@@ -1,0 +1,213 @@
+package domain
+
+import "time"
+
+type Project struct {
+	ProjectID   string    `json:"project_id"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type ProjectCreateRequest struct {
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+}
+
+type Dataset struct {
+	DatasetID   string    `json:"dataset_id"`
+	ProjectID   string    `json:"project_id"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description,omitempty"`
+	DataType    string    `json:"data_type"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type DatasetCreateRequest struct {
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+	DataType    *string `json:"data_type,omitempty"`
+}
+
+type DatasetVersion struct {
+	DatasetVersionID   string         `json:"dataset_version_id"`
+	DatasetID          string         `json:"dataset_id"`
+	ProjectID          string         `json:"project_id"`
+	StorageURI         string         `json:"storage_uri"`
+	DataType           string         `json:"data_type"`
+	RecordCount        *int           `json:"record_count,omitempty"`
+	Metadata           map[string]any `json:"metadata"`
+	PrepareStatus      string         `json:"prepare_status"`
+	PrepareModel       *string        `json:"prepare_model,omitempty"`
+	PreparePromptVer   *string        `json:"prepare_prompt_version,omitempty"`
+	PrepareURI         *string        `json:"prepare_uri,omitempty"`
+	PreparedAt         *time.Time     `json:"prepared_at,omitempty"`
+	SentimentStatus    string         `json:"sentiment_status"`
+	SentimentModel     *string        `json:"sentiment_model,omitempty"`
+	SentimentURI       *string        `json:"sentiment_uri,omitempty"`
+	SentimentLabeledAt *time.Time     `json:"sentiment_labeled_at,omitempty"`
+	SentimentPromptVer *string        `json:"sentiment_prompt_version,omitempty"`
+	EmbeddingStatus    string         `json:"embedding_status"`
+	EmbeddingModel     *string        `json:"embedding_model,omitempty"`
+	EmbeddingURI       *string        `json:"embedding_uri,omitempty"`
+	CreatedAt          time.Time      `json:"created_at"`
+	ReadyAt            *time.Time     `json:"ready_at,omitempty"`
+}
+
+type DatasetVersionCreateRequest struct {
+	StorageURI        string         `json:"storage_uri"`
+	DataType          *string        `json:"data_type,omitempty"`
+	RecordCount       *int           `json:"record_count,omitempty"`
+	Metadata          map[string]any `json:"metadata,omitempty"`
+	PrepareRequired   *bool          `json:"prepare_required,omitempty"`
+	PrepareModel      *string        `json:"prepare_model,omitempty"`
+	SentimentRequired *bool          `json:"sentiment_required,omitempty"`
+	SentimentModel    *string        `json:"sentiment_model,omitempty"`
+	EmbeddingRequired *bool          `json:"embedding_required,omitempty"`
+	EmbeddingModel    *string        `json:"embedding_model,omitempty"`
+}
+
+type DatasetPrepareRequest struct {
+	TextColumn *string `json:"text_column,omitempty"`
+	OutputPath *string `json:"output_path,omitempty"`
+	Model      *string `json:"model,omitempty"`
+	Force      *bool   `json:"force,omitempty"`
+}
+
+type DatasetEmbeddingBuildRequest struct {
+	TextColumn *string `json:"text_column,omitempty"`
+	Force      *bool   `json:"force,omitempty"`
+}
+
+type DatasetSentimentBuildRequest struct {
+	TextColumn *string `json:"text_column,omitempty"`
+	OutputPath *string `json:"output_path,omitempty"`
+	Model      *string `json:"model,omitempty"`
+	Force      *bool   `json:"force,omitempty"`
+}
+
+type SkillPlanStep struct {
+	StepID      string         `json:"step_id"`
+	SkillName   string         `json:"skill_name"`
+	DatasetName string         `json:"dataset_name"`
+	Inputs      map[string]any `json:"inputs"`
+}
+
+type SkillPlan struct {
+	PlanID    string          `json:"plan_id"`
+	Steps     []SkillPlanStep `json:"steps"`
+	Notes     *string         `json:"notes,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+type AnalysisRequest struct {
+	RequestID        string         `json:"request_id"`
+	ProjectID        string         `json:"project_id"`
+	DatasetName      *string        `json:"dataset_name,omitempty"`
+	DatasetVersionID *string        `json:"dataset_version_id,omitempty"`
+	Goal             string         `json:"goal"`
+	Constraints      []string       `json:"constraints"`
+	Context          map[string]any `json:"context"`
+	RequestedPlan    *SkillPlan     `json:"requested_plan,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+}
+
+type AnalysisSubmitRequest struct {
+	DatasetName      *string        `json:"dataset_name,omitempty"`
+	DatasetVersionID *string        `json:"dataset_version_id,omitempty"`
+	DataType         *string        `json:"data_type,omitempty"`
+	Goal             string         `json:"goal"`
+	Constraints      []string       `json:"constraints"`
+	Context          map[string]any `json:"context"`
+	RequestedPlan    *SkillPlan     `json:"requested_plan,omitempty"`
+}
+
+type PlanRecord struct {
+	PlanID               string    `json:"plan_id"`
+	RequestID            string    `json:"request_id"`
+	ProjectID            string    `json:"project_id"`
+	DatasetName          string    `json:"dataset_name"`
+	DatasetVersionID     *string   `json:"dataset_version_id,omitempty"`
+	Plan                 SkillPlan `json:"plan"`
+	Status               string    `json:"status"`
+	PlannerType          *string   `json:"planner_type,omitempty"`
+	PlannerModel         *string   `json:"planner_model,omitempty"`
+	PlannerPromptVersion *string   `json:"planner_prompt_version,omitempty"`
+	PlanHash             *string   `json:"plan_hash,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+}
+
+type AnalysisPlanResponse struct {
+	Request AnalysisRequest `json:"request"`
+	Plan    PlanRecord      `json:"plan"`
+}
+
+type ExecutionEvent struct {
+	ExecutionID string         `json:"execution_id"`
+	TS          time.Time      `json:"ts"`
+	Level       string         `json:"level"`
+	EventType   string         `json:"event_type"`
+	Message     string         `json:"message"`
+	Payload     map[string]any `json:"payload,omitempty"`
+}
+
+type ExecutionSummary struct {
+	ExecutionID        string            `json:"execution_id"`
+	ProjectID          string            `json:"project_id"`
+	RequestID          string            `json:"request_id"`
+	Plan               SkillPlan         `json:"plan"`
+	Status             string            `json:"status"`
+	EndedAt            *time.Time        `json:"ended_at,omitempty"`
+	RequiredHashes     []string          `json:"required_hashes"`
+	EmbeddingModel     *string           `json:"embedding_model_version,omitempty"`
+	Artifacts          map[string]string `json:"artifacts"`
+	DatasetVersionID   *string           `json:"dataset_version_id,omitempty"`
+	CodeVersion        *string           `json:"code_version,omitempty"`
+	ParamsHash         *string           `json:"params_hash,omitempty"`
+	SkillBundleVersion *string           `json:"skill_bundle_version,omitempty"`
+	Events             []ExecutionEvent  `json:"events"`
+}
+
+type PlanExecuteResponse struct {
+	Plan      PlanRecord       `json:"plan"`
+	Execution ExecutionSummary `json:"execution"`
+	JobID     *string          `json:"job_id,omitempty"`
+}
+
+type ExecutionRerunRequest struct {
+	Mode        *string `json:"mode,omitempty"`
+	TriggeredBy *string `json:"triggered_by,omitempty"`
+}
+
+type ExecutionResumeRequest struct {
+	Reason      *string `json:"reason,omitempty"`
+	TriggeredBy *string `json:"triggered_by,omitempty"`
+}
+
+type ExecutionRerunResponse struct {
+	Execution ExecutionSummary `json:"execution"`
+	JobID     *string          `json:"job_id,omitempty"`
+}
+
+type ExecutionResultResponse struct {
+	ExecutionID string            `json:"execution_id"`
+	Artifacts   map[string]string `json:"artifacts"`
+	Contract    map[string]any    `json:"contract"`
+}
+
+type ExecutionDiffStep struct {
+	StepID    string         `json:"step_id"`
+	SkillName string         `json:"skill_name"`
+	Status    string         `json:"status"`
+	FromHash  *string        `json:"from_hash,omitempty"`
+	ToHash    *string        `json:"to_hash,omitempty"`
+	Stats     map[string]any `json:"stats,omitempty"`
+}
+
+type ExecutionDiffResponse struct {
+	FromExecutionID string              `json:"from_execution_id"`
+	ToExecutionID   string              `json:"to_execution_id"`
+	TotalSteps      int                 `json:"total_steps"`
+	ChangedSteps    int                 `json:"changed_steps"`
+	Steps           []ExecutionDiffStep `json:"steps"`
+}

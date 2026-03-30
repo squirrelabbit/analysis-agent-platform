@@ -1,0 +1,130 @@
+package store
+
+import (
+	"sync"
+
+	"analysis-support-platform/control-plane/internal/domain"
+)
+
+type MemoryStore struct {
+	mu         sync.RWMutex
+	projects   map[string]domain.Project
+	datasets   map[string]domain.Dataset
+	versions   map[string]domain.DatasetVersion
+	requests   map[string]domain.AnalysisRequest
+	plans      map[string]domain.PlanRecord
+	executions map[string]domain.ExecutionSummary
+}
+
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{
+		projects:   make(map[string]domain.Project),
+		datasets:   make(map[string]domain.Dataset),
+		versions:   make(map[string]domain.DatasetVersion),
+		requests:   make(map[string]domain.AnalysisRequest),
+		plans:      make(map[string]domain.PlanRecord),
+		executions: make(map[string]domain.ExecutionSummary),
+	}
+}
+
+func (s *MemoryStore) SaveProject(project domain.Project) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.projects[project.ProjectID] = project
+	return nil
+}
+
+func (s *MemoryStore) GetProject(projectID string) (domain.Project, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	project, ok := s.projects[projectID]
+	if !ok {
+		return domain.Project{}, ErrNotFound
+	}
+	return project, nil
+}
+
+func (s *MemoryStore) SaveDataset(dataset domain.Dataset) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.datasets[dataset.DatasetID] = dataset
+	return nil
+}
+
+func (s *MemoryStore) GetDataset(projectID, datasetID string) (domain.Dataset, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	dataset, ok := s.datasets[datasetID]
+	if !ok || dataset.ProjectID != projectID {
+		return domain.Dataset{}, ErrNotFound
+	}
+	return dataset, nil
+}
+
+func (s *MemoryStore) SaveDatasetVersion(version domain.DatasetVersion) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.versions[version.DatasetVersionID] = version
+	return nil
+}
+
+func (s *MemoryStore) GetDatasetVersion(projectID, datasetVersionID string) (domain.DatasetVersion, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	version, ok := s.versions[datasetVersionID]
+	if !ok || version.ProjectID != projectID {
+		return domain.DatasetVersion{}, ErrNotFound
+	}
+	return version, nil
+}
+
+func (s *MemoryStore) SaveRequest(request domain.AnalysisRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requests[request.RequestID] = request
+	return nil
+}
+
+func (s *MemoryStore) GetRequest(projectID, requestID string) (domain.AnalysisRequest, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	request, ok := s.requests[requestID]
+	if !ok || request.ProjectID != projectID {
+		return domain.AnalysisRequest{}, ErrNotFound
+	}
+	return request, nil
+}
+
+func (s *MemoryStore) SavePlan(plan domain.PlanRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.plans[plan.PlanID] = plan
+	return nil
+}
+
+func (s *MemoryStore) GetPlan(projectID, planID string) (domain.PlanRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	plan, ok := s.plans[planID]
+	if !ok || plan.ProjectID != projectID {
+		return domain.PlanRecord{}, ErrNotFound
+	}
+	return plan, nil
+}
+
+func (s *MemoryStore) SaveExecution(execution domain.ExecutionSummary) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.executions[execution.ExecutionID] = execution
+	return nil
+}
+
+func (s *MemoryStore) GetExecution(projectID, executionID string) (domain.ExecutionSummary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	execution, ok := s.executions[executionID]
+	if !ok || execution.ProjectID != projectID {
+		return domain.ExecutionSummary{}, ErrNotFound
+	}
+	return execution, nil
+}

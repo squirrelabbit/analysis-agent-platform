@@ -1,0 +1,758 @@
+package service
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+	"unicode"
+
+	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/id"
+	"analysis-support-platform/control-plane/internal/store"
+)
+
+const DefaultEmbeddingModel = "token-overlap-v1"
+
+type DatasetService struct {
+	store             store.Repository
+	pythonAIWorkerURL string
+	uploadRoot        string
+	artifactRoot      string
+	httpClient        *http.Client
+}
+
+type workerTaskResponse struct {
+	Notes    []string       `json:"notes"`
+	Artifact map[string]any `json:"artifact"`
+}
+
+func NewDatasetService(repository store.Repository, pythonAIWorkerURL string, uploadRoot string, artifactRoot string) *DatasetService {
+	return &DatasetService{
+		store:             repository,
+		pythonAIWorkerURL: pythonAIWorkerURL,
+		uploadRoot:        strings.TrimSpace(uploadRoot),
+		artifactRoot:      strings.TrimSpace(artifactRoot),
+		httpClient:        &http.Client{Timeout: 60 * time.Second},
+	}
+}
+
+func (s *DatasetService) CreateDataset(projectID string, input domain.DatasetCreateRequest) (domain.Dataset, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.Dataset{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.Dataset{}, err
+	}
+
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return domain.Dataset{}, ErrInvalidArgument{Message: "name is required"}
+	}
+	dataType := normalizeDatasetDataType(input.DataType, "structured")
+
+	dataset := domain.Dataset{
+		DatasetID:   id.New(),
+		ProjectID:   projectID,
+		Name:        name,
+		Description: input.Description,
+		DataType:    dataType,
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := s.store.SaveDataset(dataset); err != nil {
+		return domain.Dataset{}, err
+	}
+	return dataset, nil
+}
+
+func (s *DatasetService) GetDataset(projectID, datasetID string) (domain.Dataset, error) {
+	dataset, err := s.store.GetDataset(projectID, datasetID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return domain.Dataset{}, ErrNotFound{Resource: "dataset"}
+		}
+		return domain.Dataset{}, err
+	}
+	return dataset, nil
+}
+
+func (s *DatasetService) CreateDatasetVersion(projectID, datasetID string, input domain.DatasetVersionCreateRequest) (domain.DatasetVersion, error) {
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+
+	storageURI := strings.TrimSpace(input.StorageURI)
+	if storageURI == "" {
+		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "storage_uri is required"}
+	}
+
+	version := s.buildDatasetVersionRecord(projectID, dataset, storageURI, input)
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	return version, nil
+}
+
+func (s *DatasetService) UploadDatasetVersion(projectID, datasetID string, input domain.DatasetVersionCreateRequest, originalName string, contentType string, reader io.Reader) (domain.DatasetVersion, error) {
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	if reader == nil {
+		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "file is required"}
+	}
+
+	versionID := id.New()
+	storedPath, uploadMetadata, err := s.persistUploadedDataset(projectID, datasetID, versionID, originalName, contentType, reader)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+
+	if input.Metadata == nil {
+		input.Metadata = map[string]any{}
+	}
+	input.Metadata = mergeStringAny(input.Metadata, map[string]any{
+		"storage_backend": "local_fs",
+		"storage_scope":   "dataset_upload",
+		"upload":          uploadMetadata,
+	})
+	input.StorageURI = storedPath
+
+	version := s.buildDatasetVersionRecord(projectID, dataset, storedPath, input)
+	version.DatasetVersionID = versionID
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	return version, nil
+}
+
+func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset domain.Dataset, storageURI string, input domain.DatasetVersionCreateRequest) domain.DatasetVersion {
+	dataType := normalizeDatasetDataType(input.DataType, dataset.DataType)
+	metadata := input.Metadata
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+
+	prepareRequired := defaultPrepareRequired(dataType, input.PrepareRequired)
+	prepareStatus := "not_applicable"
+	if dataType == "unstructured" || dataType == "mixed" || dataType == "both" {
+		prepareStatus = "not_requested"
+		if prepareRequired {
+			prepareStatus = "queued"
+		}
+	}
+
+	sentimentRequired := input.SentimentRequired != nil && *input.SentimentRequired
+	sentimentStatus := "not_applicable"
+	if dataType == "unstructured" || dataType == "mixed" || dataType == "both" {
+		sentimentStatus = "not_requested"
+		if sentimentRequired {
+			sentimentStatus = "queued"
+		}
+	}
+
+	embeddingRequired := input.EmbeddingRequired != nil && *input.EmbeddingRequired
+	embeddingStatus := "not_requested"
+	if embeddingRequired {
+		embeddingStatus = "queued"
+	}
+
+	version := domain.DatasetVersion{
+		DatasetVersionID: id.New(),
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        projectID,
+		StorageURI:       storageURI,
+		DataType:         dataType,
+		RecordCount:      input.RecordCount,
+		Metadata:         metadata,
+		PrepareStatus:    prepareStatus,
+		PrepareModel:     input.PrepareModel,
+		SentimentStatus:  sentimentStatus,
+		SentimentModel:   input.SentimentModel,
+		EmbeddingStatus:  embeddingStatus,
+		EmbeddingModel:   input.EmbeddingModel,
+		CreatedAt:        time.Now().UTC(),
+	}
+	if input.PrepareModel != nil && strings.TrimSpace(*input.PrepareModel) == "" {
+		version.PrepareModel = nil
+	}
+	if input.SentimentModel != nil && strings.TrimSpace(*input.SentimentModel) == "" {
+		version.SentimentModel = nil
+	}
+	if input.EmbeddingModel != nil && strings.TrimSpace(*input.EmbeddingModel) == "" {
+		version.EmbeddingModel = nil
+	}
+	if prepareRequired {
+		version.Metadata["prepare_required"] = true
+	}
+	if sentimentRequired {
+		version.Metadata["sentiment_required"] = true
+	}
+	return version
+}
+
+func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionID string) (domain.DatasetVersion, error) {
+	version, err := s.store.GetDatasetVersion(projectID, datasetVersionID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return domain.DatasetVersion{}, ErrNotFound{Resource: "dataset version"}
+		}
+		return domain.DatasetVersion{}, err
+	}
+	if version.DatasetID != datasetID {
+		return domain.DatasetVersion{}, ErrNotFound{Resource: "dataset version"}
+	}
+	return version, nil
+}
+
+func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest) (domain.DatasetVersion, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	if version.DataType == "structured" {
+		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "dataset prepare requires unstructured or mixed dataset version"}
+	}
+
+	force := input.Force != nil && *input.Force
+	if version.PrepareStatus == "ready" && version.PrepareURI != nil && !force {
+		return version, nil
+	}
+
+	textColumn := metadataString(version.Metadata, "text_column", "text")
+	if input.TextColumn != nil && strings.TrimSpace(*input.TextColumn) != "" {
+		textColumn = strings.TrimSpace(*input.TextColumn)
+	}
+
+	outputPath := s.derivePrepareURI(version)
+	if input.OutputPath != nil && strings.TrimSpace(*input.OutputPath) != "" {
+		outputPath = strings.TrimSpace(*input.OutputPath)
+	}
+
+	version.PrepareStatus = "preparing"
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.PrepareURI = &outputPath
+	if err := ensureParentDir(outputPath); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	version.Metadata["raw_text_column"] = textColumn
+	if input.Model != nil && strings.TrimSpace(*input.Model) != "" {
+		model := strings.TrimSpace(*input.Model)
+		version.PrepareModel = &model
+	}
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+
+	payload := map[string]any{
+		"dataset_version_id": version.DatasetVersionID,
+		"dataset_name":       version.StorageURI,
+		"text_column":        textColumn,
+		"output_path":        outputPath,
+	}
+	if version.PrepareModel != nil && strings.TrimSpace(*version.PrepareModel) != "" {
+		payload["model"] = strings.TrimSpace(*version.PrepareModel)
+	}
+
+	response, err := s.runWorkerTask(context.Background(), "/tasks/dataset_prepare", payload)
+	if err != nil {
+		version.PrepareStatus = "failed"
+		version.Metadata["prepare_error"] = err.Error()
+		_ = s.store.SaveDatasetVersion(version)
+		return domain.DatasetVersion{}, err
+	}
+
+	now := time.Now().UTC()
+	version.PrepareStatus = "ready"
+	version.PreparedAt = &now
+	preparedTextColumn := artifactString(response.Artifact, "prepared_text_column")
+	if preparedTextColumn == "" {
+		preparedTextColumn = "normalized_text"
+	}
+	version.Metadata = mergeStringAny(version.Metadata, map[string]any{
+		"prepare_notes":        response.Notes,
+		"raw_text_column":      textColumn,
+		"prepared_text_column": preparedTextColumn,
+	})
+	if promptVersion := artifactString(response.Artifact, "prepare_prompt_version"); promptVersion != "" {
+		version.PreparePromptVer = &promptVersion
+	}
+	if prepareURI := artifactString(response.Artifact, "prepare_uri"); prepareURI != "" {
+		version.PrepareURI = &prepareURI
+	}
+	if prepareModel := artifactString(response.Artifact, "prepare_model"); prepareModel != "" {
+		version.PrepareModel = &prepareModel
+	}
+	if summary, ok := response.Artifact["summary"].(map[string]any); ok {
+		version.Metadata = mergeStringAny(version.Metadata, map[string]any{
+			"prepare_summary": summary,
+		})
+		if value, ok := summary["output_row_count"]; ok {
+			if intValue, ok := anyToInt(value); ok {
+				version.RecordCount = &intValue
+			}
+		}
+	}
+	delete(version.Metadata, "prepare_error")
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	return version, nil
+}
+
+func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	if version.DataType == "structured" {
+		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "embeddings require unstructured or mixed dataset version"}
+	}
+	if requiresPrepare(version) && !isPrepareReady(version) {
+		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "dataset prepare must be ready before embeddings"}
+	}
+
+	force := input.Force != nil && *input.Force
+	if version.EmbeddingStatus == "ready" && version.EmbeddingURI != nil && !force {
+		return version, nil
+	}
+
+	textColumn := defaultPreparedTextColumn(version)
+	if input.TextColumn != nil && strings.TrimSpace(*input.TextColumn) != "" {
+		requestedTextColumn := strings.TrimSpace(*input.TextColumn)
+		rawTextColumn := metadataString(version.Metadata, "raw_text_column", metadataString(version.Metadata, "text_column", "text"))
+		if !isPrepareReady(version) || requestedTextColumn != rawTextColumn {
+			textColumn = requestedTextColumn
+		}
+	}
+	datasetName := datasetSourceForUnstructured(version)
+
+	version.EmbeddingStatus = "building"
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.Metadata["text_column"] = textColumn
+	version.Metadata["embedding_dataset_name"] = datasetName
+	outputPath := s.deriveEmbeddingURI(version)
+	version.EmbeddingURI = &outputPath
+	if err := ensureParentDir(outputPath); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	if version.EmbeddingModel == nil {
+		model := DefaultEmbeddingModel
+		version.EmbeddingModel = &model
+	}
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+
+	response, err := s.runWorkerTask(context.Background(), "/tasks/embedding", map[string]any{
+		"dataset_version_id": version.DatasetVersionID,
+		"dataset_name":       datasetName,
+		"text_column":        textColumn,
+		"output_path":        outputPath,
+		"embedding_model":    derefString(version.EmbeddingModel),
+	})
+	if err != nil {
+		version.EmbeddingStatus = "failed"
+		version.Metadata["embedding_error"] = err.Error()
+		_ = s.store.SaveDatasetVersion(version)
+		return domain.DatasetVersion{}, err
+	}
+
+	now := time.Now().UTC()
+	version.EmbeddingStatus = "ready"
+	version.ReadyAt = &now
+	version.Metadata = mergeStringAny(version.Metadata, map[string]any{
+		"text_column":     textColumn,
+		"embedding_notes": response.Notes,
+	})
+	if value, ok := response.Artifact["document_count"]; ok {
+		version.Metadata["document_count"] = value
+	}
+	if value, ok := response.Artifact["embedding_uri"].(string); ok && strings.TrimSpace(value) != "" {
+		version.EmbeddingURI = &value
+	}
+	if value, ok := response.Artifact["embedding_model"].(string); ok && strings.TrimSpace(value) != "" {
+		version.EmbeddingModel = &value
+	}
+	delete(version.Metadata, "embedding_error")
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	return version, nil
+}
+
+func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest) (domain.DatasetVersion, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	if version.DataType == "structured" {
+		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "sentiment labeling requires unstructured or mixed dataset version"}
+	}
+	if requiresPrepare(version) && !isPrepareReady(version) {
+		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "dataset prepare must be ready before sentiment labeling"}
+	}
+
+	force := input.Force != nil && *input.Force
+	if version.SentimentStatus == "ready" && version.SentimentURI != nil && !force {
+		return version, nil
+	}
+
+	textColumn := defaultPreparedTextColumn(version)
+	if input.TextColumn != nil && strings.TrimSpace(*input.TextColumn) != "" {
+		requestedTextColumn := strings.TrimSpace(*input.TextColumn)
+		rawTextColumn := metadataString(version.Metadata, "raw_text_column", metadataString(version.Metadata, "text_column", "text"))
+		if !isPrepareReady(version) || requestedTextColumn != rawTextColumn {
+			textColumn = requestedTextColumn
+		}
+	}
+	datasetName := datasetSourceForUnstructured(version)
+	outputPath := s.deriveSentimentURI(version)
+	if input.OutputPath != nil && strings.TrimSpace(*input.OutputPath) != "" {
+		outputPath = strings.TrimSpace(*input.OutputPath)
+	}
+
+	version.SentimentStatus = "labeling"
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.SentimentURI = &outputPath
+	if err := ensureParentDir(outputPath); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	version.Metadata["sentiment_dataset_name"] = datasetName
+	version.Metadata["sentiment_text_column"] = textColumn
+	if input.Model != nil && strings.TrimSpace(*input.Model) != "" {
+		model := strings.TrimSpace(*input.Model)
+		version.SentimentModel = &model
+	}
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+
+	payload := map[string]any{
+		"dataset_version_id": version.DatasetVersionID,
+		"dataset_name":       datasetName,
+		"text_column":        textColumn,
+		"output_path":        outputPath,
+	}
+	if version.SentimentModel != nil && strings.TrimSpace(*version.SentimentModel) != "" {
+		payload["model"] = strings.TrimSpace(*version.SentimentModel)
+	}
+
+	response, err := s.runWorkerTask(context.Background(), "/tasks/sentiment_label", payload)
+	if err != nil {
+		version.SentimentStatus = "failed"
+		version.Metadata["sentiment_error"] = err.Error()
+		_ = s.store.SaveDatasetVersion(version)
+		return domain.DatasetVersion{}, err
+	}
+
+	now := time.Now().UTC()
+	version.SentimentStatus = "ready"
+	version.SentimentLabeledAt = &now
+	version.ReadyAt = &now
+	version.Metadata = mergeStringAny(version.Metadata, map[string]any{
+		"sentiment_notes":             response.Notes,
+		"sentiment_text_column":       textColumn,
+		"sentiment_label_column":      artifactString(response.Artifact, "sentiment_label_column"),
+		"sentiment_reason_column":     artifactString(response.Artifact, "sentiment_reason_column"),
+		"sentiment_confidence_column": artifactString(response.Artifact, "sentiment_confidence_column"),
+	})
+	if sentimentURI := artifactString(response.Artifact, "sentiment_uri"); sentimentURI != "" {
+		version.SentimentURI = &sentimentURI
+	}
+	if sentimentModel := artifactString(response.Artifact, "sentiment_model"); sentimentModel != "" {
+		version.SentimentModel = &sentimentModel
+	}
+	if promptVersion := artifactString(response.Artifact, "sentiment_prompt_version"); promptVersion != "" {
+		version.SentimentPromptVer = &promptVersion
+	}
+	if summary, ok := response.Artifact["summary"].(map[string]any); ok {
+		version.Metadata["sentiment_summary"] = summary
+	}
+	delete(version.Metadata, "sentiment_error")
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	return version, nil
+}
+
+func (s *DatasetService) runWorkerTask(ctx context.Context, taskPath string, payload map[string]any) (workerTaskResponse, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(s.pythonAIWorkerURL), "/")
+	if baseURL == "" {
+		return workerTaskResponse{}, errors.New("python ai worker url is required")
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return workerTaskResponse{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+taskPath, bytes.NewReader(body))
+	if err != nil {
+		return workerTaskResponse{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return workerTaskResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	var decoded workerTaskResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return workerTaskResponse{}, err
+	}
+	if resp.StatusCode >= 300 {
+		return workerTaskResponse{}, fmt.Errorf("worker task %s returned %d", taskPath, resp.StatusCode)
+	}
+	return decoded, nil
+}
+
+func (s *DatasetService) persistUploadedDataset(projectID, datasetID, datasetVersionID, originalName, contentType string, reader io.Reader) (string, map[string]any, error) {
+	root := strings.TrimSpace(s.uploadRoot)
+	if root == "" {
+		return "", nil, errors.New("upload root is required")
+	}
+
+	filename := sanitizeFilename(originalName)
+	if filename == "" {
+		filename = "dataset-upload.bin"
+	}
+	targetDir := filepath.Join(root, "projects", projectID, "datasets", datasetID, "versions", datasetVersionID, "source")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return "", nil, err
+	}
+	targetPath := filepath.Join(targetDir, filename)
+
+	file, err := os.Create(targetPath)
+	if err != nil {
+		return "", nil, err
+	}
+	defer file.Close()
+
+	written, err := io.Copy(file, reader)
+	if err != nil {
+		return "", nil, err
+	}
+
+	absolutePath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return "", nil, err
+	}
+	return absolutePath, map[string]any{
+		"original_filename": strings.TrimSpace(originalName),
+		"stored_filename":   filename,
+		"content_type":      strings.TrimSpace(contentType),
+		"byte_size":         written,
+		"uploaded_at":       time.Now().UTC(),
+	}, nil
+}
+
+func (s *DatasetService) datasetArtifactPath(version domain.DatasetVersion, scope string, filename string) (string, bool) {
+	root := strings.TrimSpace(s.artifactRoot)
+	if root == "" {
+		return "", false
+	}
+	path := filepath.Join(root, "projects", version.ProjectID, "datasets", version.DatasetID, "versions", version.DatasetVersionID, scope, filename)
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return path, true
+	}
+	return absolutePath, true
+}
+
+func normalizeDatasetDataType(value *string, fallback string) string {
+	dataType := strings.TrimSpace(fallback)
+	if value != nil && strings.TrimSpace(*value) != "" {
+		dataType = strings.TrimSpace(*value)
+	}
+	if dataType == "" {
+		dataType = "structured"
+	}
+	return dataType
+}
+
+func (s *DatasetService) deriveEmbeddingURI(version domain.DatasetVersion) string {
+	if version.EmbeddingURI != nil && strings.TrimSpace(*version.EmbeddingURI) != "" {
+		return strings.TrimSpace(*version.EmbeddingURI)
+	}
+	if path, ok := s.datasetArtifactPath(version, "embedding", "embeddings.jsonl"); ok {
+		return path
+	}
+	return datasetSourceForUnstructured(version) + ".embeddings.jsonl"
+}
+
+func (s *DatasetService) deriveSentimentURI(version domain.DatasetVersion) string {
+	if version.SentimentURI != nil && strings.TrimSpace(*version.SentimentURI) != "" {
+		return strings.TrimSpace(*version.SentimentURI)
+	}
+	if path, ok := s.datasetArtifactPath(version, "sentiment", "sentiment.jsonl"); ok {
+		return path
+	}
+	base := strings.TrimSpace(version.StorageURI)
+	if requiresPrepare(version) {
+		base = s.derivePrepareURI(version)
+	}
+	return base + ".sentiment.jsonl"
+}
+
+func (s *DatasetService) derivePrepareURI(version domain.DatasetVersion) string {
+	if version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != "" {
+		return strings.TrimSpace(*version.PrepareURI)
+	}
+	if path, ok := s.datasetArtifactPath(version, "prepare", "prepared.jsonl"); ok {
+		return path
+	}
+	return strings.TrimSpace(version.StorageURI) + ".prepared.jsonl"
+}
+
+func deriveEmbeddingURI(version domain.DatasetVersion) string {
+	if version.EmbeddingURI != nil && strings.TrimSpace(*version.EmbeddingURI) != "" {
+		return strings.TrimSpace(*version.EmbeddingURI)
+	}
+	return datasetSourceForUnstructured(version) + ".embeddings.jsonl"
+}
+
+func deriveSentimentURI(version domain.DatasetVersion) string {
+	if version.SentimentURI != nil && strings.TrimSpace(*version.SentimentURI) != "" {
+		return strings.TrimSpace(*version.SentimentURI)
+	}
+	base := strings.TrimSpace(version.StorageURI)
+	if requiresPrepare(version) {
+		base = derivePrepareURI(version)
+	}
+	return base + ".sentiment.jsonl"
+}
+
+func derivePrepareURI(version domain.DatasetVersion) string {
+	if version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != "" {
+		return strings.TrimSpace(*version.PrepareURI)
+	}
+	return strings.TrimSpace(version.StorageURI) + ".prepared.jsonl"
+}
+
+func datasetSourceForUnstructured(version domain.DatasetVersion) string {
+	if isPrepareReady(version) && version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != "" {
+		return strings.TrimSpace(*version.PrepareURI)
+	}
+	return strings.TrimSpace(version.StorageURI)
+}
+
+func datasetSourceForSentiment(version domain.DatasetVersion) string {
+	if isSentimentReady(version) && version.SentimentURI != nil && strings.TrimSpace(*version.SentimentURI) != "" {
+		return strings.TrimSpace(*version.SentimentURI)
+	}
+	return deriveSentimentURI(version)
+}
+
+func defaultPreparedTextColumn(version domain.DatasetVersion) string {
+	if isPrepareReady(version) {
+		return metadataString(version.Metadata, "prepared_text_column", metadataString(version.Metadata, "text_column", "normalized_text"))
+	}
+	return metadataString(version.Metadata, "text_column", "text")
+}
+
+func defaultPrepareRequired(dataType string, value *bool) bool {
+	if value != nil {
+		return *value
+	}
+	return dataType == "unstructured" || dataType == "mixed" || dataType == "both"
+}
+
+func requiresPrepare(version domain.DatasetVersion) bool {
+	switch version.DataType {
+	case "unstructured", "mixed", "both":
+		return version.PrepareStatus != "not_requested" && version.PrepareStatus != "not_applicable"
+	default:
+		return false
+	}
+}
+
+func isPrepareReady(version domain.DatasetVersion) bool {
+	return version.PrepareStatus == "ready" && version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != ""
+}
+
+func isSentimentReady(version domain.DatasetVersion) bool {
+	return version.SentimentStatus == "ready" && version.SentimentURI != nil && strings.TrimSpace(*version.SentimentURI) != ""
+}
+
+func artifactString(artifact map[string]any, key string) string {
+	if artifact == nil {
+		return ""
+	}
+	value, ok := artifact[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+func anyToInt(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int32:
+		return int(typed), true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	default:
+		return 0, false
+	}
+}
+
+func mergeStringAny(base, overlay map[string]any) map[string]any {
+	merged := map[string]any{}
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range overlay {
+		merged[key] = value
+	}
+	return merged
+}
+
+func ensureParentDir(path string) error {
+	dir := filepath.Dir(strings.TrimSpace(path))
+	if dir == "" || dir == "." {
+		return nil
+	}
+	return os.MkdirAll(dir, 0o755)
+}
+
+func sanitizeFilename(value string) string {
+	trimmed := strings.TrimSpace(filepath.Base(value))
+	if trimmed == "" || trimmed == "." || trimmed == string(filepath.Separator) {
+		return ""
+	}
+	sanitized := strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+			return r
+		case r == '.', r == '-', r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, trimmed)
+	sanitized = strings.Trim(sanitized, "._")
+	if sanitized == "" {
+		return ""
+	}
+	return sanitized
+}
