@@ -1,0 +1,10 @@
+[project]
+name = "python-ai-worker"
+version = "0.1.0"
+description = "AI worker scaffold for planning, embeddings, semantic search, and evidence generation."
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

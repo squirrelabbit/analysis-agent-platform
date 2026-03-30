@@ -1,0 +1,109 @@
+services:
+  postgres:
+    image: postgres:16
+    command:
+      - postgres
+      - -c
+      - timezone=Asia/Seoul
+      - -c
+      - log_timezone=Asia/Seoul
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform
+      POSTGRES_DB: postgres
+      TZ: Asia/Seoul
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./apps/control-plane/dev/postgres-init.sql:/docker-entrypoint-initdb.d/10-analysis_support.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  temporal:
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--namespace", "default"]
+    environment:
+      TZ: Asia/Seoul
+    ports:
+      - "17233:7233"
+    restart: unless-stopped
+
+  python-ai-worker:
+    build:
+      context: .
+      dockerfile: workers/python-ai/Dockerfile
+    environment:
+      TZ: Asia/Seoul
+      PYTHON_AI_WORKER_HOST: 0.0.0.0
+      PYTHON_AI_WORKER_PORT: 8090
+      PYTHON_AI_LLM_PROVIDER: anthropic
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+    ports:
+      - "18090:8090"
+    volumes:
+      - ./data:/workspace/data
+    restart: unless-stopped
+
+  control-plane:
+    build:
+      context: .
+      dockerfile: apps/control-plane/Dockerfile
+    environment:
+      TZ: Asia/Seoul
+      BIND_ADDR: :8080
+      STORE_BACKEND: postgres
+      DATABASE_URL: postgresql://platform:platform@postgres:5432/analysis_support
+      DATA_ROOT: /workspace/data
+      UPLOAD_ROOT: /workspace/data/uploads
+      ARTIFACT_ROOT: /workspace/data/artifacts
+      WORKFLOW_ENGINE: temporal
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      TEMPORAL_TASK_QUEUE: analysis-support
+      PYTHON_AI_WORKER_URL: http://python-ai-worker:8090
+      PLANNER_BACKEND: python-ai
+    ports:
+      - "18080:8080"
+    volumes:
+      - ./data:/workspace/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      python-ai-worker:
+        condition: service_started
+      temporal:
+        condition: service_started
+    restart: unless-stopped
+
+  temporal-worker:
+    build:
+      context: .
+      dockerfile: apps/control-plane/Dockerfile
+    command: ["/usr/local/bin/temporal-worker"]
+    environment:
+      TZ: Asia/Seoul
+      STORE_BACKEND: postgres
+      DATABASE_URL: postgresql://platform:platform@postgres:5432/analysis_support
+      DUCKDB_PATH: /workspace/data/analysis_support.duckdb
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      TEMPORAL_TASK_QUEUE: analysis-support
+      PYTHON_AI_WORKER_URL: http://python-ai-worker:8090
+    depends_on:
+      postgres:
+        condition: service_healthy
+      python-ai-worker:
+        condition: service_started
+      temporal:
+        condition: service_started
+    volumes:
+      - ./data:/workspace/data
+    restart: unless-stopped
+
+volumes:
+  postgres_dev_data:
