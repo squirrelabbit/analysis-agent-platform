@@ -1,0 +1,24 @@
+flowchart LR
+    Client["사용자 / 내부 호출 주체"]
+    Control["Go Control Plane\napps/control-plane"]
+    API["Project / Analysis / Execution API"]
+    Temporal["Temporal Workflow\nplan, execute, waiting, rerun/diff"]
+    Registry["Skill Registry / Contracts"]
+    PG["Postgres\nmetadata + execution records"]
+    Duck["DuckDB\nstructured skill runtime"]
+    Artifact["Artifact Storage\nresult, logs, evidence"]
+    Py["Python AI Workers\nplanner, embeddings, semantic search"]
+    Rust["Rust Skill Workers\nCPU-heavy kernels"]
+    Legacy["Legacy Python MVP\nsrc/"]
+
+    Client --> Control
+    Control --> API
+    API --> Temporal
+    API --> PG
+    Temporal --> Registry
+    Temporal --> PG
+    Temporal --> Duck
+    Temporal --> Py
+    Temporal --> Rust
+    Temporal --> Artifact
+    Control -. migration source .-> Legacy
