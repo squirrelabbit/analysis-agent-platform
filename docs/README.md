@@ -16,6 +16,7 @@
 | `docs/architecture/migration_plan.md` | 레거시 Python MVP에서 목표 구조로 옮기는 단계 |
 | `docs/architecture/project_map.mmd` | 시스템 수준 구조도 |
 | `docs/skill/skill_registry.md` | Skill contract와 Core/Support 분류 기준 |
+| `docs/api/openapi.yaml` | control-plane HTTP API 명세 |
 
 ## 정리 원칙
 

@@ -20,6 +20,7 @@ WORKDIR /app
 
 COPY --from=build /out/server /usr/local/bin/server
 COPY --from=build /out/temporal-worker /usr/local/bin/temporal-worker
+COPY docs/api/openapi.yaml /app/docs/api/openapi.yaml
 
 EXPOSE 8080
 

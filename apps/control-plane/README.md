@@ -16,6 +16,8 @@
 ## 현재 구현 범위
 
 - `GET /health`
+- `GET /openapi.yaml`
+- `GET /swagger`
 - `GET /skills`
 - `POST /projects`
 - `GET /projects/{project_id}`
@@ -38,6 +40,8 @@
 - `GET /projects/{project_id}/executions/diff?from=...&to=...`
 - `cmd/temporal-worker`로 execution lifecycle activity, DuckDB structured skill, Python AI unstructured skill worker 실행
 - 개발용 통합 stack: [compose.dev.yml](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/compose.dev.yml)
+- Swagger UI: `http://127.0.0.1:18080/swagger`
+- OpenAPI YAML: `http://127.0.0.1:18080/openapi.yaml`
 - 개발용 smoke script: [smoke.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke.sh)
 - 개발용 semantic search smoke script: [smoke_semantic.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_semantic.sh)
 - 개발용 sentiment smoke script: [smoke_sentiment.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_sentiment.sh)
@@ -58,7 +62,7 @@
 - `STORE_BACKEND=postgres`와 `WORKFLOW_ENGINE=temporal` 전환 경계는 코드에 반영되어 있다.
 - `WORKFLOW_ENGINE=temporal`이면 Go control plane이 Temporal SDK로 workflow start를 시도한다.
 - `cmd/temporal-worker`는 `analysis.execution.v1` workflow와 execution lifecycle activity, DuckDB structured skill, Python AI unstructured skill activity를 묶어서 실행한다.
-- 관련 설정은 `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, `TEMPORAL_TASK_QUEUE`, `DUCKDB_PATH`, `PYTHON_AI_WORKER_URL`, `PLANNER_BACKEND`, `DATA_ROOT`, `UPLOAD_ROOT`, `ARTIFACT_ROOT`다.
+- 관련 설정은 `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, `TEMPORAL_TASK_QUEUE`, `DUCKDB_PATH`, `PYTHON_AI_WORKER_URL`, `PLANNER_BACKEND`, `DATA_ROOT`, `UPLOAD_ROOT`, `ARTIFACT_ROOT`, `OPENAPI_PATH`다.
 - 현재 DuckDB structured skill은 `structured_kpi_summary` 1종만 연결되어 있다.
 - `dataset_name`은 DuckDB table 이름 또는 `.csv` / `.parquet` 파일 경로로 해석한다.
 - dataset/version API, dataset upload API, embedding build API가 연결되어 있다.

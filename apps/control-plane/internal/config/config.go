@@ -10,6 +10,7 @@ type Config struct {
 	BindAddr          string
 	StoreBackend      string
 	DatabaseURL       string
+	OpenAPIPath       string
 	DataRoot          string
 	UploadRoot        string
 	ArtifactRoot      string
@@ -32,6 +33,7 @@ func Load() Config {
 		storeBackend = "memory"
 	}
 	workspaceRoot := detectWorkspaceRoot()
+	openAPIPath := resolvePath(os.Getenv("OPENAPI_PATH"), filepath.Join(workspaceRoot, "docs", "api", "openapi.yaml"), workspaceRoot)
 	dataRoot := resolvePath(os.Getenv("DATA_ROOT"), filepath.Join(workspaceRoot, "data"), workspaceRoot)
 	uploadRoot := resolvePath(os.Getenv("UPLOAD_ROOT"), filepath.Join(dataRoot, "uploads"), workspaceRoot)
 	artifactRoot := resolvePath(os.Getenv("ARTIFACT_ROOT"), filepath.Join(dataRoot, "artifacts"), workspaceRoot)
@@ -68,6 +70,7 @@ func Load() Config {
 		BindAddr:          addr,
 		StoreBackend:      storeBackend,
 		DatabaseURL:       os.Getenv("DATABASE_URL"),
+		OpenAPIPath:       openAPIPath,
 		DataRoot:          dataRoot,
 		UploadRoot:        uploadRoot,
 		ArtifactRoot:      artifactRoot,

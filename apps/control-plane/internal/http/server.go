@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime/multipart"
 	stdhttp "net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -63,6 +64,9 @@ func (s *Server) routes() {
 			"stack":  "go-control-plane-scaffold",
 		})
 	})
+	s.mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPI)
+	s.mux.HandleFunc("GET /swagger", s.handleSwaggerUI)
+	s.mux.HandleFunc("GET /swagger/", s.handleSwaggerUI)
 	s.mux.HandleFunc("GET /skills", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		writeJSON(w, stdhttp.StatusOK, registry.SupportedSkills)
 	})
@@ -106,6 +110,28 @@ func (s *Server) handleCreateProject(w stdhttp.ResponseWriter, r *stdhttp.Reques
 		return
 	}
 	writeJSON(w, stdhttp.StatusCreated, project)
+}
+
+func (s *Server) handleOpenAPI(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	path := strings.TrimSpace(s.cfg.OpenAPIPath)
+	if path == "" {
+		writeError(w, stdhttp.StatusInternalServerError, "openapi path is not configured")
+		return
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		writeError(w, stdhttp.StatusInternalServerError, "failed to read openapi document")
+		return
+	}
+	w.Header().Set("Content-Type", "application/yaml")
+	w.WriteHeader(stdhttp.StatusOK)
+	_, _ = w.Write(content)
+}
+
+func (s *Server) handleSwaggerUI(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(stdhttp.StatusOK)
+	_, _ = io.WriteString(w, swaggerUIHTML(r))
 }
 
 func (s *Server) handleGetProject(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -481,4 +507,38 @@ func stringPtr(value string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func swaggerUIHTML(r *stdhttp.Request) string {
+	specURL := "/openapi.yaml"
+	if r != nil && r.URL != nil && strings.HasPrefix(r.URL.Path, "/swagger/") {
+		specURL = "../openapi.yaml"
+	}
+	return `<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Analysis Support Platform API Docs</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+    <style>
+      html { box-sizing: border-box; overflow-y: scroll; }
+      *, *:before, *:after { box-sizing: inherit; }
+      body { margin: 0; background: #f6f7fb; }
+    </style>
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: '` + specURL + `',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: 'BaseLayout'
+      });
+    </script>
+  </body>
+</html>`
 }

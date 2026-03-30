@@ -1,0 +1,1116 @@
+openapi: 3.1.0
+info:
+  title: Analysis Support Platform Control Plane API
+  version: 0.1.0
+  summary: Go control-plane API for dataset lifecycle, planning, execution, and rerun/diff
+  description: |
+    현재 구현 기준 control-plane API 명세다.
+
+    주요 흐름:
+    1. 프로젝트 생성
+    2. dataset / dataset version 생성 또는 upload
+    3. prepare / sentiment / embeddings build
+    4. analysis request -> plan -> execute
+    5. result / resume / rerun / diff
+
+    `storage_uri`는 원본 dataset 위치다.
+    - `versions` API를 직접 호출할 때는 호출자가 넘기는 절대 경로다.
+    - `uploads` API를 쓰면 서버가 `UPLOAD_ROOT` 아래에 저장한 실제 파일 경로로 채운다.
+servers:
+  - url: http://127.0.0.1:18080
+    description: Local development
+tags:
+  - name: System
+  - name: Projects
+  - name: Datasets
+  - name: Analysis
+  - name: Executions
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /skills:
+    get:
+      tags: [System]
+      summary: List supported skills
+      operationId: listSkills
+      responses:
+        "200":
+          description: Supported skill names
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+  /projects:
+    post:
+      tags: [Projects]
+      summary: Create project
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreateRequest"
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}:
+    get:
+      tags: [Projects]
+      summary: Get project
+      operationId: getProject
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Project detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets:
+    post:
+      tags: [Datasets]
+      summary: Create dataset
+      operationId: createDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetCreateRequest"
+      responses:
+        "201":
+          description: Dataset created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}:
+    get:
+      tags: [Datasets]
+      summary: Get dataset
+      operationId: getDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: Dataset detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/uploads:
+    post:
+      tags: [Datasets]
+      summary: Upload raw dataset file and create dataset version
+      description: |
+        `multipart/form-data` 업로드 endpoint다.
+
+        주의:
+        - `file` 외의 form field는 문자열로 파싱된다.
+        - `metadata`는 JSON 문자열이어야 한다.
+        - `prepare_required`, `sentiment_required`, `embedding_required`는 `true` 또는 `false` 문자열이어야 한다.
+      operationId: uploadDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DatasetUploadRequest"
+      responses:
+        "201":
+          description: Uploaded file saved and dataset version created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions:
+    post:
+      tags: [Datasets]
+      summary: Create dataset version from existing storage path
+      operationId: createDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetVersionCreateRequest"
+      responses:
+        "201":
+          description: Dataset version created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}:
+    get:
+      tags: [Datasets]
+      summary: Get dataset version
+      operationId: getDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Dataset version detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare:
+    post:
+      tags: [Datasets]
+      summary: Build prepare artifact for dataset version
+      operationId: buildPrepare
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetPrepareRequest"
+      responses:
+        "202":
+          description: Prepare build handled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment:
+    post:
+      tags: [Datasets]
+      summary: Build sentiment-labeled artifact for dataset version
+      operationId: buildSentiment
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetSentimentBuildRequest"
+      responses:
+        "202":
+          description: Sentiment build handled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embeddings:
+    post:
+      tags: [Datasets]
+      summary: Build embedding sidecar for dataset version
+      operationId: buildEmbeddings
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetEmbeddingBuildRequest"
+      responses:
+        "202":
+          description: Embedding build handled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/analysis_requests:
+    post:
+      tags: [Analysis]
+      summary: Submit analysis request and generate plan
+      operationId: submitAnalysis
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalysisSubmitRequest"
+      responses:
+        "201":
+          description: Request and plan created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisPlanResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/analysis_requests/{request_id}:
+    get:
+      tags: [Analysis]
+      summary: Get analysis request
+      operationId: getAnalysisRequest
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Analysis request detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisRequest"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/plans/{plan_id}:
+    get:
+      tags: [Analysis]
+      summary: Get plan record
+      operationId: getPlan
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PlanId"
+      responses:
+        "200":
+          description: Plan detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanRecord"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/plans/{plan_id}/execute:
+    post:
+      tags: [Executions]
+      summary: Execute plan
+      operationId: executePlan
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PlanId"
+      responses:
+        "202":
+          description: Execution created and handed off
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanExecuteResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/executions/{execution_id}:
+    get:
+      tags: [Executions]
+      summary: Get execution
+      operationId: getExecution
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ExecutionId"
+      responses:
+        "200":
+          description: Execution detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionSummary"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/executions/{execution_id}/result:
+    get:
+      tags: [Executions]
+      summary: Get execution result contract
+      operationId: getExecutionResult
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ExecutionId"
+      responses:
+        "200":
+          description: Execution result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionResultResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/executions/{execution_id}/resume:
+    post:
+      tags: [Executions]
+      summary: Resume waiting execution
+      operationId: resumeExecution
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ExecutionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecutionResumeRequest"
+      responses:
+        "202":
+          description: Resume requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionRerunResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/executions/{execution_id}/rerun:
+    post:
+      tags: [Executions]
+      summary: Rerun execution
+      operationId: rerunExecution
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ExecutionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecutionRerunRequest"
+      responses:
+        "202":
+          description: Rerun requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionRerunResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/executions/diff:
+    get:
+      tags: [Executions]
+      summary: Diff two executions
+      operationId: diffExecutions
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DiffFrom"
+        - $ref: "#/components/parameters/DiffTo"
+      responses:
+        "200":
+          description: Execution diff
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionDiffResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+components:
+  responses:
+    ErrorResponse:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  parameters:
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    DatasetId:
+      name: dataset_id
+      in: path
+      required: true
+      schema:
+        type: string
+    VersionId:
+      name: version_id
+      in: path
+      required: true
+      schema:
+        type: string
+    RequestId:
+      name: request_id
+      in: path
+      required: true
+      schema:
+        type: string
+    PlanId:
+      name: plan_id
+      in: path
+      required: true
+      schema:
+        type: string
+    ExecutionId:
+      name: execution_id
+      in: path
+      required: true
+      schema:
+        type: string
+    DiffFrom:
+      name: from
+      in: query
+      required: true
+      schema:
+        type: string
+    DiffTo:
+      name: to
+      in: query
+      required: true
+      schema:
+        type: string
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        stack:
+          type: string
+          example: go-control-plane-scaffold
+      required: [status, stack]
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+      required: [detail]
+    StringList:
+      type: array
+      items:
+        type: string
+    AnyMap:
+      type: object
+      additionalProperties: true
+    StringMap:
+      type: object
+      additionalProperties:
+        type: string
+    Project:
+      type: object
+      properties:
+        project_id:
+          type: string
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        created_at:
+          type: string
+          format: date-time
+      required: [project_id, name, created_at]
+    ProjectCreateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+      required: [name]
+    Dataset:
+      type: object
+      properties:
+        dataset_id:
+          type: string
+        project_id:
+          type: string
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        data_type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required: [dataset_id, project_id, name, data_type, created_at]
+    DatasetCreateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        data_type:
+          type:
+            - string
+            - "null"
+      required: [name]
+    DatasetVersion:
+      type: object
+      description: |
+        Dataset version detail.
+
+        `storage_uri`는 원본 dataset 위치다.
+        - direct create: caller supplied path
+        - upload: server-saved raw file path
+      properties:
+        dataset_version_id:
+          type: string
+        dataset_id:
+          type: string
+        project_id:
+          type: string
+        storage_uri:
+          type: string
+        data_type:
+          type: string
+        record_count:
+          type:
+            - integer
+            - "null"
+        metadata:
+          $ref: "#/components/schemas/AnyMap"
+        prepare_status:
+          type: string
+        prepare_model:
+          type:
+            - string
+            - "null"
+        prepare_prompt_version:
+          type:
+            - string
+            - "null"
+        prepare_uri:
+          type:
+            - string
+            - "null"
+        prepared_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        sentiment_status:
+          type: string
+        sentiment_model:
+          type:
+            - string
+            - "null"
+        sentiment_uri:
+          type:
+            - string
+            - "null"
+        sentiment_labeled_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        sentiment_prompt_version:
+          type:
+            - string
+            - "null"
+        embedding_status:
+          type: string
+        embedding_model:
+          type:
+            - string
+            - "null"
+        embedding_uri:
+          type:
+            - string
+            - "null"
+        created_at:
+          type: string
+          format: date-time
+        ready_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required:
+        - dataset_version_id
+        - dataset_id
+        - project_id
+        - storage_uri
+        - data_type
+        - metadata
+        - prepare_status
+        - sentiment_status
+        - embedding_status
+        - created_at
+    DatasetVersionCreateRequest:
+      type: object
+      properties:
+        storage_uri:
+          type: string
+          description: Absolute path or caller-managed dataset URI
+        data_type:
+          type:
+            - string
+            - "null"
+        record_count:
+          type:
+            - integer
+            - "null"
+        metadata:
+          $ref: "#/components/schemas/AnyMap"
+        prepare_required:
+          type:
+            - boolean
+            - "null"
+        prepare_model:
+          type:
+            - string
+            - "null"
+        sentiment_required:
+          type:
+            - boolean
+            - "null"
+        sentiment_model:
+          type:
+            - string
+            - "null"
+        embedding_required:
+          type:
+            - boolean
+            - "null"
+        embedding_model:
+          type:
+            - string
+            - "null"
+      required: [storage_uri]
+    DatasetUploadRequest:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+        data_type:
+          type: string
+        record_count:
+          type: string
+          description: Integer string
+        metadata:
+          type: string
+          description: JSON object string
+          example: '{"text_column":"text"}'
+        prepare_required:
+          type: string
+          enum: ["true", "false"]
+        sentiment_required:
+          type: string
+          enum: ["true", "false"]
+        embedding_required:
+          type: string
+          enum: ["true", "false"]
+        prepare_model:
+          type: string
+        sentiment_model:
+          type: string
+        embedding_model:
+          type: string
+      required: [file]
+    DatasetPrepareRequest:
+      type: object
+      properties:
+        text_column:
+          type:
+            - string
+            - "null"
+        output_path:
+          type:
+            - string
+            - "null"
+        model:
+          type:
+            - string
+            - "null"
+        force:
+          type:
+            - boolean
+            - "null"
+    DatasetEmbeddingBuildRequest:
+      type: object
+      properties:
+        text_column:
+          type:
+            - string
+            - "null"
+        force:
+          type:
+            - boolean
+            - "null"
+    DatasetSentimentBuildRequest:
+      type: object
+      properties:
+        text_column:
+          type:
+            - string
+            - "null"
+        output_path:
+          type:
+            - string
+            - "null"
+        model:
+          type:
+            - string
+            - "null"
+        force:
+          type:
+            - boolean
+            - "null"
+    SkillPlanStep:
+      type: object
+      properties:
+        step_id:
+          type: string
+        skill_name:
+          type: string
+        dataset_name:
+          type: string
+        inputs:
+          $ref: "#/components/schemas/AnyMap"
+      required: [skill_name, dataset_name, inputs]
+    SkillPlan:
+      type: object
+      properties:
+        plan_id:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillPlanStep"
+        notes:
+          type:
+            - string
+            - "null"
+        created_at:
+          type: string
+          format: date-time
+      required: [steps]
+    AnalysisRequest:
+      type: object
+      properties:
+        request_id:
+          type: string
+        project_id:
+          type: string
+        dataset_name:
+          type:
+            - string
+            - "null"
+        dataset_version_id:
+          type:
+            - string
+            - "null"
+        goal:
+          type: string
+        constraints:
+          $ref: "#/components/schemas/StringList"
+        context:
+          $ref: "#/components/schemas/AnyMap"
+        requested_plan:
+          oneOf:
+            - $ref: "#/components/schemas/SkillPlan"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+      required: [request_id, project_id, goal, constraints, context, created_at]
+    AnalysisSubmitRequest:
+      type: object
+      properties:
+        dataset_name:
+          type:
+            - string
+            - "null"
+        dataset_version_id:
+          type:
+            - string
+            - "null"
+        data_type:
+          type:
+            - string
+            - "null"
+        goal:
+          type: string
+        constraints:
+          $ref: "#/components/schemas/StringList"
+        context:
+          $ref: "#/components/schemas/AnyMap"
+        requested_plan:
+          oneOf:
+            - $ref: "#/components/schemas/SkillPlan"
+            - type: "null"
+      required: [goal]
+    PlanRecord:
+      type: object
+      properties:
+        plan_id:
+          type: string
+        request_id:
+          type: string
+        project_id:
+          type: string
+        dataset_name:
+          type: string
+        dataset_version_id:
+          type:
+            - string
+            - "null"
+        plan:
+          $ref: "#/components/schemas/SkillPlan"
+        status:
+          type: string
+        planner_type:
+          type:
+            - string
+            - "null"
+        planner_model:
+          type:
+            - string
+            - "null"
+        planner_prompt_version:
+          type:
+            - string
+            - "null"
+        plan_hash:
+          type:
+            - string
+            - "null"
+        created_at:
+          type: string
+          format: date-time
+      required: [plan_id, request_id, project_id, dataset_name, plan, status, created_at]
+    AnalysisPlanResponse:
+      type: object
+      properties:
+        request:
+          $ref: "#/components/schemas/AnalysisRequest"
+        plan:
+          $ref: "#/components/schemas/PlanRecord"
+      required: [request, plan]
+    ExecutionEvent:
+      type: object
+      properties:
+        execution_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        level:
+          type: string
+        event_type:
+          type: string
+        message:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AnyMap"
+      required: [execution_id, ts, level, event_type, message]
+    ExecutionSummary:
+      type: object
+      properties:
+        execution_id:
+          type: string
+        project_id:
+          type: string
+        request_id:
+          type: string
+        plan:
+          $ref: "#/components/schemas/SkillPlan"
+        status:
+          type: string
+        ended_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        required_hashes:
+          $ref: "#/components/schemas/StringList"
+        embedding_model_version:
+          type:
+            - string
+            - "null"
+        artifacts:
+          description: Step artifact map. Values are JSON-serialized strings.
+          $ref: "#/components/schemas/StringMap"
+        dataset_version_id:
+          type:
+            - string
+            - "null"
+        code_version:
+          type:
+            - string
+            - "null"
+        params_hash:
+          type:
+            - string
+            - "null"
+        skill_bundle_version:
+          type:
+            - string
+            - "null"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutionEvent"
+      required:
+        - execution_id
+        - project_id
+        - request_id
+        - plan
+        - status
+        - required_hashes
+        - artifacts
+        - events
+    PlanExecuteResponse:
+      type: object
+      properties:
+        plan:
+          $ref: "#/components/schemas/PlanRecord"
+        execution:
+          $ref: "#/components/schemas/ExecutionSummary"
+        job_id:
+          type:
+            - string
+            - "null"
+      required: [plan, execution]
+    ExecutionResumeRequest:
+      type: object
+      properties:
+        reason:
+          type:
+            - string
+            - "null"
+        triggered_by:
+          type:
+            - string
+            - "null"
+    ExecutionRerunRequest:
+      type: object
+      properties:
+        mode:
+          type:
+            - string
+            - "null"
+        triggered_by:
+          type:
+            - string
+            - "null"
+    ExecutionRerunResponse:
+      type: object
+      properties:
+        execution:
+          $ref: "#/components/schemas/ExecutionSummary"
+        job_id:
+          type:
+            - string
+            - "null"
+      required: [execution]
+    ExecutionResultResponse:
+      type: object
+      properties:
+        execution_id:
+          type: string
+        artifacts:
+          description: Step artifact map. Values are JSON-serialized strings.
+          $ref: "#/components/schemas/StringMap"
+        contract:
+          $ref: "#/components/schemas/AnyMap"
+      required: [execution_id, artifacts, contract]
+    ExecutionDiffStep:
+      type: object
+      properties:
+        step_id:
+          type: string
+        skill_name:
+          type: string
+        status:
+          type: string
+        from_hash:
+          type:
+            - string
+            - "null"
+        to_hash:
+          type:
+            - string
+            - "null"
+        stats:
+          $ref: "#/components/schemas/AnyMap"
+      required: [step_id, skill_name, status]
+    ExecutionDiffResponse:
+      type: object
+      properties:
+        from_execution_id:
+          type: string
+        to_execution_id:
+          type: string
+        total_steps:
+          type: integer
+        changed_steps:
+          type: integer
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutionDiffStep"
+      required: [from_execution_id, to_execution_id, total_steps, changed_steps, steps]

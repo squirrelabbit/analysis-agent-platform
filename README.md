@@ -115,6 +115,9 @@ Support skill:
   - `docker compose -f compose.dev.yml up -d --build`
 - 기본 API:
   - `http://127.0.0.1:18080`
+- API 문서:
+  - Swagger UI: `http://127.0.0.1:18080/swagger`
+  - OpenAPI YAML: `http://127.0.0.1:18080/openapi.yaml`
 - Python AI worker:
   - `http://127.0.0.1:18090`
 - 샘플 smoke:
