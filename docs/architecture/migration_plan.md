@@ -7,7 +7,7 @@
 
 ## Phase 0. 동결 기준 잡기
 
-- 레거시 Python `src/`를 기준 구현으로 본다.
+- 확인 필요: 레거시 Python `src/` 디렉터리는 현재 저장소에 없으므로, 기존 Python MVP는 문서와 남은 artifact 기준으로만 추적할 수 있다.
 - 현재 API, plan, execution contract를 스냅샷으로 남긴다.
 - 삭제 전에 필요한 문서만 요약 문서로 압축한다.
 
@@ -34,17 +34,19 @@
 - planner, embeddings, semantic search, evidence generation을 `workers/python-ai/`로 옮긴다.
 - control plane에서 직접 LLM을 호출하지 않는다.
 - 비정형 `waiting`은 embedding readiness 기반 workflow로 통합한다.
+- 현재 구현에는 dedup, taxonomy tagging, clustering 기반 비정형 deterministic skill도 Python worker에 들어가 있다.
 
 ## Phase 5. Rust hot skill worker 추가
 
 - clustering, dedup, keyword cooccurrence, 대규모 토큰화 같은 병목 Skill을 분리한다.
 - 모든 Skill을 Rust로 옮기지 않는다.
 - 성능이 증명된 hot path만 옮긴다.
+- 확인 필요: 현재 저장소의 Rust worker는 아직 runtime hot path에 연결되지 않았다.
 
 ## Phase 6. 레거시 정리
 
-- 새 구조에서 최소 E2E 시나리오가 안정화되면 `src/` 제거 계획을 세운다.
-- Docker, CI, local dev script를 새 디렉터리 기준으로 정리한다.
+- `src/`는 현재 저장소 기준으로 제거된 상태다.
+- Docker, CI, local dev script를 새 디렉터리 기준으로 계속 정리한다.
 - 레거시 Python 전용 문서와 스크립트를 단계적으로 제거한다.
 
 ## 우선순위

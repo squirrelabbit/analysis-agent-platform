@@ -161,6 +161,79 @@ func TestResumeExecutionTransitionsWaitingToQueued(t *testing.T) {
 	}
 }
 
+func TestSubmitAnalysisEnrichesEmbeddingClusterInputs(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, fakePlanner{
+		result: planner.PlanGenerationResult{
+			Plan: domain.SkillPlan{
+				Steps: []domain.SkillPlanStep{
+					{
+						SkillName:   "embedding_cluster",
+						DatasetName: "dataset_from_version",
+						Inputs:      map[string]any{},
+					},
+					{
+						SkillName:   "issue_cluster_summary",
+						DatasetName: "dataset_from_version",
+						Inputs:      map[string]any{},
+					},
+				},
+			},
+			PlannerType: "python-ai",
+		},
+	})
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"raw_text_column": "text",
+		},
+		PrepareStatus:   "ready",
+		PrepareURI:      stringPtr("issues.prepared.jsonl"),
+		EmbeddingStatus: "ready",
+		EmbeddingURI:    stringPtr("issues.embeddings.jsonl"),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	dataType := "unstructured"
+	datasetVersionID := version.DatasetVersionID
+	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
+		DatasetVersionID: &datasetVersionID,
+		DataType:         &dataType,
+		Goal:             "주요 이슈 군집을 보여줘",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	if got := response.Plan.Plan.Steps[0].Inputs["embedding_uri"]; got != "issues.embeddings.jsonl" {
+		t.Fatalf("unexpected embedding uri: %+v", response.Plan.Plan.Steps[0].Inputs)
+	}
+	if got := response.Plan.Plan.Steps[0].Inputs["cluster_similarity_threshold"]; got != 0.3 {
+		t.Fatalf("unexpected cluster threshold: %+v", response.Plan.Plan.Steps[0].Inputs)
+	}
+	if got := response.Plan.Plan.Steps[1].Inputs["text_column"]; got != "normalized_text" {
+		t.Fatalf("unexpected cluster summary text column: %+v", response.Plan.Plan.Steps[1].Inputs)
+	}
+	if response.Plan.Plan.Steps[1].DatasetName != "issues.prepared.jsonl" {
+		t.Fatalf("unexpected cluster summary dataset name: %+v", response.Plan.Plan.Steps[1])
+	}
+}
+
 func stringPtr(value string) *string {
 	return &value
 }

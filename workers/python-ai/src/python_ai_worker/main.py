@@ -8,7 +8,7 @@ from typing import Any
 
 from .config import load_config
 from .skill_bundle import bundle_version
-from .tasks import capability_names, capability_payload, run_task
+from .task_router import capability_names, capability_payload, run_task
 
 
 def describe() -> None:

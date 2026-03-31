@@ -21,7 +21,7 @@
 - `DuckDB`
   - 현재 연결된 structured skill은 `structured_kpi_summary` 1종
 - `Python AI worker`
-  - planner, dataset build task, semantic search, evidence generation, 비정형 deterministic skill
+  - planner, task router, runtime helper, dataset build task, 비정형 support/core skill
 - `Rust worker`
   - 확인 필요: 저장소에는 스캐폴드가 있으나 현재 실행 hot path에는 연결되지 않았다.
 
@@ -30,6 +30,7 @@
 - dataset build task `dataset_prepare`, `sentiment_label`, `embedding`이 연결돼 있다.
 - 비정형 support/core skill은 taxonomy, dedup, clustering 계열까지 현재 실행 경로에 포함된다.
 - plan skill 메타데이터는 공용 `skill bundle`인 `config/skill_bundle.json`으로 중앙화됐다.
+- Python worker 내부는 `task_router`, `planner`, `runtime`, `skills/support`, `skills/core` 중심으로 분리됐다.
 - 상세 skill 목록과 계약은 `docs/skill/skill_registry.md`를 기준으로 본다.
 - skill별 분석 기법은 `docs/skill/analysis_techniques.md`에 정리돼 있다.
 - GitHub Actions CI는 Python worker 테스트와 Go 테스트/빌드를 현재 구조 기준으로 실행한다.

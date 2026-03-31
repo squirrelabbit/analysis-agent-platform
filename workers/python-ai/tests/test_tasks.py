@@ -8,15 +8,21 @@ from pathlib import Path
 from unittest.mock import patch
 
 from python_ai_worker.tasks import (
+    run_cluster_label_candidates,
+    run_deduplicate_documents,
+    run_dictionary_tagging,
     run_document_filter,
     run_document_sample,
     run_dataset_prepare,
     run_embedding,
+    run_embedding_cluster,
     run_evidence_pack,
     run_issue_breakdown_summary,
+    run_issue_cluster_summary,
     run_issue_evidence_summary,
     run_issue_period_compare,
     run_issue_sentiment_summary,
+    run_issue_taxonomy_summary,
     run_issue_trend_summary,
     run_keyword_frequency,
     run_meta_group_count,
@@ -139,6 +145,48 @@ class TaskTests(unittest.TestCase):
             ["document_filter", "document_sample", "issue_sentiment_summary", "issue_evidence_summary"],
         )
 
+    def test_rule_based_planner_builds_issue_cluster_summary(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PYTHON_AI_LLM_PROVIDER": "anthropic",
+            },
+            clear=False,
+        ):
+            result = run_planner(
+                {
+                    "dataset_name": "issues_cluster.csv",
+                    "data_type": "unstructured",
+                    "goal": "주요 이슈 군집을 묶어서 보여줘",
+                }
+            )
+
+        self.assertEqual(
+            [step["skill_name"] for step in result["plan"]["steps"]],
+            ["document_filter", "deduplicate_documents", "embedding_cluster", "cluster_label_candidates", "issue_cluster_summary", "issue_evidence_summary"],
+        )
+
+    def test_rule_based_planner_builds_issue_taxonomy_summary(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PYTHON_AI_LLM_PROVIDER": "anthropic",
+            },
+            clear=False,
+        ):
+            result = run_planner(
+                {
+                    "dataset_name": "issues_taxonomy.csv",
+                    "data_type": "unstructured",
+                    "goal": "카테고리 태그 기준으로 이슈를 분류해줘",
+                }
+            )
+
+        self.assertEqual(
+            [step["skill_name"] for step in result["plan"]["steps"]],
+            ["document_filter", "dictionary_tagging", "issue_taxonomy_summary", "issue_evidence_summary"],
+        )
+
     def test_support_skills_filter_keywords_and_samples(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues.csv"
@@ -183,6 +231,39 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(keyword_result["artifact"]["top_terms"][0]["term"], "결제")
         self.assertEqual(sample_result["artifact"]["summary"]["sample_count"], 2)
         self.assertEqual(sample_result["artifact"]["samples"][0]["source_index"], 0)
+
+    def test_deduplicate_documents_reduces_selected_rows(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "duplicates.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다!!"})
+            writer.writerow({"text": "로그인이 자주 실패합니다"})
+
+        dedup_result = run_deduplicate_documents(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "sample_n": 2,
+                "duplicate_threshold": 0.8,
+            }
+        )
+        keyword_result = run_keyword_frequency(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "top_n": 3,
+                "prior_artifacts": {
+                    "step:dedup": dedup_result["artifact"],
+                },
+            }
+        )
+
+        self.assertEqual(dedup_result["artifact"]["summary"]["canonical_row_count"], 2)
+        self.assertEqual(dedup_result["artifact"]["summary"]["duplicate_row_count"], 1)
+        self.assertEqual(keyword_result["artifact"]["summary"]["document_count"], 2)
 
     def test_support_skills_group_and_bucket(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
@@ -398,6 +479,109 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["summary"]["dominant_label"], "negative")
         self.assertEqual(result["artifact"]["summary"]["negative_count"], 2)
         self.assertEqual(result["artifact"]["breakdown"][0]["sentiment_label"], "negative")
+
+    def test_dictionary_tagging_and_issue_taxonomy_summary(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_taxonomy.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 승인 오류가 반복 발생했습니다"})
+            writer.writerow({"text": "환불 요청과 결제 문의가 계속 들어옵니다"})
+            writer.writerow({"text": "로그인이 계속 실패합니다"})
+            writer.writerow({"text": "배송 문의가 계속 들어옵니다"})
+
+        tagging_result = run_dictionary_tagging(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "top_n": 3,
+                "sample_n": 2,
+            }
+        )
+        taxonomy_result = run_issue_taxonomy_summary(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "top_n": 3,
+                "sample_n": 2,
+                "prior_artifacts": {
+                    "step:tagging": tagging_result["artifact"],
+                },
+            }
+        )
+
+        self.assertGreaterEqual(tagging_result["artifact"]["summary"]["taxonomy_count"], 3)
+        self.assertEqual(taxonomy_result["artifact"]["summary"]["dominant_taxonomy"], "payment_billing")
+        self.assertEqual(taxonomy_result["artifact"]["taxonomy_breakdown"][0]["count"], 2)
+
+    def test_embedding_cluster_and_issue_cluster_summary(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_cluster.csv"
+        embedding_path = temp_dir / "issues_cluster.embeddings.jsonl"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"text": "결제 승인 오류가 다시 발생했습니다"})
+            writer.writerow({"text": "로그인이 계속 실패합니다"})
+            writer.writerow({"text": "로그인 인증 오류가 반복됩니다"})
+            writer.writerow({"text": "배송 문의가 계속 들어옵니다"})
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다!!"})
+
+        dedup_result = run_deduplicate_documents(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "sample_n": 2,
+                "duplicate_threshold": 0.8,
+            }
+        )
+        run_embedding(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "output_path": str(embedding_path),
+            }
+        )
+        cluster_result = run_embedding_cluster(
+            {
+                "dataset_name": str(csv_path),
+                "embedding_uri": str(embedding_path),
+                "cluster_similarity_threshold": 0.2,
+                "sample_n": 2,
+                "top_n": 3,
+                "prior_artifacts": {
+                    "step:dedup": dedup_result["artifact"],
+                },
+            }
+        )
+        label_result = run_cluster_label_candidates(
+            {
+                "dataset_name": str(csv_path),
+                "sample_n": 2,
+                "top_n": 3,
+                "prior_artifacts": {
+                    "step:cluster": cluster_result["artifact"],
+                },
+            }
+        )
+        summary_result = run_issue_cluster_summary(
+            {
+                "dataset_name": str(csv_path),
+                "sample_n": 2,
+                "top_n": 3,
+                "prior_artifacts": {
+                    "step:cluster": cluster_result["artifact"],
+                    "step:labels": label_result["artifact"],
+                },
+            }
+        )
+
+        self.assertEqual(cluster_result["artifact"]["summary"]["clustered_document_count"], 5)
+        self.assertEqual(label_result["artifact"]["summary"]["cluster_count"], 3)
+        self.assertEqual(summary_result["artifact"]["summary"]["dominant_cluster_count"], 2)
+        self.assertIn("결제", summary_result["artifact"]["clusters"][0]["label"])
 
     def test_issue_evidence_summary_alias(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())

@@ -305,6 +305,85 @@ func TestAnalysisExecutionWorkflowWaitsForEmbeddings(t *testing.T) {
 	}
 }
 
+func TestAnalysisExecutionWorkflowWaitsForClusterEmbeddings(t *testing.T) {
+	suite := testsuite.WorkflowTestSuite{}
+	env := suite.NewTestWorkflowEnvironment()
+	fixedNow := time.Date(2026, 3, 30, 9, 0, 0, 0, time.UTC)
+	repo := store.NewMemoryStore()
+	if err := repo.SaveExecution(domain.ExecutionSummary{
+		ExecutionID:      "exec-3b",
+		ProjectID:        "project-1",
+		RequestID:        "request-1",
+		Status:           "queued",
+		DatasetVersionID: stringPtr("version-1"),
+		Artifacts:        map[string]string{},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-3b",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "embedding_cluster", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+			CreatedAt: fixedNow,
+		},
+		Events: []domain.ExecutionEvent{},
+	}); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+	if err := repo.SaveDatasetVersion(domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        "dataset-1",
+		ProjectID:        "project-1",
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		Metadata:         map[string]any{},
+		PrepareStatus:    "ready",
+		PrepareURI:       stringPtr("issues.csv.prepared.jsonl"),
+		EmbeddingStatus:  "queued",
+		CreatedAt:        fixedNow,
+	}); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	RegisterAnalysisRuntime(env, AnalysisActivities{
+		Repo: repo,
+		Runner: fakeExecutionRunner{
+			err: errors.New("runner should not execute while waiting"),
+		},
+		Now: func() time.Time {
+			return fixedNow
+		},
+	})
+
+	env.ExecuteWorkflow(
+		AnalysisExecutionWorkflow,
+		AnalysisWorkflowInput{
+			ExecutionID:      "exec-3b",
+			ProjectID:        "project-1",
+			RequestID:        "request-1",
+			PlanID:           "plan-3b",
+			DatasetVersionID: stringPtr("version-1"),
+			RequestedAt:      fixedNow.Add(-time.Minute),
+		},
+	)
+
+	if !env.IsWorkflowCompleted() {
+		t.Fatal("expected workflow to complete")
+	}
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatalf("unexpected workflow error: %v", err)
+	}
+
+	execution, err := repo.GetExecution("project-1", "exec-3b")
+	if err != nil {
+		t.Fatalf("unexpected get execution error: %v", err)
+	}
+	if execution.Status != "waiting" {
+		t.Fatalf("unexpected execution status: %s", execution.Status)
+	}
+	if execution.Events[1].Payload["waiting_for"] != "embeddings" {
+		t.Fatalf("unexpected waiting payload: %+v", execution.Events[1].Payload)
+	}
+}
+
 func TestAnalysisExecutionWorkflowWaitsForDatasetPrepare(t *testing.T) {
 	suite := testsuite.WorkflowTestSuite{}
 	env := suite.NewTestWorkflowEnvironment()

@@ -22,6 +22,7 @@
 - `Go control-plane + Temporal worker + Postgres + DuckDB + Python AI worker` 조합으로 unit test와 build가 현재 구조 기준으로 통과한다.
 - `Claude Sonnet` 기반 planner/evidence generation 경로와 fallback 경로가 Python AI worker에 반영돼 있다.
 - 비정형 deterministic skill은 Python worker 안에서 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`, `issue_taxonomy_summary`까지 확장돼 있다.
+- Python AI worker는 현재 `task_router + planner + runtime helper + support/core skill module` 구조로 분리돼 있다.
 - 레거시 Python `src/` 디렉터리는 현재 저장소에 없다.
 - `workers/rust-skills/`는 아직 실사용 hot path가 연결되지 않은 선택 최적화 경로다.
 

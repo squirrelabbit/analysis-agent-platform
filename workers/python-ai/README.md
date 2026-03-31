@@ -31,6 +31,27 @@
   - `issue_taxonomy_summary`
   - `issue_evidence_summary`
 
+## 현재 코드 구조
+
+- `src/python_ai_worker/main.py`
+  - HTTP entrypoint
+- `src/python_ai_worker/task_router.py`
+  - task name -> handler routing
+- `src/python_ai_worker/planner.py`
+  - planner entrypoint와 rule-based planner
+- `src/python_ai_worker/runtime/`
+  - `constants.py`: 공통 상수
+  - `payloads.py`: payload normalize와 기본 입력 merge
+  - `common.py`: text/io/date/token helper
+  - `artifacts.py`: prior artifact 선택과 집계 helper
+  - `llm.py`: planner/evidence/prepare/sentiment LLM helper
+- `src/python_ai_worker/skills/`
+  - `dataset_build.py`: `dataset_prepare`, `sentiment_label`, `embedding`
+  - `support.py`: filter/dedup/tagging/search/cluster support skill
+  - `core.py`: issue summary/evidence/core 분석 skill
+- `src/python_ai_worker/tasks.py`
+  - 기존 import 호환을 위한 export 레이어만 유지한다.
+
 ## 원칙
 
 - workflow 상태를 직접 관리하지 않는다.
@@ -105,6 +126,7 @@
 - `dictionary_tagging`은 rule-based taxonomy tagging을 사용한다.
 - `embedding_cluster`는 token vector cosine similarity 기반 greedy clustering을 사용한다.
 - `cluster_label_candidates`는 cluster top term으로 label 후보를 만든다.
+- helper 단위 테스트는 `workers/python-ai/tests/test_runtime_helpers.py`에서 payload/artifact/planner helper를 직접 검증한다.
 
 ## rule-based planner 패턴
 
