@@ -3,6 +3,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from .prompt_registry import (
+    DEFAULT_PREPARE_BATCH_PROMPT_VERSION,
+    DEFAULT_PREPARE_PROMPT_VERSION,
+    DEFAULT_SENTIMENT_PROMPT_VERSION,
+)
+
 
 @dataclass(frozen=True)
 class WorkerConfig:
@@ -19,6 +25,9 @@ class WorkerConfig:
     anthropic_version: str = "2023-06-01"
     anthropic_max_tokens: int = 2048
     anthropic_timeout_sec: float = 30.0
+    anthropic_prepare_prompt_version: str = DEFAULT_PREPARE_PROMPT_VERSION
+    anthropic_prepare_batch_prompt_version: str = DEFAULT_PREPARE_BATCH_PROMPT_VERSION
+    anthropic_sentiment_prompt_version: str = DEFAULT_SENTIMENT_PROMPT_VERSION
 
 
 def load_config() -> WorkerConfig:
@@ -36,4 +45,7 @@ def load_config() -> WorkerConfig:
         anthropic_version=os.getenv("ANTHROPIC_VERSION", "2023-06-01"),
         anthropic_max_tokens=int(os.getenv("ANTHROPIC_MAX_TOKENS", "2048")),
         anthropic_timeout_sec=float(os.getenv("ANTHROPIC_TIMEOUT_SEC", "30")),
+        anthropic_prepare_prompt_version=os.getenv("ANTHROPIC_PREPARE_PROMPT_VERSION", DEFAULT_PREPARE_PROMPT_VERSION),
+        anthropic_prepare_batch_prompt_version=os.getenv("ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION", DEFAULT_PREPARE_BATCH_PROMPT_VERSION),
+        anthropic_sentiment_prompt_version=os.getenv("ANTHROPIC_SENTIMENT_PROMPT_VERSION", DEFAULT_SENTIMENT_PROMPT_VERSION),
     )

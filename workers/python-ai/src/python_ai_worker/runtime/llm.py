@@ -6,6 +6,11 @@ from typing import Any, Callable
 
 from ..anthropic_client import AnthropicClient, AnthropicConfig
 from ..config import load_config
+from ..prompt_registry import (
+    render_prepare_batch_prompt,
+    render_prepare_prompt,
+    render_sentiment_prompt,
+)
 from ..skill_bundle import plan_skill_names
 from .common import (
     _coerce_string_list,
@@ -260,38 +265,15 @@ def _prepare_rows(
 
 
 def _prepare_row_with_llm(client: AnthropicClient, raw_text: str) -> dict[str, Any]:
-    prompt = "\n".join(
-        [
-            "You are preparing raw VOC or issue text for deterministic downstream analysis.",
-            "Keep the original meaning. Remove only obvious noise, duplicated punctuation, and boilerplate.",
-            "Do not summarize beyond a short normalization. Do not invent facts.",
-            "Choose disposition keep, review, or drop.",
-            "Use drop only for empty, unreadable noise, or clear non-content rows.",
-            "Use review when the text is partially readable but low quality or mixed.",
-            "",
-            f"raw_text: {raw_text}",
-        ]
-    )
+    config = load_config()
+    prompt_version, prompt = render_prepare_prompt(raw_text, version=config.anthropic_prepare_prompt_version)
     response = client.create_json(prompt=prompt, schema=_prepare_schema(), max_tokens=600)
-    return _normalize_prepare_response(response, raw_text, prompt_version="dataset-prepare-anthropic-v1")
+    return _normalize_prepare_response(response, raw_text, prompt_version=prompt_version)
 
 
 def _prepare_rows_with_llm(client: AnthropicClient, raw_texts: list[str]) -> list[dict[str, Any]]:
-    prompt = "\n".join(
-        [
-            "You are preparing raw VOC or issue text for deterministic downstream analysis.",
-            "Process each row independently and preserve ordering.",
-            "Keep the original meaning. Remove only obvious noise, duplicated punctuation, and boilerplate.",
-            "Do not summarize beyond a short normalization. Do not invent facts.",
-            "Choose disposition keep, review, or drop for each row.",
-            "",
-            "rows:",
-            json.dumps(
-                [{"row_index": index, "raw_text": raw_text} for index, raw_text in enumerate(raw_texts)],
-                ensure_ascii=False,
-            ),
-        ]
-    )
+    config = load_config()
+    prompt_version, prompt = render_prepare_batch_prompt(raw_texts, version=config.anthropic_prepare_batch_prompt_version)
     response = client.create_json(prompt=prompt, schema=_prepare_batch_schema(), max_tokens=max(800, 280 * len(raw_texts)))
     prepared_rows = response.get("rows")
     if not isinstance(prepared_rows, list) or len(prepared_rows) != len(raw_texts):
@@ -300,7 +282,7 @@ def _prepare_rows_with_llm(client: AnthropicClient, raw_texts: list[str]) -> lis
     for raw_text, prepared in zip(raw_texts, prepared_rows):
         if not isinstance(prepared, dict):
             raise ValueError("prepare batch response row must be an object")
-        normalized_rows.append(_normalize_prepare_response(prepared, raw_text, prompt_version="dataset-prepare-anthropic-batch-v1"))
+        normalized_rows.append(_normalize_prepare_response(prepared, raw_text, prompt_version=prompt_version))
     return normalized_rows
 
 
@@ -362,20 +344,8 @@ def _label_sentiment(text: str, *, client: AnthropicClient | None) -> dict[str, 
 
 
 def _label_sentiment_with_llm(client: AnthropicClient, text: str) -> dict[str, Any]:
-    prompt = "\n".join(
-        [
-            "You are labeling sentiment for customer feedback or issue text.",
-            "Classify one label only: positive, negative, neutral, mixed, or unknown.",
-            "negative: complaint, failure, error, dissatisfaction, delay, refund, or blocked experience.",
-            "positive: satisfaction, appreciation, successful resolution, or clearly favorable experience.",
-            "neutral: factual report without clear positive or negative sentiment.",
-            "mixed: both positive and negative signals are explicit in the same text.",
-            "unknown: the text is too ambiguous or too short to classify reliably.",
-            "Do not invent context beyond the text.",
-            "",
-            f"text: {text}",
-        ]
-    )
+    config = load_config()
+    prompt_version, prompt = render_sentiment_prompt(text, version=config.anthropic_sentiment_prompt_version)
     response = client.create_json(prompt=prompt, schema=_sentiment_schema(), max_tokens=400)
     label = str(response.get("label") or "unknown").strip().lower()
     if label not in SENTIMENT_LABELS:
@@ -386,7 +356,7 @@ def _label_sentiment_with_llm(client: AnthropicClient, text: str) -> dict[str, A
         "label": label,
         "confidence": confidence,
         "reason": str(response.get("reason") or "").strip(),
-        "prompt_version": "sentiment-anthropic-v1",
+        "prompt_version": prompt_version,
     }
 
 

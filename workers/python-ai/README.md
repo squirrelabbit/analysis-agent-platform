@@ -39,6 +39,8 @@
   - task name -> handler routing
 - `src/python_ai_worker/planner.py`
   - planner entrypoint와 rule-based planner
+- `src/python_ai_worker/prompt_registry.py`
+  - prepare/sentiment prompt version registry
 - `src/python_ai_worker/runtime/`
   - `constants.py`: 공통 상수
   - `payloads.py`: payload normalize와 기본 입력 merge
@@ -108,6 +110,9 @@
   - `ANTHROPIC_API_KEY`
   - `ANTHROPIC_MODEL`
   - `ANTHROPIC_PREPARE_MODEL`
+  - `ANTHROPIC_PREPARE_PROMPT_VERSION`
+  - `ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION`
+  - `ANTHROPIC_SENTIMENT_PROMPT_VERSION`
   - `ANTHROPIC_API_URL`
   - `ANTHROPIC_VERSION`
   - `ANTHROPIC_MAX_TOKENS`
@@ -120,7 +125,8 @@
 ## 구현 메모
 
 - `planner`와 `issue_evidence_summary`는 Claude Sonnet을 우선 시도하고 실패 시 deterministic fallback으로 내려간다.
-- `dataset_prepare`와 `sentiment_label`은 Claude Haiku를 우선 시도하고 실패 시 deterministic fallback으로 내려간다.
+- `dataset_prepare`와 `sentiment_label`은 기본 `ANTHROPIC_PREPARE_MODEL=claude-3-5-haiku-latest`를 사용하고 실패 시 deterministic fallback으로 내려간다.
+- prepare/sentiment prompt는 `prompt_registry.py`에서 버전별로 관리하고, 기본 선택은 `ANTHROPIC_PREPARE_PROMPT_VERSION`, `ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION`, `ANTHROPIC_SENTIMENT_PROMPT_VERSION`으로 바꿀 수 있다.
 - `dataset_prepare`는 Anthropic prepare 경로가 켜져 있으면 기본 `prepare_batch_size=8` 기준 batch 정제를 사용한다.
 - `dataset_prepare` artifact는 현재 JSONL이지만 각 row에 `row_id`를 부여하고 `prepared_ref`, `prepare_format=jsonl`, `row_id_column`을 함께 남긴다.
 - `sentiment_label` artifact도 `row_id`를 유지하고 `sentiment_ref`, `sentiment_format=jsonl` metadata를 함께 남긴다.

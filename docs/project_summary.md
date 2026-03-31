@@ -31,6 +31,7 @@
 - 비정형 support/core skill은 taxonomy, dedup, clustering 계열까지 현재 실행 경로에 포함된다.
 - `dataset_prepare`는 Anthropic prepare가 켜지면 batch 정제를 사용하고, `issue_evidence_summary`는 prior artifact를 `analysis_context`로 재사용한다.
 - dataset build artifact는 현재 JSONL이지만 `row_id`, `prepared_ref`, `sentiment_ref`, `embedding_ref` 같은 전환용 metadata를 함께 남긴다.
+- `dataset_prepare`, `sentiment_label`은 기본 Haiku model을 사용하고 prompt version을 registry로 관리한다.
 - plan skill 메타데이터는 공용 `skill bundle`인 `config/skill_bundle.json`으로 중앙화됐다.
 - Python worker 내부는 `task_router`, `planner`, `runtime`, `skills/support`, `skills/core` 중심으로 분리됐다.
 - 상세 skill 목록과 계약은 `docs/skill/skill_registry.md`를 기준으로 본다.
