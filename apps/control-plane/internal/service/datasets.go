@@ -279,11 +279,32 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if preparedTextColumn == "" {
 		preparedTextColumn = "normalized_text"
 	}
-	version.Metadata = mergeStringAny(version.Metadata, map[string]any{
+	prepareRef := artifactString(response.Artifact, "prepared_ref")
+	if prepareRef == "" {
+		prepareRef = artifactString(response.Artifact, "prepare_uri")
+	}
+	prepareFormat := artifactString(response.Artifact, "prepare_format")
+	if prepareFormat == "" && prepareRef != "" {
+		prepareFormat = "jsonl"
+	}
+	prepareMetadata := map[string]any{
 		"prepare_notes":        response.Notes,
 		"raw_text_column":      textColumn,
 		"prepared_text_column": preparedTextColumn,
-	})
+	}
+	if prepareRef != "" {
+		prepareMetadata["prepared_ref"] = prepareRef
+	}
+	if prepareFormat != "" {
+		prepareMetadata["prepared_format"] = prepareFormat
+	}
+	if rowIDColumn := artifactString(response.Artifact, "row_id_column"); rowIDColumn != "" {
+		prepareMetadata["row_id_column"] = rowIDColumn
+	}
+	if contractVersion := artifactString(response.Artifact, "storage_contract_version"); contractVersion != "" {
+		prepareMetadata["storage_contract_version"] = contractVersion
+	}
+	version.Metadata = mergeStringAny(version.Metadata, prepareMetadata)
 	if promptVersion := artifactString(response.Artifact, "prepare_prompt_version"); promptVersion != "" {
 		version.PreparePromptVer = &promptVersion
 	}
@@ -373,10 +394,37 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 	now := time.Now().UTC()
 	version.EmbeddingStatus = "ready"
 	version.ReadyAt = &now
-	version.Metadata = mergeStringAny(version.Metadata, map[string]any{
+	embeddingRef := artifactString(response.Artifact, "embedding_ref")
+	if embeddingRef == "" {
+		embeddingRef = artifactString(response.Artifact, "embedding_uri")
+	}
+	embeddingFormat := artifactString(response.Artifact, "embedding_format")
+	if embeddingFormat == "" && embeddingRef != "" {
+		embeddingFormat = "jsonl"
+	}
+	embeddingMetadata := map[string]any{
 		"text_column":     textColumn,
 		"embedding_notes": response.Notes,
-	})
+	}
+	if embeddingRef != "" {
+		embeddingMetadata["embedding_ref"] = embeddingRef
+	}
+	if embeddingFormat != "" {
+		embeddingMetadata["embedding_format"] = embeddingFormat
+	}
+	if rowIDColumn := artifactString(response.Artifact, "row_id_column"); rowIDColumn != "" {
+		embeddingMetadata["row_id_column"] = rowIDColumn
+	}
+	if chunkIDColumn := artifactString(response.Artifact, "chunk_id_column"); chunkIDColumn != "" {
+		embeddingMetadata["chunk_id_column"] = chunkIDColumn
+	}
+	if chunkingStrategy := artifactString(response.Artifact, "chunking_strategy"); chunkingStrategy != "" {
+		embeddingMetadata["chunking_strategy"] = chunkingStrategy
+	}
+	if contractVersion := artifactString(response.Artifact, "storage_contract_version"); contractVersion != "" {
+		embeddingMetadata["storage_contract_version"] = contractVersion
+	}
+	version.Metadata = mergeStringAny(version.Metadata, embeddingMetadata)
 	if value, ok := response.Artifact["document_count"]; ok {
 		version.Metadata["document_count"] = value
 	}
@@ -464,13 +512,34 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 	version.SentimentStatus = "ready"
 	version.SentimentLabeledAt = &now
 	version.ReadyAt = &now
-	version.Metadata = mergeStringAny(version.Metadata, map[string]any{
+	sentimentRef := artifactString(response.Artifact, "sentiment_ref")
+	if sentimentRef == "" {
+		sentimentRef = artifactString(response.Artifact, "sentiment_uri")
+	}
+	sentimentFormat := artifactString(response.Artifact, "sentiment_format")
+	if sentimentFormat == "" && sentimentRef != "" {
+		sentimentFormat = "jsonl"
+	}
+	sentimentMetadata := map[string]any{
 		"sentiment_notes":             response.Notes,
 		"sentiment_text_column":       textColumn,
 		"sentiment_label_column":      artifactString(response.Artifact, "sentiment_label_column"),
 		"sentiment_reason_column":     artifactString(response.Artifact, "sentiment_reason_column"),
 		"sentiment_confidence_column": artifactString(response.Artifact, "sentiment_confidence_column"),
-	})
+	}
+	if sentimentRef != "" {
+		sentimentMetadata["sentiment_ref"] = sentimentRef
+	}
+	if sentimentFormat != "" {
+		sentimentMetadata["sentiment_format"] = sentimentFormat
+	}
+	if rowIDColumn := artifactString(response.Artifact, "row_id_column"); rowIDColumn != "" {
+		sentimentMetadata["row_id_column"] = rowIDColumn
+	}
+	if contractVersion := artifactString(response.Artifact, "storage_contract_version"); contractVersion != "" {
+		sentimentMetadata["storage_contract_version"] = contractVersion
+	}
+	version.Metadata = mergeStringAny(version.Metadata, sentimentMetadata)
 	if sentimentURI := artifactString(response.Artifact, "sentiment_uri"); sentimentURI != "" {
 		version.SentimentURI = &sentimentURI
 	}

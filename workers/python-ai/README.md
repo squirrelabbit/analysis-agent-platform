@@ -122,8 +122,11 @@
 - `planner`와 `issue_evidence_summary`는 Claude Sonnet을 우선 시도하고 실패 시 deterministic fallback으로 내려간다.
 - `dataset_prepare`와 `sentiment_label`은 Claude Haiku를 우선 시도하고 실패 시 deterministic fallback으로 내려간다.
 - `dataset_prepare`는 Anthropic prepare 경로가 켜져 있으면 기본 `prepare_batch_size=8` 기준 batch 정제를 사용한다.
+- `dataset_prepare` artifact는 현재 JSONL이지만 각 row에 `row_id`를 부여하고 `prepared_ref`, `prepare_format=jsonl`, `row_id_column`을 함께 남긴다.
+- `sentiment_label` artifact도 `row_id`를 유지하고 `sentiment_ref`, `sentiment_format=jsonl` metadata를 함께 남긴다.
 - `issue_evidence_summary`는 `issue_trend_summary`, `issue_breakdown_summary`, `issue_period_compare`, `issue_cluster_summary`, `issue_taxonomy_summary`, `issue_sentiment_summary` 같은 prior artifact를 `analysis_context`로 반영한다.
 - `embedding`은 token-overlap 기반 sidecar file을 만들고, `semantic_search`와 `embedding_cluster`는 이 sidecar를 사용한다.
+- embedding sidecar record는 `row_id`, `chunk_id`, `chunk_index=0`를 함께 저장해 이후 chunk/vector index 전환 기반을 만든다.
 - `deduplicate_documents`는 정규화 텍스트 동일성 + token-set Jaccard similarity를 사용한다.
 - `dictionary_tagging`은 rule-based taxonomy tagging을 사용한다.
 - `embedding_cluster`는 token vector cosine similarity 기반 greedy clustering을 사용한다.

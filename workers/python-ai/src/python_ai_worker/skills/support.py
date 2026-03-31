@@ -355,14 +355,19 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
     matches = []
     for record in rt._selected_embedding_records(embedding_uri, payload.get("prior_artifacts")):
         score = rt._cosine_similarity(query_counts, record.get("token_counts") or {}, float(record.get("norm") or 0))
-        matches.append(
-            {
-                "rank": 0,
-                "source_index": int(record.get("source_index") or 0),
-                "score": round(score, 6),
-                "text": str(record.get("text") or "")[:240],
-            }
-        )
+        match = {
+            "rank": 0,
+            "source_index": int(record.get("source_index") or 0),
+            "score": round(score, 6),
+            "text": str(record.get("text") or "")[:240],
+        }
+        row_id = str(record.get("row_id") or "").strip()
+        if row_id:
+            match["row_id"] = row_id
+        chunk_id = str(record.get("chunk_id") or "").strip()
+        if chunk_id:
+            match["chunk_id"] = chunk_id
+        matches.append(match)
 
     matches.sort(key=lambda item: (-item["score"], item["source_index"]))
     limited = matches[: normalized["sample_n"]]

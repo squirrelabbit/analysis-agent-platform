@@ -45,11 +45,15 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"notes": []string{"prepare completed"},
 			"artifact": map[string]any{
-				"skill_name":             "dataset_prepare",
-				"prepare_uri":            "/tmp/issues.prepared.jsonl",
-				"prepare_model":          "claude-haiku-test",
-				"prepare_prompt_version": "dataset-prepare-anthropic-v1",
-				"prepared_text_column":   "normalized_text",
+				"skill_name":               "dataset_prepare",
+				"prepare_uri":              "/tmp/issues.prepared.jsonl",
+				"prepared_ref":             "/tmp/issues.prepared.jsonl",
+				"prepare_format":           "jsonl",
+				"prepare_model":            "claude-haiku-test",
+				"prepare_prompt_version":   "dataset-prepare-anthropic-v1",
+				"prepared_text_column":     "normalized_text",
+				"row_id_column":            "row_id",
+				"storage_contract_version": "unstructured-storage-v1",
 				"summary": map[string]any{
 					"input_row_count":  10,
 					"output_row_count": 7,
@@ -92,6 +96,15 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	}
 	if got := metadataString(version.Metadata, "prepared_text_column", ""); got != "normalized_text" {
 		t.Fatalf("unexpected prepared text column: %s", got)
+	}
+	if got := metadataString(version.Metadata, "prepared_ref", ""); got != "/tmp/issues.prepared.jsonl" {
+		t.Fatalf("unexpected prepared ref: %s", got)
+	}
+	if got := metadataString(version.Metadata, "prepared_format", ""); got != "jsonl" {
+		t.Fatalf("unexpected prepared format: %s", got)
+	}
+	if got := metadataString(version.Metadata, "row_id_column", ""); got != "row_id" {
+		t.Fatalf("unexpected row id column: %s", got)
 	}
 	if version.RecordCount == nil || *version.RecordCount != 7 {
 		t.Fatalf("unexpected record count: %+v", version.RecordCount)
@@ -151,9 +164,15 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"notes": []string{"embedding completed"},
 			"artifact": map[string]any{
-				"embedding_uri":   "/tmp/issues.prepared.jsonl.embeddings.jsonl",
-				"embedding_model": "token-overlap-v1",
-				"document_count":  7,
+				"embedding_uri":            "/tmp/issues.prepared.jsonl.embeddings.jsonl",
+				"embedding_ref":            "/tmp/issues.prepared.jsonl.embeddings.jsonl",
+				"embedding_format":         "jsonl",
+				"embedding_model":          "token-overlap-v1",
+				"document_count":           7,
+				"row_id_column":            "row_id",
+				"chunk_id_column":          "chunk_id",
+				"chunking_strategy":        "row",
+				"storage_contract_version": "unstructured-storage-v1",
 			},
 		})
 	}))
@@ -176,6 +195,15 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 	}
 	if result.EmbeddingStatus != "ready" {
 		t.Fatalf("unexpected embedding status: %s", result.EmbeddingStatus)
+	}
+	if got := metadataString(result.Metadata, "embedding_ref", ""); got != "/tmp/issues.prepared.jsonl.embeddings.jsonl" {
+		t.Fatalf("unexpected embedding ref: %s", got)
+	}
+	if got := metadataString(result.Metadata, "embedding_format", ""); got != "jsonl" {
+		t.Fatalf("unexpected embedding format: %s", got)
+	}
+	if got := metadataString(result.Metadata, "chunk_id_column", ""); got != "chunk_id" {
+		t.Fatalf("unexpected chunk id column: %s", got)
 	}
 }
 
@@ -236,11 +264,15 @@ func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 			"notes": []string{"sentiment completed"},
 			"artifact": map[string]any{
 				"sentiment_uri":               "/tmp/issues.prepared.jsonl.sentiment.jsonl",
+				"sentiment_ref":               "/tmp/issues.prepared.jsonl.sentiment.jsonl",
+				"sentiment_format":            "jsonl",
 				"sentiment_model":             "claude-haiku-test",
 				"sentiment_prompt_version":    "sentiment-anthropic-v1",
 				"sentiment_label_column":      "sentiment_label",
 				"sentiment_confidence_column": "sentiment_confidence",
 				"sentiment_reason_column":     "sentiment_reason",
+				"row_id_column":               "row_id",
+				"storage_contract_version":    "unstructured-storage-v1",
 				"summary": map[string]any{
 					"labeled_row_count": 7,
 					"label_counts": map[string]any{
@@ -279,6 +311,12 @@ func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 	}
 	if got := metadataString(result.Metadata, "sentiment_label_column", ""); got != "sentiment_label" {
 		t.Fatalf("unexpected sentiment label column: %s", got)
+	}
+	if got := metadataString(result.Metadata, "sentiment_ref", ""); got != "/tmp/issues.prepared.jsonl.sentiment.jsonl" {
+		t.Fatalf("unexpected sentiment ref: %s", got)
+	}
+	if got := metadataString(result.Metadata, "sentiment_format", ""); got != "jsonl" {
+		t.Fatalf("unexpected sentiment format: %s", got)
 	}
 }
 

@@ -30,28 +30,38 @@ def _select_evidence_candidates(
     if semantic_candidates:
         selected = []
         for rank, item in enumerate(semantic_candidates[: normalized["sample_n"]], start=1):
-            selected.append(
-                {
-                    "rank": rank,
-                    "source_index": int(item.get("source_index") or 0),
-                    "score": float(item.get("score") or 0),
-                    "text": str(item.get("text") or ""),
-                }
-            )
+            selected_item = {
+                "rank": rank,
+                "source_index": int(item.get("source_index") or 0),
+                "score": float(item.get("score") or 0),
+                "text": str(item.get("text") or ""),
+            }
+            row_id = str(item.get("row_id") or "").strip()
+            if row_id:
+                selected_item["row_id"] = row_id
+            chunk_id = str(item.get("chunk_id") or "").strip()
+            if chunk_id:
+                selected_item["chunk_id"] = chunk_id
+            selected.append(selected_item)
         return selected, "semantic_search"
 
     document_samples = _extract_document_samples(payload.get("prior_artifacts"))
     if document_samples:
         selected = []
         for rank, item in enumerate(document_samples[: normalized["sample_n"]], start=1):
-            selected.append(
-                {
-                    "rank": rank,
-                    "source_index": int(item.get("source_index") or 0),
-                    "score": float(item.get("score") or 0),
-                    "text": str(item.get("text") or ""),
-                }
-            )
+            selected_item = {
+                "rank": rank,
+                "source_index": int(item.get("source_index") or 0),
+                "score": float(item.get("score") or 0),
+                "text": str(item.get("text") or ""),
+            }
+            row_id = str(item.get("row_id") or "").strip()
+            if row_id:
+                selected_item["row_id"] = row_id
+            chunk_id = str(item.get("chunk_id") or "").strip()
+            if chunk_id:
+                selected_item["chunk_id"] = chunk_id
+            selected.append(selected_item)
         return selected, "document_sample"
 
     documents = [item for item in _iter_documents(normalized["dataset_name"], normalized["text_column"]) if item]
@@ -307,9 +317,11 @@ def _selected_text_rows(
         if selected_indices is not None and source_index not in selected_indices:
             continue
         row = item["row"]
+        row_id = str(row.get("row_id") or "").strip()
         selected_rows.append(
             {
                 "source_index": source_index,
+                "row_id": row_id,
                 "row": row,
                 "text": str(row.get(text_column) or "").strip(),
             }
@@ -595,6 +607,8 @@ def _build_embedding_records_from_rows(selected_rows: list[dict[str, Any]]) -> l
         records.append(
             {
                 "source_index": int(item["source_index"]),
+                "row_id": str(item.get("row_id") or "").strip(),
+                "chunk_id": str(item.get("chunk_id") or item.get("row_id") or "").strip(),
                 "text": text,
                 "token_counts": dict(token_counts),
                 "norm": _vector_norm(token_counts),
@@ -624,6 +638,8 @@ def _cluster_embedding_records(
                 best_cluster = cluster
         member = {
             "source_index": int(record.get("source_index") or 0),
+            "row_id": str(record.get("row_id") or "").strip(),
+            "chunk_id": str(record.get("chunk_id") or "").strip(),
             "text": str(record.get("text") or "")[:240],
             "token_counts": token_counts,
         }
@@ -659,6 +675,8 @@ def _cluster_embedding_records(
                 "sample_documents": [
                     {
                         "source_index": int(member["source_index"]),
+                        "row_id": str(member.get("row_id") or ""),
+                        "chunk_id": str(member.get("chunk_id") or ""),
                         "text": str(member["text"])[:240],
                     }
                     for member in members[:sample_n]

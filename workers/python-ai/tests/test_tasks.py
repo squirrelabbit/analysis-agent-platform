@@ -418,6 +418,9 @@ class TaskTests(unittest.TestCase):
             )
 
         self.assertEqual(result["artifact"]["skill_name"], "dataset_prepare")
+        self.assertEqual(result["artifact"]["prepare_format"], "jsonl")
+        self.assertEqual(result["artifact"]["prepared_ref"], str(prepared_path))
+        self.assertEqual(result["artifact"]["row_id_column"], "row_id")
         self.assertEqual(result["artifact"]["summary"]["input_row_count"], 3)
         self.assertEqual(result["artifact"]["summary"]["output_row_count"], 2)
         self.assertTrue(prepared_path.exists())
@@ -428,6 +431,7 @@ class TaskTests(unittest.TestCase):
                 prepared_rows.append(json.loads(line))
 
         self.assertEqual(len(prepared_rows), 2)
+        self.assertEqual(prepared_rows[0]["row_id"], "version-1:row:0")
         self.assertEqual(prepared_rows[0]["normalized_text"], "결제 오류가 반복 발생했습니다.")
         self.assertEqual(prepared_rows[0]["prepare_disposition"], "keep")
         self.assertEqual(prepared_rows[0]["channel"], "app")
@@ -480,6 +484,7 @@ class TaskTests(unittest.TestCase):
                 prepared_rows.append(json.loads(line))
 
         self.assertEqual(prepared_rows[0]["prepare_prompt_version"], "dataset-prepare-anthropic-batch-v1")
+        self.assertEqual(prepared_rows[0]["row_id"], "version-2:row:0")
         self.assertEqual(prepared_rows[1]["prepare_disposition"], "review")
 
     def test_sentiment_label_fallback(self) -> None:
@@ -503,12 +508,16 @@ class TaskTests(unittest.TestCase):
             )
 
         self.assertEqual(result["artifact"]["skill_name"], "sentiment_label")
+        self.assertEqual(result["artifact"]["sentiment_format"], "jsonl")
+        self.assertEqual(result["artifact"]["sentiment_ref"], str(sentiment_path))
+        self.assertEqual(result["artifact"]["row_id_column"], "row_id")
         self.assertEqual(result["artifact"]["summary"]["labeled_row_count"], 2)
         self.assertTrue(sentiment_path.exists())
         labeled_rows = []
         with sentiment_path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 labeled_rows.append(json.loads(line))
+        self.assertEqual(labeled_rows[0]["row_id"], "version-1:row:0")
         self.assertEqual(labeled_rows[0]["sentiment_label"], "negative")
         self.assertEqual(labeled_rows[1]["sentiment_label"], "positive")
 
@@ -780,13 +789,25 @@ class TaskTests(unittest.TestCase):
 
         embedding_result = run_embedding(
             {
+                "dataset_version_id": "version-embed",
                 "dataset_name": str(csv_path),
                 "text_column": "text",
                 "output_path": str(embedding_path),
             }
         )
         self.assertEqual(embedding_result["artifact"]["embedding_uri"], str(embedding_path))
+        self.assertEqual(embedding_result["artifact"]["embedding_ref"], str(embedding_path))
+        self.assertEqual(embedding_result["artifact"]["embedding_format"], "jsonl")
+        self.assertEqual(embedding_result["artifact"]["row_id_column"], "row_id")
+        self.assertEqual(embedding_result["artifact"]["chunk_id_column"], "chunk_id")
         self.assertTrue(embedding_path.exists())
+
+        embedding_rows = []
+        with embedding_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                embedding_rows.append(json.loads(line))
+        self.assertEqual(embedding_rows[0]["row_id"], "version-embed:row:0")
+        self.assertEqual(embedding_rows[0]["chunk_id"], "version-embed:row:0:chunk:0")
 
         search_result = run_semantic_search(
             {
@@ -799,6 +820,8 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(search_result["artifact"]["skill_name"], "semantic_search")
         self.assertEqual(search_result["artifact"]["summary"]["match_count"], 2)
         self.assertEqual(search_result["artifact"]["matches"][0]["source_index"], 0)
+        self.assertEqual(search_result["artifact"]["matches"][0]["row_id"], "version-embed:row:0")
+        self.assertEqual(search_result["artifact"]["matches"][0]["chunk_id"], "version-embed:row:0:chunk:0")
 
 
 if __name__ == "__main__":

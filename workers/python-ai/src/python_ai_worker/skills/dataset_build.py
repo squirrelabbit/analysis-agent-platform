@@ -9,6 +9,27 @@ from typing import Any
 
 from .. import runtime as rt
 
+
+def _stable_source_index(row: dict[str, Any], fallback_index: int) -> int:
+    try:
+        return int(row.get("source_row_index") or fallback_index)
+    except (TypeError, ValueError):
+        return fallback_index
+
+
+def _row_id(row: dict[str, Any], fallback_index: int, dataset_version_id: str) -> str:
+    existing = str(row.get("row_id") or "").strip()
+    if existing:
+        return existing
+    source_index = _stable_source_index(row, fallback_index)
+    prefix = dataset_version_id or "dataset"
+    return f"{prefix}:row:{source_index}"
+
+
+def _chunk_id(row_id: str, chunk_index: int = 0) -> str:
+    return f"{row_id}:chunk:{chunk_index}"
+
+
 def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_prepare_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
@@ -41,6 +62,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                     handle,
                     prepared_batch,
                     batch_results,
+                    dataset_version_id=normalized["dataset_version_id"],
                     kept_count=kept_count,
                     review_count=review_count,
                     dropped_count=dropped_count,
@@ -58,6 +80,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 handle,
                 prepared_batch,
                 batch_results,
+                dataset_version_id=normalized["dataset_version_id"],
                 kept_count=kept_count,
                 review_count=review_count,
                 dropped_count=dropped_count,
@@ -91,11 +114,15 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
             "dataset_version_id": normalized["dataset_version_id"],
             "source_dataset_name": normalized["dataset_name"],
             "prepare_uri": str(output_path),
+            "prepared_ref": str(output_path),
+            "prepare_format": "jsonl",
             "prepare_model": prepare_model,
             "prepare_prompt_version": prompt_version,
             "prepare_strategy": prepare_strategy,
             "prepare_batch_size": normalized["prepare_batch_size"],
             "prepared_text_column": "normalized_text",
+            "row_id_column": "row_id",
+            "storage_contract_version": "unstructured-storage-v1",
             "summary": {
                 "input_row_count": len(rows),
                 "output_row_count": kept_count + review_count,
@@ -114,6 +141,7 @@ def _write_prepared_rows(
     batch_rows: list[tuple[int, dict[str, Any], str]],
     batch_results: list[dict[str, Any]],
     *,
+    dataset_version_id: str,
     kept_count: int,
     review_count: int,
     dropped_count: int,
@@ -130,6 +158,7 @@ def _write_prepared_rows(
 
         prepared_row = dict(row)
         prepared_row["source_row_index"] = source_index
+        prepared_row["row_id"] = _row_id(prepared_row, source_index, dataset_version_id)
         prepared_row["raw_text"] = raw_text
         prepared_row["normalized_text"] = prepared["normalized_text"]
         prepared_row["prepare_disposition"] = disposition
@@ -143,21 +172,31 @@ def _write_prepared_rows(
 
 def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_embedding_payload(payload)
-    documents = [item for item in rt._iter_documents(normalized["dataset_name"], normalized["text_column"]) if item]
+    rows = rt._iter_rows(normalized["dataset_name"])
     embedding_path = Path(normalized["output_path"])
     embedding_path.parent.mkdir(parents=True, exist_ok=True)
+    document_count = 0
 
     with embedding_path.open("w", encoding="utf-8") as handle:
-        for index, document in enumerate(documents):
+        for index, row in enumerate(rows):
+            document = str(row.get(normalized["text_column"]) or "").strip()
+            if not document:
+                continue
+            source_index = _stable_source_index(row, index)
+            row_identifier = _row_id(row, source_index, normalized["dataset_version_id"])
             token_counts = Counter(rt._tokenize(document))
             record = {
-                "source_index": index,
+                "source_index": source_index,
+                "row_id": row_identifier,
+                "chunk_id": _chunk_id(row_identifier),
+                "chunk_index": 0,
                 "text": document,
                 "token_counts": dict(token_counts),
                 "norm": rt._vector_norm(token_counts),
             }
             handle.write(json.dumps(record, ensure_ascii=False))
             handle.write("\n")
+            document_count += 1
 
     return {
         "notes": [
@@ -168,8 +207,14 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
             "skill_name": "embedding",
             "dataset_name": normalized["dataset_name"],
             "embedding_uri": str(embedding_path),
+            "embedding_ref": str(embedding_path),
+            "embedding_format": "jsonl",
             "embedding_model": normalized["embedding_model"],
-            "document_count": len(documents),
+            "document_count": document_count,
+            "row_id_column": "row_id",
+            "chunk_id_column": "chunk_id",
+            "chunking_strategy": "row",
+            "storage_contract_version": "unstructured-storage-v1",
         },
     }
 
@@ -186,13 +231,14 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     labeled_count = 0
 
     with output_path.open("w", encoding="utf-8") as handle:
-        for row in rows:
+        for index, row in enumerate(rows):
             text = str(row.get(normalized["text_column"]) or "").strip()
             if not text:
                 skipped_rows += 1
                 continue
             labeled = rt._label_sentiment(text, client=client)
             labeled_row = dict(row)
+            labeled_row["row_id"] = _row_id(labeled_row, index, normalized["dataset_version_id"])
             labeled_row["sentiment_label"] = labeled["label"]
             labeled_row["sentiment_confidence"] = labeled["confidence"]
             labeled_row["sentiment_reason"] = labeled["reason"]
@@ -224,11 +270,15 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
             "dataset_version_id": normalized["dataset_version_id"],
             "source_dataset_name": normalized["dataset_name"],
             "sentiment_uri": str(output_path),
+            "sentiment_ref": str(output_path),
+            "sentiment_format": "jsonl",
             "sentiment_model": sentiment_model,
             "sentiment_prompt_version": prompt_version,
             "sentiment_label_column": "sentiment_label",
             "sentiment_confidence_column": "sentiment_confidence",
             "sentiment_reason_column": "sentiment_reason",
+            "row_id_column": "row_id",
+            "storage_contract_version": "unstructured-storage-v1",
             "summary": {
                 "input_row_count": len(rows),
                 "labeled_row_count": labeled_count,

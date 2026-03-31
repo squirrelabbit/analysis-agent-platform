@@ -164,6 +164,7 @@ def _normalize_embedding_payload(payload: dict[str, Any]) -> dict[str, Any]:
     output_path = str(payload.get("output_path") or f"{dataset_name}.embeddings.jsonl").strip()
     embedding_model = str(payload.get("embedding_model") or DEFAULT_EMBEDDING_MODEL).strip()
     return {
+        "dataset_version_id": str(payload.get("dataset_version_id") or "").strip(),
         "dataset_name": dataset_name,
         "text_column": text_column,
         "output_path": output_path,

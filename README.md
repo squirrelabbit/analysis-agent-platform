@@ -24,6 +24,7 @@
 - `Claude Sonnet` 기반 planner/evidence generation 경로와 fallback 경로가 Python AI worker에 반영돼 있다.
 - `issue_evidence_summary`는 trend/breakdown/compare/cluster/taxonomy/sentiment 계열 prior artifact를 `analysis_context`로 끌어와 근거 설명에 반영한다.
 - `dataset_prepare`는 Anthropic prepare 경로가 켜지면 기본 `prepare_batch_size=8` 기준 batch 정제를 수행한다.
+- `dataset_prepare`, `sentiment_label`, `embedding` JSONL artifact는 현재 `row_id/ref/format` 메타데이터를 함께 남겨 이후 Parquet 전환의 기반을 잡아 두었다.
 - 비정형 deterministic skill은 Python worker 안에서 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`, `issue_taxonomy_summary`까지 확장돼 있다.
 - Python AI worker는 현재 `task_router + planner + runtime helper + support/core skill module` 구조로 분리돼 있다.
 - Python skill-case devtool은 `python_ai_worker.devtools` 패키지와 `run_skill_case --validate` CLI로 정식 검증 경로를 가진다.

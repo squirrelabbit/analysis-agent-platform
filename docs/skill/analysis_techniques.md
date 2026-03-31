@@ -29,9 +29,9 @@
 
 | Skill | 한국어 이름 | 주요 구현 파일 | 현재 구현 방식 | 향상 가능 방향 |
 | --- | --- | --- | --- | --- |
-| `dataset_prepare` | 데이터셋 정제 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | 정규식 기반 text normalization과 noise 판별을 기본으로 수행하고, 설정 시 Anthropic batch prepare를 우선 사용한다. 기본 `prepare_batch_size`는 8이며 결과는 `prepared.jsonl` artifact로 저장한다. | 언어별 normalization, quality score, column-aware cleaning, duplicate/noise classifier, adaptive batch sizing을 추가할 수 있다. |
-| `sentiment_label` | 감성 라벨링 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | 감성 사전 기반 fallback 분류를 수행하고, 설정 시 Anthropic 분류를 우선 사용한다. 결과는 `sentiment.jsonl` artifact로 저장한다. | 도메인 특화 classifier, confidence calibration, aspect sentiment, label guideline 강화, 평가셋 기반 품질 측정을 붙일 수 있다. |
-| `embedding` | 임베딩 생성 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | `token-overlap-v1` 방식으로 문서를 토큰화하고 `token_counts`와 `norm`을 저장한다. 외부 embedding API나 dense vector model은 사용하지 않는다. | sentence-transformer/OpenAI 계열 dense embedding, hybrid retrieval, ANN index, chunk 단위 embedding, multilingual embedding을 검토할 수 있다. |
+| `dataset_prepare` | 데이터셋 정제 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | 정규식 기반 text normalization과 noise 판별을 기본으로 수행하고, 설정 시 Anthropic batch prepare를 우선 사용한다. 기본 `prepare_batch_size`는 8이며 결과는 `prepared.jsonl` artifact로 저장한다. 각 row에는 `row_id`를 부여하고 artifact에는 `prepared_ref`, `prepare_format=jsonl`을 함께 남긴다. | 언어별 normalization, quality score, column-aware cleaning, duplicate/noise classifier, adaptive batch sizing, Parquet 출력 전환을 추가할 수 있다. |
+| `sentiment_label` | 감성 라벨링 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | 감성 사전 기반 fallback 분류를 수행하고, 설정 시 Anthropic 분류를 우선 사용한다. 결과는 `sentiment.jsonl` artifact로 저장하며 `row_id`를 유지한다. | 도메인 특화 classifier, confidence calibration, aspect sentiment, label guideline 강화, sidecar Parquet 분리를 붙일 수 있다. |
+| `embedding` | 임베딩 생성 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | `token-overlap-v1` 방식으로 문서를 토큰화하고 `token_counts`와 `norm`을 저장한다. 외부 embedding API나 dense vector model은 사용하지 않는다. 현재 record에는 `row_id`, `chunk_id`, `chunk_index=0`도 함께 저장해 이후 chunk/vector index 전환 기반을 마련한다. | sentence-transformer/OpenAI 계열 dense embedding, hybrid retrieval, ANN index, chunk 단위 embedding, multilingual embedding을 검토할 수 있다. |
 
 ## Unstructured Support
 
