@@ -77,6 +77,7 @@
   structured dataset scan, 집계, 순위, 기간 비교
 - `Artifact storage`
   result bundle, logs, evidence pack
+- 비정형 dataset build artifact는 현재 JSONL 중심이고, Parquet + vector index 전환 설계는 `docs/architecture/unstructured_storage_transition.md`에 별도로 정리한다.
 - 확인 필요:
   비정형 원문 저장을 Postgres 중심으로 둘지, object storage까지 확장할지는 별도 합의가 필요하다.
 

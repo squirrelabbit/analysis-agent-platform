@@ -35,6 +35,15 @@
 - control plane에서 직접 LLM을 호출하지 않는다.
 - 비정형 `waiting`은 embedding readiness 기반 workflow로 통합한다.
 - 현재 구현에는 dedup, taxonomy tagging, clustering 기반 비정형 deterministic skill도 Python worker에 들어가 있다.
+- 현재 JSONL artifact 경로를 곧바로 고정 계약으로 보지 않고, `docs/architecture/unstructured_storage_transition.md` 기준으로 `prepared/sentiment/chunk/vector index` 분리를 준비한다.
+
+## Phase 4-1. 비정형 저장 포맷 전환
+
+- `dataset_prepare` 출력은 `prepared.parquet` 중심으로 옮긴다.
+- `sentiment_label`은 row 복제 JSONL 대신 `row_id` 기준 sidecar를 우선한다.
+- dense retrieval을 위해 `chunk_id`와 vector index를 도입한다.
+- control plane과 worker는 파일 경로 문자열보다 `ref + format` 해석 계층을 점진적으로 도입한다.
+- 확인 필요: Parquet writer 의존성은 `pyarrow`와 DuckDB Python 경로 중 어느 쪽을 채택할지 합의가 필요하다.
 
 ## Phase 5. Rust hot skill worker 추가
 

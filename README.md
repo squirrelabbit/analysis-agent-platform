@@ -27,6 +27,7 @@
 - 비정형 deterministic skill은 Python worker 안에서 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`, `issue_taxonomy_summary`까지 확장돼 있다.
 - Python AI worker는 현재 `task_router + planner + runtime helper + support/core skill module` 구조로 분리돼 있다.
 - Python skill-case devtool은 `python_ai_worker.devtools` 패키지와 `run_skill_case --validate` CLI로 정식 검증 경로를 가진다.
+- 비정형 dataset build artifact는 현재 JSONL 중심이고, Parquet + vector index 전환 설계는 `docs/architecture/unstructured_storage_transition.md`에 따로 정리했다.
 - 레거시 Python `src/` 디렉터리는 현재 저장소에 없다.
 - `workers/rust-skills/`는 아직 실사용 hot path가 연결되지 않은 선택 최적화 경로다.
 
@@ -60,6 +61,7 @@
 - 저장소 경로
   - raw upload는 `UPLOAD_ROOT`
   - prepare/sentiment/embedding 산출물은 `ARTIFACT_ROOT`
+  - 현재 기본 포맷은 JSONL이고, 장기 전환안은 `docs/architecture/unstructured_storage_transition.md`를 기준으로 본다.
 - 검증 자산
   - Go unit test / build
   - Python unit test

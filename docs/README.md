@@ -15,6 +15,7 @@
 | `docs/architecture/target_stack.md` | 목표 아키텍처와 실행 흐름 |
 | `docs/architecture/language_roles.md` | Go, Python, Rust, DuckDB, Postgres의 책임 구분 |
 | `docs/architecture/migration_plan.md` | 레거시 Python MVP에서 목표 구조로 옮기는 단계 |
+| `docs/architecture/unstructured_storage_transition.md` | 비정형 dataset의 JSONL artifact를 Parquet + vector index 구조로 바꾸는 설계 |
 | `docs/architecture/project_map.mmd` | 시스템 수준 구조도 |
 | `docs/skill/skill_registry.md` | Skill contract와 Core/Support 분류 기준 |
 | `docs/skill/analysis_techniques.md` | skill별 분석 기법과 사용 기술 설명 |

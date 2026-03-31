@@ -34,6 +34,7 @@
 - Python worker 내부는 `task_router`, `planner`, `runtime`, `skills/support`, `skills/core` 중심으로 분리됐다.
 - 상세 skill 목록과 계약은 `docs/skill/skill_registry.md`를 기준으로 본다.
 - skill별 분석 기법은 `docs/skill/analysis_techniques.md`에 정리돼 있다.
+- 비정형 dataset build artifact는 현재 JSONL 중심이며, Parquet + vector index 전환안은 `docs/architecture/unstructured_storage_transition.md`에 분리해 정리했다.
 - GitHub Actions CI는 Python worker 테스트와 Go 테스트/빌드를 현재 구조 기준으로 실행한다.
 
 ## 5. 문서 구분
