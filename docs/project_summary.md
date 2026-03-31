@@ -29,6 +29,7 @@
 
 - dataset build task `dataset_prepare`, `sentiment_label`, `embedding`이 연결돼 있다.
 - 비정형 support/core skill은 taxonomy, dedup, clustering 계열까지 현재 실행 경로에 포함된다.
+- `dataset_prepare`는 Anthropic prepare가 켜지면 batch 정제를 사용하고, `issue_evidence_summary`는 prior artifact를 `analysis_context`로 재사용한다.
 - plan skill 메타데이터는 공용 `skill bundle`인 `config/skill_bundle.json`으로 중앙화됐다.
 - Python worker 내부는 `task_router`, `planner`, `runtime`, `skills/support`, `skills/core` 중심으로 분리됐다.
 - 상세 skill 목록과 계약은 `docs/skill/skill_registry.md`를 기준으로 본다.
@@ -46,5 +47,5 @@
 
 ## 6. 확인 필요
 
-- compose 기반 통합 smoke는 저장소에 스크립트가 있지만, 이번 문서 갱신 시점에 재실행 로그를 다시 수집하지는 않았다.
+- 이번 문서 갱신 turn에서는 Python worker 재빌드 후 smoke 8종을 다시 실행했다.
 - Rust worker를 실제 hot path로 넘길 성능 기준과 시점은 별도 측정이 필요하다.

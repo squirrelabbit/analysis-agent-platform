@@ -29,16 +29,17 @@ project_id="$(printf '%s' "$project_json" | python3 -c 'import json,sys; print(j
 dataset_json="$(post_json POST "/projects/${project_id}/datasets" '{"name":"issues-sentiment","data_type":"unstructured"}')"
 dataset_id="$(printf '%s' "$dataset_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dataset_id"])')"
 
-version_payload="$(DATASET_NAME="$DATASET_NAME" python3 - <<'PY'
+upload_metadata="$(python3 - <<'PY'
 import json
-import os
 print(json.dumps({
-    "storage_uri": os.environ["DATASET_NAME"],
-    "data_type": "unstructured",
+    "text_column": "text",
 }, ensure_ascii=False))
 PY
 )"
-version_json="$(post_json POST "/projects/${project_id}/datasets/${dataset_id}/versions" "$version_payload")"
+version_json="$(curl -sS -X POST "${API_BASE}/projects/${project_id}/datasets/${dataset_id}/uploads" \
+  -F "file=@${DATASET_NAME}" \
+  -F 'data_type=unstructured' \
+  -F "metadata=${upload_metadata}")"
 version_id="$(printf '%s' "$version_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dataset_version_id"])')"
 
 prepare_payload="$(python3 - <<'PY'

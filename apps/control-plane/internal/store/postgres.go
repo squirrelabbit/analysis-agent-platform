@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -15,6 +16,11 @@ import (
 
 type PostgresStore struct {
 	db *sql.DB
+}
+
+type timestampColumn struct {
+	tableName  string
+	columnName string
 }
 
 func NewPostgresStore(databaseURL string) (*PostgresStore, error) {
@@ -611,7 +617,7 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			project_id UUID PRIMARY KEY,
 			name TEXT NOT NULL,
 			description TEXT,
-			created_at TIMESTAMP NOT NULL
+			created_at TIMESTAMPTZ NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS datasets (
 			dataset_id UUID PRIMARY KEY,
@@ -619,7 +625,7 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			name TEXT NOT NULL,
 			description TEXT,
 			data_type TEXT NOT NULL,
-			created_at TIMESTAMP NOT NULL
+			created_at TIMESTAMPTZ NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS dataset_versions (
 			dataset_version_id TEXT PRIMARY KEY,
@@ -633,27 +639,27 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			prepare_model TEXT,
 			prepare_prompt_version TEXT,
 			prepare_uri TEXT,
-			prepared_at TIMESTAMP,
+			prepared_at TIMESTAMPTZ,
 			sentiment_status TEXT NOT NULL DEFAULT 'not_requested',
 			sentiment_model TEXT,
 			sentiment_uri TEXT,
-			sentiment_labeled_at TIMESTAMP,
+			sentiment_labeled_at TIMESTAMPTZ,
 			sentiment_prompt_version TEXT,
 			embedding_status TEXT NOT NULL,
 			embedding_model TEXT,
 			embedding_uri TEXT,
-			created_at TIMESTAMP NOT NULL,
-			ready_at TIMESTAMP
+			created_at TIMESTAMPTZ NOT NULL,
+			ready_at TIMESTAMPTZ
 		)`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_status TEXT NOT NULL DEFAULT 'not_requested'`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_model TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_prompt_version TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_uri TEXT`,
-		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepared_at TIMESTAMP`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepared_at TIMESTAMPTZ`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_status TEXT NOT NULL DEFAULT 'not_requested'`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_model TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_uri TEXT`,
-		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_labeled_at TIMESTAMP`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_labeled_at TIMESTAMPTZ`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_prompt_version TEXT`,
 		`CREATE TABLE IF NOT EXISTS analysis_requests (
 			request_id UUID PRIMARY KEY,
@@ -664,7 +670,7 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			constraints JSONB NOT NULL,
 			context JSONB NOT NULL,
 			requested_plan JSONB,
-			created_at TIMESTAMP NOT NULL
+			created_at TIMESTAMPTZ NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS skill_plans (
 			plan_id UUID PRIMARY KEY,
@@ -680,14 +686,14 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			created_by TEXT,
 			approvals JSONB,
 			plan JSONB NOT NULL,
-			created_at TIMESTAMP NOT NULL
+			created_at TIMESTAMPTZ NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS executions (
 			execution_id UUID PRIMARY KEY,
 			project_id UUID NOT NULL REFERENCES projects(project_id),
 			plan_id UUID NOT NULL REFERENCES skill_plans(plan_id),
 			status TEXT NOT NULL,
-			ended_at TIMESTAMP,
+			ended_at TIMESTAMPTZ,
 			embedding_model_version TEXT,
 			required_hashes JSONB,
 			artifacts JSONB,
@@ -696,7 +702,7 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			params_hash TEXT,
 			skill_bundle_version TEXT,
 			events JSONB,
-			created_at TIMESTAMP NOT NULL
+			created_at TIMESTAMPTZ NOT NULL
 		)`,
 	}
 	for _, statement := range statements {
@@ -704,7 +710,65 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			return err
 		}
 	}
+	return s.promoteTimestampColumnsToTimestamptz(ctx)
+}
+
+func (s *PostgresStore) promoteTimestampColumnsToTimestamptz(ctx context.Context) error {
+	columns := []timestampColumn{
+		{tableName: "projects", columnName: "created_at"},
+		{tableName: "datasets", columnName: "created_at"},
+		{tableName: "dataset_versions", columnName: "prepared_at"},
+		{tableName: "dataset_versions", columnName: "sentiment_labeled_at"},
+		{tableName: "dataset_versions", columnName: "created_at"},
+		{tableName: "dataset_versions", columnName: "ready_at"},
+		{tableName: "analysis_requests", columnName: "created_at"},
+		{tableName: "skill_plans", columnName: "created_at"},
+		{tableName: "executions", columnName: "ended_at"},
+		{tableName: "executions", columnName: "created_at"},
+	}
+	for _, column := range columns {
+		dataType, err := s.columnDataType(ctx, column.tableName, column.columnName)
+		if err != nil {
+			return err
+		}
+		if dataType == "" || dataType == "timestamp with time zone" {
+			continue
+		}
+		if dataType != "timestamp without time zone" {
+			return fmt.Errorf("unsupported timestamp type for %s.%s: %s", column.tableName, column.columnName, dataType)
+		}
+		statement := fmt.Sprintf(
+			`ALTER TABLE %s ALTER COLUMN %s TYPE TIMESTAMPTZ USING %s AT TIME ZONE 'UTC'`,
+			column.tableName,
+			column.columnName,
+			column.columnName,
+		)
+		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (s *PostgresStore) columnDataType(ctx context.Context, tableName, columnName string) (string, error) {
+	row := s.db.QueryRowContext(
+		ctx,
+		`SELECT data_type
+		 FROM information_schema.columns
+		 WHERE table_schema = 'public'
+		   AND table_name = $1
+		   AND column_name = $2`,
+		tableName,
+		columnName,
+	)
+	var dataType string
+	if err := row.Scan(&dataType); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return dataType, nil
 }
 
 func normalizeDatabaseURL(value string) string {

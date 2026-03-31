@@ -29,21 +29,19 @@ project_id="$(printf '%s' "$project_json" | python3 -c 'import json,sys; print(j
 dataset_json="$(post_json POST "/projects/${project_id}/datasets" '{"name":"issues-breakdown","data_type":"unstructured"}')"
 dataset_id="$(printf '%s' "$dataset_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dataset_id"])')"
 
-version_payload="$(DATASET_NAME="$DATASET_NAME" python3 - <<'PY'
+upload_metadata="$(python3 - <<'PY'
 import json
-import os
 print(json.dumps({
-    "storage_uri": os.environ["DATASET_NAME"],
-    "data_type": "unstructured",
-    "metadata": {
-        "text_column": "text",
-        "breakdown_column": "channel",
-        "sample_n": 3,
-    },
+    "text_column": "text",
+    "breakdown_column": "channel",
+    "sample_n": 3,
 }, ensure_ascii=False))
 PY
 )"
-version_json="$(post_json POST "/projects/${project_id}/datasets/${dataset_id}/versions" "$version_payload")"
+version_json="$(curl -sS -X POST "${API_BASE}/projects/${project_id}/datasets/${dataset_id}/uploads" \
+  -F "file=@${DATASET_NAME}" \
+  -F 'data_type=unstructured' \
+  -F "metadata=${upload_metadata}")"
 version_id="$(printf '%s' "$version_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["dataset_version_id"])')"
 
 prepare_payload="$(python3 - <<'PY'
@@ -56,7 +54,7 @@ PY
 prepare_json="$(post_json POST "/projects/${project_id}/datasets/${dataset_id}/versions/${version_id}/prepare" "$prepare_payload")"
 printf '%s\n' "$prepare_json"
 
-analysis_payload="$(DATASET_VERSION_ID="$version_id" GOAL="$GOAL" DATASET_NAME="$DATASET_NAME" python3 - <<'PY'
+analysis_payload="$(DATASET_VERSION_ID="$version_id" GOAL="$GOAL" python3 - <<'PY'
 import json
 import os
 
@@ -64,7 +62,6 @@ plan = {
     "steps": [
         {
             "skill_name": "issue_breakdown_summary",
-            "dataset_name": os.environ["DATASET_NAME"],
             "inputs": {
                 "text_column": "text",
                 "dimension_column": "channel",
@@ -74,7 +71,6 @@ plan = {
         },
         {
             "skill_name": "issue_evidence_summary",
-            "dataset_name": os.environ["DATASET_NAME"],
             "inputs": {
                 "text_column": "text",
                 "query": os.environ["GOAL"],

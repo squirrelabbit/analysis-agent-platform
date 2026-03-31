@@ -126,6 +126,154 @@ def _find_prior_artifact(prior_artifacts: Any, skill_name: str) -> dict[str, Any
     return None
 
 
+def _analysis_context_entries(prior_artifacts: Any) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for artifact in (
+        _first_prior_artifact(prior_artifacts, "issue_trend_summary", "time_bucket_count"),
+        _first_prior_artifact(prior_artifacts, "issue_breakdown_summary", "meta_group_count"),
+        _first_prior_artifact(prior_artifacts, "issue_period_compare"),
+        _first_prior_artifact(prior_artifacts, "issue_cluster_summary", "cluster_label_candidates", "embedding_cluster"),
+        _first_prior_artifact(prior_artifacts, "issue_taxonomy_summary", "dictionary_tagging"),
+        _first_prior_artifact(prior_artifacts, "issue_sentiment_summary"),
+        _first_prior_artifact(prior_artifacts, "unstructured_issue_summary"),
+        _first_prior_artifact(prior_artifacts, "keyword_frequency"),
+    ):
+        if artifact is None:
+            continue
+        entry = _analysis_context_entry(artifact)
+        if entry is not None:
+            entries.append(entry)
+    return entries
+
+
+def _first_prior_artifact(prior_artifacts: Any, *skill_names: str) -> dict[str, Any] | None:
+    for skill_name in skill_names:
+        artifact = _find_prior_artifact(prior_artifacts, skill_name)
+        if artifact is not None:
+            return artifact
+    return None
+
+
+def _analysis_context_entry(artifact: dict[str, Any]) -> dict[str, Any] | None:
+    skill_name = str(artifact.get("skill_name") or "").strip()
+    if not skill_name:
+        return None
+    summary = _analysis_context_summary(artifact)
+    if not summary:
+        return None
+    return {
+        "source_skill": skill_name,
+        "summary": summary,
+    }
+
+
+def _analysis_context_summary(artifact: dict[str, Any]) -> str:
+    skill_name = str(artifact.get("skill_name") or "").strip()
+    summary = artifact.get("summary") or {}
+    if not isinstance(summary, dict):
+        summary = {}
+
+    if skill_name in {"issue_trend_summary", "time_bucket_count"}:
+        peak_bucket = str(summary.get("peak_bucket") or "").strip()
+        peak_count = int(summary.get("peak_count") or 0)
+        bucket = str(artifact.get("bucket") or summary.get("bucket_type") or "").strip()
+        if peak_bucket and peak_count > 0:
+            prefix = f"{bucket} 기준 " if bucket else ""
+            return f"{prefix}피크 구간은 {peak_bucket}({peak_count}건)이다."
+        return ""
+
+    if skill_name in {"issue_breakdown_summary", "meta_group_count"}:
+        top_group = str(summary.get("top_group") or "").strip()
+        top_group_count = int(summary.get("top_group_count") or 0)
+        dimension = str(summary.get("dimension_column") or artifact.get("dimension_column") or "").strip()
+        if top_group and top_group_count > 0:
+            prefix = f"{dimension} 기준 " if dimension else ""
+            return f"{prefix}최다 그룹은 {top_group}({top_group_count}건)이다."
+        return ""
+
+    if skill_name == "issue_period_compare":
+        current_count = int(summary.get("current_count") or 0)
+        previous_count = int(summary.get("previous_count") or 0)
+        count_delta = int(summary.get("count_delta") or 0)
+        if count_delta > 0:
+            return f"현재 기간 {current_count}건, 이전 기간 {previous_count}건으로 {count_delta}건 증가했다."
+        if count_delta < 0:
+            return f"현재 기간 {current_count}건, 이전 기간 {previous_count}건으로 {abs(count_delta)}건 감소했다."
+        if current_count or previous_count:
+            return f"현재 기간과 이전 기간이 모두 {current_count}건으로 동일하다."
+        return ""
+
+    if skill_name == "issue_cluster_summary":
+        label = str(summary.get("dominant_cluster_label") or "").strip()
+        count = int(summary.get("dominant_cluster_count") or 0)
+        if label and count > 0:
+            return f"가장 큰 군집은 {label}이며 {count}건이다."
+        return ""
+
+    if skill_name == "cluster_label_candidates":
+        clusters = artifact.get("clusters") or []
+        if isinstance(clusters, list):
+            for cluster in clusters:
+                if not isinstance(cluster, dict):
+                    continue
+                label = str(cluster.get("label") or "").strip()
+                count = int(cluster.get("document_count") or 0)
+                if label and count > 0:
+                    return f"가장 큰 군집 후보 라벨은 {label}이며 {count}건이다."
+        return ""
+
+    if skill_name == "embedding_cluster":
+        clusters = artifact.get("clusters") or []
+        if isinstance(clusters, list):
+            for cluster in clusters:
+                if not isinstance(cluster, dict):
+                    continue
+                count = int(cluster.get("document_count") or 0)
+                terms = [str(item.get("term") or "").strip() for item in list(cluster.get("top_terms") or []) if isinstance(item, dict)]
+                terms = [term for term in terms if term]
+                if count > 0 and terms:
+                    return f"대표 군집 top term은 {', '.join(terms[:2])}이고 {count}건이다."
+        return ""
+
+    if skill_name in {"issue_taxonomy_summary", "dictionary_tagging"}:
+        label = str(summary.get("dominant_taxonomy_label") or "").strip()
+        count = int(summary.get("dominant_taxonomy_count") or 0)
+        if not label:
+            breakdown = artifact.get("taxonomy_breakdown") or []
+            if isinstance(breakdown, list) and breakdown:
+                first = breakdown[0]
+                if isinstance(first, dict):
+                    label = str(first.get("label") or first.get("taxonomy_id") or "").strip()
+                    count = int(first.get("count") or 0)
+        if label and count > 0:
+            return f"가장 큰 taxonomy는 {label}이며 {count}건이다."
+        return ""
+
+    if skill_name == "issue_sentiment_summary":
+        label = str(summary.get("dominant_label") or "").strip()
+        count = int(summary.get("dominant_label_count") or 0)
+        if label and count > 0:
+            return f"지배적인 감성은 {label}이며 {count}건이다."
+        return ""
+
+    if skill_name == "unstructured_issue_summary":
+        top_terms = [str(item.get("term") or "").strip() for item in list(artifact.get("top_terms") or []) if isinstance(item, dict)]
+        top_terms = [term for term in top_terms if term]
+        document_count = int(summary.get("document_count") or 0)
+        if top_terms:
+            return f"주요 키워드는 {', '.join(top_terms[:3])}이며 문서 수는 {document_count}건이다."
+        return ""
+
+    if skill_name == "keyword_frequency":
+        top_terms = [str(item.get("term") or "").strip() for item in list(artifact.get("top_terms") or []) if isinstance(item, dict)]
+        top_terms = [term for term in top_terms if term]
+        if top_terms:
+            return f"상위 키워드는 {', '.join(top_terms[:3])}이다."
+        return ""
+
+    return ""
+
+
 def _copy_artifact_fields(artifact: dict[str, Any], skill_name: str, step_id: Any) -> dict[str, Any]:
     copied = dict(artifact)
     copied["skill_name"] = skill_name
@@ -521,6 +669,7 @@ def _cluster_embedding_records(
 
 
 __all__ = [
+    "_analysis_context_entries",
     "_build_dictionary_tagging_artifact",
     "_build_embedding_records_from_rows",
     "_build_meta_group_artifact",

@@ -121,6 +121,8 @@
 
 - `planner`와 `issue_evidence_summary`는 Claude Sonnet을 우선 시도하고 실패 시 deterministic fallback으로 내려간다.
 - `dataset_prepare`와 `sentiment_label`은 Claude Haiku를 우선 시도하고 실패 시 deterministic fallback으로 내려간다.
+- `dataset_prepare`는 Anthropic prepare 경로가 켜져 있으면 기본 `prepare_batch_size=8` 기준 batch 정제를 사용한다.
+- `issue_evidence_summary`는 `issue_trend_summary`, `issue_breakdown_summary`, `issue_period_compare`, `issue_cluster_summary`, `issue_taxonomy_summary`, `issue_sentiment_summary` 같은 prior artifact를 `analysis_context`로 반영한다.
 - `embedding`은 token-overlap 기반 sidecar file을 만들고, `semantic_search`와 `embedding_cluster`는 이 sidecar를 사용한다.
 - `deduplicate_documents`는 정규화 텍스트 동일성 + token-set Jaccard similarity를 사용한다.
 - `dictionary_tagging`은 rule-based taxonomy tagging을 사용한다.
@@ -148,3 +150,20 @@
 ## 메타데이터 확인
 
 - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.main --describe`
+
+## skill 단위 테스트
+
+- 개별 skill 샘플 케이스 목록 보기
+  - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --list`
+- registry와 샘플 케이스 정합성만 빠르게 확인
+  - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --validate`
+- 개별 skill 직접 실행
+  - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --skill semantic_search --pretty`
+  - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --skill issue_cluster_summary --pretty --keep-tempdir`
+- 기본값은 LLM 호출을 강제로 끄고 deterministic fallback 경로로 실행한다.
+  - 실제 키가 있어도 `ANTHROPIC_API_KEY`를 비워서 local case를 안정적으로 재현한다.
+  - LLM 포함 경로까지 보고 싶으면 `--allow-llm`을 사용한다.
+- `python_ai_worker.devtools` 패키지는 `available_skill_cases`, `run_skill_case`, `validate_skill_cases`를 공개 API로 export한다.
+- 자동 검증
+  - `PYTHONPATH=workers/python-ai/src python3 -m unittest discover -s workers/python-ai/tests -p 'test_skill_cases.py'`
+  - 이 테스트는 `task_router`에 등록된 모든 skill/task에 대해 샘플 케이스가 존재하는지와 실제 실행이 되는지를 확인한다.

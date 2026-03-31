@@ -65,8 +65,9 @@
 - plan skill 메타데이터의 runtime source는 `config/skill_bundle.json`이고, Go control plane과 Python worker가 이 bundle을 함께 읽는다.
 - Python worker에는 planner, evidence, semantic search뿐 아니라 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `issue_cluster_summary`, `issue_taxonomy_summary`가 현재 구현돼 있다.
 - GitHub Actions CI는 Go 테스트/빌드와 Python worker 테스트를 현재 구조 기준으로 실행한다.
+- 개발용 smoke script는 `/uploads` API를 통해 입력 파일을 먼저 올리고 dataset version을 생성하도록 정리돼 있다.
 - 확인 필요:
-  저장소에는 compose 기반 통합 개발 경로와 smoke 스크립트가 있지만, 이번 문서 갱신 시점에 재실행 로그를 다시 수집하지는 않았다.
+  이번 turn에서는 `smoke.sh`, `smoke_cluster.sh`, `smoke_taxonomy.sh`만 재실행했고, 나머지 smoke는 문법 점검만 수행했다.
 
 ## 8. 데이터 경계
 

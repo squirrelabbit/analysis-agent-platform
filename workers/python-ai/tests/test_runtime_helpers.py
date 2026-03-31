@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from python_ai_worker.runtime.artifacts import _select_evidence_candidates, _selected_source_indices
+from python_ai_worker.runtime.artifacts import _analysis_context_entries, _select_evidence_candidates, _selected_source_indices
 from python_ai_worker.runtime.common import _match_taxonomies
 from python_ai_worker.runtime.constants import DEFAULT_TAXONOMY_RULES
 from python_ai_worker.runtime.llm import _normalize_planner_response
@@ -54,6 +54,44 @@ class RuntimeHelperTests(unittest.TestCase):
 
         self.assertEqual(source, "semantic_search")
         self.assertEqual(selected[0]["source_index"], 7)
+
+    def test_analysis_context_entries_summarize_prior_artifacts(self) -> None:
+        prior_artifacts = {
+            "trend": {
+                "skill_name": "issue_trend_summary",
+                "bucket": "day",
+                "summary": {
+                    "peak_bucket": "2026-03-27",
+                    "peak_count": 3,
+                },
+            },
+            "compare": {
+                "skill_name": "issue_period_compare",
+                "summary": {
+                    "current_count": 3,
+                    "previous_count": 1,
+                    "count_delta": 2,
+                },
+            },
+            "breakdown": {
+                "skill_name": "issue_breakdown_summary",
+                "summary": {
+                    "dimension_column": "channel",
+                    "top_group": "app",
+                    "top_group_count": 2,
+                },
+            },
+        }
+
+        entries = _analysis_context_entries(prior_artifacts)
+
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(entries[0]["source_skill"], "issue_trend_summary")
+        self.assertIn("피크 구간", entries[0]["summary"])
+        self.assertEqual(entries[1]["source_skill"], "issue_breakdown_summary")
+        self.assertIn("최다 그룹", entries[1]["summary"])
+        self.assertEqual(entries[2]["source_skill"], "issue_period_compare")
+        self.assertIn("증가", entries[2]["summary"])
 
     def test_normalize_dictionary_tagging_payload_uses_default_rules_for_invalid_input(self) -> None:
         normalized = _normalize_dictionary_tagging_payload(

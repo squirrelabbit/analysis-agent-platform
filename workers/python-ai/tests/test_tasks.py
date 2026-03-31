@@ -34,6 +34,17 @@ from python_ai_worker.tasks import (
 
 
 class TaskTests(unittest.TestCase):
+    class _DummyPrepareClient:
+        def __init__(self, rows: list[dict[str, object]]) -> None:
+            self._rows = rows
+            self._config = type("Config", (), {"model": "claude-test"})()
+
+        def is_enabled(self) -> bool:
+            return True
+
+        def create_json(self, *, prompt: str, schema: dict[str, object], max_tokens: int | None = None) -> dict[str, object]:
+            return {"rows": self._rows}
+
     def test_rule_based_planner_without_key(self) -> None:
         with patch.dict(
             "os.environ",
@@ -421,6 +432,56 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(prepared_rows[0]["prepare_disposition"], "keep")
         self.assertEqual(prepared_rows[0]["channel"], "app")
 
+    def test_dataset_prepare_batches_llm_requests(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_raw.csv"
+        prepared_path = temp_dir / "issues_raw.prepared.jsonl"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["channel", "text"])
+            writer.writeheader()
+            writer.writerow({"channel": "app", "text": "결제 오류가 반복 발생했습니다!!!"})
+            writer.writerow({"channel": "call", "text": "로그인이 자주 실패하고 오류가 보입니다"})
+
+        dummy_client = self._DummyPrepareClient(
+            [
+                {
+                    "disposition": "keep",
+                    "normalized_text": "결제 오류가 반복 발생했습니다.",
+                    "reason": "noise removed",
+                    "quality_flags": ["normalized"],
+                },
+                {
+                    "disposition": "review",
+                    "normalized_text": "로그인이 자주 실패하고 오류가 보입니다.",
+                    "reason": "needs review",
+                    "quality_flags": ["review_needed"],
+                },
+            ]
+        )
+
+        with patch("python_ai_worker.skills.dataset_build.rt._anthropic_prepare_client", return_value=dummy_client):
+            result = run_dataset_prepare(
+                {
+                    "dataset_version_id": "version-2",
+                    "dataset_name": str(csv_path),
+                    "text_column": "text",
+                    "output_path": str(prepared_path),
+                    "prepare_batch_size": 2,
+                }
+            )
+
+        self.assertEqual(result["artifact"]["prepare_strategy"], "anthropic-batch")
+        self.assertEqual(result["artifact"]["prepare_batch_size"], 2)
+        self.assertEqual(result["artifact"]["summary"]["review_count"], 1)
+
+        prepared_rows = []
+        with prepared_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                prepared_rows.append(json.loads(line))
+
+        self.assertEqual(prepared_rows[0]["prepare_prompt_version"], "dataset-prepare-anthropic-batch-v1")
+        self.assertEqual(prepared_rows[1]["prepare_disposition"], "review")
+
     def test_sentiment_label_fallback(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         prepared_path = temp_dir / "issues.prepared.jsonl"
@@ -603,6 +664,51 @@ class TaskTests(unittest.TestCase):
 
         self.assertEqual(result["artifact"]["skill_name"], "issue_evidence_summary")
         self.assertEqual(len(result["artifact"]["evidence"]), 2)
+        self.assertEqual(result["artifact"]["analysis_context"], [])
+
+    def test_issue_evidence_summary_includes_prior_analysis_context(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"text": "결제 승인 오류가 다시 발생했습니다"})
+            writer.writerow({"text": "로그인이 자주 실패하고 오류가 보입니다"})
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+            result = run_issue_evidence_summary(
+                {
+                    "dataset_name": str(csv_path),
+                    "query": "결제 오류 관련 근거를 보여줘",
+                    "sample_n": 2,
+                    "prior_artifacts": {
+                        "trend": {
+                            "skill_name": "issue_trend_summary",
+                            "bucket": "day",
+                            "summary": {
+                                "peak_bucket": "2026-03-27",
+                                "peak_count": 3,
+                            },
+                        },
+                        "compare": {
+                            "skill_name": "issue_period_compare",
+                            "summary": {
+                                "current_count": 3,
+                                "previous_count": 1,
+                                "count_delta": 2,
+                            },
+                        },
+                    },
+                }
+            )
+
+        context = result["artifact"]["analysis_context"]
+        self.assertEqual(len(context), 2)
+        self.assertEqual(context[0]["source_skill"], "issue_trend_summary")
+        self.assertIn("피크 구간", context[0]["summary"])
+        self.assertIn("issue_period_compare", result["artifact"]["summary"])
+        self.assertIn("증가", result["artifact"]["summary"])
 
     def test_evidence_pack_fallback(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())

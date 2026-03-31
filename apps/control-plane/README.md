@@ -108,8 +108,10 @@
   - [smoke_trend.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_trend.sh)
   - [smoke_compare.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_compare.sh)
   - [smoke_breakdown.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_breakdown.sh)
+  - [smoke_cluster.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_cluster.sh)
+  - [smoke_taxonomy.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_taxonomy.sh)
+  - smoke script는 입력 파일을 `/uploads` API로 올린 뒤 dataset version을 생성하므로 host/container 경로 차이에 덜 민감하다.
 
 ## 확인 필요
 
 - auth policy와 approval flow는 아직 운영 기능 범위로 남아 있다.
-- cluster/taxonomy 시나리오는 unit test에는 포함됐지만 compose smoke script는 아직 별도 추가하지 않았다.

@@ -9,6 +9,7 @@ from .constants import (
     DEFAULT_DUPLICATE_THRESHOLD,
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_MAX_TAGS_PER_DOCUMENT,
+    DEFAULT_PREPARE_BATCH_SIZE,
 )
 
 
@@ -144,12 +145,14 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("output_path is required")
     text_column = str(payload.get("text_column") or "text").strip()
     model = str(payload.get("model") or "").strip()
+    prepare_batch_size = max(1, int(payload.get("prepare_batch_size") or DEFAULT_PREPARE_BATCH_SIZE))
     return {
         "dataset_version_id": str(payload.get("dataset_version_id") or "").strip(),
         "dataset_name": dataset_name,
         "text_column": text_column,
         "output_path": output_path,
         "model": model,
+        "prepare_batch_size": prepare_batch_size,
     }
 
 

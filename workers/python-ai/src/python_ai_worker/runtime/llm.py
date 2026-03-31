@@ -120,15 +120,20 @@ def _run_evidence_pack_with_llm(
     selected_documents: list[dict[str, Any]],
     selection_source: str,
     artifact_skill_name: str,
+    analysis_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    analysis_context = list(analysis_context or [])
     prompt = "\n".join(
         [
             "You are generating an evidence pack for an analysis execution.",
             "Summarize the issue briefly and cite the most relevant snippets using the provided source_index values.",
+            "When prior analysis context is provided, keep the narrative consistent with it, but only claim what the snippets can support.",
             "Do not invent evidence outside the provided snippets.",
             "",
             f"dataset_name: {normalized['dataset_name']}",
             f"query: {normalized['query']}",
+            "analysis_context:",
+            json.dumps(analysis_context, ensure_ascii=False),
             "documents:",
             json.dumps(selected_documents, ensure_ascii=False),
         ]
@@ -140,6 +145,7 @@ def _run_evidence_pack_with_llm(
         "dataset_name": normalized["dataset_name"],
         "query": normalized["query"],
         "selection_source": selection_source,
+        "analysis_context": analysis_context,
         "summary": response.get("summary") or "",
         "key_findings": response.get("key_findings") or [],
         "evidence": response.get("evidence") or [],
@@ -160,7 +166,9 @@ def _run_evidence_pack_fallback(
     selected_documents: list[dict[str, Any]],
     selection_source: str,
     artifact_skill_name: str,
+    analysis_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    analysis_context = list(analysis_context or [])
     snippets = []
     for item in selected_documents:
         snippets.append(
@@ -176,14 +184,24 @@ def _run_evidence_pack_fallback(
     for item in selected_documents:
         top_terms.update(_tokenize(item["text"]))
 
+    context_findings = [
+        f"{entry['source_skill']}: {entry['summary']}"
+        for entry in analysis_context[:3]
+        if entry.get("summary")
+    ]
+    summary = _fallback_evidence_summary(normalized["query"], snippets, top_terms)
+    if context_findings:
+        summary = " ".join(context_findings[:2] + [summary]).strip()
+
     artifact = {
         "skill_name": artifact_skill_name,
         "step_id": normalized["step"].get("step_id"),
         "dataset_name": normalized["dataset_name"],
         "query": normalized["query"],
         "selection_source": selection_source,
-        "summary": _fallback_evidence_summary(normalized["query"], snippets, top_terms),
-        "key_findings": [
+        "analysis_context": analysis_context,
+        "summary": summary,
+        "key_findings": context_findings + [
             f"selected_documents={len(selected_documents)}",
             f"top_terms={[term for term, _ in top_terms.most_common(5)]}",
         ],
@@ -216,6 +234,31 @@ def _prepare_row(
     return _prepare_row_fallback(raw_text)
 
 
+def _prepare_rows(
+    raw_texts: list[str],
+    *,
+    client: AnthropicClient | None,
+    model: str,
+    batch_size: int = 1,
+) -> list[dict[str, Any]]:
+    if not raw_texts:
+        return []
+    normalized_batch_size = max(1, int(batch_size or 1))
+    if client and client.is_enabled() and normalized_batch_size > 1:
+        prepared_rows: list[dict[str, Any]] = []
+        for start in range(0, len(raw_texts), normalized_batch_size):
+            batch = raw_texts[start : start + normalized_batch_size]
+            try:
+                prepared_rows.extend(_prepare_rows_with_llm(client, batch))
+            except Exception as exc:
+                for raw_text in batch:
+                    fallback = _prepare_row_fallback(raw_text)
+                    fallback["quality_flags"] = list(fallback["quality_flags"]) + [f"llm_batch_fallback:{exc}"]
+                    prepared_rows.append(fallback)
+        return prepared_rows
+    return [_prepare_row(raw_text, client=client, model=model) for raw_text in raw_texts]
+
+
 def _prepare_row_with_llm(client: AnthropicClient, raw_text: str) -> dict[str, Any]:
     prompt = "\n".join(
         [
@@ -230,6 +273,38 @@ def _prepare_row_with_llm(client: AnthropicClient, raw_text: str) -> dict[str, A
         ]
     )
     response = client.create_json(prompt=prompt, schema=_prepare_schema(), max_tokens=600)
+    return _normalize_prepare_response(response, raw_text, prompt_version="dataset-prepare-anthropic-v1")
+
+
+def _prepare_rows_with_llm(client: AnthropicClient, raw_texts: list[str]) -> list[dict[str, Any]]:
+    prompt = "\n".join(
+        [
+            "You are preparing raw VOC or issue text for deterministic downstream analysis.",
+            "Process each row independently and preserve ordering.",
+            "Keep the original meaning. Remove only obvious noise, duplicated punctuation, and boilerplate.",
+            "Do not summarize beyond a short normalization. Do not invent facts.",
+            "Choose disposition keep, review, or drop for each row.",
+            "",
+            "rows:",
+            json.dumps(
+                [{"row_index": index, "raw_text": raw_text} for index, raw_text in enumerate(raw_texts)],
+                ensure_ascii=False,
+            ),
+        ]
+    )
+    response = client.create_json(prompt=prompt, schema=_prepare_batch_schema(), max_tokens=max(800, 280 * len(raw_texts)))
+    prepared_rows = response.get("rows")
+    if not isinstance(prepared_rows, list) or len(prepared_rows) != len(raw_texts):
+        raise ValueError("prepare batch response row count mismatch")
+    normalized_rows = []
+    for raw_text, prepared in zip(raw_texts, prepared_rows):
+        if not isinstance(prepared, dict):
+            raise ValueError("prepare batch response row must be an object")
+        normalized_rows.append(_normalize_prepare_response(prepared, raw_text, prompt_version="dataset-prepare-anthropic-batch-v1"))
+    return normalized_rows
+
+
+def _normalize_prepare_response(response: dict[str, Any], raw_text: str, *, prompt_version: str) -> dict[str, Any]:
     disposition = str(response.get("disposition") or "review").strip().lower()
     if disposition not in {"keep", "review", "drop"}:
         disposition = "review"
@@ -242,7 +317,7 @@ def _prepare_row_with_llm(client: AnthropicClient, raw_text: str) -> dict[str, A
         "normalized_text": normalized_text,
         "reason": str(response.get("reason") or "").strip(),
         "quality_flags": _coerce_string_list(response.get("quality_flags")),
-        "prompt_version": "dataset-prepare-anthropic-v1",
+        "prompt_version": prompt_version,
     }
 
 
@@ -461,6 +536,20 @@ def _prepare_schema() -> dict[str, Any]:
     }
 
 
+def _prepare_batch_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "rows": {
+                "type": "array",
+                "items": _prepare_schema(),
+            }
+        },
+        "required": ["rows"],
+        "additionalProperties": False,
+    }
+
+
 def _sentiment_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -530,8 +619,10 @@ __all__ = [
     "_normalize_planner_response",
     "_planner_schema",
     "_prepare_row",
+    "_prepare_rows",
     "_prepare_row_fallback",
     "_prepare_row_with_llm",
+    "_prepare_batch_schema",
     "_prepare_schema",
     "_run_evidence_pack_fallback",
     "_run_evidence_pack_with_llm",

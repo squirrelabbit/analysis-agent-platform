@@ -1,8 +1,9 @@
 # 분석 실행 플랫폼
 
-이 저장소는 초기 Python MVP에서 출발했지만, 현재 구현의 중심은 **Go control plane + Temporal workflow + DuckDB + Postgres + Python AI worker** 조합입니다. `workers/rust-skills/`는 hot path 최적화 후보를 위한 스캐폴드로만 남아 있습니다.
+구현의 중심은 **Go control plane + Temporal workflow + DuckDB + Postgres + Python AI worker** 조합입니다. 
+`workers/rust-skills/`는 hot path 최적화 후보를 위한 스캐폴드로만 남아 있습니다.
 
-제품의 핵심은 그대로 유지합니다.
+제품의 핵심은 다음과 같습니다.
 - 질문을 `Skill Plan`으로 바꾼다.
 - 등록된 Skill만 실행한다.
 - 같은 실행 조건으로 `rerun/diff` 할 수 있게 남긴다.
@@ -21,8 +22,11 @@
 - 현재는 단순 스캐폴드 단계가 아니라, **실행 경로와 테스트가 붙은 MVP 단계**다.
 - `Go control-plane + Temporal worker + Postgres + DuckDB + Python AI worker` 조합으로 unit test와 build가 현재 구조 기준으로 통과한다.
 - `Claude Sonnet` 기반 planner/evidence generation 경로와 fallback 경로가 Python AI worker에 반영돼 있다.
+- `issue_evidence_summary`는 trend/breakdown/compare/cluster/taxonomy/sentiment 계열 prior artifact를 `analysis_context`로 끌어와 근거 설명에 반영한다.
+- `dataset_prepare`는 Anthropic prepare 경로가 켜지면 기본 `prepare_batch_size=8` 기준 batch 정제를 수행한다.
 - 비정형 deterministic skill은 Python worker 안에서 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`, `issue_taxonomy_summary`까지 확장돼 있다.
 - Python AI worker는 현재 `task_router + planner + runtime helper + support/core skill module` 구조로 분리돼 있다.
+- Python skill-case devtool은 `python_ai_worker.devtools` 패키지와 `run_skill_case --validate` CLI로 정식 검증 경로를 가진다.
 - 레거시 Python `src/` 디렉터리는 현재 저장소에 없다.
 - `workers/rust-skills/`는 아직 실사용 hot path가 연결되지 않은 선택 최적화 경로다.
 
@@ -59,6 +63,7 @@
 - 검증 자산
   - Go unit test / build
   - Python unit test
+  - Python skill-case devtool validate
   - compose 기반 smoke script
 
 ## 구현된 Skill 현황
@@ -115,6 +120,8 @@ Support skill:
 - `issue_trend_summary -> issue_evidence_summary`
 - `issue_period_compare -> issue_evidence_summary`
 - `issue_breakdown_summary -> issue_evidence_summary`
+- `deduplicate_documents -> embedding_cluster -> cluster_label_candidates -> issue_cluster_summary -> issue_evidence_summary`
+- `dictionary_tagging -> issue_taxonomy_summary -> issue_evidence_summary`
 
 ## 개발 실행
 
@@ -142,6 +149,8 @@ Support skill:
   - `apps/control-plane/dev/smoke_trend.sh`
   - `apps/control-plane/dev/smoke_compare.sh`
   - `apps/control-plane/dev/smoke_breakdown.sh`
+  - `apps/control-plane/dev/smoke_cluster.sh`
+  - `apps/control-plane/dev/smoke_taxonomy.sh`
   - 기본 dataset 경로는 실행 환경을 보고 자동 선택한다.
   - 컨테이너 안에서는 `/workspace/data/...`
   - 호스트에서 직접 실행하면 repo의 `data/...`
@@ -162,11 +171,15 @@ Support skill:
   - [data/issues_sentiment.csv](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/data/issues_sentiment.csv)
   - [data/issues_trend.csv](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/data/issues_trend.csv)
   - [data/issues_compare.csv](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/data/issues_compare.csv)
+- smoke 전용 샘플 데이터:
+  - [apps/control-plane/dev/testdata/issues_cluster.csv](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/testdata/issues_cluster.csv)
+  - [apps/control-plane/dev/testdata/issues_taxonomy.csv](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/testdata/issues_taxonomy.csv)
 
 ## 검증 상태
 
 - `cd apps/control-plane && go test ./... && go build ./...`
 - `PYTHONPATH=workers/python-ai/src python3 -m unittest discover -s workers/python-ai/tests -p 'test_*.py'`
+- `PYTHONPATH=workers/python-ai/src python3 -m python_ai_worker.devtools.run_skill_case --validate`
 - `docker compose -f compose.dev.yml up -d --build`
 - smoke script:
   - `smoke.sh`
@@ -175,12 +188,14 @@ Support skill:
   - `smoke_trend.sh`
   - `smoke_compare.sh`
   - `smoke_breakdown.sh`
-  - 모든 smoke script가 host/container 경로를 자동 선택한다.
+  - `smoke_cluster.sh`
+  - `smoke_taxonomy.sh`
+  - smoke script는 source file을 `/uploads`로 올린 뒤 dataset version을 만들어 host/container 경로 차이를 줄인다.
 
 확인 필요:
-- 이번 turn에서는 `docker compose`와 smoke script를 재실행하지 않았다.
-- `issue_evidence_summary`는 현재도 동작하지만, breakdown/compare/trend의 이전 step 산출물을 더 강하게 반영하도록 prompt/context를 고도화할 여지가 있다.
-- `dataset_prepare`는 현재 row 단위 Haiku 호출 또는 fallback 정규화를 사용한다. 대용량 dataset 기준 batch 전략 최적화는 이후 단계다.
+- 이번 turn에서는 Python worker 재빌드 후 smoke 8종을 모두 다시 실행했다.
+- smoke 재실행 기준으로 `dataset_prepare`는 `dataset-prepare-anthropic-batch-v1`, `prepare batch size: 8` 메타데이터가 기록됐다.
+- smoke 재실행 기준으로 `issue_evidence_summary`는 compare/breakdown/trend/cluster/taxonomy/sentiment 시나리오에서 `analysis_context`를 포함했다.
 
 ## 디렉터리
 
@@ -213,9 +228,6 @@ Should:
   - metrics
   - tracing
   - retry / timeout 정책
-
-품질 메모:
-- `issue_evidence_summary`는 동작하지만 breakdown/compare/trend 산출물을 더 강하게 반영하도록 prompt/context를 고도화할 여지가 있다.
 
 운영 메모:
 - Rust skill worker 전환은 실제 hot path 측정 뒤 결정한다.

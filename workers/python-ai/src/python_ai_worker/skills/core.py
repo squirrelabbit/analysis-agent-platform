@@ -336,15 +336,35 @@ def run_evidence_pack(payload: dict[str, Any]) -> dict[str, Any]:
 def _run_evidence_summary(payload: dict[str, Any], artifact_skill_name: str) -> dict[str, Any]:
     normalized = rt._normalize_text_task_payload(payload)
     selected, selection_source = rt._select_evidence_candidates(payload, normalized)
+    analysis_context = rt._analysis_context_entries(payload.get("prior_artifacts"))
     client = rt._anthropic_client()
     if client and client.is_enabled():
         try:
-            return rt._run_evidence_pack_with_llm(client, normalized, selected, selection_source, artifact_skill_name)
+            return rt._run_evidence_pack_with_llm(
+                client,
+                normalized,
+                selected,
+                selection_source,
+                artifact_skill_name,
+                analysis_context,
+            )
         except Exception as exc:
-            fallback = rt._run_evidence_pack_fallback(normalized, selected, selection_source, artifact_skill_name)
+            fallback = rt._run_evidence_pack_fallback(
+                normalized,
+                selected,
+                selection_source,
+                artifact_skill_name,
+                analysis_context,
+            )
             fallback["notes"].append(f"anthropic evidence fallback: {exc}")
             return fallback
-    return rt._run_evidence_pack_fallback(normalized, selected, selection_source, artifact_skill_name)
+    return rt._run_evidence_pack_fallback(
+        normalized,
+        selected,
+        selection_source,
+        artifact_skill_name,
+        analysis_context,
+    )
 
 def run_unstructured_issue_summary(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_text_task_payload(payload)
