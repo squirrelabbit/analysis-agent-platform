@@ -1,0 +1,476 @@
+{
+  "version": "2026-03-31-v1",
+  "default_plans": {
+    "structured": [
+      "structured_kpi_summary"
+    ],
+    "unstructured": [
+      "unstructured_issue_summary",
+      "issue_evidence_summary"
+    ],
+    "mixed": [
+      "structured_kpi_summary",
+      "unstructured_issue_summary",
+      "semantic_search",
+      "issue_evidence_summary"
+    ],
+    "both": [
+      "structured_kpi_summary",
+      "unstructured_issue_summary",
+      "semantic_search",
+      "issue_evidence_summary"
+    ]
+  },
+  "planner_sequences": {
+    "structured_default": [
+      "structured_kpi_summary"
+    ],
+    "mixed_default": [
+      "structured_kpi_summary",
+      "document_filter",
+      "keyword_frequency",
+      "document_sample",
+      "unstructured_issue_summary",
+      "issue_evidence_summary"
+    ],
+    "unstructured_default": [
+      "document_filter",
+      "keyword_frequency",
+      "document_sample",
+      "unstructured_issue_summary",
+      "issue_evidence_summary"
+    ],
+    "unstructured_cluster": [
+      "document_filter",
+      "deduplicate_documents",
+      "embedding_cluster",
+      "cluster_label_candidates",
+      "issue_cluster_summary",
+      "issue_evidence_summary"
+    ],
+    "unstructured_taxonomy": [
+      "document_filter",
+      "dictionary_tagging",
+      "issue_taxonomy_summary",
+      "issue_evidence_summary"
+    ],
+    "unstructured_duplicate": [
+      "document_filter",
+      "deduplicate_documents",
+      "issue_evidence_summary"
+    ],
+    "unstructured_sentiment": [
+      "document_filter",
+      "document_sample",
+      "issue_sentiment_summary",
+      "issue_evidence_summary"
+    ],
+    "unstructured_semantic_search": [
+      "semantic_search",
+      "issue_evidence_summary"
+    ],
+    "unstructured_compare": [
+      "document_filter",
+      "document_sample",
+      "issue_period_compare",
+      "issue_evidence_summary"
+    ],
+    "unstructured_breakdown": [
+      "document_filter",
+      "meta_group_count",
+      "document_sample",
+      "issue_breakdown_summary",
+      "issue_evidence_summary"
+    ],
+    "unstructured_trend": [
+      "document_filter",
+      "time_bucket_count",
+      "document_sample",
+      "issue_trend_summary",
+      "issue_evidence_summary"
+    ]
+  },
+  "skills": [
+    {
+      "name": "structured_kpi_summary",
+      "description": "Summarize structured KPI metrics.",
+      "engine": "duckdb",
+      "kind": "plan",
+      "category": "structured_core",
+      "plan_enabled": true,
+      "dataset_source": "request",
+      "default_inputs": {
+        "time_column": "date",
+        "metric_column": "value"
+      }
+    },
+    {
+      "name": "document_filter",
+      "description": "Filter documents before downstream analysis steps.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/document_filter",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "goal_input": "query",
+      "default_inputs": {
+        "text_column": "text",
+        "sample_n": 5
+      }
+    },
+    {
+      "name": "deduplicate_documents",
+      "description": "Collapse near-duplicate documents into canonical rows.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/deduplicate_documents",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "default_inputs": {
+        "text_column": "text",
+        "sample_n": 3,
+        "duplicate_threshold": 0.85
+      }
+    },
+    {
+      "name": "keyword_frequency",
+      "description": "Count top keywords from filtered unstructured rows.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/keyword_frequency",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "default_inputs": {
+        "text_column": "text",
+        "top_n": 10
+      }
+    },
+    {
+      "name": "time_bucket_count",
+      "description": "Aggregate filtered issue rows by time bucket.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/time_bucket_count",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "metadata_defaults": {
+        "time_column": "time_column",
+        "bucket": "time_bucket"
+      },
+      "default_inputs": {
+        "text_column": "text",
+        "time_column": "occurred_at",
+        "bucket": "day",
+        "top_n": 5,
+        "sample_n": 3
+      }
+    },
+    {
+      "name": "meta_group_count",
+      "description": "Aggregate filtered issue rows by metadata group.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/meta_group_count",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "metadata_defaults": {
+        "dimension_column": "breakdown_column"
+      },
+      "default_inputs": {
+        "text_column": "text",
+        "dimension_column": "channel",
+        "top_n": 5,
+        "sample_n": 3
+      }
+    },
+    {
+      "name": "document_sample",
+      "description": "Select representative documents for downstream summaries.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/document_sample",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "goal_input": "query",
+      "default_inputs": {
+        "text_column": "text",
+        "sample_n": 3
+      }
+    },
+    {
+      "name": "dictionary_tagging",
+      "description": "Assign deterministic taxonomy tags to filtered text rows.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/dictionary_tagging",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "default_inputs": {
+        "text_column": "text",
+        "top_n": 5,
+        "sample_n": 3,
+        "max_tags_per_document": 3
+      }
+    },
+    {
+      "name": "embedding_cluster",
+      "description": "Cluster filtered embedding records into issue groups.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/embedding_cluster",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "requires_embedding": true,
+      "default_inputs": {
+        "sample_n": 3,
+        "top_n": 5,
+        "cluster_similarity_threshold": 0.3
+      }
+    },
+    {
+      "name": "cluster_label_candidates",
+      "description": "Generate deterministic label candidates for clusters.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/cluster_label_candidates",
+      "dataset_source": "request",
+      "default_inputs": {
+        "top_n": 5,
+        "sample_n": 3
+      }
+    },
+    {
+      "name": "unstructured_issue_summary",
+      "description": "Summarize top issues from unstructured text rows.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_core",
+      "plan_enabled": true,
+      "task_path": "/tasks/unstructured_issue_summary",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "default_inputs": {
+        "text_column": "text",
+        "top_n": 10,
+        "sample_n": 3
+      }
+    },
+    {
+      "name": "issue_breakdown_summary",
+      "description": "Break down issue volume by a metadata dimension.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_core",
+      "plan_enabled": true,
+      "task_path": "/tasks/issue_breakdown_summary",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "metadata_defaults": {
+        "dimension_column": "breakdown_column"
+      },
+      "default_inputs": {
+        "text_column": "text",
+        "dimension_column": "channel",
+        "top_n": 5,
+        "sample_n": 3
+      }
+    },
+    {
+      "name": "issue_cluster_summary",
+      "description": "Summarize dominant issue clusters from clustered documents.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_core",
+      "plan_enabled": true,
+      "task_path": "/tasks/issue_cluster_summary",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "default_inputs": {
+        "text_column": "text",
+        "top_n": 5,
+        "sample_n": 3
+      }
+    },
+    {
+      "name": "issue_trend_summary",
+      "description": "Summarize issue volume trends over time buckets.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_core",
+      "plan_enabled": true,
+      "task_path": "/tasks/issue_trend_summary",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "metadata_defaults": {
+        "time_column": "time_column",
+        "bucket": "time_bucket"
+      },
+      "default_inputs": {
+        "text_column": "text",
+        "time_column": "occurred_at",
+        "bucket": "day",
+        "top_n": 5,
+        "sample_n": 3
+      }
+    },
+    {
+      "name": "issue_period_compare",
+      "description": "Compare issue volume between two time windows.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_core",
+      "plan_enabled": true,
+      "task_path": "/tasks/issue_period_compare",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "metadata_defaults": {
+        "time_column": "time_column",
+        "bucket": "time_bucket"
+      },
+      "default_inputs": {
+        "text_column": "text",
+        "time_column": "occurred_at",
+        "bucket": "day",
+        "window_size": 1,
+        "top_n": 5,
+        "sample_n": 3
+      }
+    },
+    {
+      "name": "issue_sentiment_summary",
+      "description": "Summarize sentiment label distribution and representative samples.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_core",
+      "plan_enabled": true,
+      "task_path": "/tasks/issue_sentiment_summary",
+      "dataset_source": "sentiment",
+      "requires_prepare": true,
+      "requires_sentiment": true,
+      "metadata_defaults": {
+        "sentiment_column": "sentiment_label_column"
+      },
+      "default_inputs": {
+        "text_column": "text",
+        "sentiment_column": "sentiment_label",
+        "sample_n": 3
+      }
+    },
+    {
+      "name": "issue_taxonomy_summary",
+      "description": "Summarize taxonomy-tagged issues by category.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_core",
+      "plan_enabled": true,
+      "task_path": "/tasks/issue_taxonomy_summary",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "default_inputs": {
+        "text_column": "text",
+        "top_n": 5,
+        "sample_n": 3,
+        "max_tags_per_document": 3
+      }
+    },
+    {
+      "name": "semantic_search",
+      "description": "Find evidence candidates for a request.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/semantic_search",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "requires_embedding": true,
+      "goal_input": "query",
+      "default_inputs": {
+        "text_column": "text",
+        "sample_n": 5
+      }
+    },
+    {
+      "name": "issue_evidence_summary",
+      "description": "Build user-facing evidence summaries for text analysis.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_core",
+      "plan_enabled": true,
+      "task_path": "/tasks/issue_evidence_summary",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "goal_input": "query",
+      "default_inputs": {
+        "text_column": "text",
+        "sample_n": 3
+      }
+    },
+    {
+      "name": "evidence_pack",
+      "description": "Build evidence bundles for final outputs.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/evidence_pack",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "goal_input": "query",
+      "default_inputs": {
+        "text_column": "text",
+        "sample_n": 3
+      }
+    },
+    {
+      "name": "dataset_prepare",
+      "description": "Normalize and filter raw text rows into a prepared dataset artifact.",
+      "engine": "python-ai",
+      "kind": "dataset_build",
+      "category": "dataset_build",
+      "plan_enabled": false,
+      "task_path": "/tasks/dataset_prepare",
+      "dataset_source": "request"
+    },
+    {
+      "name": "sentiment_label",
+      "description": "Attach deterministic sentiment labels to prepared text rows.",
+      "engine": "python-ai",
+      "kind": "dataset_build",
+      "category": "dataset_build",
+      "plan_enabled": false,
+      "task_path": "/tasks/sentiment_label",
+      "dataset_source": "prepared",
+      "requires_prepare": true
+    },
+    {
+      "name": "embedding",
+      "description": "Produce embedding vectors for unstructured rows.",
+      "engine": "python-ai",
+      "kind": "dataset_build",
+      "category": "dataset_build",
+      "plan_enabled": false,
+      "task_path": "/tasks/embedding",
+      "dataset_source": "prepared",
+      "requires_prepare": true
+    }
+  ]
+}

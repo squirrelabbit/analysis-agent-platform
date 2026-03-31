@@ -68,7 +68,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /swagger", s.handleSwaggerUI)
 	s.mux.HandleFunc("GET /swagger/", s.handleSwaggerUI)
 	s.mux.HandleFunc("GET /skills", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
-		writeJSON(w, stdhttp.StatusOK, registry.SupportedSkills)
+		writeJSON(w, stdhttp.StatusOK, registry.SupportedSkills())
 	})
 	s.mux.HandleFunc("POST /projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /projects/{project_id}", s.handleGetProject)

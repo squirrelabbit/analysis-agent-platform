@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from .config import load_config
+from .skill_bundle import bundle_version
 from .tasks import capability_names, capability_payload, run_task
 
 
@@ -20,6 +21,7 @@ def describe() -> None:
         "llm_provider": config.llm_provider,
         "anthropic_model": config.anthropic_model,
         "anthropic_prepare_model": config.anthropic_prepare_model,
+        "skill_bundle_version": bundle_version(),
         "capabilities": capability_names(),
     }
     print(json.dumps(payload, ensure_ascii=False))
@@ -38,6 +40,7 @@ def make_handler(config: Any) -> type[BaseHTTPRequestHandler]:
                         "llm_provider": config.llm_provider,
                         "anthropic_model": config.anthropic_model,
                         "anthropic_prepare_model": config.anthropic_prepare_model,
+                        "skill_bundle_version": bundle_version(),
                         "capabilities": capability_names(),
                     },
                 )
@@ -93,6 +96,7 @@ def serve() -> None:
                 "llm_provider": config.llm_provider,
                 "anthropic_model": config.anthropic_model,
                 "anthropic_prepare_model": config.anthropic_prepare_model,
+                "skill_bundle_version": bundle_version(),
                 "capabilities": capability_names(),
             },
             ensure_ascii=False,

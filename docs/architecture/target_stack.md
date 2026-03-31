@@ -13,8 +13,8 @@
 | Temporal | durable workflow, retry, waiting, rerun/diff orchestration |
 | DuckDB | structured Skill 실행 엔진 |
 | Postgres | 프로젝트, dataset version, plan, execution 메타데이터 저장 |
-| Python AI workers | planner, embeddings, semantic search, evidence generation |
-| Rust skill workers | CPU 집약 Skill와 대용량 텍스트 처리 |
+| Python AI workers | planner, embeddings, semantic search, evidence generation, 현재 구현의 비정형 deterministic skill |
+| Rust skill workers | 확인 필요: 현재는 스캐폴드만 있고 향후 CPU 집약 Skill 후보를 위한 경로 |
 | Artifact storage | 결과 계약, 로그, evidence bundle 저장 |
 
 ## 3. 실행 흐름
@@ -25,8 +25,8 @@
 4. workflow가 planner step을 호출해 `SkillPlan`을 만든다.
 5. workflow가 registry와 dataset contract를 기준으로 plan을 검증한다.
 6. structured step은 DuckDB runtime으로 실행한다.
-7. AI/embedding/evidence step은 Python worker로 실행한다.
-8. CPU 집약 step은 Rust worker로 실행한다.
+7. AI/embedding/evidence step과 현재 구현된 비정형 deterministic skill은 Python worker로 실행한다.
+8. CPU 집약 step이 실제 hot path로 확인되면 Rust worker로 분리한다.
 9. workflow가 결과, 로그, artifacts를 Postgres와 storage에 남긴다.
 10. 같은 execution context를 기준으로 rerun/diff 한다.
 
@@ -47,14 +47,28 @@
 - structured와 unstructured 실행 경로를 같은 execution contract 안에 묶는다.
 - 결과는 요약치뿐 아니라 evidence와 metadata까지 함께 저장한다.
 
-## 6. 현재 구현 기준
+## 6. Skill 확장 전략
+
+- 현재 단계에서는 완전 동적 플러그인보다 `skill bundle` 중심 확장을 우선한다.
+- `skill bundle`은 skill 이름, 실행 엔진, task path, 기본 입력, dataset readiness, planner 노출 여부, artifact contract version 같은 메타데이터를 묶는 공용 계약으로 본다.
+- 목적은 skill 추가나 수정 시 control plane과 worker 코드에 흩어진 switch/list 수정 범위를 줄이고, 메타데이터 변경과 코드 변경을 가능한 한 분리하는 데 있다.
+- 내부 사용 단계에서는 공식 지원 skill을 제품 소유 코드베이스 안에서 관리한다.
+- 고객용 확장 단계에서 tenant별 custom skill, 외부 파트너 확장, skill별 독립 배포, 격리 실행 요구가 커지면 동적 플러그인 모델을 다시 검토한다.
+- 동적 플러그인은 보안, 버전 호환, replay 재현성, 운영 복잡도를 함께 높이므로 기본 전략으로 두지 않는다.
+- 확인 필요:
+  `skill bundle`의 저장 위치와 배포 방식은 repo 포함 정적 파일, config, metadata store 중 어떤 방식으로 둘지 별도 합의가 필요하다.
+
+## 7. 현재 구현 기준
 
 - `apps/control-plane/` 기준으로 `memory/noop` 경로는 테스트로 검증됐다.
 - `postgres` 저장소와 `temporal` starter는 코드 경계와 SDK 연동이 들어가 있다.
+- plan skill 메타데이터의 runtime source는 `config/skill_bundle.json`이고, Go control plane과 Python worker가 이 bundle을 함께 읽는다.
+- Python worker에는 planner, evidence, semantic search뿐 아니라 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `issue_cluster_summary`, `issue_taxonomy_summary`가 현재 구현돼 있다.
+- GitHub Actions CI는 Go 테스트/빌드와 Python worker 테스트를 현재 구조 기준으로 실행한다.
 - 확인 필요:
-  실제 Temporal server와 Postgres runtime에 붙인 통합 검증은 아직 수행하지 못했다.
+  저장소에는 compose 기반 통합 개발 경로와 smoke 스크립트가 있지만, 이번 문서 갱신 시점에 재실행 로그를 다시 수집하지는 않았다.
 
-## 7. 데이터 경계
+## 8. 데이터 경계
 
 - `Postgres`
   프로젝트, 요청, plan, execution, job, registry 메타데이터
@@ -65,11 +79,11 @@
 - 확인 필요:
   비정형 원문 저장을 Postgres 중심으로 둘지, object storage까지 확장할지는 별도 합의가 필요하다.
 
-## 8. 저장소 구조 방향
+## 9. 저장소 구조 방향
 
 - `apps/control-plane/`
 - `workers/python-ai/`
 - `workers/rust-skills/`
 - `docs/`
-- `src/`
-  레거시 Python MVP. 완전 이관 전까지는 비교 기준으로만 본다.
+- 확인 필요:
+  레거시 Python MVP용 `src/` 디렉터리는 현재 저장소에 없다.

@@ -1,28 +1,43 @@
 # Python AI Worker
 
-이 디렉터리는 목표 아키텍처에서 Python이 맡을 AI worker 스캐폴드다.
+이 디렉터리는 현재 런타임에서 Python이 맡는 AI worker와 비정형 deterministic skill 구현체다.
 
 ## 책임
 
 - planner
-- dataset prepare
-- sentiment label
-- embedding 생성
-- semantic search
-- evidence generation
-- 1차 support skill
+- dataset build task
+  - `dataset_prepare`
+  - `sentiment_label`
+  - `embedding`
+- unstructured support skill
   - `document_filter`
+  - `deduplicate_documents`
   - `keyword_frequency`
   - `time_bucket_count`
   - `meta_group_count`
   - `document_sample`
-- `dataset_prepare`, `sentiment_label`, `document_filter`, `keyword_frequency`, `time_bucket_count`, `meta_group_count`, `document_sample`, `unstructured_issue_summary`, `issue_breakdown_summary`, `issue_trend_summary`, `issue_period_compare`, `issue_sentiment_summary`, `semantic_search`, `issue_evidence_summary`, `evidence_pack`, `embedding` HTTP task 실행
+  - `dictionary_tagging`
+  - `embedding_cluster`
+  - `cluster_label_candidates`
+  - `semantic_search`
+  - `evidence_pack`
+- unstructured core skill
+  - `unstructured_issue_summary`
+  - `issue_breakdown_summary`
+  - `issue_cluster_summary`
+  - `issue_trend_summary`
+  - `issue_period_compare`
+  - `issue_sentiment_summary`
+  - `issue_taxonomy_summary`
+  - `issue_evidence_summary`
 
 ## 원칙
 
 - workflow 상태를 직접 관리하지 않는다.
-- API를 직접 소유하지 않는다.
-- contract를 받아서 계산 결과만 반환한다.
+- 운영 API를 직접 소유하지 않는다.
+- contract를 받아 계산 결과만 반환한다.
+- LLM 경로가 실패해도 deterministic fallback을 유지한다.
+- planner 기본 입력, capability 노출, plan 허용 skill 목록은 공용 `skill bundle` 기준으로 맞춘다.
 
 ## 현재 구현 범위
 
@@ -33,20 +48,33 @@
 - `POST /tasks/sentiment_label`
 - `POST /tasks/embedding`
 - `POST /tasks/document_filter`
+- `POST /tasks/deduplicate_documents`
 - `POST /tasks/keyword_frequency`
 - `POST /tasks/time_bucket_count`
 - `POST /tasks/meta_group_count`
 - `POST /tasks/document_sample`
+- `POST /tasks/dictionary_tagging`
+- `POST /tasks/embedding_cluster`
+- `POST /tasks/cluster_label_candidates`
 - `POST /tasks/semantic_search`
 - `POST /tasks/issue_breakdown_summary`
+- `POST /tasks/issue_cluster_summary`
 - `POST /tasks/issue_trend_summary`
 - `POST /tasks/issue_period_compare`
 - `POST /tasks/issue_sentiment_summary`
+- `POST /tasks/issue_taxonomy_summary`
 - `POST /tasks/issue_evidence_summary`
 - `POST /tasks/evidence_pack`
 - `POST /tasks/unstructured_issue_summary`
 
-## 실행
+## skill bundle 연동
+
+- runtime source는 저장소 루트의 `config/skill_bundle.json`이다.
+- `GET /capabilities`, `GET /health`, `python -m python_ai_worker.main --describe`는 `skill_bundle_version`을 함께 노출한다.
+- rule-based planner의 sequence와 기본 입력값도 bundle에서 읽는다.
+- `dataset_prepare`, `sentiment_label`, `embedding`은 bundle에 포함되지만 plan skill이 아니라 dataset build task로 본다.
+
+## 실행 메모
 
 - 기본 bind: `127.0.0.1:8090`
 - 환경 변수:
@@ -54,6 +82,7 @@
   - `PYTHON_AI_WORKER_PORT`
   - `PYTHON_AI_WORKER_ROLE`
   - `PYTHON_AI_WORKER_QUEUE`
+  - `SKILL_BUNDLE_PATH`
   - `PYTHON_AI_LLM_PROVIDER`
   - `ANTHROPIC_API_KEY`
   - `ANTHROPIC_MODEL`
@@ -66,17 +95,34 @@
   - provider: `anthropic`
   - planner/evidence model: `claude-sonnet-4-6`
   - prepare/sentiment model: `claude-3-5-haiku-latest`
-- planner와 `issue_evidence_summary`는 Claude Sonnet 호출을 우선 시도하고, 실패하거나 키가 없으면 deterministic fallback으로 내려간다.
-- `dataset_prepare`와 `sentiment_label`은 Claude Haiku 호출을 우선 시도하고, 실패하거나 키가 없으면 deterministic fallback으로 내려간다.
-- `embedding`은 token-overlap 기반 sidecar file을 생성하고, `semantic_search`는 그 sidecar를 읽어 점수를 계산한다.
-- `dataset_prepare`는 raw row를 `normalized_text` 기준 prepared JSONL artifact로 만들고, downstream unstructured skill이 이 artifact를 우선 사용하게 한다.
-- `sentiment_label`은 prepared JSONL artifact에 `sentiment_label`, `sentiment_confidence`, `sentiment_reason` 컬럼을 추가한 sentiment JSONL artifact를 만든다.
-- `issue_sentiment_summary`는 sentiment artifact를 읽어 라벨 분포와 대표 예시를 집계한다.
-- rule-based planner는 비정형 요청에 대해 support skill을 먼저 배치한다.
-  - 일반 요약: `document_filter -> keyword_frequency -> document_sample -> unstructured_issue_summary -> issue_evidence_summary`
-  - 추세: `document_filter -> time_bucket_count -> document_sample -> issue_trend_summary -> issue_evidence_summary`
-  - 분해: `document_filter -> meta_group_count -> document_sample -> issue_breakdown_summary -> issue_evidence_summary`
-  - 비교: `document_filter -> document_sample -> issue_period_compare -> issue_evidence_summary`
-  - 감성: `document_filter -> document_sample -> issue_sentiment_summary -> issue_evidence_summary`
-- 메타데이터 확인:
-  - `PYTHONPATH=src python -m python_ai_worker.main --describe`
+
+## 구현 메모
+
+- `planner`와 `issue_evidence_summary`는 Claude Sonnet을 우선 시도하고 실패 시 deterministic fallback으로 내려간다.
+- `dataset_prepare`와 `sentiment_label`은 Claude Haiku를 우선 시도하고 실패 시 deterministic fallback으로 내려간다.
+- `embedding`은 token-overlap 기반 sidecar file을 만들고, `semantic_search`와 `embedding_cluster`는 이 sidecar를 사용한다.
+- `deduplicate_documents`는 정규화 텍스트 동일성 + token-set Jaccard similarity를 사용한다.
+- `dictionary_tagging`은 rule-based taxonomy tagging을 사용한다.
+- `embedding_cluster`는 token vector cosine similarity 기반 greedy clustering을 사용한다.
+- `cluster_label_candidates`는 cluster top term으로 label 후보를 만든다.
+
+## rule-based planner 패턴
+
+- 일반 요약:
+  - `document_filter -> keyword_frequency -> document_sample -> unstructured_issue_summary -> issue_evidence_summary`
+- 추세:
+  - `document_filter -> time_bucket_count -> document_sample -> issue_trend_summary -> issue_evidence_summary`
+- 분해:
+  - `document_filter -> meta_group_count -> document_sample -> issue_breakdown_summary -> issue_evidence_summary`
+- 비교:
+  - `document_filter -> document_sample -> issue_period_compare -> issue_evidence_summary`
+- 감성:
+  - `document_filter -> document_sample -> issue_sentiment_summary -> issue_evidence_summary`
+- 군집:
+  - `document_filter -> deduplicate_documents -> embedding_cluster -> cluster_label_candidates -> issue_cluster_summary -> issue_evidence_summary`
+- taxonomy:
+  - `document_filter -> dictionary_tagging -> issue_taxonomy_summary -> issue_evidence_summary`
+
+## 메타데이터 확인
+
+- `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.main --describe`

@@ -11,6 +11,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY workers/python-ai/src /app/src
+COPY config/skill_bundle.json /app/config/skill_bundle.json
 
 EXPOSE 8090
 

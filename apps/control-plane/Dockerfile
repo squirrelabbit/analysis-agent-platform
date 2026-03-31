@@ -21,6 +21,7 @@ WORKDIR /app
 COPY --from=build /out/server /usr/local/bin/server
 COPY --from=build /out/temporal-worker /usr/local/bin/temporal-worker
 COPY docs/api/openapi.yaml /app/docs/api/openapi.yaml
+COPY config/skill_bundle.json /app/config/skill_bundle.json
 
 EXPOSE 8080
 

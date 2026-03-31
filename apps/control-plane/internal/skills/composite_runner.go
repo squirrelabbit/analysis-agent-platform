@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/registry"
 )
 
 type CompositeRunner struct {
@@ -68,10 +69,15 @@ func splitExecution(execution domain.ExecutionSummary) (domain.ExecutionSummary,
 	unsupported := []string{}
 
 	for _, step := range execution.Plan.Steps {
-		switch step.SkillName {
-		case "structured_kpi_summary":
+		definition, ok := registry.Skill(step.SkillName)
+		if !ok {
+			unsupported = append(unsupported, step.SkillName)
+			continue
+		}
+		switch definition.Engine {
+		case "duckdb":
 			structuredSteps = append(structuredSteps, step)
-		case "document_filter", "keyword_frequency", "time_bucket_count", "meta_group_count", "document_sample", "unstructured_issue_summary", "issue_breakdown_summary", "issue_trend_summary", "issue_period_compare", "issue_sentiment_summary", "semantic_search", "issue_evidence_summary", "evidence_pack":
+		case "python-ai":
 			unstructuredSteps = append(unstructuredSteps, step)
 		default:
 			unsupported = append(unsupported, step.SkillName)

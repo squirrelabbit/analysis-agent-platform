@@ -1,24 +1,26 @@
 flowchart LR
     Client["사용자 / 내부 호출 주체"]
     Control["Go Control Plane\napps/control-plane"]
-    API["Project / Analysis / Execution API"]
-    Temporal["Temporal Workflow\nplan, execute, waiting, rerun/diff"]
-    Registry["Skill Registry / Contracts"]
+    API["Project / Dataset / Analysis API"]
+    Build["Dataset Build API\nprepare / sentiment / embedding"]
+    Temporal["Temporal Workflow\nexecute / waiting / resume / rerun / diff"]
+    Registry["Skill Bundle / Registry\nconfig/skill_bundle.json"]
     PG["Postgres\nmetadata + execution records"]
     Duck["DuckDB\nstructured skill runtime"]
-    Artifact["Artifact Storage\nresult, logs, evidence"]
-    Py["Python AI Workers\nplanner, embeddings, semantic search"]
-    Rust["Rust Skill Workers\nCPU-heavy kernels"]
-    Legacy["Legacy Python MVP\nsrc/"]
+    Py["Python AI Worker\nplanner + unstructured skills"]
+    Artifact["Artifact Paths\ndata/uploads + data/artifacts"]
 
     Client --> Control
     Control --> API
-    API --> Temporal
     API --> PG
+    API --> Temporal
+    API --> Registry
+    API --> Build
+    Build --> Py
+    Build --> Artifact
     Temporal --> Registry
     Temporal --> PG
     Temporal --> Duck
     Temporal --> Py
-    Temporal --> Rust
     Temporal --> Artifact
-    Control -. migration source .-> Legacy
+    Py --> Registry

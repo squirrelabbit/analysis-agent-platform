@@ -178,7 +178,7 @@ func (s *AnalysisService) ExecutePlan(projectID, planID string) (domain.PlanExec
 		Artifacts:          map[string]string{},
 		DatasetVersionID:   plan.DatasetVersionID,
 		ParamsHash:         plan.PlanHash,
-		SkillBundleVersion: nil,
+		SkillBundleVersion: stringPointer(registry.BundleVersion()),
 		Events: []domain.ExecutionEvent{
 			{
 				ExecutionID: executionID,
@@ -452,10 +452,7 @@ func buildDefaultPlan(input domain.AnalysisSubmitRequest) domain.SkillPlan {
 	if input.DataType != nil && strings.TrimSpace(*input.DataType) != "" {
 		dataType = strings.TrimSpace(*input.DataType)
 	}
-	skills := registry.MVPDefaultSkills
-	if selected, ok := registry.MVPSkillsByDataType[dataType]; ok && len(selected) > 0 {
-		skills = selected
-	}
+	skills := registry.DefaultPlanSkills(dataType)
 
 	datasetName := "dataset_from_version"
 	if input.DatasetName != nil && strings.TrimSpace(*input.DatasetName) != "" {
@@ -537,81 +534,13 @@ func extractSkillNames(plan domain.SkillPlan) []string {
 }
 
 func defaultInputsForSkill(skillName, goal string) map[string]any {
-	inputs := map[string]any{}
-	switch skillName {
-	case "structured_kpi_summary":
-		inputs["time_column"] = "date"
-		inputs["metric_column"] = "value"
-	case "document_filter":
-		inputs["text_column"] = "text"
-		inputs["sample_n"] = 5
-		if strings.TrimSpace(goal) != "" {
-			inputs["query"] = strings.TrimSpace(goal)
-		}
-	case "keyword_frequency":
-		inputs["text_column"] = "text"
-		inputs["top_n"] = 10
-	case "time_bucket_count":
-		inputs["text_column"] = "text"
-		inputs["time_column"] = "occurred_at"
-		inputs["bucket"] = "day"
-		inputs["top_n"] = 5
-		inputs["sample_n"] = 3
-	case "meta_group_count":
-		inputs["text_column"] = "text"
-		inputs["dimension_column"] = "channel"
-		inputs["top_n"] = 5
-		inputs["sample_n"] = 3
-	case "document_sample":
-		inputs["text_column"] = "text"
-		inputs["sample_n"] = 3
-		if strings.TrimSpace(goal) != "" {
-			inputs["query"] = strings.TrimSpace(goal)
-		}
-	case "unstructured_issue_summary":
-		inputs["text_column"] = "text"
-		inputs["top_n"] = 10
-		inputs["sample_n"] = 3
-	case "issue_breakdown_summary":
-		inputs["text_column"] = "text"
-		inputs["dimension_column"] = "channel"
-		inputs["top_n"] = 5
-		inputs["sample_n"] = 3
-	case "issue_trend_summary":
-		inputs["text_column"] = "text"
-		inputs["time_column"] = "occurred_at"
-		inputs["bucket"] = "day"
-		inputs["top_n"] = 5
-		inputs["sample_n"] = 3
-	case "issue_period_compare":
-		inputs["text_column"] = "text"
-		inputs["time_column"] = "occurred_at"
-		inputs["bucket"] = "day"
-		inputs["window_size"] = 1
-		inputs["top_n"] = 5
-		inputs["sample_n"] = 3
-	case "issue_sentiment_summary":
-		inputs["text_column"] = "text"
-		inputs["sentiment_column"] = "sentiment_label"
-		inputs["sample_n"] = 3
-	case "issue_evidence_summary":
-		inputs["text_column"] = "text"
-		inputs["sample_n"] = 3
-		if strings.TrimSpace(goal) != "" {
-			inputs["query"] = strings.TrimSpace(goal)
-		}
-	case "semantic_search":
-		inputs["text_column"] = "text"
-		inputs["sample_n"] = 5
-		if strings.TrimSpace(goal) != "" {
-			inputs["query"] = strings.TrimSpace(goal)
-		}
-	case "evidence_pack":
-		inputs["text_column"] = "text"
-		inputs["sample_n"] = 3
-		if strings.TrimSpace(goal) != "" {
-			inputs["query"] = strings.TrimSpace(goal)
-		}
+	definition, ok := registry.Skill(skillName)
+	if !ok {
+		return map[string]any{}
+	}
+	inputs := cloneInputMap(definition.DefaultInputs)
+	if definition.GoalInput != "" && strings.TrimSpace(goal) != "" {
+		inputs[definition.GoalInput] = strings.TrimSpace(goal)
 	}
 	return inputs
 }
@@ -620,144 +549,45 @@ func enrichInputsForSkill(step *domain.SkillPlanStep, version domain.DatasetVers
 	if step.Inputs == nil {
 		step.Inputs = map[string]any{}
 	}
-	textColumn := resolvedTextColumnForSkill(step.Inputs, version)
-	switch strings.TrimSpace(step.SkillName) {
-	case "document_filter":
-		step.Inputs["text_column"] = textColumn
-		if _, ok := step.Inputs["sample_n"]; !ok {
-			step.Inputs["sample_n"] = 5
+	definition, ok := registry.Skill(step.SkillName)
+	if !ok {
+		return
+	}
+	defaults := defaultInputsForSkill(step.SkillName, goal)
+	for key, defaultValue := range defaults {
+		if inputPresent(step.Inputs, key) {
+			continue
 		}
-		if _, ok := step.Inputs["query"]; !ok && strings.TrimSpace(goal) != "" {
-			step.Inputs["query"] = strings.TrimSpace(goal)
+		if metadataKey, hasMetadataOverride := definition.MetadataDefaults[key]; hasMetadataOverride {
+			step.Inputs[key] = metadataValue(version.Metadata, metadataKey, defaultValue)
+			continue
 		}
-	case "keyword_frequency":
-		step.Inputs["text_column"] = textColumn
-		if _, ok := step.Inputs["top_n"]; !ok {
-			step.Inputs["top_n"] = 10
-		}
-	case "time_bucket_count":
-		step.Inputs["text_column"] = textColumn
-		if _, ok := step.Inputs["time_column"]; !ok {
-			step.Inputs["time_column"] = metadataString(version.Metadata, "time_column", "occurred_at")
-		}
-		if _, ok := step.Inputs["bucket"]; !ok {
-			step.Inputs["bucket"] = metadataString(version.Metadata, "time_bucket", "day")
-		}
-		if _, ok := step.Inputs["top_n"]; !ok {
-			step.Inputs["top_n"] = 5
-		}
-		if _, ok := step.Inputs["sample_n"]; !ok {
-			step.Inputs["sample_n"] = 3
-		}
-	case "meta_group_count":
-		step.Inputs["text_column"] = textColumn
-		if _, ok := step.Inputs["dimension_column"]; !ok {
-			step.Inputs["dimension_column"] = metadataString(version.Metadata, "breakdown_column", "channel")
-		}
-		if _, ok := step.Inputs["top_n"]; !ok {
-			step.Inputs["top_n"] = 5
-		}
-		if _, ok := step.Inputs["sample_n"]; !ok {
-			step.Inputs["sample_n"] = 3
-		}
-	case "document_sample":
-		step.Inputs["text_column"] = textColumn
-		if _, ok := step.Inputs["sample_n"]; !ok {
-			step.Inputs["sample_n"] = 3
-		}
-		if _, ok := step.Inputs["query"]; !ok && strings.TrimSpace(goal) != "" {
-			step.Inputs["query"] = strings.TrimSpace(goal)
-		}
-	case "unstructured_issue_summary":
-		step.Inputs["text_column"] = textColumn
-		if _, ok := step.Inputs["top_n"]; !ok {
-			step.Inputs["top_n"] = 10
-		}
-		if _, ok := step.Inputs["sample_n"]; !ok {
-			step.Inputs["sample_n"] = 3
-		}
-	case "issue_breakdown_summary":
-		step.Inputs["text_column"] = textColumn
-		if _, ok := step.Inputs["dimension_column"]; !ok {
-			step.Inputs["dimension_column"] = metadataString(version.Metadata, "breakdown_column", "channel")
-		}
-		if _, ok := step.Inputs["top_n"]; !ok {
-			step.Inputs["top_n"] = 5
-		}
-		if _, ok := step.Inputs["sample_n"]; !ok {
-			step.Inputs["sample_n"] = 3
-		}
-	case "issue_trend_summary":
-		step.Inputs["text_column"] = textColumn
-		if _, ok := step.Inputs["time_column"]; !ok {
-			step.Inputs["time_column"] = metadataString(version.Metadata, "time_column", "occurred_at")
-		}
-		if _, ok := step.Inputs["bucket"]; !ok {
-			step.Inputs["bucket"] = metadataString(version.Metadata, "time_bucket", "day")
-		}
-		if _, ok := step.Inputs["top_n"]; !ok {
-			step.Inputs["top_n"] = 5
-		}
-		if _, ok := step.Inputs["sample_n"]; !ok {
-			step.Inputs["sample_n"] = 3
-		}
-	case "issue_period_compare":
-		step.Inputs["text_column"] = textColumn
-		if _, ok := step.Inputs["time_column"]; !ok {
-			step.Inputs["time_column"] = metadataString(version.Metadata, "time_column", "occurred_at")
-		}
-		if _, ok := step.Inputs["bucket"]; !ok {
-			step.Inputs["bucket"] = metadataString(version.Metadata, "time_bucket", "day")
-		}
-		if _, ok := step.Inputs["window_size"]; !ok {
-			step.Inputs["window_size"] = 1
-		}
-		if _, ok := step.Inputs["top_n"]; !ok {
-			step.Inputs["top_n"] = 5
-		}
-		if _, ok := step.Inputs["sample_n"]; !ok {
-			step.Inputs["sample_n"] = 3
-		}
-	case "issue_sentiment_summary":
-		step.Inputs["text_column"] = textColumn
-		if _, ok := step.Inputs["sentiment_column"]; !ok {
-			step.Inputs["sentiment_column"] = metadataString(version.Metadata, "sentiment_label_column", "sentiment_label")
-		}
-		if _, ok := step.Inputs["sample_n"]; !ok {
-			step.Inputs["sample_n"] = 3
-		}
-	case "semantic_search":
-		step.Inputs["text_column"] = textColumn
-		if _, ok := step.Inputs["sample_n"]; !ok {
-			step.Inputs["sample_n"] = 5
-		}
-		if _, ok := step.Inputs["query"]; !ok && strings.TrimSpace(goal) != "" {
-			step.Inputs["query"] = strings.TrimSpace(goal)
-		}
-		if _, ok := step.Inputs["embedding_uri"]; !ok {
-			step.Inputs["embedding_uri"] = deriveEmbeddingURI(version)
-		}
-	case "evidence_pack":
-		fallthrough
-	case "issue_evidence_summary":
-		step.Inputs["text_column"] = textColumn
-		if _, ok := step.Inputs["sample_n"]; !ok {
-			step.Inputs["sample_n"] = 3
-		}
-		if _, ok := step.Inputs["query"]; !ok && strings.TrimSpace(goal) != "" {
-			step.Inputs["query"] = strings.TrimSpace(goal)
-		}
+		step.Inputs[key] = defaultValue
+	}
+	if _, hasTextColumn := defaults["text_column"]; hasTextColumn {
+		step.Inputs["text_column"] = resolvedTextColumnForSkill(step.Inputs, version)
+	}
+	if definition.GoalInput != "" && !inputPresent(step.Inputs, definition.GoalInput) && strings.TrimSpace(goal) != "" {
+		step.Inputs[definition.GoalInput] = strings.TrimSpace(goal)
+	}
+	if definition.RequiresEmbedding && !inputPresent(step.Inputs, "embedding_uri") {
+		step.Inputs["embedding_uri"] = deriveEmbeddingURI(version)
 	}
 }
 
 func resolvedDatasetNameForSkill(skillName, fallback string, version domain.DatasetVersion) string {
-	if usesSentimentDataset(skillName) {
+	definition, ok := registry.Skill(skillName)
+	if !ok {
+		return fallback
+	}
+	switch definition.DatasetSource {
+	case "sentiment":
 		return datasetSourceForSentiment(version)
-	}
-	if usesPreparedDataset(skillName) {
+	case "prepared":
 		return datasetSourceForUnstructured(version)
+	default:
+		return fallback
 	}
-	return fallback
 }
 
 func defaultTextColumnForSkill(version domain.DatasetVersion) string {
@@ -794,22 +624,37 @@ func resolvedTextColumnForSkill(inputs map[string]any, version domain.DatasetVer
 	return text
 }
 
-func usesPreparedDataset(skillName string) bool {
-	switch strings.TrimSpace(skillName) {
-	case "document_filter", "keyword_frequency", "time_bucket_count", "meta_group_count", "document_sample", "unstructured_issue_summary", "issue_breakdown_summary", "issue_trend_summary", "issue_period_compare", "semantic_search", "issue_evidence_summary", "evidence_pack":
-		return true
-	default:
-		return false
+func cloneInputMap(source map[string]any) map[string]any {
+	cloned := make(map[string]any, len(source))
+	for key, value := range source {
+		cloned[key] = value
 	}
+	return cloned
 }
 
-func usesSentimentDataset(skillName string) bool {
-	switch strings.TrimSpace(skillName) {
-	case "issue_sentiment_summary":
-		return true
-	default:
+func inputPresent(inputs map[string]any, key string) bool {
+	if inputs == nil {
 		return false
 	}
+	value, ok := inputs[key]
+	if !ok || value == nil {
+		return false
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", value)) != ""
+}
+
+func metadataValue(metadata map[string]any, key string, fallback any) any {
+	if metadata == nil {
+		return fallback
+	}
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return fallback
+	}
+	if strings.TrimSpace(fmt.Sprintf("%v", value)) == "" {
+		return fallback
+	}
+	return value
 }
 
 func sortedArtifactKeys(artifacts map[string]string) []string {
@@ -866,4 +711,8 @@ func metadataString(metadata map[string]any, key, fallback string) string {
 		return fallback
 	}
 	return text
+}
+
+func stringPointer(value string) *string {
+	return &value
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/registry"
 	"analysis-support-platform/control-plane/internal/skills"
 	"analysis-support-platform/control-plane/internal/store"
 
@@ -452,7 +453,8 @@ func (a AnalysisActivities) now() time.Time {
 
 func requiresEmbeddingReady(plan domain.SkillPlan) bool {
 	for _, step := range plan.Steps {
-		if step.SkillName == "semantic_search" {
+		definition, ok := registry.Skill(step.SkillName)
+		if ok && definition.RequiresEmbedding {
 			return true
 		}
 	}
@@ -461,8 +463,8 @@ func requiresEmbeddingReady(plan domain.SkillPlan) bool {
 
 func requiresPrepareReady(plan domain.SkillPlan) bool {
 	for _, step := range plan.Steps {
-		switch step.SkillName {
-		case "document_filter", "keyword_frequency", "time_bucket_count", "meta_group_count", "document_sample", "unstructured_issue_summary", "issue_breakdown_summary", "issue_trend_summary", "issue_period_compare", "issue_sentiment_summary", "semantic_search", "issue_evidence_summary", "evidence_pack":
+		definition, ok := registry.Skill(step.SkillName)
+		if ok && definition.RequiresPrepare {
 			return true
 		}
 	}
@@ -471,8 +473,8 @@ func requiresPrepareReady(plan domain.SkillPlan) bool {
 
 func requiresSentimentReady(plan domain.SkillPlan) bool {
 	for _, step := range plan.Steps {
-		switch step.SkillName {
-		case "issue_sentiment_summary":
+		definition, ok := registry.Skill(step.SkillName)
+		if ok && definition.RequiresSentiment {
 			return true
 		}
 	}

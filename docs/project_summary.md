@@ -1,69 +1,49 @@
 # 프로젝트 요약
 
-## 1. 문제정의
+## 1. 한 줄 정의
 
 - 확인 필요: 저장소 루트에서 `project_context.yaml`은 확인되지 않았다.
-- 이 프로젝트의 목적은 질문을 바로 답변하는 챗봇이 아니라, **질문을 재실행 가능한 Skill Plan으로 고정하고, 실행 결과를 다시 비교할 수 있게 남기는 분석 실행 플랫폼**을 만드는 것이다.
-- 기존 Python MVP는 제품 개념 검증에는 충분했지만, 비정형 Skill 확대와 운영형 workflow까지 감당하기에는 구조가 한 프로세스에 너무 많이 묶여 있다.
+- 이 프로젝트는 질문을 재실행 가능한 `Skill Plan`으로 고정하고, 실행 결과를 `result / rerun / diff` 단위로 남기는 분석 실행 플랫폼이다.
 
-## 2. 목표 제품 방향
+## 2. 핵심 흐름
 
-- 제품의 중심 흐름은 계속 `request -> plan -> execute -> rerun/diff` 이다.
-- 1차 이후에는 structured 분석뿐 아니라 비정형 이슈 분석도 공식 축으로 확장한다.
-- 비정형 경로는 자유형 QA보다 `이슈 요약`, `변화 비교`, `메타 분해`, `근거 제시`, `군집화` 같은 실행형 Skill 중심으로 확장한다.
+- 프로젝트와 dataset, dataset version을 등록한다.
+- 원본 dataset을 upload한 뒤 필요하면 `prepare`, `sentiment`, `embedding` 산출물을 만든다.
+- 분석 요청을 제출하면 planner가 최소 skill plan을 만들고, Temporal workflow가 실행과 `waiting / resume`를 오케스트레이션한다.
+- 실행 결과는 artifact와 execution metadata로 남고, 같은 execution context 기준으로 `rerun / diff` 할 수 있다.
 
-## 3. 목표 스택
+## 3. 현재 런타임 경계
 
-- `Go`: API, auth, execution control plane, Temporal orchestration 진입점
-- `Temporal`: durable workflow, `waiting/retry/resume`, rerun orchestration
-- `DuckDB`: structured Skill 계산 엔진
-- `Postgres`: 프로젝트, dataset version, plan, execution 메타데이터 저장
-- `Python workers`: planner, embeddings, semantic search, evidence generation
-- `Rust workers`: CPU 집약 Skill, 토큰화, 군집화, 대용량 텍스트 처리
+- `Go control plane`
+  - 프로젝트, dataset, analysis request, execution API
+- `Temporal runtime`
+  - execution lifecycle와 `waiting / resume`
+- `DuckDB`
+  - 현재 연결된 structured skill은 `structured_kpi_summary` 1종
+- `Python AI worker`
+  - planner, dataset build task, semantic search, evidence generation, 비정형 deterministic skill
+- `Rust worker`
+  - 확인 필요: 저장소에는 스캐폴드가 있으나 현재 실행 hot path에는 연결되지 않았다.
 
-## 4. 시스템 구조도
+## 4. 현재 상태
 
-```mermaid
-flowchart LR
-    Client["사용자 / 내부 호출 주체"]
-    Control["Go Control Plane"]
-    Temporal["Temporal Workflow"]
-    PG["Postgres"]
-    Duck["DuckDB"]
-    Artifact["Artifact Storage"]
-    Py["Python AI Workers"]
-    Rust["Rust Skill Workers"]
-    Skills["Skill Registry / Contracts"]
+- dataset build task `dataset_prepare`, `sentiment_label`, `embedding`이 연결돼 있다.
+- 비정형 support/core skill은 taxonomy, dedup, clustering 계열까지 현재 실행 경로에 포함된다.
+- plan skill 메타데이터는 공용 `skill bundle`인 `config/skill_bundle.json`으로 중앙화됐다.
+- 상세 skill 목록과 계약은 `docs/skill/skill_registry.md`를 기준으로 본다.
+- skill별 분석 기법은 `docs/skill/analysis_techniques.md`에 정리돼 있다.
+- GitHub Actions CI는 Python worker 테스트와 Go 테스트/빌드를 현재 구조 기준으로 실행한다.
 
-    Client --> Control
-    Control --> Temporal
-    Control --> PG
-    Temporal --> PG
-    Temporal --> Skills
-    Temporal --> Duck
-    Temporal --> Py
-    Temporal --> Rust
-    Temporal --> Artifact
-    Py --> PG
-    Rust --> PG
-```
+## 5. 문서 구분
 
-## 5. 현재 상태
+- `docs/project_summary.md`
+  - 현재 제품 정의와 실행 흐름의 짧은 스냅샷
+- `docs/devlog/`
+  - 매일의 고민, 챌린지, 실험 메모, 다음 액션 기록
+- `docs/chat-notes/`
+  - 확정된 결정 로그와 Codex 대화 보관본
 
-- `src/` 아래 Python 코드는 레거시 MVP 런타임으로 남아 있다.
-- `apps/control-plane/`, `workers/python-ai/`, `workers/rust-skills/`는 목표 구조로 옮기기 위한 새 골격이다.
-- 확인 필요: Docker, CI, 배포 스크립트는 아직 레거시 Python 런타임 기준이며 새 구조로 완전히 옮기지 않았다.
+## 6. 확인 필요
 
-## 6. 기대효과
-
-- workflow 상태 관리와 재시도를 애플리케이션 코드에서 분리해 운영 복잡도를 낮출 수 있다.
-- structured Skill은 DuckDB로 올려 행 단위 Python 루프보다 더 큰 데이터셋을 안정적으로 처리할 수 있다.
-- Python은 LLM/임베딩에 집중하고, Rust는 고비용 Skill만 맡겨 전체 실행 구조가 단순해진다.
-- Skill이 늘어나도 언어별 책임이 분리되어 성능 병목과 팀 역할 충돌을 줄이기 쉽다.
-
-## 7. 다음 단계
-
-- Go control plane에서 프로젝트, dataset, analysis request, execution API를 다시 정의한다.
-- Temporal workflow로 `plan -> validate -> execute -> waiting -> resume -> rerun/diff`를 옮긴다.
-- structured / AI / high-performance Skill contract를 언어 중립 형태로 고정한다.
-- 레거시 Python `src/` 제거 시점은 새 control plane과 worker 경로가 최소 E2E를 통과한 뒤로 잡는다.
+- compose 기반 통합 smoke는 저장소에 스크립트가 있지만, 이번 문서 갱신 시점에 재실행 로그를 다시 수집하지는 않았다.
+- Rust worker를 실제 hot path로 넘길 성능 기준과 시점은 별도 측정이 필요하다.

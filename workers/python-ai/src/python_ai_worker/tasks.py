@@ -12,6 +12,7 @@ from typing import Any
 
 from .anthropic_client import AnthropicClient, AnthropicConfig
 from .config import load_config
+from .skill_bundle import bundle_version, capability_skills, default_inputs_for_skill, plan_skill_names, planner_sequence
 
 
 @dataclass(frozen=True)
@@ -20,25 +21,7 @@ class TaskCapability:
     description: str
 
 
-SUPPORTED_CAPABILITIES = [
-    TaskCapability(name="planner", description="Generate replayable skill plans."),
-    TaskCapability(name="dataset_prepare", description="Normalize and filter raw text rows into a prepared dataset artifact."),
-    TaskCapability(name="sentiment_label", description="Attach deterministic sentiment labels to prepared text rows."),
-    TaskCapability(name="embedding", description="Produce embedding vectors for unstructured rows."),
-    TaskCapability(name="document_filter", description="Filter documents before downstream analysis steps."),
-    TaskCapability(name="keyword_frequency", description="Count top keywords from filtered unstructured rows."),
-    TaskCapability(name="time_bucket_count", description="Aggregate filtered issue rows by time bucket."),
-    TaskCapability(name="meta_group_count", description="Aggregate filtered issue rows by metadata group."),
-    TaskCapability(name="document_sample", description="Select representative documents for downstream summaries."),
-    TaskCapability(name="issue_breakdown_summary", description="Break down issue volume by a metadata dimension."),
-    TaskCapability(name="issue_trend_summary", description="Summarize issue volume trends over time buckets."),
-    TaskCapability(name="issue_period_compare", description="Compare issue volume between two time windows."),
-    TaskCapability(name="issue_sentiment_summary", description="Summarize sentiment label distribution and representative samples."),
-    TaskCapability(name="semantic_search", description="Find evidence candidates for a request."),
-    TaskCapability(name="issue_evidence_summary", description="Build user-facing evidence summaries for text analysis."),
-    TaskCapability(name="evidence_pack", description="Build evidence bundles for final outputs."),
-    TaskCapability(name="unstructured_issue_summary", description="Summarize top issues from unstructured text rows."),
-]
+PLANNER_CAPABILITY = TaskCapability(name="planner", description="Generate replayable skill plans.")
 
 TOKEN_PATTERN = re.compile(r"[0-9A-Za-z가-힣]{2,}")
 STOPWORDS = {
@@ -59,6 +42,7 @@ STOPWORDS = {
     "there",
     "있습니다",
     "합니다",
+    "계속",
     "문의",
     "내용",
     "확인",
@@ -67,6 +51,9 @@ STOPWORDS = {
     "관련",
 }
 DEFAULT_EMBEDDING_MODEL = "token-overlap-v1"
+DEFAULT_DUPLICATE_THRESHOLD = 0.85
+DEFAULT_CLUSTER_SIMILARITY_THRESHOLD = 0.3
+DEFAULT_MAX_TAGS_PER_DOCUMENT = 3
 SENTIMENT_LABELS = {"positive", "negative", "neutral", "mixed", "unknown"}
 POSITIVE_SENTIMENT_TERMS = {
     "good",
@@ -109,57 +96,92 @@ NEGATIVE_SENTIMENT_TERMS = {
     "안돼",
     "끊김",
 }
+DEFAULT_TAXONOMY_RULES: dict[str, dict[str, Any]] = {
+    "payment_billing": {
+        "label": "결제/정산",
+        "patterns": ["결제", "승인", "주문", "환불", "billing", "payment", "checkout", "refund"],
+    },
+    "login_account": {
+        "label": "로그인/계정",
+        "patterns": ["로그인", "인증", "계정", "비밀번호", "otp", "login", "account", "password"],
+    },
+    "delivery_fulfillment": {
+        "label": "배송/이행",
+        "patterns": ["배송", "배달", "출고", "도착", "tracking", "shipment", "delivery"],
+    },
+    "system_failure": {
+        "label": "시스템 장애",
+        "patterns": ["오류", "장애", "실패", "에러", "버그", "fail", "error", "broken", "안됨", "안돼"],
+    },
+    "service_quality": {
+        "label": "품질/성능",
+        "patterns": ["지연", "느림", "끊김", "latency", "slow", "performance", "timeout"],
+    },
+    "support_request": {
+        "label": "문의/지원",
+        "patterns": ["문의", "상담", "도움", "안내", "support", "help", "ticket"],
+    },
+}
 
 
 def capability_names() -> list[str]:
-    return [item.name for item in SUPPORTED_CAPABILITIES]
+    return [item.name for item in supported_capabilities()]
 
 
 def capability_payload() -> dict[str, Any]:
     return {
+        "skill_bundle_version": bundle_version(),
         "capabilities": [
             {"name": item.name, "description": item.description}
-            for item in SUPPORTED_CAPABILITIES
+            for item in supported_capabilities()
         ]
     }
 
 
+def supported_capabilities() -> list[TaskCapability]:
+    capabilities = [PLANNER_CAPABILITY]
+    for skill in capability_skills():
+        name = str(skill.get("name") or "").strip()
+        description = str(skill.get("description") or "").strip()
+        if not name:
+            continue
+        capabilities.append(TaskCapability(name=name, description=description))
+    return capabilities
+
+
+def task_handlers() -> dict[str, Any]:
+    return {
+        "planner": run_planner,
+        "dataset_prepare": run_dataset_prepare,
+        "sentiment_label": run_sentiment_label,
+        "embedding": run_embedding,
+        "document_filter": run_document_filter,
+        "deduplicate_documents": run_deduplicate_documents,
+        "keyword_frequency": run_keyword_frequency,
+        "time_bucket_count": run_time_bucket_count,
+        "meta_group_count": run_meta_group_count,
+        "document_sample": run_document_sample,
+        "dictionary_tagging": run_dictionary_tagging,
+        "embedding_cluster": run_embedding_cluster,
+        "cluster_label_candidates": run_cluster_label_candidates,
+        "issue_breakdown_summary": run_issue_breakdown_summary,
+        "issue_cluster_summary": run_issue_cluster_summary,
+        "issue_trend_summary": run_issue_trend_summary,
+        "issue_period_compare": run_issue_period_compare,
+        "issue_sentiment_summary": run_issue_sentiment_summary,
+        "issue_taxonomy_summary": run_issue_taxonomy_summary,
+        "semantic_search": run_semantic_search,
+        "issue_evidence_summary": run_issue_evidence_summary,
+        "evidence_pack": run_evidence_pack,
+        "unstructured_issue_summary": run_unstructured_issue_summary,
+    }
+
+
 def run_task(name: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if name == "planner":
-        return run_planner(payload)
-    if name == "dataset_prepare":
-        return run_dataset_prepare(payload)
-    if name == "sentiment_label":
-        return run_sentiment_label(payload)
-    if name == "embedding":
-        return run_embedding(payload)
-    if name == "document_filter":
-        return run_document_filter(payload)
-    if name == "keyword_frequency":
-        return run_keyword_frequency(payload)
-    if name == "time_bucket_count":
-        return run_time_bucket_count(payload)
-    if name == "meta_group_count":
-        return run_meta_group_count(payload)
-    if name == "document_sample":
-        return run_document_sample(payload)
-    if name == "issue_breakdown_summary":
-        return run_issue_breakdown_summary(payload)
-    if name == "issue_trend_summary":
-        return run_issue_trend_summary(payload)
-    if name == "issue_period_compare":
-        return run_issue_period_compare(payload)
-    if name == "issue_sentiment_summary":
-        return run_issue_sentiment_summary(payload)
-    if name == "semantic_search":
-        return run_semantic_search(payload)
-    if name == "issue_evidence_summary":
-        return run_issue_evidence_summary(payload)
-    if name == "evidence_pack":
-        return run_evidence_pack(payload)
-    if name == "unstructured_issue_summary":
-        return run_unstructured_issue_summary(payload)
-    raise ValueError(f"unsupported capability: {name}")
+    handler = task_handlers().get(name)
+    if handler is None:
+        raise ValueError(f"unsupported capability: {name}")
+    return handler(payload)
 
 
 def run_planner(payload: dict[str, Any]) -> dict[str, Any]:
@@ -428,6 +450,95 @@ def run_document_filter(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def run_deduplicate_documents(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_deduplicate_payload(payload)
+    selected_rows = _selected_text_rows(
+        normalized["dataset_name"],
+        normalized["text_column"],
+        payload.get("prior_artifacts"),
+        apply_dedup=False,
+    )
+    canonical_documents: list[dict[str, Any]] = []
+    duplicate_records: list[dict[str, Any]] = []
+    groups: dict[int, dict[str, Any]] = {}
+
+    for item in selected_rows:
+        text = item["text"]
+        if not text:
+            continue
+        normalized_text = _normalize_prepared_text(text).lower()
+        token_set = set(_tokenize(text))
+        best_match: dict[str, Any] | None = None
+        best_score = 0.0
+        for canonical in canonical_documents:
+            score = _duplicate_similarity(normalized_text, token_set, canonical["normalized_text"], canonical["token_set"])
+            if score > best_score:
+                best_score = score
+                best_match = canonical
+        if best_match is not None and best_score >= normalized["duplicate_threshold"]:
+            group = groups[int(best_match["source_index"])]
+            group["duplicate_source_indices"].append(int(item["source_index"]))
+            group["member_count"] = 1 + len(group["duplicate_source_indices"])
+            if len(group["samples"]) < normalized["sample_n"]:
+                group["samples"].append(text[:240])
+            duplicate_records.append(
+                {
+                    "source_index": int(item["source_index"]),
+                    "canonical_source_index": int(best_match["source_index"]),
+                    "similarity": round(best_score, 4),
+                    "text": text[:240],
+                }
+            )
+            continue
+
+        canonical = {
+            "source_index": int(item["source_index"]),
+            "normalized_text": normalized_text,
+            "token_set": token_set,
+            "text": text[:240],
+        }
+        canonical_documents.append(canonical)
+        groups[canonical["source_index"]] = {
+            "group_id": "",
+            "canonical_source_index": canonical["source_index"],
+            "duplicate_source_indices": [],
+            "member_count": 1,
+            "samples": [text[:240]],
+        }
+
+    sorted_groups = sorted(
+        groups.values(),
+        key=lambda item: (-int(item["member_count"]), int(item["canonical_source_index"])),
+    )
+    duplicate_groups = []
+    for rank, group in enumerate(sorted_groups, start=1):
+        group["group_id"] = f"duplicate-{rank:02d}"
+        duplicate_groups.append(group)
+
+    return {
+        "notes": [
+            f"deduplicate_documents reduced {len(selected_rows)} rows to {len(canonical_documents)} canonical documents",
+            f"dataset source: {normalized['dataset_name']}",
+            f"duplicate_threshold: {normalized['duplicate_threshold']}",
+        ],
+        "artifact": {
+            "skill_name": "deduplicate_documents",
+            "step_id": normalized["step"].get("step_id"),
+            "dataset_name": normalized["dataset_name"],
+            "summary": {
+                "input_row_count": len([item for item in selected_rows if item["text"]]),
+                "canonical_row_count": len(canonical_documents),
+                "duplicate_row_count": len(duplicate_records),
+                "duplicate_group_count": len([group for group in duplicate_groups if group["duplicate_source_indices"]]),
+                "duplicate_threshold": normalized["duplicate_threshold"],
+            },
+            "canonical_indices": [int(item["source_index"]) for item in canonical_documents],
+            "duplicate_records": duplicate_records[: max(1, normalized["sample_n"] * 4)],
+            "duplicate_groups": duplicate_groups,
+        },
+    }
+
+
 def run_keyword_frequency(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = _normalize_text_task_payload(payload)
     selected_rows = _selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
@@ -520,6 +631,86 @@ def run_document_sample(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def run_dictionary_tagging(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_dictionary_tagging_payload(payload)
+    selected_rows = _selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
+    artifact = _build_dictionary_tagging_artifact(normalized, selected_rows)
+    artifact["skill_name"] = "dictionary_tagging"
+    return {
+        "notes": [
+            f"dictionary_tagging assigned tags to {artifact['summary']['tagged_row_count']} rows",
+            f"dataset source: {normalized['dataset_name']}",
+        ],
+        "artifact": artifact,
+    }
+
+
+def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_embedding_cluster_payload(payload)
+    records = _selected_embedding_records(normalized["embedding_uri"], payload.get("prior_artifacts"))
+    clusters = _cluster_embedding_records(records, normalized["cluster_similarity_threshold"], normalized["sample_n"], normalized["top_n"])
+    noise_count = len([cluster for cluster in clusters if int(cluster["document_count"]) == 1])
+    return {
+        "notes": [
+            f"embedding_cluster built {len(clusters)} clusters",
+            f"embedding source: {normalized['embedding_uri']}",
+            f"cluster_similarity_threshold: {normalized['cluster_similarity_threshold']}",
+        ],
+        "artifact": {
+            "skill_name": "embedding_cluster",
+            "step_id": normalized["step"].get("step_id"),
+            "dataset_name": normalized["dataset_name"],
+            "embedding_uri": normalized["embedding_uri"],
+            "summary": {
+                "cluster_count": len(clusters),
+                "clustered_document_count": len(records),
+                "noise_count": noise_count,
+                "cluster_similarity_threshold": normalized["cluster_similarity_threshold"],
+            },
+            "clusters": clusters,
+        },
+    }
+
+
+def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_cluster_label_payload(payload)
+    prior = _find_prior_artifact(payload.get("prior_artifacts"), "embedding_cluster")
+    clusters = []
+    for cluster in list((prior or {}).get("clusters") or []):
+        if not isinstance(cluster, dict):
+            continue
+        top_terms = list(cluster.get("top_terms") or [])
+        candidate_labels = _cluster_candidate_labels(top_terms)
+        clusters.append(
+            {
+                "cluster_id": cluster.get("cluster_id"),
+                "document_count": int(cluster.get("document_count") or 0),
+                "label": candidate_labels[0] if candidate_labels else "기타 이슈",
+                "candidate_labels": candidate_labels,
+                "top_terms": top_terms[: normalized["top_n"]],
+                "samples": list(cluster.get("sample_documents") or [])[: normalized["sample_n"]],
+                "rationale": _cluster_label_rationale(top_terms),
+            }
+        )
+
+    return {
+        "notes": [
+            f"cluster_label_candidates generated labels for {len(clusters)} clusters",
+            f"dataset source: {normalized['dataset_name']}",
+        ],
+        "artifact": {
+            "skill_name": "cluster_label_candidates",
+            "step_id": normalized["step"].get("step_id"),
+            "dataset_name": normalized["dataset_name"],
+            "summary": {
+                "cluster_count": len(clusters),
+                "label_rule": "top_terms",
+            },
+            "clusters": clusters,
+        },
+    }
+
+
 def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = _normalize_text_task_payload(payload)
     embedding_uri = str(
@@ -532,7 +723,7 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
 
     query_counts = Counter(_tokenize(normalized["query"]))
     matches = []
-    for record in _iter_embedding_records(Path(embedding_uri)):
+    for record in _selected_embedding_records(embedding_uri, payload.get("prior_artifacts")):
         score = _cosine_similarity(query_counts, record.get("token_counts") or {}, float(record.get("norm") or 0))
         matches.append(
             {
@@ -613,6 +804,101 @@ def run_issue_breakdown_summary(payload: dict[str, Any]) -> dict[str, Any]:
             f"dataset source: {normalized['dataset_name']}",
         ],
         "artifact": artifact,
+    }
+
+
+def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_text_task_payload(payload)
+    labeled_clusters = _find_prior_artifact(payload.get("prior_artifacts"), "cluster_label_candidates")
+    embedded_clusters = _find_prior_artifact(payload.get("prior_artifacts"), "embedding_cluster")
+
+    clusters: list[dict[str, Any]] = []
+    if labeled_clusters:
+        for item in list(labeled_clusters.get("clusters") or []):
+            if isinstance(item, dict):
+                clusters.append(dict(item))
+    elif embedded_clusters:
+        for item in list(embedded_clusters.get("clusters") or []):
+            if not isinstance(item, dict):
+                continue
+            top_terms = list(item.get("top_terms") or [])
+            labels = _cluster_candidate_labels(top_terms)
+            clusters.append(
+                {
+                    "cluster_id": item.get("cluster_id"),
+                    "document_count": int(item.get("document_count") or 0),
+                    "label": labels[0] if labels else "기타 이슈",
+                    "candidate_labels": labels,
+                    "top_terms": top_terms[: normalized["top_n"]],
+                    "samples": list(item.get("sample_documents") or [])[: normalized["sample_n"]],
+                    "rationale": _cluster_label_rationale(top_terms),
+                }
+            )
+    else:
+        fallback = _cluster_embedding_records(
+            _build_embedding_records_from_rows(
+                _selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
+            ),
+            DEFAULT_CLUSTER_SIMILARITY_THRESHOLD,
+            normalized["sample_n"],
+            normalized["top_n"],
+        )
+        for item in fallback:
+            top_terms = list(item.get("top_terms") or [])
+            labels = _cluster_candidate_labels(top_terms)
+            clusters.append(
+                {
+                    "cluster_id": item.get("cluster_id"),
+                    "document_count": int(item.get("document_count") or 0),
+                    "label": labels[0] if labels else "기타 이슈",
+                    "candidate_labels": labels,
+                    "top_terms": top_terms[: normalized["top_n"]],
+                    "samples": list(item.get("sample_documents") or [])[: normalized["sample_n"]],
+                    "rationale": _cluster_label_rationale(top_terms),
+                }
+            )
+
+    total_documents = sum(int(item.get("document_count") or 0) for item in clusters)
+    ranked_clusters = []
+    for rank, cluster in enumerate(
+        sorted(clusters, key=lambda item: (-int(item.get("document_count") or 0), str(item.get("label") or ""))),
+        start=1,
+    ):
+        count = int(cluster.get("document_count") or 0)
+        ranked_clusters.append(
+            {
+                "rank": rank,
+                "cluster_id": cluster.get("cluster_id"),
+                "label": cluster.get("label") or "기타 이슈",
+                "document_count": count,
+                "ratio_pct": round((count / total_documents) * 100, 2) if total_documents > 0 else 0.0,
+                "candidate_labels": list(cluster.get("candidate_labels") or []),
+                "top_terms": list(cluster.get("top_terms") or [])[: normalized["top_n"]],
+                "samples": list(cluster.get("samples") or [])[: normalized["sample_n"]],
+                "rationale": cluster.get("rationale") or "",
+            }
+        )
+
+    summary = {
+        "cluster_count": len(ranked_clusters),
+        "clustered_document_count": total_documents,
+    }
+    if ranked_clusters:
+        summary["dominant_cluster_label"] = ranked_clusters[0]["label"]
+        summary["dominant_cluster_count"] = ranked_clusters[0]["document_count"]
+
+    return {
+        "notes": [
+            f"issue_cluster_summary summarized {len(ranked_clusters)} clusters",
+            f"dataset source: {normalized['dataset_name']}",
+        ],
+        "artifact": {
+            "skill_name": "issue_cluster_summary",
+            "step_id": normalized["step"].get("step_id"),
+            "dataset_name": normalized["dataset_name"],
+            "summary": summary,
+            "clusters": ranked_clusters,
+        },
     }
 
 
@@ -759,6 +1045,38 @@ def run_issue_sentiment_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def run_issue_taxonomy_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_dictionary_tagging_payload(payload)
+    prior = _find_prior_artifact(payload.get("prior_artifacts"), "dictionary_tagging")
+    if prior:
+        breakdown = list(prior.get("taxonomy_breakdown") or [])
+        summary = dict(prior.get("summary") or {})
+    else:
+        selected_rows = _selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
+        tagging_artifact = _build_dictionary_tagging_artifact(normalized, selected_rows)
+        breakdown = list(tagging_artifact.get("taxonomy_breakdown") or [])
+        summary = dict(tagging_artifact.get("summary") or {})
+
+    if breakdown:
+        summary["dominant_taxonomy"] = breakdown[0]["taxonomy_id"]
+        summary["dominant_taxonomy_label"] = breakdown[0]["label"]
+        summary["dominant_taxonomy_count"] = breakdown[0]["count"]
+
+    return {
+        "notes": [
+            f"issue_taxonomy_summary summarized {len(breakdown)} taxonomy groups",
+            f"dataset source: {normalized['dataset_name']}",
+        ],
+        "artifact": {
+            "skill_name": "issue_taxonomy_summary",
+            "step_id": normalized["step"].get("step_id"),
+            "dataset_name": normalized["dataset_name"],
+            "summary": summary,
+            "taxonomy_breakdown": breakdown,
+        },
+    }
+
+
 def run_issue_evidence_summary(payload: dict[str, Any]) -> dict[str, Any]:
     return _run_evidence_summary(payload, "issue_evidence_summary")
 
@@ -788,28 +1106,36 @@ def _run_rule_based_planner(payload: dict[str, Any]) -> dict[str, Any]:
     goal = goal_raw.lower()
 
     if data_type in {"mixed", "both"}:
-        skills = ["structured_kpi_summary", "document_filter", "keyword_frequency", "document_sample", "unstructured_issue_summary", "issue_evidence_summary"]
+        sequence_name = "mixed_default"
+    elif data_type == "unstructured" and _looks_cluster_goal(goal):
+        sequence_name = "unstructured_cluster"
+    elif data_type == "unstructured" and _looks_taxonomy_goal(goal):
+        sequence_name = "unstructured_taxonomy"
+    elif data_type == "unstructured" and _looks_duplicate_goal(goal):
+        sequence_name = "unstructured_duplicate"
     elif data_type == "unstructured" and _looks_sentiment_goal(goal):
-        skills = ["document_filter", "document_sample", "issue_sentiment_summary", "issue_evidence_summary"]
+        sequence_name = "unstructured_sentiment"
     elif data_type == "unstructured" and _looks_semantic_search_goal(goal):
-        skills = ["semantic_search", "issue_evidence_summary"]
+        sequence_name = "unstructured_semantic_search"
     elif data_type == "unstructured" and _looks_compare_goal(goal):
-        skills = ["document_filter", "document_sample", "issue_period_compare", "issue_evidence_summary"]
+        sequence_name = "unstructured_compare"
     elif data_type == "unstructured" and _looks_breakdown_goal(goal):
-        skills = ["document_filter", "meta_group_count", "document_sample", "issue_breakdown_summary", "issue_evidence_summary"]
+        sequence_name = "unstructured_breakdown"
     elif data_type == "unstructured" and _looks_trend_goal(goal):
-        skills = ["document_filter", "time_bucket_count", "document_sample", "issue_trend_summary", "issue_evidence_summary"]
+        sequence_name = "unstructured_trend"
     elif data_type == "unstructured" or _looks_unstructured(goal):
-        skills = ["document_filter", "keyword_frequency", "document_sample", "unstructured_issue_summary", "issue_evidence_summary"]
+        sequence_name = "unstructured_default"
     else:
-        skills = ["structured_kpi_summary"]
+        sequence_name = "structured_default"
+
+    skills = planner_sequence(sequence_name)
 
     steps = []
     for skill_name in skills:
         step = {
             "skill_name": skill_name,
             "dataset_name": dataset_name,
-            "inputs": _default_inputs(skill_name, goal=goal_raw),
+            "inputs": default_inputs_for_skill(skill_name, goal=goal_raw),
         }
         steps.append(step)
 
@@ -962,6 +1288,62 @@ def _normalize_sentiment_summary_payload(payload: dict[str, Any]) -> dict[str, A
     inputs = step.get("inputs") or {}
     normalized["sentiment_column"] = str(inputs.get("sentiment_column") or payload.get("sentiment_column") or "sentiment_label").strip()
     return normalized
+
+
+def _normalize_deduplicate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_text_task_payload(payload)
+    step = normalized["step"]
+    inputs = step.get("inputs") or {}
+    normalized["duplicate_threshold"] = round(
+        max(0.0, min(1.0, float(inputs.get("duplicate_threshold") or payload.get("duplicate_threshold") or DEFAULT_DUPLICATE_THRESHOLD))),
+        4,
+    )
+    return normalized
+
+
+def _normalize_dictionary_tagging_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_text_task_payload(payload)
+    step = normalized["step"]
+    inputs = step.get("inputs") or {}
+    normalized["max_tags_per_document"] = max(
+        1,
+        int(inputs.get("max_tags_per_document") or payload.get("max_tags_per_document") or DEFAULT_MAX_TAGS_PER_DOCUMENT),
+    )
+    normalized["taxonomy_rules"] = _normalize_taxonomy_rules(inputs.get("taxonomy_rules") or payload.get("taxonomy_rules"))
+    return normalized
+
+
+def _normalize_embedding_cluster_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_text_task_payload(payload)
+    step = normalized["step"]
+    inputs = step.get("inputs") or {}
+    embedding_uri = str(
+        inputs.get("embedding_uri")
+        or payload.get("embedding_uri")
+        or f"{normalized['dataset_name']}.embeddings.jsonl"
+    ).strip()
+    if not embedding_uri:
+        raise ValueError("embedding_uri is required")
+    normalized["embedding_uri"] = embedding_uri
+    normalized["cluster_similarity_threshold"] = round(
+        max(
+            0.0,
+            min(
+                1.0,
+                float(
+                    inputs.get("cluster_similarity_threshold")
+                    or payload.get("cluster_similarity_threshold")
+                    or DEFAULT_CLUSTER_SIMILARITY_THRESHOLD
+                ),
+            ),
+        ),
+        4,
+    )
+    return normalized
+
+
+def _normalize_cluster_label_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return _normalize_text_task_payload(payload)
 
 
 def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1138,8 +1520,14 @@ def _indexed_rows(dataset_name: str) -> list[dict[str, Any]]:
     return indexed
 
 
-def _selected_text_rows(dataset_name: str, text_column: str, prior_artifacts: Any) -> list[dict[str, Any]]:
-    selected_indices = _extract_document_filter_indices(prior_artifacts)
+def _selected_text_rows(
+    dataset_name: str,
+    text_column: str,
+    prior_artifacts: Any,
+    *,
+    apply_dedup: bool = True,
+) -> list[dict[str, Any]]:
+    selected_indices = _selected_source_indices(prior_artifacts, apply_dedup=apply_dedup)
     selected_rows: list[dict[str, Any]] = []
     for item in _indexed_rows(dataset_name):
         source_index = int(item["source_index"])
@@ -1156,12 +1544,37 @@ def _selected_text_rows(dataset_name: str, text_column: str, prior_artifacts: An
     return selected_rows
 
 
+def _selected_source_indices(prior_artifacts: Any, *, apply_dedup: bool = True) -> set[int] | None:
+    selected_indices = _extract_document_filter_indices(prior_artifacts)
+    if not apply_dedup:
+        return selected_indices
+    deduplicated_indices = _extract_deduplicated_indices(prior_artifacts)
+    if deduplicated_indices is None:
+        return selected_indices
+    if selected_indices is None:
+        return deduplicated_indices
+    return selected_indices & deduplicated_indices
+
+
 def _extract_document_filter_indices(prior_artifacts: Any) -> set[int] | None:
     artifact = _find_prior_artifact(prior_artifacts, "document_filter")
     if artifact is None:
         return None
     indices: set[int] = set()
     for item in artifact.get("matched_indices") or []:
+        try:
+            indices.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    return indices
+
+
+def _extract_deduplicated_indices(prior_artifacts: Any) -> set[int] | None:
+    artifact = _find_prior_artifact(prior_artifacts, "deduplicate_documents")
+    if artifact is None:
+        return None
+    indices: set[int] = set()
+    for item in artifact.get("canonical_indices") or []:
         try:
             indices.add(int(item))
         except (TypeError, ValueError):
@@ -1202,6 +1615,20 @@ def _rank_sample_rows(rows: list[dict[str, Any]], query: str, sample_n: int) -> 
     for rank, item in enumerate(limited, start=1):
         item["rank"] = rank
     return limited
+
+
+def _selected_embedding_records(embedding_uri: str, prior_artifacts: Any) -> list[dict[str, Any]]:
+    selected_indices = _selected_source_indices(prior_artifacts)
+    records = []
+    for record in _iter_embedding_records(Path(embedding_uri)):
+        try:
+            source_index = int(record.get("source_index") or 0)
+        except (TypeError, ValueError):
+            continue
+        if selected_indices is not None and source_index not in selected_indices:
+            continue
+        records.append(record)
+    return records
 
 
 def _build_time_bucket_artifact(normalized: dict[str, Any], selected_rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1322,6 +1749,259 @@ def _build_meta_group_artifact(normalized: dict[str, Any], selected_rows: list[d
     }
 
 
+def _build_dictionary_tagging_artifact(normalized: dict[str, Any], selected_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    taxonomy_counts: Counter[str] = Counter()
+    taxonomy_terms: dict[str, Counter[str]] = {}
+    taxonomy_samples: dict[str, list[str]] = {}
+    multi_tagged_count = 0
+    uncovered_row_count = 0
+    tagged_row_count = 0
+
+    for item in selected_rows:
+        text = item["text"]
+        if not text:
+            continue
+        matched = _match_taxonomies(text, normalized["taxonomy_rules"], normalized["max_tags_per_document"])
+        if not matched:
+            uncovered_row_count += 1
+            continue
+        tagged_row_count += 1
+        if len(matched) > 1:
+            multi_tagged_count += 1
+        row_tokens = _tokenize(text)
+        for taxonomy_id in matched:
+            taxonomy_counts.update([taxonomy_id])
+            taxonomy_terms.setdefault(taxonomy_id, Counter()).update(row_tokens)
+            taxonomy_samples.setdefault(taxonomy_id, [])
+            if len(taxonomy_samples[taxonomy_id]) < normalized["sample_n"]:
+                taxonomy_samples[taxonomy_id].append(text[:240])
+
+    total_documents = tagged_row_count
+    breakdown = []
+    ranked = sorted(taxonomy_counts.items(), key=lambda item: (-item[1], item[0]))
+    for rank, (taxonomy_id, count) in enumerate(ranked, start=1):
+        rule = normalized["taxonomy_rules"].get(taxonomy_id, {})
+        breakdown.append(
+            {
+                "rank": rank,
+                "taxonomy_id": taxonomy_id,
+                "label": str(rule.get("label") or taxonomy_id),
+                "count": count,
+                "ratio_pct": round((count / total_documents) * 100, 2) if total_documents > 0 else 0.0,
+                "top_terms": [
+                    {"term": term, "count": term_count}
+                    for term, term_count in taxonomy_terms.get(taxonomy_id, Counter()).most_common(normalized["top_n"])
+                ],
+                "samples": taxonomy_samples.get(taxonomy_id, []),
+            }
+        )
+
+    summary = {
+        "document_count": len([item for item in selected_rows if item["text"]]),
+        "tagged_row_count": tagged_row_count,
+        "uncovered_row_count": uncovered_row_count,
+        "multi_tagged_row_count": multi_tagged_count,
+        "taxonomy_count": len(taxonomy_counts),
+    }
+
+    return {
+        "step_id": normalized["step"].get("step_id"),
+        "dataset_name": normalized["dataset_name"],
+        "summary": summary,
+        "taxonomy_breakdown": breakdown,
+    }
+
+
+def _build_embedding_records_from_rows(selected_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records = []
+    for item in selected_rows:
+        text = item["text"]
+        if not text:
+            continue
+        token_counts = Counter(_tokenize(text))
+        records.append(
+            {
+                "source_index": int(item["source_index"]),
+                "text": text,
+                "token_counts": dict(token_counts),
+                "norm": _vector_norm(token_counts),
+            }
+        )
+    return records
+
+
+def _cluster_embedding_records(
+    records: list[dict[str, Any]],
+    similarity_threshold: float,
+    sample_n: int,
+    top_n: int,
+) -> list[dict[str, Any]]:
+    working_clusters: list[dict[str, Any]] = []
+    ordered_records = sorted(records, key=lambda item: int(item.get("source_index") or 0))
+    for record in ordered_records:
+        token_counts = _token_counter(record.get("token_counts") or {})
+        if not token_counts:
+            continue
+        best_cluster: dict[str, Any] | None = None
+        best_score = 0.0
+        for cluster in working_clusters:
+            score = _cosine_similarity(token_counts, dict(cluster["aggregate_counts"]), float(cluster["aggregate_norm"]))
+            if score > best_score:
+                best_score = score
+                best_cluster = cluster
+        member = {
+            "source_index": int(record.get("source_index") or 0),
+            "text": str(record.get("text") or "")[:240],
+            "token_counts": token_counts,
+        }
+        if best_cluster is None or best_score < similarity_threshold:
+            working_clusters.append(
+                {
+                    "members": [member],
+                    "aggregate_counts": Counter(token_counts),
+                    "aggregate_norm": _vector_norm(token_counts),
+                }
+            )
+            continue
+        best_cluster["members"].append(member)
+        best_cluster["aggregate_counts"].update(token_counts)
+        best_cluster["aggregate_norm"] = _vector_norm(best_cluster["aggregate_counts"])
+
+    payload_clusters = []
+    sorted_clusters = sorted(
+        working_clusters,
+        key=lambda item: (-len(item["members"]), min(member["source_index"] for member in item["members"])),
+    )
+    for rank, cluster in enumerate(sorted_clusters, start=1):
+        members = sorted(cluster["members"], key=lambda item: int(item["source_index"]))
+        payload_clusters.append(
+            {
+                "cluster_id": f"cluster-{rank:02d}",
+                "document_count": len(members),
+                "member_source_indices": [int(member["source_index"]) for member in members],
+                "top_terms": [
+                    {"term": term, "count": count}
+                    for term, count in cluster["aggregate_counts"].most_common(top_n)
+                ],
+                "sample_documents": [
+                    {
+                        "source_index": int(member["source_index"]),
+                        "text": str(member["text"])[:240],
+                    }
+                    for member in members[:sample_n]
+                ],
+            }
+        )
+    return payload_clusters
+
+
+def _token_counter(value: Any) -> Counter[str]:
+    counter: Counter[str] = Counter()
+    if not isinstance(value, dict):
+        return counter
+    for key, count in value.items():
+        try:
+            normalized_count = int(count)
+        except (TypeError, ValueError):
+            continue
+        if normalized_count <= 0:
+            continue
+        counter[str(key)] = normalized_count
+    return counter
+
+
+def _duplicate_similarity(
+    normalized_text: str,
+    token_set: set[str],
+    canonical_text: str,
+    canonical_tokens: set[str],
+) -> float:
+    if normalized_text and normalized_text == canonical_text:
+        return 1.0
+    if not token_set or not canonical_tokens:
+        return 0.0
+    intersection = len(token_set & canonical_tokens)
+    union = len(token_set | canonical_tokens)
+    if union <= 0:
+        return 0.0
+    return intersection / union
+
+
+def _normalize_taxonomy_rules(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict):
+        return dict(DEFAULT_TAXONOMY_RULES)
+    normalized: dict[str, dict[str, Any]] = {}
+    for taxonomy_id, raw_rule in value.items():
+        taxonomy_key = str(taxonomy_id).strip()
+        if not taxonomy_key:
+            continue
+        label = taxonomy_key
+        patterns: list[str] = []
+        if isinstance(raw_rule, dict):
+            label = str(raw_rule.get("label") or taxonomy_key).strip() or taxonomy_key
+            patterns = [str(item).strip().lower() for item in list(raw_rule.get("patterns") or []) if str(item).strip()]
+        elif isinstance(raw_rule, list):
+            patterns = [str(item).strip().lower() for item in raw_rule if str(item).strip()]
+        if not patterns:
+            continue
+        normalized[taxonomy_key] = {
+            "label": label,
+            "patterns": patterns,
+        }
+    if not normalized:
+        return dict(DEFAULT_TAXONOMY_RULES)
+    return normalized
+
+
+def _match_taxonomies(text: str, taxonomy_rules: dict[str, dict[str, Any]], max_tags_per_document: int) -> list[str]:
+    tokens = _tokenize(text)
+    lowered_text = text.lower()
+    scored: list[tuple[str, int]] = []
+    for taxonomy_id, rule in taxonomy_rules.items():
+        score = 0
+        for pattern in list(rule.get("patterns") or []):
+            normalized_pattern = str(pattern).strip().lower()
+            if not normalized_pattern:
+                continue
+            if " " in normalized_pattern:
+                if normalized_pattern in lowered_text:
+                    score += 1
+                continue
+            for token in tokens:
+                if token == normalized_pattern or normalized_pattern in token or token in normalized_pattern:
+                    score += 1
+        if score > 0:
+            scored.append((taxonomy_id, score))
+    scored.sort(key=lambda item: (-item[1], item[0]))
+    return [taxonomy_id for taxonomy_id, _ in scored[:max_tags_per_document]]
+
+
+def _cluster_candidate_labels(top_terms: list[dict[str, Any]]) -> list[str]:
+    terms = [str(item.get("term") or "").strip() for item in top_terms if str(item.get("term") or "").strip()]
+    labels: list[str] = []
+    if len(terms) >= 2:
+        labels.append(f"{terms[0]} / {terms[1]}")
+    if len(terms) >= 3:
+        labels.append(f"{terms[0]}, {terms[1]}, {terms[2]}")
+    if terms:
+        labels.append(terms[0])
+    unique = []
+    seen: set[str] = set()
+    for label in labels:
+        if label in seen:
+            continue
+        unique.append(label)
+        seen.add(label)
+    return unique
+
+
+def _cluster_label_rationale(top_terms: list[dict[str, Any]]) -> str:
+    terms = [str(item.get("term") or "").strip() for item in top_terms if str(item.get("term") or "").strip()]
+    if not terms:
+        return "대표 용어가 부족해 기본 레이블을 사용했습니다."
+    return f"상위 용어 {', '.join(terms[:3])} 기준으로 레이블 후보를 만들었습니다."
+
+
 def _iter_documents(dataset_name: str, text_column: str) -> list[str]:
     return [str(row.get(text_column) or "").strip() for row in _iter_rows(dataset_name)]
 
@@ -1388,10 +2068,20 @@ def _looks_noise_only(text: str) -> bool:
 def _tokenize(text: str) -> list[str]:
     tokens = []
     for match in TOKEN_PATTERN.findall(text.lower()):
-        if match in STOPWORDS:
+        normalized = _normalize_token(match)
+        if normalized in STOPWORDS:
             continue
-        tokens.append(match)
+        tokens.append(normalized)
     return tokens
+
+
+def _normalize_token(token: str) -> str:
+    normalized = token.strip().lower()
+    if len(normalized) >= 3 and normalized[-1] in {"이", "가", "은", "는", "을", "를", "와", "과", "도", "에"}:
+        candidate = normalized[:-1]
+        if len(candidate) >= 2:
+            normalized = candidate
+    return normalized
 
 
 def _looks_unstructured(goal: str) -> bool:
@@ -1419,114 +2109,28 @@ def _looks_breakdown_goal(goal: str) -> bool:
     return any(keyword in goal for keyword in keywords)
 
 
+def _looks_cluster_goal(goal: str) -> bool:
+    keywords = ("cluster", "clustering", "theme", "topic group", "군집", "클러스터", "토픽", "주제별", "묶음")
+    return any(keyword in goal for keyword in keywords)
+
+
+def _looks_taxonomy_goal(goal: str) -> bool:
+    keywords = ("taxonomy", "tag", "category", "categorize", "분류", "분류체계", "카테고리", "태그")
+    return any(keyword in goal for keyword in keywords)
+
+
+def _looks_duplicate_goal(goal: str) -> bool:
+    keywords = ("duplicate", "dedup", "중복", "반복 문서", "같은 이슈", "유사 문서")
+    return any(keyword in goal for keyword in keywords)
+
+
 def _looks_sentiment_goal(goal: str) -> bool:
     keywords = ("sentiment", "positive", "negative", "neutral", "긍정", "부정", "중립", "감성", "감정", "호감", "불만", "만족")
     return any(keyword in goal for keyword in keywords)
 
 
 def _default_inputs(skill_name: str, *, goal: str = "") -> dict[str, Any]:
-    if skill_name == "structured_kpi_summary":
-        return {
-            "time_column": "date",
-            "metric_column": "value",
-        }
-    if skill_name == "document_filter":
-        inputs = {
-            "text_column": "text",
-            "sample_n": 5,
-        }
-        if goal:
-            inputs["query"] = goal
-        return inputs
-    if skill_name == "keyword_frequency":
-        return {
-            "text_column": "text",
-            "top_n": 10,
-        }
-    if skill_name == "time_bucket_count":
-        return {
-            "text_column": "text",
-            "time_column": "occurred_at",
-            "bucket": "day",
-            "top_n": 5,
-            "sample_n": 3,
-        }
-    if skill_name == "meta_group_count":
-        return {
-            "text_column": "text",
-            "dimension_column": "channel",
-            "top_n": 5,
-            "sample_n": 3,
-        }
-    if skill_name == "document_sample":
-        inputs = {
-            "text_column": "text",
-            "sample_n": 3,
-        }
-        if goal:
-            inputs["query"] = goal
-        return inputs
-    if skill_name == "unstructured_issue_summary":
-        return {
-            "text_column": "text",
-            "top_n": 10,
-            "sample_n": 3,
-        }
-    if skill_name == "issue_breakdown_summary":
-        return {
-            "text_column": "text",
-            "dimension_column": "channel",
-            "top_n": 5,
-            "sample_n": 3,
-        }
-    if skill_name == "issue_trend_summary":
-        return {
-            "text_column": "text",
-            "time_column": "occurred_at",
-            "bucket": "day",
-            "top_n": 5,
-            "sample_n": 3,
-        }
-    if skill_name == "issue_period_compare":
-        return {
-            "text_column": "text",
-            "time_column": "occurred_at",
-            "bucket": "day",
-            "window_size": 1,
-            "top_n": 5,
-            "sample_n": 3,
-        }
-    if skill_name == "issue_sentiment_summary":
-        return {
-            "text_column": "text",
-            "sentiment_column": "sentiment_label",
-            "sample_n": 3,
-        }
-    if skill_name == "issue_evidence_summary":
-        inputs = {
-            "text_column": "text",
-            "sample_n": 3,
-        }
-        if goal:
-            inputs["query"] = goal
-        return inputs
-    if skill_name == "semantic_search":
-        inputs = {
-            "text_column": "text",
-            "sample_n": 5,
-        }
-        if goal:
-            inputs["query"] = goal
-        return inputs
-    if skill_name == "evidence_pack":
-        inputs = {
-            "text_column": "text",
-            "sample_n": 3,
-        }
-        if goal:
-            inputs["query"] = goal
-        return inputs
-    return {}
+    return default_inputs_for_skill(skill_name, goal=goal)
 
 
 def _anthropic_client() -> AnthropicClient | None:
@@ -1563,26 +2167,35 @@ def _anthropic_prepare_client(model_override: str = "") -> AnthropicClient | Non
 
 
 def _run_planner_with_llm(client: AnthropicClient, payload: dict[str, Any]) -> dict[str, Any]:
+    allowed_skills = ", ".join(plan_skill_names())
     prompt = "\n".join(
         [
             "You are an analysis planner for a deterministic execution platform.",
             "Choose the smallest valid skill plan for the request.",
-            "Allowed skills: structured_kpi_summary, document_filter, keyword_frequency, time_bucket_count, meta_group_count, document_sample, unstructured_issue_summary, issue_breakdown_summary, issue_trend_summary, issue_period_compare, issue_sentiment_summary, semantic_search, issue_evidence_summary.",
+            f"Allowed skills: {allowed_skills}.",
             "Use structured_kpi_summary for numeric KPI/tabular analysis.",
             "Use document_filter first for replayable lexical narrowing before downstream text analysis.",
+            "Use deduplicate_documents to collapse repeated or near-identical documents.",
             "Use keyword_frequency to count top terms after document filtering.",
             "Use time_bucket_count to aggregate filtered rows by time bucket.",
             "Use meta_group_count to aggregate filtered rows by metadata dimension.",
             "Use document_sample to select representative documents for downstream summaries.",
+            "Use dictionary_tagging when the user asks for category or taxonomy-based classification.",
+            "Use embedding_cluster to group similar issues with precomputed embeddings.",
+            "Use cluster_label_candidates after embedding_cluster to propose deterministic cluster labels.",
             "Use unstructured_issue_summary for VOC/document/text analysis.",
             "Use issue_breakdown_summary when the user asks which channel, product, region, or metadata group has more issues.",
+            "Use issue_cluster_summary when the user asks for major themes, clusters, or grouped issues.",
             "Use issue_trend_summary when the user asks about changes, increases, decreases, or time-based trends in text issues.",
             "Use issue_period_compare when the user asks to compare current vs previous periods in text issues.",
             "Use issue_sentiment_summary when the user asks about positive, negative, neutral, or sentiment distribution.",
+            "Use issue_taxonomy_summary when the user asks for tagged categories or taxonomy distribution.",
             "Use semantic_search when the user asks to find relevant evidence or related documents.",
             "Use issue_evidence_summary to return representative snippets and follow-up questions for text analysis.",
             "For general unstructured text analysis, prefer unstructured_issue_summary followed by issue_evidence_summary.",
             "For general unstructured text analysis, prefer document_filter, keyword_frequency, document_sample, unstructured_issue_summary, then issue_evidence_summary.",
+            "For cluster analysis, prefer document_filter, deduplicate_documents, embedding_cluster, cluster_label_candidates, issue_cluster_summary, then issue_evidence_summary.",
+            "For taxonomy analysis, prefer document_filter, dictionary_tagging, issue_taxonomy_summary, then issue_evidence_summary.",
             "For breakdown analysis, prefer document_filter, meta_group_count, document_sample, issue_breakdown_summary, then issue_evidence_summary.",
             "For trend analysis, prefer document_filter, time_bucket_count, document_sample, issue_trend_summary, then issue_evidence_summary.",
             "For period comparison, prefer document_filter, document_sample, issue_period_compare, then issue_evidence_summary.",
@@ -1973,10 +2586,11 @@ def _normalize_planner_response(
     dataset_name = str(payload.get("dataset_name") or "dataset_from_version").strip()
     raw_plan = response.get("plan") or {}
     raw_steps = raw_plan.get("steps") or []
+    allowed_skills = set(plan_skill_names())
     steps = []
     for raw_step in raw_steps:
         skill_name = str(raw_step.get("skill_name") or "").strip()
-        if skill_name not in {"structured_kpi_summary", "document_filter", "keyword_frequency", "time_bucket_count", "meta_group_count", "document_sample", "unstructured_issue_summary", "issue_breakdown_summary", "issue_trend_summary", "issue_period_compare", "issue_sentiment_summary", "semantic_search", "issue_evidence_summary", "evidence_pack"}:
+        if skill_name not in allowed_skills:
             continue
         inputs = raw_step.get("inputs") or {}
         steps.append(

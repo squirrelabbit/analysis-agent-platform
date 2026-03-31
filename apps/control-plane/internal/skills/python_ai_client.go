@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/registry"
 )
 
 type PythonAIClient struct {
@@ -115,34 +116,9 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 }
 
 func pythonAITaskPath(skillName string) (string, bool) {
-	switch strings.TrimSpace(skillName) {
-	case "document_filter":
-		return "/tasks/document_filter", true
-	case "keyword_frequency":
-		return "/tasks/keyword_frequency", true
-	case "time_bucket_count":
-		return "/tasks/time_bucket_count", true
-	case "meta_group_count":
-		return "/tasks/meta_group_count", true
-	case "document_sample":
-		return "/tasks/document_sample", true
-	case "unstructured_issue_summary":
-		return "/tasks/unstructured_issue_summary", true
-	case "issue_breakdown_summary":
-		return "/tasks/issue_breakdown_summary", true
-	case "issue_trend_summary":
-		return "/tasks/issue_trend_summary", true
-	case "issue_period_compare":
-		return "/tasks/issue_period_compare", true
-	case "issue_sentiment_summary":
-		return "/tasks/issue_sentiment_summary", true
-	case "semantic_search":
-		return "/tasks/semantic_search", true
-	case "issue_evidence_summary":
-		return "/tasks/issue_evidence_summary", true
-	case "evidence_pack":
-		return "/tasks/evidence_pack", true
-	default:
+	definition, ok := registry.Skill(skillName)
+	if !ok || strings.TrimSpace(definition.Engine) != "python-ai" || strings.TrimSpace(definition.TaskPath) == "" {
 		return "", false
 	}
+	return strings.TrimSpace(definition.TaskPath), true
 }

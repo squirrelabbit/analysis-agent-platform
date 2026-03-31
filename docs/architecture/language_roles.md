@@ -14,8 +14,8 @@
 | Temporal | workflow engine | retry, waiting, resume, rerun/diff, long-running execution history | 데이터 계산 자체 |
 | DuckDB | structured compute | aggregate, compare, rank, period analysis, dataset scan | 인증, workflow 상태관리 |
 | Postgres | metadata store | project, dataset_version, plan, execution, registry metadata | 대규모 analytical scan |
-| Python | AI worker | planner, LLM 호출, embedding, semantic search, evidence generation | 전체 control plane, durable workflow 상태 저장 |
-| Rust | high-performance worker | 토큰화, 군집화, 대용량 텍스트 처리, CPU 집약 Skill | 잦은 제품 정책 변경이 있는 orchestration |
+| Python | AI worker | planner, LLM 호출, embedding, semantic search, evidence generation, 현재 구현의 dedup/cluster/taxonomy deterministic skill | 전체 control plane, durable workflow 상태 저장 |
+| Rust | high-performance worker | 확인 필요: 현재는 스캐폴드만 있고, 향후 hot path로 올릴 clustering/dedup/대용량 텍스트 처리 | 잦은 제품 정책 변경이 있는 orchestration |
 
 ## Go
 
@@ -27,7 +27,7 @@
   - project / dataset / analysis / execution API
   - 인증과 권한 확인
   - workflow 시작과 결과 조회
-  - skill registry 메타데이터 조회
+  - 공용 `skill bundle` 메타데이터 조회와 plan normalize
 
 ## Python
 
@@ -39,6 +39,8 @@
   - embedding pipeline
   - semantic search
   - evidence bundle 생성
+  - 현재 구현의 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `issue_cluster_summary`, `issue_taxonomy_summary`
+  - 공용 `skill bundle` 기준 capability와 planner sequence 반영
 - 제한:
   - structured 집계 엔진과 workflow 상태관리까지 모두 Python에 남기지 않는다.
 
@@ -48,11 +50,12 @@
   - CPU 집약 Skill에서 높은 성능과 예측 가능한 메모리 사용을 기대할 수 있다.
   - 텍스트 전처리와 clustering 같은 hot path를 분리하기 좋다.
 - 주요 책임:
-  - 고성능 support Skill
-  - 대규모 문서 토큰화/정규화
-  - clustering / dedup / cooccurrence 같은 연산
+  - 고성능 support Skill 후보
+  - 대규모 문서 토큰화/정규화 후보
+  - clustering / dedup / cooccurrence 같은 연산 후보
 - 제한:
   - 자주 바뀌는 제품 정책과 API orchestration은 Rust 중심으로 두지 않는다.
+  - 현재 저장소 기준 runtime 연결은 아직 없다.
 
 ## DuckDB와 Postgres를 같이 두는 이유
 
