@@ -2,16 +2,21 @@ package service
 
 import (
 	"bufio"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
 	"analysis-support-platform/control-plane/internal/store"
+
+	_ "github.com/marcboeker/go-duckdb"
 )
 
 type embeddingIndexCaptureStore struct {
@@ -24,6 +29,74 @@ func (s *embeddingIndexCaptureStore) ReplaceEmbeddingChunkIndex(datasetVersionID
 	s.datasetVersionID = datasetVersionID
 	s.records = append([]domain.EmbeddingIndexChunk(nil), records...)
 	return nil
+}
+
+func writeEmbeddingIndexParquet(t *testing.T, path string, rows []map[string]any) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "embedding-index.duckdb")
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("unexpected duckdb open error: %v", err)
+	}
+	defer db.Close()
+
+	selects := make([]string, 0, len(rows))
+	for _, row := range rows {
+		selects = append(selects, fmt.Sprintf(
+			`SELECT %d AS source_index, '%s' AS row_id, '%s' AS chunk_id, %d AS chunk_index, %d AS char_start, %d AS char_end, '%s' AS embedding_json, %d AS embedding_dim, '%s' AS embedding_provider, '%s' AS token_counts_json`,
+			int64Value(row["source_index"]),
+			escapeDuckDBLiteral(stringValue(row["row_id"])),
+			escapeDuckDBLiteral(stringValue(row["chunk_id"])),
+			intValue(row["chunk_index"]),
+			intValue(row["char_start"]),
+			intValue(row["char_end"]),
+			escapeDuckDBLiteral(stringValue(row["embedding_json"])),
+			intValue(row["embedding_dim"]),
+			escapeDuckDBLiteral(stringValue(row["embedding_provider"])),
+			escapeDuckDBLiteral(stringValue(row["token_counts_json"])),
+		))
+	}
+	query := fmt.Sprintf(
+		`COPY (%s) TO '%s' (FORMAT PARQUET)`,
+		strings.Join(selects, " UNION ALL "),
+		escapeDuckDBLiteral(path),
+	)
+	if _, err := db.Exec(query); err != nil {
+		t.Fatalf("unexpected parquet write error: %v", err)
+	}
+}
+
+func int64Value(value any) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case float64:
+		return int64(typed)
+	default:
+		return 0
+	}
+}
+
+func intValue(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
+}
+
+func stringValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
 }
 
 func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
@@ -167,6 +240,7 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 	var requestedDatasetName string
 	var requestedTextColumn string
 	var requestedOutputPath string
+	var requestedIndexOutputPath string
 	var requestedEmbeddingModel string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
@@ -176,6 +250,7 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 		requestedDatasetName = payload["dataset_name"].(string)
 		requestedTextColumn = payload["text_column"].(string)
 		requestedOutputPath = payload["output_path"].(string)
+		requestedIndexOutputPath = payload["index_output_path"].(string)
 		requestedEmbeddingModel = payload["embedding_model"].(string)
 		if err := os.WriteFile(requestedOutputPath, []byte(strings.Join([]string{
 			`{"source_index":0,"row_id":"version-1:row:0","chunk_id":"version-1:row:0:chunk:0","chunk_index":0,"char_start":0,"char_end":16,"token_counts":{"결제":1,"오류":1}}`,
@@ -183,12 +258,40 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 		}, "\n")), 0o644); err != nil {
 			t.Fatalf("unexpected write error: %v", err)
 		}
+		writeEmbeddingIndexParquet(t, requestedIndexOutputPath, []map[string]any{
+			{
+				"source_index":      0,
+				"row_id":            "version-1:row:0",
+				"chunk_id":          "version-1:row:0:chunk:0",
+				"chunk_index":       0,
+				"char_start":        0,
+				"char_end":          16,
+				"embedding_json":    "",
+				"embedding_dim":     0,
+				"embedding_provider": "",
+				"token_counts_json": `{"결제":1,"오류":1}`,
+			},
+			{
+				"source_index":      1,
+				"row_id":            "version-1:row:1",
+				"chunk_id":          "version-1:row:1:chunk:0",
+				"chunk_index":       0,
+				"char_start":        0,
+				"char_end":          21,
+				"embedding_json":    "",
+				"embedding_dim":     0,
+				"embedding_provider": "",
+				"token_counts_json": `{"로그인":1,"오류":1}`,
+			},
+		})
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"notes": []string{"embedding completed"},
 			"artifact": map[string]any{
 				"embedding_uri":            "/tmp/issues.prepared.parquet.embeddings.jsonl",
 				"embedding_ref":            "/tmp/issues.prepared.parquet.embeddings.jsonl",
 				"embedding_format":         "jsonl",
+				"embedding_index_source_ref": requestedIndexOutputPath,
+				"embedding_index_source_format": "parquet",
 				"chunk_ref":                "/tmp/issues.prepared.parquet.chunks.parquet",
 				"chunk_format":             "parquet",
 				"embedding_model":          "token-overlap-v1",
@@ -224,6 +327,9 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 	if !strings.HasPrefix(requestedOutputPath, artifactRoot) {
 		t.Fatalf("unexpected embedding output path: %s", requestedOutputPath)
 	}
+	if !strings.HasPrefix(requestedIndexOutputPath, artifactRoot) {
+		t.Fatalf("unexpected embedding index output path: %s", requestedIndexOutputPath)
+	}
 	if result.EmbeddingStatus != "ready" {
 		t.Fatalf("unexpected embedding status: %s", result.EmbeddingStatus)
 	}
@@ -238,6 +344,12 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 	}
 	if got := metadataString(result.Metadata, "embedding_format", ""); got != "jsonl" {
 		t.Fatalf("unexpected embedding format: %s", got)
+	}
+	if got := metadataString(result.Metadata, "embedding_index_source_ref", ""); got != requestedIndexOutputPath {
+		t.Fatalf("unexpected embedding index source ref: %s", got)
+	}
+	if got := metadataString(result.Metadata, "embedding_index_source_format", ""); got != "parquet" {
+		t.Fatalf("unexpected embedding index source format: %s", got)
 	}
 	if got := metadataString(result.Metadata, "chunk_id_column", ""); got != "chunk_id" {
 		t.Fatalf("unexpected chunk id column: %s", got)
@@ -308,6 +420,41 @@ func TestLoadEmbeddingIndexChunksPrefersDenseEmbeddings(t *testing.T) {
 		t.Fatalf("unexpected dense embedding: %+v", records[0].Embedding)
 	}
 	if provider, ok := records[0].Metadata["embedding_provider"].(string); !ok || provider != "openai" {
+		t.Fatalf("unexpected embedding provider metadata: %+v", records[0].Metadata)
+	}
+}
+
+func TestLoadEmbeddingIndexChunksFromParquetPrefersDenseEmbeddings(t *testing.T) {
+	embeddingPath := filepath.Join(t.TempDir(), "issues.embeddings.index.parquet")
+	writeEmbeddingIndexParquet(t, embeddingPath, []map[string]any{
+		{
+			"source_index":       0,
+			"row_id":             "version-dense:row:0",
+			"chunk_id":           "version-dense:row:0:chunk:0",
+			"chunk_index":        0,
+			"char_start":         0,
+			"char_end":           16,
+			"embedding_json":     `[0.1,0.2,0.3]`,
+			"embedding_dim":      3,
+			"embedding_provider": "fastembed",
+			"token_counts_json":  `{"결제":1,"오류":1}`,
+		},
+	})
+
+	records, err := loadEmbeddingIndexChunks("version-dense", embeddingPath, "/tmp/issues.chunks.parquet", "intfloat/multilingual-e5-small")
+	if err != nil {
+		t.Fatalf("unexpected load embedding chunks error: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("unexpected record count: %d", len(records))
+	}
+	if records[0].VectorDim != 3 {
+		t.Fatalf("unexpected vector dim: %d", records[0].VectorDim)
+	}
+	if len(records[0].Embedding) != 3 || records[0].Embedding[0] != float32(0.1) {
+		t.Fatalf("unexpected dense embedding: %+v", records[0].Embedding)
+	}
+	if provider, ok := records[0].Metadata["embedding_provider"].(string); !ok || provider != "fastembed" {
 		t.Fatalf("unexpected embedding provider metadata: %+v", records[0].Metadata)
 	}
 }

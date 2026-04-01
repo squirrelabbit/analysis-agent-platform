@@ -26,11 +26,11 @@
 - `dataset_prepare`는 Anthropic prepare 경로가 켜지면 기본 `prepare_batch_size=8` 기준 batch 정제를 수행한다.
 - `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding`은 아직 JSONL sidecar를 유지한다.
 - `sentiment_label` 기본 출력은 이제 `row_id`, `source_row_index`, 감성 컬럼 중심의 sidecar이고, `issue_sentiment_summary`는 `prepared_dataset_name`을 함께 받아 텍스트를 조인한다.
-- `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 `embeddings.jsonl` record에 함께 저장한다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1` sidecar로 자동 fallback한다.
+- `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 결과는 fallback/debug용 `embeddings.jsonl`과 index 적재용 `embeddings.index.parquet`를 함께 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1` sidecar로 자동 fallback한다.
 - `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 model로 query vector를 다시 만든다. 불가하면 `embeddings.jsonl` scan과 token-overlap 계산으로 fallback한다. 검색 결과는 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 반환하고, `issue_evidence_summary`는 이를 evidence artifact까지 유지한다.
 - `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 함께 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` sidecar와 token-overlap 경로로 fallback한다.
 - dataset build artifact는 현재 `row_id/ref/format` 메타데이터를 함께 남겨 다음 단계의 chunk/vector index 전환 기반을 잡아 두었다.
-- control plane은 `embedding` build가 끝나면 `embeddings.jsonl`을 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection으로 바꾼 뒤 `embedding_index_chunks`에 적재한다.
+- control plane은 `embedding` build가 끝나면 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection으로 바꾼 뒤 `embedding_index_chunks`에 적재한다. index source를 찾지 못할 때만 `embeddings.jsonl`로 fallback한다.
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension, `embedding_index_chunks` table을 포함한다.
 - `dataset_prepare`와 `sentiment_label`은 기본 Haiku model을 쓰고, prompt version은 registry와 환경 변수로 선택할 수 있다.
 - 비정형 deterministic skill은 Python worker 안에서 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`, `issue_taxonomy_summary`까지 확장돼 있다.
@@ -203,16 +203,17 @@ Support skill:
   - `smoke_taxonomy.sh`
   - smoke script는 source file을 `/uploads`로 올린 뒤 dataset version을 만들어 host/container 경로 차이를 줄인다.
   - 이번 turn 기준 `smoke_semantic.sh`는 새 compose 이미지에서 다시 실행해 통과했다.
-  - 이번 turn의 compose 실행에서 `smoke_semantic.sh`, `smoke_cluster.sh`를 `embedding_model=intfloat/multilingual-e5-small` 기준으로 다시 실행해 `embedding_index_backend=pgvector`, `embedding_vector_dim=384`, `retrieval_backend=pgvector`, `embedding_source_backend=pgvector`, `cluster_similarity_backend=dense-hybrid`, `dominant_cluster_label=결제 / 오류`를 확인했다.
+  - 이번 turn의 compose 실행에서 `smoke_semantic.sh`, `smoke_cluster.sh`를 `embedding_model=intfloat/multilingual-e5-small` 기준으로 다시 실행해 `embedding_index_backend=pgvector`, `embedding_index_source_format=parquet`, `embedding_vector_dim=384`, `retrieval_backend=pgvector`, `embedding_source_backend=pgvector`, `cluster_similarity_backend=dense-hybrid`, `dominant_cluster_label=결제 / 오류`를 확인했다.
   - 별도 컨테이너 검증과 end-to-end smoke 모두에서 `intfloat/multilingual-e5-small` local model download와 `fastembed`, `384차원` dense embedding 생성을 확인했다.
+  - Python unit test에는 generic overlap fixture를 추가해 `dense-hybrid`가 `결제/로그인/배송`처럼 공통 표현이 많은 데이터에서도 `3개 군집`으로 분리되는 케이스를 고정했다.
 
 확인 필요:
 - `pgvector` 이미지 전환 뒤 기존 Postgres volume에서 collation version mismatch warning이 관찰됐다.
-- `embedding_cluster`는 현재 `pgvector` 우선 경로에서 dense vector가 있으면 `dense-hybrid` similarity를 쓰고, 필요 시에만 JSONL/token-overlap fallback을 사용한다. dense-only clustering 품질은 추가 검증이 더 필요하다.
+- `embedding_cluster`는 현재 `pgvector` 우선 경로에서 dense vector가 있으면 `dense-hybrid` similarity를 쓰고, 필요 시에만 JSONL/token-overlap fallback을 사용한다. generic overlap guardrail fixture는 추가됐지만 dense-only clustering 품질 기준은 아직 별도 검증이 더 필요하다.
 - OpenAI key를 넣은 dense embedding end-to-end smoke는 이번 turn에 재현하지 않았다. 코드 경로와 unit test는 반영돼 있다.
 
 개발 메모:
-- Postgres collation warning이 보이면 [docs/architecture/dev_postgres_reset.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/architecture/dev_postgres_reset.md) 기준으로 dev volume만 재초기화한다.
+- Postgres collation warning이 보이면 [reset_postgres_dev.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/reset_postgres_dev.sh) 또는 [docs/architecture/dev_postgres_reset.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/architecture/dev_postgres_reset.md) 기준으로 dev volume만 재초기화한다.
 
 ## 디렉터리
 

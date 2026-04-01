@@ -3,7 +3,12 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from python_ai_worker.runtime.artifacts import _analysis_context_entries, _select_evidence_candidates, _selected_source_indices
+from python_ai_worker.runtime.artifacts import (
+    _analysis_context_entries,
+    _cluster_embedding_records,
+    _select_evidence_candidates,
+    _selected_source_indices,
+)
 from python_ai_worker.runtime.common import _match_taxonomies
 from python_ai_worker.runtime.constants import DEFAULT_TAXONOMY_RULES
 from python_ai_worker.runtime.embeddings import _generate_dense_embeddings, _generate_query_embedding
@@ -186,6 +191,70 @@ class RuntimeHelperTests(unittest.TestCase):
 
         self.assertEqual(result, [0.9, 0.1])
         generate_local.assert_called_once_with(["결제 오류"], model="intfloat/multilingual-e5-small", task_type="query")
+
+    def test_dense_hybrid_outperforms_dense_only_on_generic_overlap_fixture(self) -> None:
+        records = [
+            {
+                "source_index": 0,
+                "row_id": "version-generic:row:0",
+                "chunk_id": "version-generic:row:0:chunk:0",
+                "text": "결제 오류가 계속 발생합니다",
+                "token_counts": {"결제": 1, "오류": 1, "계속": 1, "발생합니다": 1},
+                "embedding": [1.0, 0.0],
+            },
+            {
+                "source_index": 1,
+                "row_id": "version-generic:row:1",
+                "chunk_id": "version-generic:row:1:chunk:0",
+                "text": "결제 승인 문제가 반복됩니다",
+                "token_counts": {"결제": 1, "승인": 1, "문제": 1, "반복됩니다": 1},
+                "embedding": [0.999, 0.001],
+            },
+            {
+                "source_index": 2,
+                "row_id": "version-generic:row:2",
+                "chunk_id": "version-generic:row:2:chunk:0",
+                "text": "로그인 오류가 계속 발생합니다",
+                "token_counts": {"로그인": 1, "오류": 1, "계속": 1, "발생합니다": 1},
+                "embedding": [0.998, 0.002],
+            },
+            {
+                "source_index": 3,
+                "row_id": "version-generic:row:3",
+                "chunk_id": "version-generic:row:3:chunk:0",
+                "text": "로그인 인증 문제가 반복됩니다",
+                "token_counts": {"로그인": 1, "인증": 1, "문제": 1, "반복됩니다": 1},
+                "embedding": [0.997, 0.003],
+            },
+            {
+                "source_index": 4,
+                "row_id": "version-generic:row:4",
+                "chunk_id": "version-generic:row:4:chunk:0",
+                "text": "배송 오류가 계속 발생합니다",
+                "token_counts": {"배송": 1, "오류": 1, "계속": 1, "발생합니다": 1},
+                "embedding": [0.996, 0.004],
+            },
+            {
+                "source_index": 5,
+                "row_id": "version-generic:row:5",
+                "chunk_id": "version-generic:row:5:chunk:0",
+                "text": "배송 조회 문제가 반복됩니다",
+                "token_counts": {"배송": 1, "조회": 1, "문제": 1, "반복됩니다": 1},
+                "embedding": [0.995, 0.005],
+            },
+        ]
+
+        dense_only = _cluster_embedding_records(records, 0.2, 2, 3, similarity_mode="dense-only")
+        dense_hybrid = _cluster_embedding_records(records, 0.2, 2, 3, similarity_mode="dense-hybrid")
+
+        self.assertEqual(len(dense_only), 1)
+        self.assertEqual(dense_only[0]["similarity_backend"], "dense-only")
+        self.assertEqual(len(dense_hybrid), 3)
+        self.assertEqual(dense_hybrid[0]["similarity_backend"], "dense-hybrid")
+        self.assertEqual(
+            [cluster["member_source_indices"] for cluster in dense_hybrid],
+            [[0, 1], [2, 3], [4, 5]],
+        )
 
 
 if __name__ == "__main__":

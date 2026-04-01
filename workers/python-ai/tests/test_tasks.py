@@ -41,6 +41,14 @@ class TaskTests(unittest.TestCase):
     def _read_parquet_rows(path: Path) -> list[dict[str, object]]:
         return [dict(row) for row in pq.read_table(path).to_pylist()]
 
+    @staticmethod
+    def _write_csv_rows(path: Path, rows: list[str]) -> None:
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({"text": row})
+
     class _DummyPrepareClient:
         def __init__(self, rows: list[dict[str, object]]) -> None:
             self._rows = rows
@@ -860,6 +868,295 @@ class TaskTests(unittest.TestCase):
             [[0, 1], [2, 3], [4, 5]],
         )
 
+    def test_embedding_cluster_idf_guardrail_separates_generic_overlap_topics(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_cluster_generic_overlap.csv"
+        embedding_path = temp_dir / "issues_cluster_generic_overlap.embeddings.jsonl"
+        self._write_csv_rows(
+            csv_path,
+            [
+                "결제 오류가 계속 발생합니다",
+                "결제 승인 문제가 반복됩니다",
+                "로그인 오류가 계속 발생합니다",
+                "로그인 인증 문제가 반복됩니다",
+                "배송 오류가 계속 발생합니다",
+                "배송 조회 문제가 반복됩니다",
+            ],
+        )
+
+        dense_records = [
+            {
+                "source_index": 0,
+                "row_id": "version-generic:row:0",
+                "chunk_id": "version-generic:row:0:chunk:0",
+                "chunk_index": 0,
+                "char_start": 0,
+                "char_end": 14,
+                "text": "결제 오류가 계속 발생합니다",
+                "token_counts": {"결제": 1, "오류": 1, "계속": 1, "발생합니다": 1},
+                "norm": 1.0,
+                "embedding": [1.0, 0.0],
+                "embedding_dim": 2,
+                "embedding_provider": "fastembed",
+            },
+            {
+                "source_index": 1,
+                "row_id": "version-generic:row:1",
+                "chunk_id": "version-generic:row:1:chunk:0",
+                "chunk_index": 0,
+                "char_start": 0,
+                "char_end": 14,
+                "text": "결제 승인 문제가 반복됩니다",
+                "token_counts": {"결제": 1, "승인": 1, "문제": 1, "반복됩니다": 1},
+                "norm": 1.0,
+                "embedding": [0.999, 0.001],
+                "embedding_dim": 2,
+                "embedding_provider": "fastembed",
+            },
+            {
+                "source_index": 2,
+                "row_id": "version-generic:row:2",
+                "chunk_id": "version-generic:row:2:chunk:0",
+                "chunk_index": 0,
+                "char_start": 0,
+                "char_end": 15,
+                "text": "로그인 오류가 계속 발생합니다",
+                "token_counts": {"로그인": 1, "오류": 1, "계속": 1, "발생합니다": 1},
+                "norm": 1.0,
+                "embedding": [0.998, 0.002],
+                "embedding_dim": 2,
+                "embedding_provider": "fastembed",
+            },
+            {
+                "source_index": 3,
+                "row_id": "version-generic:row:3",
+                "chunk_id": "version-generic:row:3:chunk:0",
+                "chunk_index": 0,
+                "char_start": 0,
+                "char_end": 15,
+                "text": "로그인 인증 문제가 반복됩니다",
+                "token_counts": {"로그인": 1, "인증": 1, "문제": 1, "반복됩니다": 1},
+                "norm": 1.0,
+                "embedding": [0.997, 0.003],
+                "embedding_dim": 2,
+                "embedding_provider": "fastembed",
+            },
+            {
+                "source_index": 4,
+                "row_id": "version-generic:row:4",
+                "chunk_id": "version-generic:row:4:chunk:0",
+                "chunk_index": 0,
+                "char_start": 0,
+                "char_end": 14,
+                "text": "배송 오류가 계속 발생합니다",
+                "token_counts": {"배송": 1, "오류": 1, "계속": 1, "발생합니다": 1},
+                "norm": 1.0,
+                "embedding": [0.996, 0.004],
+                "embedding_dim": 2,
+                "embedding_provider": "fastembed",
+            },
+            {
+                "source_index": 5,
+                "row_id": "version-generic:row:5",
+                "chunk_id": "version-generic:row:5:chunk:0",
+                "chunk_index": 0,
+                "char_start": 0,
+                "char_end": 14,
+                "text": "배송 조회 문제가 반복됩니다",
+                "token_counts": {"배송": 1, "조회": 1, "문제": 1, "반복됩니다": 1},
+                "norm": 1.0,
+                "embedding": [0.995, 0.005],
+                "embedding_dim": 2,
+                "embedding_provider": "fastembed",
+            },
+        ]
+        with embedding_path.open("w", encoding="utf-8") as handle:
+            for record in dense_records:
+                handle.write(json.dumps(record, ensure_ascii=False))
+                handle.write("\n")
+
+        cluster_result = run_embedding_cluster(
+            {
+                "dataset_name": str(csv_path),
+                "embedding_uri": str(embedding_path),
+                "cluster_similarity_threshold": 0.2,
+                "sample_n": 2,
+                "top_n": 3,
+            }
+        )
+
+        self.assertEqual(cluster_result["artifact"]["summary"]["similarity_backend"], "dense-hybrid")
+        self.assertEqual(cluster_result["artifact"]["summary"]["cluster_count"], 3)
+        self.assertEqual(
+            [cluster["member_source_indices"] for cluster in cluster_result["artifact"]["clusters"]],
+            [[0, 1], [2, 3], [4, 5]],
+        )
+
+    def test_local_embedding_cluster_fixture_is_stable_for_topic_groups(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_cluster_local_eval.csv"
+        embedding_path = temp_dir / "issues_cluster_local_eval.embeddings.jsonl"
+        self._write_csv_rows(
+            csv_path,
+            [
+                "결제 오류가 계속 발생합니다",
+                "결제 승인 문제가 반복됩니다",
+                "로그인 오류가 계속 발생합니다",
+                "로그인 인증 문제가 반복됩니다",
+                "배송 오류가 계속 발생합니다",
+                "배송 조회 문제가 반복됩니다",
+            ],
+        )
+
+        local_embedding_vectors = {
+            "결제 오류가 계속 발생합니다": [1.0, 0.0],
+            "결제 승인 문제가 반복됩니다": [0.999, 0.001],
+            "로그인 오류가 계속 발생합니다": [0.998, 0.002],
+            "로그인 인증 문제가 반복됩니다": [0.997, 0.003],
+            "배송 오류가 계속 발생합니다": [0.996, 0.004],
+            "배송 조회 문제가 반복됩니다": [0.995, 0.005],
+        }
+
+        with patch(
+            "python_ai_worker.skills.dataset_build.rt._generate_dense_embeddings",
+            return_value={
+                "provider": "fastembed",
+                "model": "intfloat/multilingual-e5-small",
+                "dimensions": 2,
+                "embeddings": [local_embedding_vectors[text] for text in local_embedding_vectors],
+            },
+        ):
+            embedding_result = run_embedding(
+                {
+                    "dataset_version_id": "version-local-cluster",
+                    "dataset_name": str(csv_path),
+                    "text_column": "text",
+                    "output_path": str(embedding_path),
+                    "embedding_model": "intfloat/multilingual-e5-small",
+                }
+            )
+
+        cluster_result = run_embedding_cluster(
+            {
+                "dataset_name": str(csv_path),
+                "embedding_uri": embedding_result["artifact"]["embedding_uri"],
+                "cluster_similarity_threshold": 0.2,
+                "sample_n": 2,
+                "top_n": 3,
+            }
+        )
+
+        self.assertEqual(cluster_result["artifact"]["summary"]["similarity_backend"], "dense-hybrid")
+        self.assertEqual(cluster_result["artifact"]["summary"]["cluster_count"], 3)
+        self.assertEqual(
+            [cluster["member_source_indices"] for cluster in cluster_result["artifact"]["clusters"]],
+            [[0, 1], [2, 3], [4, 5]],
+        )
+
+    def test_local_embedding_fixture_drives_semantic_search_ranking(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_semantic_local_eval.csv"
+        embedding_path = temp_dir / "issues_semantic_local_eval.embeddings.jsonl"
+        self._write_csv_rows(
+            csv_path,
+            [
+                "결제 오류가 반복 발생했습니다",
+                "로그인이 자주 실패하고 오류가 보입니다",
+                "배송 문의가 계속 들어옵니다",
+            ],
+        )
+
+        local_embedding_vectors = {
+            "결제 오류가 반복 발생했습니다": [1.0, 0.0],
+            "로그인이 자주 실패하고 오류가 보입니다": [0.82, 0.18],
+            "배송 문의가 계속 들어옵니다": [0.0, 1.0],
+        }
+
+        with patch(
+            "python_ai_worker.skills.dataset_build.rt._generate_dense_embeddings",
+            return_value={
+                "provider": "fastembed",
+                "model": "intfloat/multilingual-e5-small",
+                "dimensions": 2,
+                "embeddings": [local_embedding_vectors[text] for text in local_embedding_vectors],
+            },
+        ):
+            embedding_result = run_embedding(
+                {
+                    "dataset_version_id": "version-local-semantic",
+                    "dataset_name": str(csv_path),
+                    "text_column": "text",
+                    "output_path": str(embedding_path),
+                    "embedding_model": "intfloat/multilingual-e5-small",
+                }
+            )
+
+        chunk_path = Path(str(embedding_result["artifact"]["chunk_ref"]))
+        embedding_index_path = Path(str(embedding_result["artifact"]["embedding_index_source_ref"]))
+        index_rows = self._read_parquet_rows(embedding_index_path)
+
+        def fake_query_pgvector_rows(dataset_version_id: str, query_vector: list[float], sample_n: int) -> list[dict[str, object]]:
+            self.assertEqual(dataset_version_id, "version-local-semantic")
+            scored_rows: list[dict[str, object]] = []
+            for row in index_rows:
+                embedding_json = str(row.get("embedding_json") or "").strip()
+                if not embedding_json:
+                    continue
+                vector = [float(item) for item in json.loads(embedding_json)]
+                score = sum(
+                    float(query_vector[index]) * vector[index]
+                    for index in range(min(len(query_vector), len(vector)))
+                )
+                scored_rows.append(
+                    {
+                        "chunk_id": row["chunk_id"],
+                        "row_id": row["row_id"],
+                        "source_row_index": row["source_index"],
+                        "chunk_index": row["chunk_index"],
+                        "chunk_ref": str(chunk_path),
+                        "metadata": {
+                            "char_start": row["char_start"],
+                            "char_end": row["char_end"],
+                        },
+                        "score": score,
+                    }
+                )
+            scored_rows.sort(key=lambda item: (-float(item["score"]), int(item["source_row_index"])))
+            return scored_rows[:sample_n]
+
+        with (
+            patch(
+                "python_ai_worker.skills.support._lookup_pgvector_index_metadata",
+                return_value={"embedding_model": "intfloat/multilingual-e5-small", "vector_dim": 2},
+            ),
+            patch(
+                "python_ai_worker.skills.support.rt._generate_query_embedding",
+                return_value=[1.0, 0.0],
+            ),
+            patch(
+                "python_ai_worker.skills.support._query_pgvector_rows",
+                side_effect=fake_query_pgvector_rows,
+            ),
+        ):
+            result = run_semantic_search(
+                {
+                    "dataset_name": str(csv_path),
+                    "dataset_version_id": "version-local-semantic",
+                    "embedding_uri": embedding_result["artifact"]["embedding_uri"],
+                    "embedding_index_ref": "pgvector://embedding_index_chunks?dataset_version_id=version-local-semantic",
+                    "chunk_ref": str(chunk_path),
+                    "chunk_format": "parquet",
+                    "query": "결제 오류 관련 근거를 찾아줘",
+                    "sample_n": 3,
+                    "text_column": "text",
+                }
+            )
+
+        self.assertEqual(result["artifact"]["retrieval_backend"], "pgvector")
+        self.assertEqual(result["artifact"]["matches"][0]["text"], "결제 오류가 반복 발생했습니다")
+        self.assertEqual(result["artifact"]["matches"][1]["text"], "로그인이 자주 실패하고 오류가 보입니다")
+        self.assertEqual(result["artifact"]["matches"][0]["chunk_ref"], str(chunk_path))
+
     def test_embedding_cluster_prefers_pgvector_when_available(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues_cluster_pgvector.csv"
@@ -1163,6 +1460,7 @@ class TaskTests(unittest.TestCase):
         csv_path = temp_dir / "issues.csv"
         embedding_path = temp_dir / "issues.csv.embeddings.jsonl"
         chunk_path = temp_dir / "issues.csv.chunks.parquet"
+        embedding_index_path = temp_dir / "issues.csv.embeddings.index.parquet"
         with csv_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=["text"])
             writer.writeheader()
@@ -1181,6 +1479,8 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(embedding_result["artifact"]["embedding_uri"], str(embedding_path))
         self.assertEqual(embedding_result["artifact"]["embedding_ref"], str(embedding_path))
         self.assertEqual(embedding_result["artifact"]["embedding_format"], "jsonl")
+        self.assertEqual(embedding_result["artifact"]["embedding_index_source_ref"], str(embedding_index_path))
+        self.assertEqual(embedding_result["artifact"]["embedding_index_source_format"], "parquet")
         self.assertEqual(embedding_result["artifact"]["chunk_ref"], str(chunk_path))
         self.assertEqual(embedding_result["artifact"]["chunk_format"], "parquet")
         self.assertEqual(embedding_result["artifact"]["row_id_column"], "row_id")
@@ -1190,16 +1490,20 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(embedding_result["artifact"]["chunking_strategy"], "text-window-v1")
         self.assertTrue(embedding_path.exists())
         self.assertTrue(chunk_path.exists())
+        self.assertTrue(embedding_index_path.exists())
 
         embedding_rows = []
         with embedding_path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 embedding_rows.append(json.loads(line))
         chunk_rows = self._read_parquet_rows(chunk_path)
+        embedding_index_rows = self._read_parquet_rows(embedding_index_path)
         self.assertEqual(embedding_rows[0]["row_id"], "version-embed:row:0")
         self.assertEqual(embedding_rows[0]["chunk_id"], "version-embed:row:0:chunk:0")
         self.assertEqual(chunk_rows[0]["chunk_id"], "version-embed:row:0:chunk:0")
         self.assertEqual(chunk_rows[0]["chunk_text"], "결제 오류가 반복 발생했습니다")
+        self.assertEqual(embedding_index_rows[0]["chunk_id"], "version-embed:row:0:chunk:0")
+        self.assertIn("token_counts_json", embedding_index_rows[0])
 
         search_result = run_semantic_search(
             {

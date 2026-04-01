@@ -8,7 +8,6 @@ from typing import Any
 
 from .common import (
     _bucket_label,
-    _cosine_similarity,
     _duplicate_similarity,
     _iter_documents,
     _iter_embedding_records,
@@ -443,15 +442,75 @@ def _dense_cosine_similarity(left: list[float], right: list[float]) -> float:
     return sum(left[index] * right[index] for index in range(len(left)))
 
 
+def _cluster_token_idf(records: list[dict[str, Any]]) -> dict[str, float]:
+    if not records:
+        return {}
+    document_frequency: Counter[str] = Counter()
+    for record in records:
+        token_counts = _token_counter(record.get("token_counts") or {})
+        document_frequency.update(set(token_counts.keys()))
+    total_documents = max(len(records), 1)
+    return {
+        token: 1.0 + math.log((total_documents + 1.0) / (float(frequency) + 1.0))
+        for token, frequency in document_frequency.items()
+        if token
+    }
+
+
+def _weighted_token_counts(token_counts: Counter[str], token_idf: dict[str, float]) -> dict[str, float]:
+    weighted: dict[str, float] = {}
+    for token, count in token_counts.items():
+        weight = float(count) * float(token_idf.get(token, 1.0))
+        if weight > 0:
+            weighted[token] = weight
+    return weighted
+
+
+def _sparse_vector_norm(values: dict[str, float]) -> float:
+    if not values:
+        return 0.0
+    return math.sqrt(sum(value * value for value in values.values()))
+
+
+def _sparse_cosine_similarity(left: dict[str, float], right: dict[str, float], right_norm: float) -> float:
+    if not left or not right or right_norm <= 0:
+        return 0.0
+    left_norm = _sparse_vector_norm(left)
+    if left_norm <= 0:
+        return 0.0
+    dot_product = 0.0
+    for token, left_value in left.items():
+        dot_product += left_value * float(right.get(token) or 0.0)
+    return dot_product / (left_norm * right_norm)
+
+
+def _leading_anchor_token(text: Any) -> str:
+    tokens = _tokenize(str(text or ""))
+    if not tokens:
+        return ""
+    return str(tokens[0]).strip()
+
+
 def _cluster_similarity_backend(value: Any) -> str:
     if not isinstance(value, set):
         return "token-overlap"
     normalized = {str(item).strip() for item in value if str(item).strip()}
+    if normalized == {"dense-only"}:
+        return "dense-only"
     if normalized == {"dense-hybrid"}:
         return "dense-hybrid"
     if normalized == {"token-overlap"} or not normalized:
         return "token-overlap"
     return "mixed"
+
+
+def _normalize_cluster_similarity_mode(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "dense-only":
+        return "dense-only"
+    if normalized == "token-overlap":
+        return "token-overlap"
+    return "dense-hybrid"
 
 
 def _build_time_bucket_artifact(normalized: dict[str, Any], selected_rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -660,12 +719,17 @@ def _cluster_embedding_records(
     similarity_threshold: float,
     sample_n: int,
     top_n: int,
+    similarity_mode: str = "dense-hybrid",
 ) -> list[dict[str, Any]]:
     working_clusters: list[dict[str, Any]] = []
     ordered_records = sorted(records, key=lambda item: int(item.get("source_index") or 0))
+    token_idf = _cluster_token_idf(ordered_records)
+    resolved_similarity_mode = _normalize_cluster_similarity_mode(similarity_mode)
     for record in ordered_records:
         token_counts = _token_counter(record.get("token_counts") or {})
+        weighted_counts = _weighted_token_counts(token_counts, token_idf)
         dense_vector = _dense_embedding_vector(record.get("embedding"))
+        leading_anchor = _leading_anchor_token(record.get("text"))
         if not token_counts and not dense_vector:
             continue
         best_cluster: dict[str, Any] | None = None
@@ -675,13 +739,38 @@ def _cluster_embedding_records(
             score = 0.0
             backend = "token-overlap"
             aggregate_embedding = list(cluster.get("aggregate_embedding") or [])
-            if dense_vector and aggregate_embedding and len(dense_vector) == len(aggregate_embedding):
+            if (
+                resolved_similarity_mode == "dense-only"
+                and dense_vector
+                and aggregate_embedding
+                and len(dense_vector) == len(aggregate_embedding)
+            ):
+                score = _dense_cosine_similarity(dense_vector, aggregate_embedding)
+                backend = "dense-only"
+            elif dense_vector and aggregate_embedding and len(dense_vector) == len(aggregate_embedding):
                 dense_score = _dense_cosine_similarity(dense_vector, aggregate_embedding)
-                token_score = _cosine_similarity(token_counts, dict(cluster["aggregate_counts"]), float(cluster["aggregate_norm"]))
-                score = dense_score * max(token_score, 0.1)
-                backend = "dense-hybrid"
+                token_score = _sparse_cosine_similarity(
+                    weighted_counts,
+                    dict(cluster.get("aggregate_weighted_counts") or {}),
+                    float(cluster.get("aggregate_weighted_norm") or 0.0),
+                )
+                cluster_anchor_counts = Counter(cluster.get("leading_anchor_counts") or {})
+                anchor_match = bool(leading_anchor and cluster_anchor_counts.get(leading_anchor, 0) > 0)
+                cluster_tokens = set(_token_counter(cluster.get("aggregate_counts") or {}).keys())
+                shared_token_count = len(set(token_counts.keys()) & cluster_tokens)
+                generic_overlap_penalty = not anchor_match and shared_token_count >= 2
+                if resolved_similarity_mode == "dense-hybrid":
+                    lexical_guard = token_score * 0.25 if generic_overlap_penalty else max(token_score, 0.1)
+                    score = dense_score * lexical_guard
+                    backend = "dense-hybrid"
+                else:
+                    score = token_score
             elif token_counts:
-                score = _cosine_similarity(token_counts, dict(cluster["aggregate_counts"]), float(cluster["aggregate_norm"]))
+                score = _sparse_cosine_similarity(
+                    weighted_counts,
+                    dict(cluster.get("aggregate_weighted_counts") or {}),
+                    float(cluster.get("aggregate_weighted_norm") or 0.0),
+                )
             if score > best_score:
                 best_score = score
                 best_cluster = cluster
@@ -692,16 +781,25 @@ def _cluster_embedding_records(
             "chunk_id": str(record.get("chunk_id") or "").strip(),
             "text": str(record.get("text") or "")[:240],
             "token_counts": token_counts,
+            "leading_anchor": leading_anchor,
         }
         if best_cluster is None or best_score < similarity_threshold:
-            backends = {"dense-hybrid"} if dense_vector else {"token-overlap"}
+            if dense_vector and resolved_similarity_mode == "dense-only":
+                backends = {"dense-only"}
+            elif dense_vector and resolved_similarity_mode == "dense-hybrid":
+                backends = {"dense-hybrid"}
+            else:
+                backends = {"token-overlap"}
             working_clusters.append(
                 {
                     "members": [member],
                     "aggregate_counts": Counter(token_counts),
                     "aggregate_norm": _vector_norm(token_counts),
+                    "aggregate_weighted_counts": Counter(weighted_counts),
+                    "aggregate_weighted_norm": _sparse_vector_norm(weighted_counts),
                     "aggregate_embedding": list(dense_vector),
                     "dense_member_count": 1 if dense_vector else 0,
+                    "leading_anchor_counts": Counter([leading_anchor]) if leading_anchor else Counter(),
                     "similarity_backends": backends,
                 }
             )
@@ -709,6 +807,10 @@ def _cluster_embedding_records(
         best_cluster["members"].append(member)
         best_cluster["aggregate_counts"].update(token_counts)
         best_cluster["aggregate_norm"] = _vector_norm(best_cluster["aggregate_counts"])
+        best_cluster.setdefault("aggregate_weighted_counts", Counter()).update(weighted_counts)
+        best_cluster["aggregate_weighted_norm"] = _sparse_vector_norm(dict(best_cluster["aggregate_weighted_counts"]))
+        if leading_anchor:
+            best_cluster.setdefault("leading_anchor_counts", Counter()).update([leading_anchor])
         best_cluster.setdefault("similarity_backends", set()).add(best_backend)
         if dense_vector:
             aggregate_embedding = list(best_cluster.get("aggregate_embedding") or [])

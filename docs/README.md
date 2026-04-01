@@ -13,7 +13,7 @@
 | `docs/project_summary.md` | 제품 정의와 현재 실행 흐름의 짧은 스냅샷 |
 | `docs/devlog/README.md` | daily 고민/챌린지 로그 안내와 작성 규칙 |
 | `docs/architecture/target_stack.md` | 목표 아키텍처와 실행 흐름 |
-| `docs/architecture/dev_postgres_reset.md` | `pgvector` 전환 뒤 개발용 Postgres volume 재초기화 절차 |
+| `docs/architecture/dev_postgres_reset.md` | `pgvector` 전환 뒤 개발용 Postgres volume 재초기화 절차와 helper script 안내 |
 | `docs/architecture/language_roles.md` | Go, Python, Rust, DuckDB, Postgres의 책임 구분 |
 | `docs/architecture/migration_plan.md` | 레거시 Python MVP에서 목표 구조로 옮기는 단계 |
 | `docs/architecture/unstructured_storage_transition.md` | 비정형 dataset의 JSONL artifact를 Parquet + vector index 구조로 바꾸는 설계 |

@@ -145,14 +145,16 @@
 - `embedding_model=text-embedding-*` override를 주면 OpenAI dense embedding 경로를 사용할 수 있다.
 - 예를 들어 기본값 `embedding_model=intfloat/multilingual-e5-small`이면 local model download 뒤 `384차원` embedding을 만들 수 있다.
 - `OPENAI_API_KEY`가 없거나 local/OpenAI dense 호출이 불가하면 `embedding`은 `token-overlap-v1` sidecar로 자동 fallback한다.
-- dense가 성공해도 `embeddings.jsonl`에는 기존 `token_counts`, `norm`을 같이 남겨 fallback과 lexical guardrail 경로를 유지한다.
-- control plane은 build가 끝난 뒤 이 `embeddings.jsonl`을 읽어 dense vector가 있으면 그대로, 없으면 64차원 hashed projection vector로 바꿔 `pgvector` table `embedding_index_chunks`에 적재한다.
+- dense가 성공해도 `embeddings.jsonl`에는 기존 `token_counts`, `norm`을 같이 남겨 fallback과 lexical guardrail 경로를 유지하고, 별도 `embeddings.index.parquet`를 index 적재용으로 만든다.
+- control plane은 build가 끝난 뒤 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 64차원 hashed projection vector로 바꿔 `pgvector` table `embedding_index_chunks`에 적재한다. index source를 못 읽을 때만 `embeddings.jsonl`로 fallback한다.
 - `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query embedding을 다시 만든다. 불가하면 `embeddings.jsonl`로 fallback한다. 검색 결과에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.
 - `BuildEmbeddings` request는 `embedding_model` override를 받아 dataset version에 저장된 기본 model을 바꿔 실행할 수 있다.
 - `issue_evidence_summary`와 `evidence_pack`은 `semantic_search` prior artifact가 있을 때 chunk citation을 evidence artifact까지 그대로 보존한다.
 - `runtime/common.py`는 `.parquet` reader를 지원하므로 `sentiment_label`, `document_filter`, `time_bucket_count` 같은 row 기반 task가 prepared Parquet를 직접 읽을 수 있다.
 - `issue_evidence_summary`는 `issue_trend_summary`, `issue_breakdown_summary`, `issue_period_compare`, `issue_cluster_summary`, `issue_taxonomy_summary`, `issue_sentiment_summary` 같은 prior artifact를 `analysis_context`로 반영한다.
-- `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 우선 사용한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` token fallback을 사용한다.
+- `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 우선 사용한다. generic overlap 회귀 fixture가 unit test에 추가됐고, `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` token fallback을 사용한다.
+- 테스트에는 `dense-only`와 `dense-hybrid`를 같은 generic overlap fixture에서 비교하는 helper 케이스가 있고, 현재 기준으로 `dense-only`는 1개 군집으로 붕괴되고 `dense-hybrid`는 `3개 군집`을 유지한다.
+- 테스트에는 local embedding fixture를 직접 주입해 `semantic_search` top ranking과 `embedding_cluster` membership이 기대 토픽 그룹을 유지하는지 확인하는 회귀 케이스도 포함한다.
 - embedding sidecar record는 `row_id`, `chunk_id`, `chunk_index`, `char_start`, `char_end`를 함께 저장하고, 별도 `chunks.parquet`에는 `chunk_text`와 chunk metadata를 남긴다.
 - `deduplicate_documents`는 정규화 텍스트 동일성 + token-set Jaccard similarity를 사용한다.
 - `dictionary_tagging`은 rule-based taxonomy tagging을 사용한다.

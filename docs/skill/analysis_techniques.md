@@ -15,7 +15,7 @@
 - support skill이 먼저 artifact를 만들고, core skill이 그 결과를 재사용하는 구조를 우선한다.
 - planner, evidence summary, dataset prepare, sentiment labeling은 Anthropic 경로가 있더라도 fallback 경로를 유지한다.
 - 현재 `embedding`의 기본값은 `intfloat/multilingual-e5-small` FastEmbed local model 기반 dense 경로이고, 필요하면 OpenAI Embeddings API override를 줄 수 있다. 호출이 실패하면 `token-overlap-v1` fallback을 유지한다.
-  - `embedding` task는 dense vector가 있더라도 `token_counts`와 `norm`을 같이 저장해 기존 clustering/debug 경로를 유지한다.
+  - `embedding` task는 dense vector가 있더라도 `token_counts`와 `norm`을 같이 저장해 기존 clustering/debug 경로를 유지하고, index 적재용 `embeddings.index.parquet`도 함께 만든다.
   - `semantic_search`는 dense index metadata가 있으면 같은 model로 query embedding을 만들고, 없으면 token vector cosine similarity로 fallback한다.
   - `embedding_cluster`는 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 token vector cosine similarity로 fallback한다.
 
@@ -31,7 +31,7 @@
 | --- | --- | --- | --- | --- |
 | `dataset_prepare` | 데이터셋 정제 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | 정규식 기반 text normalization과 noise 판별을 기본으로 수행하고, 설정 시 Anthropic batch prepare를 우선 사용한다. 기본 prepare model은 `claude-3-5-haiku-latest`이며 prompt는 version registry에서 관리한다. 기본 `prepare_batch_size`는 8이며 결과는 `prepared.parquet` artifact로 저장한다. 각 row에는 `row_id`를 부여하고 artifact에는 `prepared_ref`, `prepare_format=parquet`을 함께 남긴다. 명시적으로 `.jsonl` output path를 주면 호환용 JSONL도 유지할 수 있다. | 언어별 normalization, quality score, column-aware cleaning, duplicate/noise classifier, adaptive batch sizing, sentiment/chunk sidecar까지 Parquet로 확장할 수 있다. |
 | `sentiment_label` | 감성 라벨링 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | 감성 사전 기반 fallback 분류를 수행하고, 설정 시 Anthropic 분류를 우선 사용한다. 기본 model은 `claude-3-5-haiku-latest`이며 prompt는 version registry에서 관리한다. 입력은 prepare 완료 후 `prepared.parquet`를 직접 읽을 수 있고, 결과는 현재 `row_id`, `source_row_index`, 감성 컬럼 중심의 `sentiment.parquet` sidecar로 저장한다. | 도메인 특화 classifier, confidence calibration, aspect sentiment, label guideline 강화, prepared dataset join을 control plane 공통 helper로 끌어올리는 방향을 검토할 수 있다. |
-| `embedding` | 임베딩 생성 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | 현재는 text-window 기반 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준 FastEmbed local model을 시도한다. `text-embedding-*` override를 주면 OpenAI 경로를 탄다. dense 호출이 가능하면 vector를 `embeddings.jsonl` record에 함께 저장하고, 불가하면 `token-overlap-v1` 방식의 `token_counts`와 `norm`만 남긴다. record에는 `row_id`, `chunk_id`, `chunk_index`, `char_start`, `char_end`를 함께 저장한다. control plane은 이 sidecar를 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection vector로 바꿔 `pgvector` table에 적재한다. | hybrid retrieval, ANN index, adaptive chunking, multilingual embedding, embedding cost control, cache 정책을 검토할 수 있다. |
+| `embedding` | 임베딩 생성 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | 현재는 text-window 기반 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준 FastEmbed local model을 시도한다. `text-embedding-*` override를 주면 OpenAI 경로를 탄다. dense 호출이 가능하면 vector를 `embeddings.jsonl` fallback record와 `embeddings.index.parquet` index source에 함께 저장하고, 불가하면 `token-overlap-v1` 방식의 `token_counts`와 `norm`만 남긴다. record에는 `row_id`, `chunk_id`, `chunk_index`, `char_start`, `char_end`를 함께 저장한다. control plane은 index source parquet를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection vector로 바꿔 `pgvector` table에 적재한다. | hybrid retrieval, ANN index, adaptive chunking, multilingual embedding, embedding cost control, cache 정책을 검토할 수 있다. |
 
 ## Unstructured Support
 
@@ -73,7 +73,8 @@
 - 현재 비정형 skill의 핵심 deterministic 기술은 `토큰화`, `사전 매칭`, `빈도 분석`, `bucket 집계`, `bag-of-words cosine similarity`, `greedy clustering`이다.
 - `semantic_search`는 이제 dense index metadata가 있으면 query embedding도 dense model로 맞춘다. `embedding_cluster`는 `pgvector`와 chunk parquet를 우선 쓰고, dense vector가 있으면 `dense-hybrid` 유사도를 사용한다.
 - 현재 `pgvector` 적재는 dense model 출력 또는 token count projection fallback의 혼합 단계다.
-- `dense-hybrid`는 dense-only collapse를 막기 위한 guardrail로는 유효하지만, 범용 표현이 많이 겹치는 dataset에서는 여전히 1개 군집으로 뭉칠 수 있어 threshold와 fixture 검증을 계속 유지해야 한다.
+- `dense-hybrid`는 dense-only collapse를 막기 위한 guardrail로는 유효하고, 현재 generic overlap 회귀 fixture도 추가됐다. 다만 threshold와 fixture 검증은 계속 유지해야 한다.
+- 현재 테스트 자산에는 `dense-only`와 `dense-hybrid`를 같은 fixture에서 직접 비교하는 helper 회귀가 있고, local embedding fixture를 주입해 `semantic_search`, `embedding_cluster` 결과를 평가하는 task 회귀도 포함한다.
 - LLM은 planner, evidence summary, dataset prepare, sentiment labeling에서 선택적으로 사용되고, 실패 시 deterministic fallback으로 내려간다.
 - 확인 필요: OpenAI key를 넣은 dense embedding end-to-end smoke와 local/OpenAI retrieval 품질 비교는 아직 별도 검증이 더 필요하다.
 - 확인 필요: 실제 운영 단계에서 clustering, dedup, retrieval 중 어떤 부분을 Rust hot path 또는 별도 inference path로 옮길지는 성능 측정 결과와 분석팀 품질 기준을 함께 보고 결정해야 한다.

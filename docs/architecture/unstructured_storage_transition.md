@@ -10,13 +10,13 @@
 
 - `dataset_prepare` 기본 출력은 `prepared.parquet` artifact다.
 - `sentiment_label` 기본 출력은 `sentiment.parquet` artifact다.
-- `embedding`은 현재 `chunks.parquet`를 먼저 만들고 `embeddings.jsonl` artifact를 만든다.
+- `embedding`은 현재 `chunks.parquet`를 먼저 만들고 `embeddings.jsonl` fallback artifact와 `embeddings.index.parquet` index source artifact를 함께 만든다.
 - control plane은 `dataset_versions.prepare_uri`, `sentiment_uri`, `embedding_uri`에 이 경로를 저장한다.
 - Python worker는 현재 `.csv`, `.jsonl`, `.parquet`, `.txt`를 읽을 수 있지만, 대부분 전체 row를 메모리 `list`로 올린다.
 - embedding sidecar도 전체 record를 메모리로 읽어 cosine similarity와 clustering에 사용한다.
 - 현재 `embedding`은 기본 `intfloat/multilingual-e5-small` FastEmbed local model vector를 기록하고, 필요하면 OpenAI dense vector override를 받을 수 있다. dense 호출이 불가하면 `token_counts + norm` 중심의 `token-overlap-v1`로 fallback한다.
 - 현재 `semantic_search`와 `issue_evidence_summary`는 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 artifact까지 전달한다.
-- control plane은 현재 embedding build 직후 `embeddings.jsonl`을 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection vector로 바꾸고 `embedding_index_chunks`에 적재한다.
+- control plane은 현재 embedding build 직후 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection vector로 바꾸고 `embedding_index_chunks`에 적재한다. index source가 없을 때만 `embeddings.jsonl` fallback을 읽는다.
 - `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 embedding model로 query vector를 만든다. 불가하면 `embeddings.jsonl` scan으로 fallback한다.
 - `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` fallback을 사용한다.
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension, `embedding_index_chunks` table을 가진다.
@@ -134,7 +134,7 @@ flowchart LR
 
 - prepared dataset에서 `chunks.parquet`를 만든다.
 - chunk는 `chunk_id`, `row_id`, `chunk_index`, `chunk_text`, `char_start`, `char_end`를 가진다.
-- 현재 구현은 chunk 단위 sidecar에 dense embedding을 함께 기록할 수 있고, control plane은 dense vector를 그대로 `pgvector`에 적재한다.
+- 현재 구현은 chunk 단위 sidecar에 dense embedding을 함께 기록할 수 있고, control plane은 `embeddings.index.parquet`의 dense vector를 그대로 `pgvector`에 적재한다.
 - dense embedding이 없으면 control plane은 token-overlap sidecar를 64차원 hashed projection으로 `pgvector`에 적재한다.
 - 확인 필요:
   실제 OpenAI key를 넣은 dense embedding end-to-end smoke는 이번 turn에 재현하지 않았다.
@@ -145,6 +145,7 @@ flowchart LR
 - 현재 `semantic_search`는 index metadata가 dense model이면 같은 model로 query embedding을 만든다.
 - 다음 단계는 dense embedding 실운영 검증과 `dense-hybrid` clustering 품질 평가다.
 - clustering은 현재 `pgvector + chunks.parquet` 기반 `dense-hybrid` 경로를 우선 사용하고, JSONL/token fallback을 보조 경로로 유지한다.
+- generic overlap fixture는 현재 unit test에 추가돼 기본 분리 회귀를 고정했다.
 
 ### Phase 5. JSONL 축소
 
@@ -169,7 +170,7 @@ flowchart LR
   - 현재 stack에 이미 있고 Parquet scan과 잘 맞는다.
 - `pgvector`
   - 이미 Postgres가 있으므로 1차 운영 복잡도를 크게 늘리지 않는다.
-  - 현재 dev stack에는 extension과 table, embedding build 후 적재 경로를 반영했다.
+  - 현재 dev stack에는 extension과 table, `embeddings.index.parquet` 기반 적재 경로를 반영했다.
 - `OpenAI Embeddings API`
   - 현재 dense embedding code path 중 하나는 이 API 기준으로 구현돼 있다.
   - 공식 문서: [Embeddings API](https://platform.openai.com/docs/api-reference/embeddings/create)
@@ -182,11 +183,11 @@ flowchart LR
 ## 구현 시 주의점
 
 - 현재 `workers/python-ai/pyproject.toml`에는 `pyarrow`가 추가돼 있다.
-- 현재 구현은 `pyarrow`로 Parquet reader/writer를 처리한다.
+- 현재 구현은 `pyarrow`로 Parquet reader/writer를 처리하고, control plane 쪽 parquet index source read에는 DuckDB를 사용한다.
 - 현재 control plane의 `datasetSourceForUnstructured`, `derivePrepareURI`, `deriveSentimentURI`, `deriveEmbeddingURI`는 파일 경로 계약을 전제로 한다.
 - 따라서 1차 구현은 필드 이름을 유지한 채 포맷과 metadata를 늘리는 방향이 안전하다.
 - 확인 필요:
-  `pgvector` 이미지 전환 뒤 기존 volume을 재사용하면 Postgres collation version mismatch warning이 관찰됐다.
+  `pgvector` 이미지 전환 뒤 기존 volume을 재사용하면 Postgres collation version mismatch warning이 관찰됐다. 개발용 reset helper는 [reset_postgres_dev.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/reset_postgres_dev.sh)다.
 
 ## 완료 기준
 
