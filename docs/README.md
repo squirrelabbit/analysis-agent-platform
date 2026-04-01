@@ -20,6 +20,7 @@
 | `docs/architecture/project_map.mmd` | 시스템 수준 구조도 |
 | `docs/skill/skill_registry.md` | Skill contract와 Core/Support 분류 기준 |
 | `docs/skill/analysis_techniques.md` | skill별 분석 기법과 사용 기술 설명 |
+| `docs/skill/preprocessing_candidates.md` | 전처리 후보 skill과 prepare 내부 규칙, backlog 정리 |
 | `docs/api/openapi.yaml` | control-plane HTTP API 명세 |
 
 참고:

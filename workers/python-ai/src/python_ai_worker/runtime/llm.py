@@ -71,6 +71,7 @@ def _run_planner_with_llm(
             "Choose the smallest valid skill plan for the request.",
             f"Allowed skills: {allowed_skills}.",
             "Use structured_kpi_summary for numeric KPI/tabular analysis.",
+            "Use garbage_filter to remove ad, promotion, placeholder, or noise-only rows before downstream text analysis when the dataset likely contains garbage SNS content.",
             "Use document_filter first for replayable lexical narrowing before downstream text analysis.",
             "Use deduplicate_documents to collapse repeated or near-identical documents.",
             "Use keyword_frequency to count top terms after document filtering.",

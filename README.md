@@ -24,6 +24,9 @@
 - `Claude Sonnet` 기반 planner/evidence generation 경로와 fallback 경로가 Python AI worker에 반영돼 있다.
 - `issue_evidence_summary`는 trend/breakdown/compare/cluster/taxonomy/sentiment 계열 prior artifact를 `analysis_context`로 끌어와 근거 설명에 반영한다.
 - `dataset_prepare`는 Anthropic prepare 경로가 켜지면 기본 `prepare_batch_size=8` 기준 batch 정제를 수행한다.
+- `dataset_prepare`에는 `regex_rule_names` 확장 포인트가 있고, 현재 기본 규칙은 `media_placeholder`, `html_artifact`, `url_cleanup`, `zero_width_cleanup` 4종이다.
+- 비정형 support skill에 `garbage_filter`가 추가돼 광고/협찬/링크 유도/placeholder/noise-only row를 downstream 분석 전에 제거할 수 있다.
+- `garbage_filter`는 execution 안에서 실행되면 row 단위 결과를 `rows.parquet` sidecar로 저장하고, execution artifact JSON에는 summary와 `artifact_ref`만 남긴다.
 - `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding`은 아직 JSONL sidecar를 유지한다.
 - `sentiment_label` 기본 출력은 이제 `row_id`, `source_row_index`, 감성 컬럼 중심의 sidecar이고, `issue_sentiment_summary`는 `prepared_dataset_name`을 함께 받아 텍스트를 조인한다.
 - `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 결과는 fallback/debug용 `embeddings.jsonl`과 index 적재용 `embeddings.index.parquet`를 함께 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1` sidecar로 자동 fallback한다.
@@ -69,9 +72,10 @@
   - Go control plane과 Python AI worker가 같은 bundle을 읽는다.
   - `/skills`와 planner 기본 입력, worker capability 노출은 이 bundle 기준으로 맞춘다.
 - 저장소 경로
-  - raw upload는 `UPLOAD_ROOT`
-  - prepare/sentiment/embedding 산출물은 `ARTIFACT_ROOT`
-  - 현재 기본 포맷은 `prepare/sentiment/chunk=Parquet`, `embedding=JSONL`이며, 장기 전환안은 `docs/architecture/unstructured_storage_transition.md`를 기준으로 본다.
+- raw upload는 `UPLOAD_ROOT`
+- prepare/sentiment/embedding 산출물은 `ARTIFACT_ROOT`
+- 일부 대용량 support skill 결과는 `ARTIFACT_ROOT/projects/<project_id>/executions/<execution_id>/steps/` 아래 sidecar로 저장하고, Postgres execution artifact에는 summary와 ref만 남긴다. 현재는 `garbage_filter`, `document_filter`, `deduplicate_documents`가 이 정책을 사용한다.
+- 현재 기본 포맷은 `prepare/sentiment/chunk=Parquet`, `embedding=JSONL`이며, 장기 전환안은 `docs/architecture/unstructured_storage_transition.md`를 기준으로 본다.
 - 검증 자산
   - Go unit test / build
   - Python unit test
@@ -92,6 +96,7 @@ Core skill:
 - `issue_evidence_summary`
 
 Support skill:
+- `garbage_filter`
 - `dataset_prepare`
 - `sentiment_label`
 - `document_filter`
@@ -111,6 +116,7 @@ Support skill:
 - 코어 스킬 우선 구현은 유지한다.
 - 1차 support skill 분리는 완료했고, planner가 support step을 명시적으로 포함한다.
 - cluster/taxonomy 계열 비정형 분석도 support skill 조합으로 실행할 수 있다.
+- `garbage_filter`는 현재 공식 plan skill로 등록돼 있고, LLM planner나 수동 plan step에서 명시적으로 사용할 수 있다.
 - 현재 skill 추가/수정의 메타데이터 변경은 `config/skill_bundle.json` 중심으로 반영한다.
 
 ## 현재 실행 흐름

@@ -36,7 +36,8 @@ func main() {
 		Runner: skills.CompositeRunner{
 			Structured: skills.DuckDBRunner{Path: cfg.DuckDBPath},
 			Unstructured: skills.PythonAIClient{
-				BaseURL: cfg.PythonAIWorkerURL,
+				BaseURL:      cfg.PythonAIWorkerURL,
+				ArtifactRoot: cfg.ArtifactRoot,
 			},
 		},
 		Now: workflows.NewAnalysisActivities().Now,

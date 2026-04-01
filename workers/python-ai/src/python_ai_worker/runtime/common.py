@@ -16,7 +16,15 @@ except ImportError:  # pragma: no cover - exercised in environments without parq
     pa = None
     pq = None
 
-from .constants import DEFAULT_TAXONOMY_RULES, STOPWORDS, TOKEN_PATTERN
+from .constants import (
+    DEFAULT_GARBAGE_RULE_NAMES,
+    DEFAULT_PREPARE_REGEX_RULE_NAMES,
+    DEFAULT_TAXONOMY_RULES,
+    GARBAGE_RULES,
+    PREPARE_REGEX_RULES,
+    STOPWORDS,
+    TOKEN_PATTERN,
+)
 
 
 def _iter_documents(dataset_name: str, text_column: str) -> list[str]:
@@ -91,6 +99,62 @@ def _normalize_prepared_text(text: str) -> str:
     normalized = re.sub(r"[!?.]{2,}", ".", normalized)
     normalized = re.sub(r"[_\-=/]{3,}", " ", normalized)
     return normalized.strip()
+
+
+def _normalize_prepare_regex_rule_names(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return list(DEFAULT_PREPARE_REGEX_RULE_NAMES)
+    normalized: list[str] = []
+    for item in value:
+        name = str(item or "").strip()
+        if not name or name not in PREPARE_REGEX_RULES or name in normalized:
+            continue
+        normalized.append(name)
+    return normalized or list(DEFAULT_PREPARE_REGEX_RULE_NAMES)
+
+
+def _normalize_garbage_rule_names(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return list(DEFAULT_GARBAGE_RULE_NAMES)
+    normalized: list[str] = []
+    for item in value:
+        name = str(item or "").strip()
+        if not name or name not in GARBAGE_RULES or name in normalized:
+            continue
+        normalized.append(name)
+    return normalized or list(DEFAULT_GARBAGE_RULE_NAMES)
+
+
+def _apply_prepare_regex_rules(text: str, rule_names: list[str]) -> tuple[str, list[str]]:
+    current = str(text or "")
+    applied: list[str] = []
+    for name in _normalize_prepare_regex_rule_names(rule_names):
+        rule = PREPARE_REGEX_RULES.get(name) or {}
+        replacement = str(rule.get("replacement") or " ")
+        before = current
+        for pattern in list(rule.get("patterns") or []):
+            current = re.sub(str(pattern), replacement, current, flags=re.IGNORECASE)
+        if current != before:
+            applied.append(name)
+    return current, applied
+
+
+def _match_garbage_rules(text: str, rule_names: list[str]) -> list[str]:
+    raw_text = str(text or "")
+    normalized_text, _ = _apply_prepare_regex_rules(raw_text, DEFAULT_PREPARE_REGEX_RULE_NAMES)
+    prepared_text = _normalize_prepared_text(normalized_text)
+    matched: list[str] = []
+    for name in _normalize_garbage_rule_names(rule_names):
+        if name == "empty_or_noise":
+            if not prepared_text or _looks_noise_only(prepared_text):
+                matched.append(name)
+            continue
+        rule = GARBAGE_RULES.get(name) or {}
+        for pattern in list(rule.get("patterns") or []):
+            if re.search(str(pattern), raw_text, flags=re.IGNORECASE):
+                matched.append(name)
+                break
+    return matched
 
 
 def _looks_noise_only(text: str) -> bool:
@@ -488,6 +552,7 @@ __all__ = [
     "_evidence_rationale",
     "_fallback_evidence_summary",
     "_fallback_follow_up_questions",
+    "_apply_prepare_regex_rules",
     "_in_bucket_range",
     "_iter_documents",
     "_iter_embedding_records",
@@ -503,7 +568,10 @@ __all__ = [
     "_looks_trend_goal",
     "_looks_unstructured",
     "_match_taxonomies",
+    "_match_garbage_rules",
+    "_normalize_garbage_rule_names",
     "_normalize_prepared_text",
+    "_normalize_prepare_regex_rule_names",
     "_normalize_taxonomy_rules",
     "_normalize_token",
     "_parse_timestamp",

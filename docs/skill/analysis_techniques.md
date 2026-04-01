@@ -14,6 +14,7 @@
 - 현재 비정형 skill의 기본 축은 `deterministic 전처리 + 규칙 기반 집계/검색 + 선택적 LLM 보강`이다.
 - support skill이 먼저 artifact를 만들고, core skill이 그 결과를 재사용하는 구조를 우선한다.
 - planner, evidence summary, dataset prepare, sentiment labeling은 Anthropic 경로가 있더라도 fallback 경로를 유지한다.
+- `dataset_prepare`는 현재 `regex_rule_names` 확장 포인트를 통해 명시적인 정규식 정제 규칙을 먼저 적용한 뒤 LLM/fallback normalize를 수행한다. 기본 규칙은 `media_placeholder`, `html_artifact`, `url_cleanup`, `zero_width_cleanup`이다.
 - 현재 `embedding`의 기본값은 `intfloat/multilingual-e5-small` FastEmbed local model 기반 dense 경로이고, 필요하면 OpenAI Embeddings API override를 줄 수 있다. 호출이 실패하면 `token-overlap-v1` fallback을 유지한다.
   - `embedding` task는 dense vector가 있더라도 `token_counts`와 `norm`을 같이 저장해 기존 clustering/debug 경로를 유지하고, index 적재용 `embeddings.index.parquet`도 함께 만든다.
 - `semantic_search`는 dense index metadata가 있으면 같은 model로 query embedding을 만들고, 없으면 token vector cosine similarity로 fallback한다. 현재 primary input은 `embedding_index_ref + chunk_ref`이고 `embedding_uri`는 명시적 fallback일 때만 사용한다.
@@ -29,7 +30,7 @@
 
 | Skill | 한국어 이름 | 주요 구현 파일 | 현재 구현 방식 | 향상 가능 방향 |
 | --- | --- | --- | --- | --- |
-| `dataset_prepare` | 데이터셋 정제 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | 정규식 기반 text normalization과 noise 판별을 기본으로 수행하고, 설정 시 Anthropic batch prepare를 우선 사용한다. 기본 prepare model은 `claude-3-5-haiku-latest`이며 prompt는 version registry에서 관리한다. 기본 `prepare_batch_size`는 8이며 결과는 `prepared.parquet` artifact로 저장한다. 각 row에는 `row_id`를 부여하고 artifact에는 `prepared_ref`, `prepare_format=parquet`을 함께 남긴다. 명시적으로 `.jsonl` output path를 주면 호환용 JSONL도 유지할 수 있다. | 언어별 normalization, quality score, column-aware cleaning, duplicate/noise classifier, adaptive batch sizing, sentiment/chunk sidecar까지 Parquet로 확장할 수 있다. |
+| `dataset_prepare` | 데이터셋 정제 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | 정규식 기반 text normalization과 noise 판별을 기본으로 수행하고, 설정 시 Anthropic batch prepare를 우선 사용한다. 기본 prepare model은 `claude-3-5-haiku-latest`이며 prompt는 version registry에서 관리한다. 기본 `prepare_batch_size`는 8이며 결과는 `prepared.parquet` artifact로 저장한다. 각 row에는 `row_id`를 부여하고 artifact에는 `prepared_ref`, `prepare_format=parquet`을 함께 남긴다. 명시적으로 `.jsonl` output path를 주면 호환용 JSONL도 유지할 수 있다. 현재 기본 regex 규칙은 `media_placeholder`, `html_artifact`, `url_cleanup`, `zero_width_cleanup`이고, row별 `prepare_regex_applied_rules`와 aggregate `prepare_regex_rule_hits`를 남긴다. | 언어별 normalization, quality score, column-aware cleaning, duplicate/noise classifier, adaptive batch sizing, sentiment/chunk sidecar까지 Parquet로 확장할 수 있다. |
 | `sentiment_label` | 감성 라벨링 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | 감성 사전 기반 fallback 분류를 수행하고, 설정 시 Anthropic 분류를 우선 사용한다. 기본 model은 `claude-3-5-haiku-latest`이며 prompt는 version registry에서 관리한다. 입력은 prepare 완료 후 `prepared.parquet`를 직접 읽을 수 있고, 결과는 현재 `row_id`, `source_row_index`, 감성 컬럼 중심의 `sentiment.parquet` sidecar로 저장한다. | 도메인 특화 classifier, confidence calibration, aspect sentiment, label guideline 강화, prepared dataset join을 control plane 공통 helper로 끌어올리는 방향을 검토할 수 있다. |
 | `embedding` | 임베딩 생성 | `workers/python-ai/src/python_ai_worker/skills/dataset_build.py` | 현재는 text-window 기반 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준 FastEmbed local model을 시도한다. `text-embedding-*` override를 주면 OpenAI 경로를 탄다. dense 호출이 가능하면 vector를 `embeddings.jsonl` fallback record와 `embeddings.index.parquet` index source에 함께 저장하고, 불가하면 `token-overlap-v1` 방식의 `token_counts`와 `norm`만 남긴다. record에는 `row_id`, `chunk_id`, `chunk_index`, `char_start`, `char_end`를 함께 저장한다. control plane은 index source parquet를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection vector로 바꿔 `pgvector` table에 적재한다. | hybrid retrieval, ANN index, adaptive chunking, multilingual embedding, embedding cost control, cache 정책을 검토할 수 있다. |
 
@@ -37,9 +38,10 @@
 
 | Skill | 한국어 이름 | 주요 구현 파일 | 현재 구현 방식 | 향상 가능 방향 |
 | --- | --- | --- | --- | --- |
-| `document_filter` | 문서 필터링 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 질의와 문서의 token overlap 점수로 문서를 좁힌다. 매칭이 약하면 전체 row fallback도 사용한다. | BM25, hybrid retrieval, query expansion, field weighting, metadata filter를 추가할 수 있다. |
-| `deduplicate_documents` | 중복 문서 제거 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 정규화 텍스트 exact match와 token-set Jaccard similarity로 대표 문서와 중복 문서를 묶는다. | MinHash/LSH, dense embedding 기반 near-duplicate 탐지, source-aware dedup, threshold tuning을 추가할 수 있다. |
-| `keyword_frequency` | 키워드 빈도 집계 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 선택된 문서의 token frequency를 집계한다. | n-gram, TF-IDF, keyphrase extraction, stopword 자동 보정, domain lexicon weighting을 추가할 수 있다. |
+| `document_filter` | 문서 필터링 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 질의와 문서의 token overlap 점수로 문서를 좁힌다. 매칭이 약하면 전체 row fallback도 사용한다. worker 직접 호출 시에는 inline artifact를 반환하고, execution 안에서 실행되면 matched row를 `matches.parquet` sidecar로 저장한 뒤 execution artifact JSON에는 summary, `artifact_ref`, preview `matches`만 남긴다. | BM25, hybrid retrieval, query expansion, field weighting, metadata filter를 추가할 수 있다. |
+| `garbage_filter` | 광고/가비지 제거 | `workers/python-ai/src/python_ai_worker/skills/support.py` | prepared row를 읽은 뒤 `ad_marker`, `promotion_link`, `platform_placeholder`, `empty_or_noise` 규칙으로 광고/협찬/링크 유도/placeholder/noise-only row를 제거한다. worker 직접 호출 시에는 inline artifact를 반환하고, execution 안에서 실행되면 row 단위 결과를 `rows.parquet` sidecar로 저장한 뒤 execution artifact JSON에는 summary, `artifact_ref`, `artifact_format`, column metadata만 남긴다. | 규칙 사전 확장, 채널별 정책 분리, regex/operator 조합 확장, borderline row review 경로를 추가할 수 있다. |
+| `deduplicate_documents` | 중복 문서 제거 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 정규화 텍스트 exact match와 token-set Jaccard similarity로 대표 문서와 중복 문서를 묶는다. worker 직접 호출 시에는 inline artifact를 반환하고, execution 안에서 실행되면 row별 canonical mapping을 `rows.parquet` sidecar로 저장한 뒤 execution artifact JSON에는 summary, `artifact_ref`, preview `duplicate_records`만 남긴다. | MinHash/LSH, dense embedding 기반 near-duplicate 탐지, source-aware dedup, threshold tuning을 추가할 수 있다. |
+| `keyword_frequency` | 키워드 빈도 집계 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 선택된 문서의 regex token frequency를 집계한다. 현재는 형태소 분석기 대신 공통 tokenization helper를 사용한다. | n-gram, TF-IDF, keyphrase extraction, stopword 자동 보정, domain lexicon weighting, 한국어 형태소 기반 `noun_frequency` 후보를 추가할 수 있다. |
 | `time_bucket_count` | 시계열 버킷 집계 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 날짜 컬럼을 day/week/month bucket으로 묶고 bucket별 문서 수와 top term을 만든다. | anomaly detection, moving average, change point 탐지, seasonality 비교를 붙일 수 있다. |
 | `meta_group_count` | 메타데이터 그룹 집계 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 메타데이터 차원값별 건수와 top term을 집계한다. | significance test, drill-down, 다중 dimension breakdown, low-volume suppression을 추가할 수 있다. |
 | `document_sample` | 대표 문서 샘플링 | `workers/python-ai/src/python_ai_worker/skills/support.py` | query overlap ranking 또는 source order로 대표 문서를 뽑는다. | MMR/diversity sampling, cluster-aware sampling, recency weighting, confidence-based sampling을 추가할 수 있다. |
@@ -67,6 +69,13 @@
 | Skill | 한국어 이름 | 주요 구현 파일 | 현재 구현 방식 | 향상 가능 방향 |
 | --- | --- | --- | --- | --- |
 | `planner` | 분석 계획 생성기 | `workers/python-ai/src/python_ai_worker/planner.py`, `config/skill_bundle.json` | 기본은 goal keyword 기반 rule-based intent routing이며, 설정 시 Anthropic structured JSON planner를 우선 사용한다. skill bundle 메타데이터를 참조해 step을 구성한다. | dependency-aware planning, cost-aware planning, validation loop, planner evaluation set, user intent memory를 추가할 수 있다. |
+
+## 후보와 backlog
+
+| 항목 | 분류 | 현재 상태 | 설계 방향 |
+| --- | --- | --- | --- |
+| `noun_frequency` | 후보 support skill | 미구현 | `keyword_frequency` 옆에 두는 한국어 명사 빈도 집계 경로다. Kiwi 같은 형태소 분석기, 사용자 사전, 불용어, 최소 길이 규칙을 적용해 명사 중심 top term을 산출하는 방향이 자연스럽다. |
+| `sentence_split` | backlog | 미구현 | 현재 chunk 기반 retrieval이 있어 즉시 필수는 아니다. 다만 문장 단위 citation, sentence sentiment, long-form evidence ranking이 필요해지면 별도 utility 또는 prepare 옵션으로 검토할 수 있다. |
 
 ## 현재 해석 포인트
 

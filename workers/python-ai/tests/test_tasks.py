@@ -20,6 +20,7 @@ from python_ai_worker.tasks import (
     run_embedding,
     run_embedding_cluster,
     run_evidence_pack,
+    run_garbage_filter,
     run_issue_breakdown_summary,
     run_issue_cluster_summary,
     run_issue_evidence_summary,
@@ -258,6 +259,119 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(sample_result["artifact"]["summary"]["sample_count"], 2)
         self.assertEqual(sample_result["artifact"]["samples"][0]["source_index"], 0)
 
+    def test_garbage_filter_removes_ad_and_placeholder_rows(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "garbage.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "광고 협찬으로 진행된 후기입니다. 프로필 링크 클릭"})
+            writer.writerow({"text": "존재하지 않는 이미지입니다"})
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"text": "로그인이 자주 실패하고 오류가 보입니다"})
+
+        result = run_garbage_filter(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "sample_n": 2,
+            }
+        )
+
+        self.assertEqual(result["artifact"]["skill_name"], "garbage_filter")
+        self.assertEqual(result["artifact"]["summary"]["removed_row_count"], 2)
+        self.assertEqual(result["artifact"]["retained_indices"], [2, 3])
+        self.assertEqual(result["artifact"]["removed_indices"], [0, 1])
+        self.assertIn("ad_marker", result["artifact"]["removed_samples"][0]["matched_rules"])
+
+    def test_garbage_filter_writes_sidecar_parquet_when_output_path_is_provided(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "garbage.csv"
+        output_path = temp_dir / "garbage_filter.rows.parquet"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["row_id", "text"])
+            writer.writeheader()
+            writer.writerow({"row_id": "row-0", "text": "광고 협찬으로 진행된 후기입니다. 프로필 링크 클릭"})
+            writer.writerow({"row_id": "row-1", "text": "결제 오류가 반복 발생했습니다"})
+
+        result = run_garbage_filter(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "artifact_output_path": str(output_path),
+            }
+        )
+
+        self.assertEqual(result["artifact"]["artifact_storage_mode"], "sidecar_ref")
+        self.assertEqual(result["artifact"]["artifact_ref"], str(output_path))
+        self.assertEqual(result["artifact"]["artifact_format"], "parquet")
+        rows = self._read_parquet_rows(output_path)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["row_id"], "row-0")
+        self.assertEqual(rows[0]["filter_status"], "removed")
+        self.assertIn("ad_marker", rows[0]["matched_rules"])
+        self.assertEqual(rows[1]["filter_status"], "retained")
+
+    def test_document_filter_writes_sidecar_parquet_when_output_path_is_provided(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "filter.csv"
+        output_path = temp_dir / "document_filter.matches.parquet"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["row_id", "text"])
+            writer.writeheader()
+            writer.writerow({"row_id": "row-0", "text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"row_id": "row-1", "text": "배송 문의가 계속 들어옵니다"})
+            writer.writerow({"row_id": "row-2", "text": "결제 승인 오류가 늘었습니다"})
+
+        result = run_document_filter(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "query": "결제 오류",
+                "artifact_output_path": str(output_path),
+                "sample_n": 2,
+            }
+        )
+
+        self.assertEqual(result["artifact"]["artifact_storage_mode"], "sidecar_ref")
+        self.assertEqual(result["artifact"]["artifact_ref"], str(output_path))
+        rows = self._read_parquet_rows(output_path)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["row_id"], "row-0")
+        self.assertEqual(rows[0]["rank"], 1)
+        self.assertEqual(rows[1]["row_id"], "row-2")
+
+    def test_deduplicate_documents_writes_sidecar_parquet_when_output_path_is_provided(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "dedup.csv"
+        output_path = temp_dir / "deduplicate_documents.rows.parquet"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["row_id", "text"])
+            writer.writeheader()
+            writer.writerow({"row_id": "row-0", "text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"row_id": "row-1", "text": "결제 오류가 반복 발생했습니다!!"})
+            writer.writerow({"row_id": "row-2", "text": "로그인이 자주 실패합니다"})
+
+        result = run_deduplicate_documents(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "duplicate_threshold": 0.8,
+                "artifact_output_path": str(output_path),
+                "sample_n": 2,
+            }
+        )
+
+        self.assertEqual(result["artifact"]["artifact_storage_mode"], "sidecar_ref")
+        self.assertEqual(result["artifact"]["artifact_ref"], str(output_path))
+        rows = self._read_parquet_rows(output_path)
+        self.assertEqual(len(rows), 3)
+        canonical_rows = [row for row in rows if row["dedup_status"] == "canonical"]
+        duplicate_rows = [row for row in rows if row["dedup_status"] == "duplicate"]
+        self.assertEqual(len(canonical_rows), 2)
+        self.assertEqual(len(duplicate_rows), 1)
+        self.assertEqual(duplicate_rows[0]["canonical_row_id"], "row-0")
+
     def test_deduplicate_documents_reduces_selected_rows(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "duplicates.csv"
@@ -436,6 +550,10 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["prepare_format"], "parquet")
         self.assertEqual(result["artifact"]["prepared_ref"], str(prepared_path))
         self.assertEqual(result["artifact"]["row_id_column"], "row_id")
+        self.assertEqual(
+            result["artifact"]["prepare_regex_rule_names"],
+            ["media_placeholder", "html_artifact", "url_cleanup", "zero_width_cleanup"],
+        )
         self.assertEqual(result["artifact"]["summary"]["input_row_count"], 3)
         self.assertEqual(result["artifact"]["summary"]["output_row_count"], 2)
         self.assertTrue(prepared_path.exists())
@@ -446,7 +564,38 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(prepared_rows[0]["row_id"], "version-1:row:0")
         self.assertEqual(prepared_rows[0]["normalized_text"], "결제 오류가 반복 발생했습니다.")
         self.assertEqual(prepared_rows[0]["prepare_disposition"], "keep")
+        self.assertEqual(prepared_rows[0]["prepare_regex_applied_rules"], [])
         self.assertEqual(prepared_rows[0]["channel"], "app")
+
+    def test_dataset_prepare_applies_regex_rules_before_fallback(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_raw.csv"
+        prepared_path = temp_dir / "issues_raw.prepared.parquet"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "존재하지 않는 이미지입니다 https://example.com"})
+            writer.writerow({"text": "문의 내용은 <br> 결제 오류입니다"})
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+            result = run_dataset_prepare(
+                {
+                    "dataset_version_id": "version-regex",
+                    "dataset_name": str(csv_path),
+                    "text_column": "text",
+                    "output_path": str(prepared_path),
+                }
+            )
+
+        self.assertEqual(result["artifact"]["summary"]["output_row_count"], 1)
+        self.assertEqual(result["artifact"]["summary"]["prepare_regex_rule_hits"]["media_placeholder"], 1)
+        self.assertEqual(result["artifact"]["summary"]["prepare_regex_rule_hits"]["url_cleanup"], 1)
+        self.assertEqual(result["artifact"]["summary"]["prepare_regex_rule_hits"]["html_artifact"], 1)
+
+        prepared_rows = self._read_parquet_rows(prepared_path)
+        self.assertEqual(len(prepared_rows), 1)
+        self.assertEqual(prepared_rows[0]["normalized_text"], "문의 내용은 결제 오류입니다")
+        self.assertIn("html_artifact", prepared_rows[0]["prepare_regex_applied_rules"])
 
     def test_dataset_prepare_batches_llm_requests(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())

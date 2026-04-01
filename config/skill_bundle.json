@@ -1,5 +1,5 @@
 {
-  "version": "2026-03-31-v1",
+  "version": "2026-04-01-v1",
   "default_plans": {
     "structured": [
       "structured_kpi_summary"
@@ -102,6 +102,27 @@
       "default_inputs": {
         "time_column": "date",
         "metric_column": "value"
+      }
+    },
+    {
+      "name": "garbage_filter",
+      "description": "Remove ad, promotion, placeholder, or noise-only rows before downstream text analysis.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/garbage_filter",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "default_inputs": {
+        "text_column": "text",
+        "sample_n": 5,
+        "garbage_rule_names": [
+          "ad_marker",
+          "promotion_link",
+          "platform_placeholder",
+          "empty_or_noise"
+        ]
       }
     },
     {

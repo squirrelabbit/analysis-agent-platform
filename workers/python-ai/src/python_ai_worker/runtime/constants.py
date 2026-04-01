@@ -30,6 +30,92 @@ STOPWORDS = {
     "대한",
     "관련",
 }
+PREPARE_REGEX_RULES: dict[str, dict[str, Any]] = {
+    "media_placeholder": {
+        "description": "이미지/스티커 placeholder 문구 제거",
+        "patterns": [
+            r"존재하지 않는 이미지입니다",
+            r"존재하지 않는 스티커입니다",
+            r"Previous imageNext image",
+        ],
+        "replacement": " ",
+    },
+    "html_artifact": {
+        "description": "HTML break 및 nbsp 정리",
+        "patterns": [
+            r"<br\s*/?>",
+            r"&nbsp;",
+        ],
+        "replacement": " ",
+    },
+    "url_cleanup": {
+        "description": "URL 문자열 제거",
+        "patterns": [
+            r"https?://\S+",
+            r"www\.\S+",
+        ],
+        "replacement": " ",
+    },
+    "zero_width_cleanup": {
+        "description": "zero-width/BOM 문자 제거",
+        "patterns": [
+            r"[\u200b-\u200d\ufeff]",
+        ],
+        "replacement": "",
+    },
+}
+DEFAULT_PREPARE_REGEX_RULE_NAMES = [
+    "media_placeholder",
+    "html_artifact",
+    "url_cleanup",
+    "zero_width_cleanup",
+]
+GARBAGE_RULES: dict[str, dict[str, Any]] = {
+    "ad_marker": {
+        "description": "광고/협찬/원고료 고지 패턴",
+        "patterns": [
+            r"#?\s*광고",
+            r"#?\s*협찬",
+            r"체험단",
+            r"원고료",
+            r"유료\s*광고",
+            r"소정의\s*수수료",
+            r"쿠팡\s*파트너스",
+            r"파트너스\s*활동",
+            r"sponsored",
+            r"advertisement",
+        ],
+    },
+    "promotion_link": {
+        "description": "링크 클릭/프로필 이동 유도 패턴",
+        "patterns": [
+            r"프로필\s*링크",
+            r"링크\s*클릭",
+            r"구매\s*링크",
+            r"자세한\s*내용은\s*링크",
+            r"문의는?\s*dm",
+            r"상담은?\s*dm",
+        ],
+    },
+    "platform_placeholder": {
+        "description": "플랫폼 placeholder 또는 미디어 안내 문구",
+        "patterns": [
+            r"존재하지 않는 이미지입니다",
+            r"존재하지 않는 스티커입니다",
+            r"Previous imageNext image",
+        ],
+    },
+    "empty_or_noise": {
+        "description": "정제 후 비어 있거나 noise-only 텍스트",
+        "patterns": [],
+    },
+}
+DEFAULT_GARBAGE_RULE_NAMES = [
+    "ad_marker",
+    "promotion_link",
+    "platform_placeholder",
+    "empty_or_noise",
+]
 TOKEN_OVERLAP_EMBEDDING_MODEL = "token-overlap-v1"
 DEFAULT_LOCAL_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 DEFAULT_EMBEDDING_MODEL = DEFAULT_LOCAL_EMBEDDING_MODEL
@@ -112,12 +198,16 @@ __all__ = [
     "DEFAULT_DENSE_EMBEDDING_BATCH_SIZE",
     "DEFAULT_DUPLICATE_THRESHOLD",
     "DEFAULT_EMBEDDING_MODEL",
+    "DEFAULT_GARBAGE_RULE_NAMES",
     "DEFAULT_LOCAL_EMBEDDING_MODEL",
     "DEFAULT_MAX_TAGS_PER_DOCUMENT",
     "DEFAULT_PREPARE_BATCH_SIZE",
+    "DEFAULT_PREPARE_REGEX_RULE_NAMES",
     "DEFAULT_TAXONOMY_RULES",
+    "GARBAGE_RULES",
     "NEGATIVE_SENTIMENT_TERMS",
     "POSITIVE_SENTIMENT_TERMS",
+    "PREPARE_REGEX_RULES",
     "SENTIMENT_LABELS",
     "STOPWORDS",
     "TOKEN_OVERLAP_EMBEDDING_MODEL",

@@ -335,7 +335,13 @@ def _selected_text_rows(
 
 
 def _selected_source_indices(prior_artifacts: Any, *, apply_dedup: bool = True) -> set[int] | None:
-    selected_indices = _extract_document_filter_indices(prior_artifacts)
+    selected_indices = _extract_garbage_filter_indices(prior_artifacts)
+    document_filter_indices = _extract_document_filter_indices(prior_artifacts)
+    if document_filter_indices is not None:
+        if selected_indices is None:
+            selected_indices = document_filter_indices
+        else:
+            selected_indices = selected_indices & document_filter_indices
     if not apply_dedup:
         return selected_indices
     deduplicated_indices = _extract_deduplicated_indices(prior_artifacts)
@@ -352,6 +358,19 @@ def _extract_document_filter_indices(prior_artifacts: Any) -> set[int] | None:
         return None
     indices: set[int] = set()
     for item in artifact.get("matched_indices") or []:
+        try:
+            indices.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    return indices
+
+
+def _extract_garbage_filter_indices(prior_artifacts: Any) -> set[int] | None:
+    artifact = _find_prior_artifact(prior_artifacts, "garbage_filter")
+    if artifact is None:
+        return None
+    indices: set[int] = set()
+    for item in artifact.get("retained_indices") or []:
         try:
             indices.add(int(item))
         except (TypeError, ValueError):
@@ -867,6 +886,7 @@ __all__ = [
     "_copy_artifact_fields",
     "_extract_deduplicated_indices",
     "_extract_document_filter_indices",
+    "_extract_garbage_filter_indices",
     "_extract_document_samples",
     "_extract_semantic_candidates",
     "_find_prior_artifact",

@@ -2,9 +2,12 @@ package skills
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -364,5 +367,288 @@ func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 	}
 	if !strings.Contains(result.Artifacts["step:step-5:document_sample"], `"sample_count":2`) {
 		t.Fatalf("unexpected sample artifact: %s", result.Artifacts["step:step-5:document_sample"])
+	}
+}
+
+func TestPythonAIClientStoresGarbageFilterAsSidecarRefButKeepsRuntimeArtifactForNextStep(t *testing.T) {
+	artifactRoot := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("unexpected read error: %v", err)
+		}
+		switch r.URL.Path {
+		case "/tasks/garbage_filter":
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("unexpected unmarshal error: %v", err)
+			}
+			step := payload["step"].(map[string]any)
+			inputs := step["inputs"].(map[string]any)
+			outputPath := inputs["artifact_output_path"].(string)
+			expectedSuffix := filepath.Join("steps", "step-1.garbage_filter.rows.parquet")
+			if !strings.HasPrefix(outputPath, artifactRoot) || !strings.HasSuffix(outputPath, expectedSuffix) {
+				t.Fatalf("unexpected garbage_filter output path: %s", outputPath)
+			}
+			if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+				t.Fatalf("unexpected mkdir error: %v", err)
+			}
+			if err := os.WriteFile(outputPath, []byte("parquet-placeholder"), 0o644); err != nil {
+				t.Fatalf("unexpected write error: %v", err)
+			}
+			_, _ = w.Write([]byte(`{
+				"notes":["garbage path completed"],
+				"artifact":{
+					"skill_name":"garbage_filter",
+					"summary":{"input_row_count":4,"retained_row_count":2,"removed_row_count":2,"garbage_rule_hits":{"ad_marker":1}},
+					"retained_indices":[1,2],
+					"removed_indices":[0,3],
+					"removed_samples":[{"source_index":0,"matched_rules":["ad_marker"],"text":"광고 문구"}],
+					"artifact_storage_mode":"sidecar_ref",
+					"artifact_ref":"` + outputPath + `",
+					"artifact_format":"parquet",
+					"row_id_column":"row_id",
+					"source_index_column":"source_index",
+					"status_column":"filter_status",
+					"matched_rules_column":"matched_rules"
+				}
+			}`))
+		case "/tasks/document_filter":
+			if !strings.Contains(string(body), `"retained_indices":[1,2]`) {
+				t.Fatalf("expected retained_indices in prior artifacts, got: %s", string(body))
+			}
+			_, _ = w.Write([]byte(`{
+				"notes":["document filter completed"],
+				"artifact":{
+					"skill_name":"document_filter",
+					"summary":{"filtered_row_count":2},
+					"matched_indices":[1,2]
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := PythonAIClient{
+		BaseURL:      server.URL,
+		HTTPClient:   server.Client(),
+		ArtifactRoot: artifactRoot,
+	}
+
+	result, err := client.Run(context.Background(), domain.ExecutionSummary{
+		ExecutionID: "exec-garbage",
+		ProjectID:   "project-1",
+		Plan: domain.SkillPlan{
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "garbage_filter", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text"}},
+				{StepID: "step-2", SkillName: "document_filter", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text", "query": "결제 오류"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	garbageArtifact := result.Artifacts["step:step-1:garbage_filter"]
+	if !strings.Contains(garbageArtifact, `"artifact_ref":"`) {
+		t.Fatalf("expected artifact_ref in stored garbage artifact: %s", garbageArtifact)
+	}
+	if strings.Contains(garbageArtifact, `"retained_indices"`) {
+		t.Fatalf("stored garbage artifact should be compacted: %s", garbageArtifact)
+	}
+	if !strings.Contains(result.Artifacts["step:step-2:document_filter"], `"filtered_row_count":2`) {
+		t.Fatalf("unexpected document_filter artifact: %s", result.Artifacts["step:step-2:document_filter"])
+	}
+}
+
+func TestPythonAIClientStoresDocumentFilterAsSidecarRefButKeepsRuntimeArtifactForNextStep(t *testing.T) {
+	artifactRoot := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("unexpected read error: %v", err)
+		}
+		switch r.URL.Path {
+		case "/tasks/document_filter":
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("unexpected unmarshal error: %v", err)
+			}
+			step := payload["step"].(map[string]any)
+			inputs := step["inputs"].(map[string]any)
+			outputPath := inputs["artifact_output_path"].(string)
+			expectedSuffix := filepath.Join("steps", "step-1.document_filter.matches.parquet")
+			if !strings.HasPrefix(outputPath, artifactRoot) || !strings.HasSuffix(outputPath, expectedSuffix) {
+				t.Fatalf("unexpected document_filter output path: %s", outputPath)
+			}
+			if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+				t.Fatalf("unexpected mkdir error: %v", err)
+			}
+			if err := os.WriteFile(outputPath, []byte("parquet-placeholder"), 0o644); err != nil {
+				t.Fatalf("unexpected write error: %v", err)
+			}
+			_, _ = w.Write([]byte(`{
+				"notes":["document filter completed"],
+				"artifact":{
+					"skill_name":"document_filter",
+					"query":"결제 오류",
+					"summary":{"input_row_count":4,"filtered_row_count":2,"selection_mode":"lexical_overlap","query_token_count":2},
+					"matched_indices":[1,2],
+					"matches":[{"rank":1,"source_index":1,"score":2,"text":"결제 오류"},{"rank":2,"source_index":2,"score":1,"text":"결제 승인 오류"}],
+					"artifact_storage_mode":"sidecar_ref",
+					"artifact_ref":"` + outputPath + `",
+					"artifact_format":"parquet",
+					"row_id_column":"row_id",
+					"source_index_column":"source_index",
+					"rank_column":"rank",
+					"score_column":"score"
+				}
+			}`))
+		case "/tasks/keyword_frequency":
+			if !strings.Contains(string(body), `"matched_indices":[1,2]`) {
+				t.Fatalf("expected matched_indices in prior artifacts, got: %s", string(body))
+			}
+			_, _ = w.Write([]byte(`{
+				"notes":["keyword completed"],
+				"artifact":{
+					"skill_name":"keyword_frequency",
+					"summary":{"document_count":2},
+					"top_terms":[{"term":"결제","count":2}]
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := PythonAIClient{
+		BaseURL:      server.URL,
+		HTTPClient:   server.Client(),
+		ArtifactRoot: artifactRoot,
+	}
+
+	result, err := client.Run(context.Background(), domain.ExecutionSummary{
+		ExecutionID: "exec-filter",
+		ProjectID:   "project-1",
+		Plan: domain.SkillPlan{
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "document_filter", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text", "query": "결제 오류"}},
+				{StepID: "step-2", SkillName: "keyword_frequency", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text", "top_n": 3}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	filterArtifact := result.Artifacts["step:step-1:document_filter"]
+	if !strings.Contains(filterArtifact, `"artifact_ref":"`) {
+		t.Fatalf("expected artifact_ref in stored document_filter artifact: %s", filterArtifact)
+	}
+	if strings.Contains(filterArtifact, `"matched_indices"`) {
+		t.Fatalf("stored document_filter artifact should be compacted: %s", filterArtifact)
+	}
+	if !strings.Contains(result.Artifacts["step:step-2:keyword_frequency"], `"document_count":2`) {
+		t.Fatalf("unexpected keyword_frequency artifact: %s", result.Artifacts["step:step-2:keyword_frequency"])
+	}
+}
+
+func TestPythonAIClientStoresDeduplicateDocumentsAsSidecarRefButKeepsRuntimeArtifactForNextStep(t *testing.T) {
+	artifactRoot := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("unexpected read error: %v", err)
+		}
+		switch r.URL.Path {
+		case "/tasks/deduplicate_documents":
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("unexpected unmarshal error: %v", err)
+			}
+			step := payload["step"].(map[string]any)
+			inputs := step["inputs"].(map[string]any)
+			outputPath := inputs["artifact_output_path"].(string)
+			expectedSuffix := filepath.Join("steps", "step-1.deduplicate_documents.rows.parquet")
+			if !strings.HasPrefix(outputPath, artifactRoot) || !strings.HasSuffix(outputPath, expectedSuffix) {
+				t.Fatalf("unexpected deduplicate output path: %s", outputPath)
+			}
+			if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+				t.Fatalf("unexpected mkdir error: %v", err)
+			}
+			if err := os.WriteFile(outputPath, []byte("parquet-placeholder"), 0o644); err != nil {
+				t.Fatalf("unexpected write error: %v", err)
+			}
+			_, _ = w.Write([]byte(`{
+				"notes":["dedup completed"],
+				"artifact":{
+					"skill_name":"deduplicate_documents",
+					"summary":{"input_row_count":3,"canonical_row_count":2,"duplicate_row_count":1,"duplicate_group_count":1,"duplicate_threshold":0.8},
+					"canonical_indices":[0,2],
+					"duplicate_records":[{"source_index":1,"canonical_source_index":0,"similarity":1.0,"text":"결제 오류"}],
+					"duplicate_groups":[{"group_id":"duplicate-01","canonical_source_index":0,"duplicate_source_indices":[1],"member_count":2,"samples":["결제 오류","결제 오류!!"]}],
+					"artifact_storage_mode":"sidecar_ref",
+					"artifact_ref":"` + outputPath + `",
+					"artifact_format":"parquet",
+					"row_id_column":"row_id",
+					"source_index_column":"source_index",
+					"canonical_row_id_column":"canonical_row_id",
+					"canonical_source_index_column":"canonical_source_index",
+					"group_id_column":"group_id",
+					"status_column":"dedup_status",
+					"similarity_column":"similarity",
+					"member_count_column":"member_count"
+				}
+			}`))
+		case "/tasks/keyword_frequency":
+			if !strings.Contains(string(body), `"canonical_indices":[0,2]`) {
+				t.Fatalf("expected canonical_indices in prior artifacts, got: %s", string(body))
+			}
+			_, _ = w.Write([]byte(`{
+				"notes":["keyword completed"],
+				"artifact":{
+					"skill_name":"keyword_frequency",
+					"summary":{"document_count":2},
+					"top_terms":[{"term":"결제","count":1},{"term":"로그인","count":1}]
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := PythonAIClient{
+		BaseURL:      server.URL,
+		HTTPClient:   server.Client(),
+		ArtifactRoot: artifactRoot,
+	}
+
+	result, err := client.Run(context.Background(), domain.ExecutionSummary{
+		ExecutionID: "exec-dedup",
+		ProjectID:   "project-1",
+		Plan: domain.SkillPlan{
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "deduplicate_documents", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text", "duplicate_threshold": 0.8}},
+				{StepID: "step-2", SkillName: "keyword_frequency", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text", "top_n": 3}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	dedupArtifact := result.Artifacts["step:step-1:deduplicate_documents"]
+	if !strings.Contains(dedupArtifact, `"artifact_ref":"`) {
+		t.Fatalf("expected artifact_ref in stored deduplicate artifact: %s", dedupArtifact)
+	}
+	if strings.Contains(dedupArtifact, `"canonical_indices"`) {
+		t.Fatalf("stored deduplicate artifact should be compacted: %s", dedupArtifact)
+	}
+	if !strings.Contains(result.Artifacts["step:step-2:keyword_frequency"], `"document_count":2`) {
+		t.Fatalf("unexpected keyword_frequency artifact: %s", result.Artifacts["step:step-2:keyword_frequency"])
 	}
 }

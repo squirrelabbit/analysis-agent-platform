@@ -3,11 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from ..skill_bundle import default_inputs_for_skill
-from .common import _normalize_taxonomy_rules
+from .common import _normalize_garbage_rule_names, _normalize_prepare_regex_rule_names, _normalize_taxonomy_rules
 from .constants import (
     DEFAULT_CLUSTER_SIMILARITY_THRESHOLD,
     DEFAULT_DUPLICATE_THRESHOLD,
     DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_GARBAGE_RULE_NAMES,
     DEFAULT_MAX_TAGS_PER_DOCUMENT,
     DEFAULT_PREPARE_BATCH_SIZE,
 )
@@ -39,6 +40,9 @@ def _normalize_text_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "top_n": top_n,
         "sample_n": sample_n,
         "query": query,
+        "artifact_output_path": str(
+            inputs.get("artifact_output_path") or payload.get("artifact_output_path") or ""
+        ).strip(),
     }
 
 
@@ -113,6 +117,19 @@ def _normalize_dictionary_tagging_payload(payload: dict[str, Any]) -> dict[str, 
     return normalized
 
 
+def _normalize_garbage_filter_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_text_task_payload(payload)
+    step = normalized["step"]
+    inputs = step.get("inputs") or {}
+    normalized["garbage_rule_names"] = _normalize_garbage_rule_names(
+        inputs.get("garbage_rule_names") or payload.get("garbage_rule_names") or DEFAULT_GARBAGE_RULE_NAMES
+    )
+    normalized["artifact_output_path"] = str(
+        inputs.get("artifact_output_path") or payload.get("artifact_output_path") or ""
+    ).strip()
+    return normalized
+
+
 def _normalize_embedding_cluster_payload(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = _normalize_text_task_payload(payload)
     step = normalized["step"]
@@ -162,6 +179,7 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
     text_column = str(payload.get("text_column") or "text").strip()
     model = str(payload.get("model") or "").strip()
     prepare_batch_size = max(1, int(payload.get("prepare_batch_size") or DEFAULT_PREPARE_BATCH_SIZE))
+    regex_rule_names = _normalize_prepare_regex_rule_names(payload.get("regex_rule_names"))
     return {
         "dataset_version_id": str(payload.get("dataset_version_id") or "").strip(),
         "dataset_name": dataset_name,
@@ -169,6 +187,7 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "output_path": output_path,
         "model": model,
         "prepare_batch_size": prepare_batch_size,
+        "regex_rule_names": regex_rule_names,
     }
 
 
@@ -235,6 +254,7 @@ __all__ = [
     "_normalize_compare_task_payload",
     "_normalize_deduplicate_payload",
     "_normalize_dictionary_tagging_payload",
+    "_normalize_garbage_filter_payload",
     "_normalize_embedding_cluster_payload",
     "_normalize_embedding_payload",
     "_normalize_inputs",

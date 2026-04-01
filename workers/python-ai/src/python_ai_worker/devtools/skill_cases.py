@@ -170,6 +170,15 @@ def _prepared_rows() -> list[dict[str, Any]]:
     ]
 
 
+def _garbage_rows() -> list[dict[str, Any]]:
+    return [
+        {"channel": "sns", "text": "광고 협찬으로 진행된 후기입니다. 프로필 링크 클릭"},
+        {"channel": "sns", "text": "존재하지 않는 이미지입니다"},
+        {"channel": "app", "text": "결제 오류가 반복 발생했습니다"},
+        {"channel": "web", "text": "로그인이 자주 실패하고 오류가 보입니다"},
+    ]
+
+
 def _dataset_prepare_case(ctx: SkillCaseContext) -> dict[str, Any]:
     csv_path = ctx.write_csv(
         "issues_raw.csv",
@@ -235,6 +244,18 @@ def _document_filter_case(ctx: SkillCaseContext) -> dict[str, Any]:
             "dataset_name": str(csv_path),
             "text_column": "text",
             "query": "결제 오류",
+            "sample_n": 3,
+        },
+    )
+
+
+def _garbage_filter_case(ctx: SkillCaseContext) -> dict[str, Any]:
+    csv_path = ctx.write_csv("garbage.csv", ["channel", "text"], _garbage_rows())
+    return ctx.run(
+        "garbage_filter",
+        {
+            "dataset_name": str(csv_path),
+            "text_column": "text",
             "sample_n": 3,
         },
     )
@@ -834,6 +855,7 @@ SKILL_CASES: dict[str, SkillCase] = {
     "dataset_prepare": SkillCase("dataset_prepare", "prepare raw rows into normalized jsonl", _dataset_prepare_case),
     "sentiment_label": SkillCase("sentiment_label", "label prepared rows with fallback sentiment", _sentiment_label_case),
     "embedding": SkillCase("embedding", "build dense-or-token embedding sidecar", _embedding_case),
+    "garbage_filter": SkillCase("garbage_filter", "remove ad, promotion, and placeholder rows", _garbage_filter_case),
     "document_filter": SkillCase("document_filter", "lexical narrowing over issue rows", _document_filter_case),
     "deduplicate_documents": SkillCase("deduplicate_documents", "collapse duplicate or near-duplicate rows", _deduplicate_documents_case),
     "keyword_frequency": SkillCase("keyword_frequency", "count top terms from filtered rows", _keyword_frequency_case),
