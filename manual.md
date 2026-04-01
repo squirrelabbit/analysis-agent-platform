@@ -391,6 +391,7 @@ curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID" | python3 -m json.tool
 - `status`
 - `events`
 - `artifacts`
+- `artifacts["step:<step_id>:issue_evidence_summary"]` 또는 `artifacts["step:<step_id>:evidence_pack"]` 안의 `prompt_compaction`
 
 
 ### 7-9. 최종 결과 조회
@@ -405,6 +406,7 @@ curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID/result" | python3 -m jso
 - `contract.artifact_keys`
 - `contract.skill_names`
 - `contract.evidence_artifact_keys`
+- evidence artifact 안에 `prompt_compaction.analysis_context`, `prompt_compaction.selected_documents`가 있으면 evidence LLM 입력이 compaction된 것이다.
 
 
 ### 7-10. waiting 상태면 resume
@@ -427,6 +429,7 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/executions/$EXEC_ID/resume" \
 - prepare / sentiment / embedding artifact: [data/artifacts](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/data/artifacts)
 - execution 안에서 sidecar로 저장되는 support skill artifact: [data/artifacts](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/data/artifacts)`/projects/<project_id>/executions/<execution_id>/steps/`
 - 현재는 `garbage_filter`, `document_filter`, `deduplicate_documents`가 이 경로를 사용한다.
+- `issue_evidence_summary`, `evidence_pack`의 compaction 여부는 별도 파일이 아니라 execution artifact JSON 안의 `prompt_compaction` metadata로 확인한다.
 - 파일명 예시:
   - `step-1.garbage_filter.rows.parquet`
   - `step-2.document_filter.matches.parquet`

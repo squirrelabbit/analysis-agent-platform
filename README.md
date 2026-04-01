@@ -23,6 +23,7 @@
 - `Go control-plane + Temporal worker + Postgres + DuckDB + Python AI worker` 조합으로 unit test와 build가 현재 구조 기준으로 통과한다.
 - `Claude Sonnet` 기반 planner/evidence generation 경로와 fallback 경로가 Python AI worker에 반영돼 있다.
 - `issue_evidence_summary`는 trend/breakdown/compare/cluster/taxonomy/sentiment 계열 prior artifact를 `analysis_context`로 끌어와 근거 설명에 반영한다.
+- evidence LLM 입력은 현재 `analysis_context`와 selected evidence snippet 길이를 기준으로 prompt compaction을 적용하고, artifact에는 `prompt_compaction` metadata를 남긴다.
 - `dataset_prepare`는 Anthropic prepare 경로가 켜지면 기본 `prepare_batch_size=8` 기준 batch 정제를 수행한다.
 - `dataset_prepare`에는 `regex_rule_names` 확장 포인트가 있고, 현재 기본 규칙은 `media_placeholder`, `html_artifact`, `url_cleanup`, `zero_width_cleanup` 4종이다.
 - 비정형 support skill에 `garbage_filter`가 추가돼 광고/협찬/링크 유도/placeholder/noise-only row를 downstream 분석 전에 제거할 수 있다.

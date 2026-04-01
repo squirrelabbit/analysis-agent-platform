@@ -1471,6 +1471,71 @@ class TaskTests(unittest.TestCase):
         self.assertIn("issue_period_compare", result["artifact"]["summary"])
         self.assertIn("증가", result["artifact"]["summary"])
 
+    def test_issue_evidence_summary_compacts_analysis_context_when_limits_are_small(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"text": "결제 승인 오류가 다시 발생했습니다"})
+            writer.writerow({"text": "로그인이 자주 실패하고 오류가 보입니다"})
+
+        prior_artifacts = {
+            "trend": {
+                "skill_name": "issue_trend_summary",
+                "bucket": "day",
+                "summary": {
+                    "peak_bucket": "2026-03-27",
+                    "peak_count": 3,
+                },
+            },
+            "breakdown": {
+                "skill_name": "issue_breakdown_summary",
+                "summary": {
+                    "dimension_column": "channel",
+                    "top_group": "app",
+                    "top_group_count": 5,
+                },
+            },
+            "compare": {
+                "skill_name": "issue_period_compare",
+                "summary": {
+                    "current_count": 5,
+                    "previous_count": 2,
+                    "count_delta": 3,
+                },
+            },
+        }
+
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "ANTHROPIC_API_KEY": "",
+                    "EVIDENCE_CONTEXT_MAX_ENTRIES": "2",
+                    "EVIDENCE_CONTEXT_MAX_CHARS": "80",
+                    "EVIDENCE_CONTEXT_ENTRY_MAX_CHARS": "40",
+                },
+                clear=False,
+            ),
+        ):
+            result = run_issue_evidence_summary(
+                {
+                    "dataset_name": str(csv_path),
+                    "query": "결제 오류 관련 근거를 보여줘",
+                    "sample_n": 2,
+                    "prior_artifacts": prior_artifacts,
+                }
+            )
+
+        context = result["artifact"]["analysis_context"]
+        self.assertEqual(len(context), 2)
+        self.assertIn("prompt_compaction", result["artifact"])
+        self.assertEqual(result["artifact"]["prompt_compaction"]["analysis_context"]["input_entry_count"], 3)
+        self.assertEqual(result["artifact"]["prompt_compaction"]["analysis_context"]["output_entry_count"], 2)
+        self.assertTrue(any("analysis_context compacted" in note for note in result["notes"]))
+
     def test_evidence_pack_fallback(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues.csv"

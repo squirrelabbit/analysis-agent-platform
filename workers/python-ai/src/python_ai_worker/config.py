@@ -35,6 +35,11 @@ class WorkerConfig:
     anthropic_prepare_prompt_version: str = DEFAULT_PREPARE_PROMPT_VERSION
     anthropic_prepare_batch_prompt_version: str = DEFAULT_PREPARE_BATCH_PROMPT_VERSION
     anthropic_sentiment_prompt_version: str = DEFAULT_SENTIMENT_PROMPT_VERSION
+    evidence_context_max_entries: int = 6
+    evidence_context_max_chars: int = 900
+    evidence_context_entry_max_chars: int = 180
+    evidence_document_total_chars: int = 1800
+    evidence_document_max_chars: int = 320
 
 
 def load_config() -> WorkerConfig:
@@ -62,4 +67,9 @@ def load_config() -> WorkerConfig:
         anthropic_prepare_prompt_version=os.getenv("ANTHROPIC_PREPARE_PROMPT_VERSION", DEFAULT_PREPARE_PROMPT_VERSION),
         anthropic_prepare_batch_prompt_version=os.getenv("ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION", DEFAULT_PREPARE_BATCH_PROMPT_VERSION),
         anthropic_sentiment_prompt_version=os.getenv("ANTHROPIC_SENTIMENT_PROMPT_VERSION", DEFAULT_SENTIMENT_PROMPT_VERSION),
+        evidence_context_max_entries=max(1, int(os.getenv("EVIDENCE_CONTEXT_MAX_ENTRIES", "6"))),
+        evidence_context_max_chars=max(60, int(os.getenv("EVIDENCE_CONTEXT_MAX_CHARS", "900"))),
+        evidence_context_entry_max_chars=max(30, int(os.getenv("EVIDENCE_CONTEXT_ENTRY_MAX_CHARS", "180"))),
+        evidence_document_total_chars=max(120, int(os.getenv("EVIDENCE_DOCUMENT_TOTAL_CHARS", "1800"))),
+        evidence_document_max_chars=max(40, int(os.getenv("EVIDENCE_DOCUMENT_MAX_CHARS", "320"))),
     )

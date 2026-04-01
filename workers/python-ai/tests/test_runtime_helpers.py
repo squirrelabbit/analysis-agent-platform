@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unittest
 from unittest.mock import patch
 
@@ -12,7 +13,11 @@ from python_ai_worker.runtime.artifacts import (
 from python_ai_worker.runtime.common import _match_taxonomies
 from python_ai_worker.runtime.constants import DEFAULT_TAXONOMY_RULES
 from python_ai_worker.runtime.embeddings import _generate_dense_embeddings, _generate_query_embedding
-from python_ai_worker.runtime.llm import _normalize_planner_response
+from python_ai_worker.runtime.llm import (
+    _compact_analysis_context,
+    _compact_evidence_documents_for_prompt,
+    _normalize_planner_response,
+)
 from python_ai_worker.runtime.payloads import _normalize_dictionary_tagging_payload
 
 
@@ -99,6 +104,54 @@ class RuntimeHelperTests(unittest.TestCase):
         self.assertIn("최다 그룹", entries[1]["summary"])
         self.assertEqual(entries[2]["source_skill"], "issue_period_compare")
         self.assertIn("증가", entries[2]["summary"])
+
+    def test_compact_analysis_context_truncates_and_omits_when_limits_are_small(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "EVIDENCE_CONTEXT_MAX_ENTRIES": "2",
+                "EVIDENCE_CONTEXT_MAX_CHARS": "90",
+                "EVIDENCE_CONTEXT_ENTRY_MAX_CHARS": "40",
+            },
+            clear=False,
+        ):
+            compacted, metadata = _compact_analysis_context(
+                [
+                    {"source_skill": "issue_trend_summary", "summary": "a" * 80},
+                    {"source_skill": "issue_breakdown_summary", "summary": "b" * 80},
+                    {"source_skill": "issue_period_compare", "summary": "c" * 80},
+                ]
+            )
+
+        self.assertTrue(metadata["applied"])
+        self.assertEqual(metadata["input_entry_count"], 3)
+        self.assertEqual(metadata["output_entry_count"], 2)
+        self.assertEqual(metadata["omitted_entry_count"], 1)
+        self.assertGreaterEqual(metadata["truncated_entry_count"], 2)
+        self.assertLessEqual(sum(len(item["summary"]) for item in compacted), 90)
+
+    def test_compact_evidence_documents_for_prompt_truncates_to_budget(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "EVIDENCE_DOCUMENT_MAX_CHARS": "80",
+                "EVIDENCE_DOCUMENT_TOTAL_CHARS": "120",
+            },
+            clear=False,
+        ):
+            compacted, metadata = _compact_evidence_documents_for_prompt(
+                [
+                    {"source_index": 0, "text": "가" * 120},
+                    {"source_index": 1, "text": "나" * 120},
+                    {"source_index": 2, "text": "다" * 20},
+                ]
+            )
+
+        self.assertTrue(metadata["applied"])
+        self.assertEqual(metadata["input_document_count"], 3)
+        self.assertLess(metadata["output_document_count"], 3)
+        self.assertLessEqual(metadata["output_text_chars"], 120)
+        self.assertLessEqual(len(compacted[0]["text"]), 80)
 
     def test_normalize_dictionary_tagging_payload_uses_default_rules_for_invalid_input(self) -> None:
         normalized = _normalize_dictionary_tagging_payload(

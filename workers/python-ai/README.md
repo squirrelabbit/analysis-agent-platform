@@ -128,7 +128,12 @@
   - `OPENAI_EMBEDDING_DIMENSIONS`
   - `OPENAI_EMBEDDING_BATCH_SIZE`
   - `OPENAI_TIMEOUT_SEC`
-  - `LOCAL_EMBEDDING_MODEL`
+- `LOCAL_EMBEDDING_MODEL`
+- `EVIDENCE_CONTEXT_MAX_ENTRIES`
+- `EVIDENCE_CONTEXT_MAX_CHARS`
+- `EVIDENCE_CONTEXT_ENTRY_MAX_CHARS`
+- `EVIDENCE_DOCUMENT_TOTAL_CHARS`
+- `EVIDENCE_DOCUMENT_MAX_CHARS`
 - 기본 LLM 설정:
   - provider: `anthropic`
   - planner/evidence model: `claude-sonnet-4-6`
@@ -153,6 +158,7 @@
 - `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query embedding을 다시 만든다. task input도 `embedding_index_ref + chunk_ref`를 우선 쓰고, `embedding_uri`는 명시적 fallback일 때만 사용한다. 검색 결과에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.
 - `BuildEmbeddings` request는 `embedding_model` override를 받아 dataset version에 저장된 기본 model을 바꿔 실행할 수 있다.
 - `issue_evidence_summary`와 `evidence_pack`은 `semantic_search` prior artifact가 있을 때 chunk citation을 evidence artifact까지 그대로 보존한다.
+- `issue_evidence_summary`와 `evidence_pack`은 evidence LLM 입력이 커질 때 `analysis_context`와 selected document text를 prompt budget 기준으로 compaction하고, artifact에 `prompt_compaction.analysis_context`, `prompt_compaction.selected_documents`를 남긴다.
 - `runtime/common.py`는 `.parquet` reader를 지원하므로 `sentiment_label`, `document_filter`, `time_bucket_count` 같은 row 기반 task가 prepared Parquet를 직접 읽을 수 있다.
 - `garbage_filter`는 prepared row를 읽고 `ad_marker`, `promotion_link`, `platform_placeholder`, `empty_or_noise` 규칙으로 광고/협찬/링크 유도/placeholder/noise-only row를 제거한다.
 - `garbage_filter`는 `artifact_output_path`를 받으면 `row_id`, `source_index`, `filter_status`, `matched_rules`를 담은 `rows.parquet` sidecar를 쓴다. control plane execution 경로에서는 이 sidecar ref만 DB artifact에 남기고, step chaining에는 full artifact를 계속 사용한다.
