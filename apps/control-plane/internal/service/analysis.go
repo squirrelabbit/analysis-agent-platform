@@ -251,12 +251,109 @@ func (s *AnalysisService) BuildExecutionResult(projectID, executionID string) (d
 			"skill_bundle_version": execution.SkillBundleVersion,
 		},
 	}
+	if usageSummary := buildArtifactUsageSummary(execution.Artifacts); len(usageSummary) > 0 {
+		contract["usage_summary"] = usageSummary
+	}
 
 	return domain.ExecutionResultResponse{
 		ExecutionID: execution.ExecutionID,
 		Artifacts:   execution.Artifacts,
 		Contract:    contract,
 	}, nil
+}
+
+func buildArtifactUsageSummary(artifacts map[string]string) map[string]any {
+	summary := map[string]any{}
+	for _, raw := range artifacts {
+		var decoded map[string]any
+		if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+			continue
+		}
+		usage, ok := decoded["usage"].(map[string]any)
+		if !ok || len(usage) == 0 {
+			continue
+		}
+		summary = mergeExecutionUsage(summary, usage)
+	}
+	if len(summary) == 0 {
+		return nil
+	}
+	return summary
+}
+
+func mergeExecutionUsage(left, right map[string]any) map[string]any {
+	if len(left) == 0 && len(right) == 0 {
+		return nil
+	}
+	result := map[string]any{}
+	for key, value := range left {
+		result[key] = value
+	}
+	for key, value := range right {
+		switch key {
+		case "request_count", "input_tokens", "output_tokens", "total_tokens", "prompt_tokens", "input_text_count", "vector_count":
+			result[key] = usageIntValue(result[key]) + usageIntValue(value)
+		case "estimated_cost_usd":
+			result[key] = usageRoundCost(usageFloatValue(result[key]) + usageFloatValue(value))
+		case "provider", "model", "operation", "cost_estimation_status":
+			existing := strings.TrimSpace(artifactStringValue(result[key]))
+			incoming := strings.TrimSpace(artifactStringValue(value))
+			if existing == "" {
+				result[key] = incoming
+			} else if incoming == "" || existing == incoming {
+				result[key] = existing
+			} else {
+				result[key] = "mixed"
+			}
+		default:
+			if _, ok := result[key]; !ok {
+				result[key] = value
+			}
+		}
+	}
+	return result
+}
+
+func usageIntValue(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
+}
+
+func usageFloatValue(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	default:
+		return 0
+	}
+}
+
+func usageRoundCost(value float64) float64 {
+	return float64(int(value*100000000+0.5)) / 100000000
+}
+
+func artifactStringValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return fmt.Sprint(value)
 }
 
 func (s *AnalysisService) ResumeExecution(projectID, executionID string, input domain.ExecutionResumeRequest) (domain.ExecutionSummary, error) {

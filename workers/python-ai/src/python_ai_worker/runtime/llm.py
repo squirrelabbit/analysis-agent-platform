@@ -147,8 +147,8 @@ def _run_evidence_pack_with_llm(
             json.dumps(prompt_documents, ensure_ascii=False),
         ]
     )
-    response = client.create_json(prompt=prompt, schema=_evidence_schema(), max_tokens=1400)
-    evidence = _merge_evidence_citations(response.get("evidence") or [], selected_documents)
+    response = client.create_json_response(prompt=prompt, schema=_evidence_schema(), max_tokens=1400)
+    evidence = _merge_evidence_citations(response.body.get("evidence") or [], selected_documents)
     artifact = {
         "skill_name": artifact_skill_name,
         "step_id": normalized["step"].get("step_id"),
@@ -157,10 +157,15 @@ def _run_evidence_pack_with_llm(
         "selection_source": selection_source,
         "citation_mode": _evidence_citation_mode(selected_documents),
         "analysis_context": compacted_context,
-        "summary": response.get("summary") or "",
-        "key_findings": response.get("key_findings") or [],
+        "summary": response.body.get("summary") or "",
+        "key_findings": response.body.get("key_findings") or [],
         "evidence": evidence,
-        "follow_up_questions": response.get("follow_up_questions") or [],
+        "follow_up_questions": response.body.get("follow_up_questions") or [],
+        "usage": _anthropic_usage_metadata(
+            response.usage,
+            operation=artifact_skill_name,
+            model=client._config.model,
+        ),
     }
     prompt_compaction = _build_prompt_compaction_metadata(context_compaction, document_compaction)
     if prompt_compaction:
@@ -230,6 +235,14 @@ def _run_evidence_pack_fallback(
         ],
         "evidence": snippets,
         "follow_up_questions": _fallback_follow_up_questions(normalized["query"]),
+        "usage": _free_usage_metadata(
+            provider="deterministic-fallback",
+            model=f"{artifact_skill_name}-fallback-v1",
+            operation=artifact_skill_name,
+            request_count=1,
+            input_text_count=len(selected_documents),
+            cost_status="free_fallback",
+        ),
     }
     prompt_compaction = _build_prompt_compaction_metadata(context_compaction, None)
     if prompt_compaction:
@@ -402,6 +415,82 @@ def _unique_strings(values: list[str]) -> list[str]:
     return unique
 
 
+def _anthropic_usage_metadata(
+    usage: dict[str, Any] | None,
+    *,
+    operation: str,
+    model: str,
+) -> dict[str, Any]:
+    config = load_config()
+    input_tokens = max(0, int((usage or {}).get("input_tokens") or 0))
+    output_tokens = max(0, int((usage or {}).get("output_tokens") or 0))
+    input_price = max(0.0, float(config.anthropic_input_price_per_million_tokens))
+    output_price = max(0.0, float(config.anthropic_output_price_per_million_tokens))
+    estimated_cost = None
+    cost_status = "not_configured"
+    if input_price > 0.0 or output_price > 0.0:
+        estimated_cost = round((float(input_tokens) * input_price / 1_000_000.0) + (float(output_tokens) * output_price / 1_000_000.0), 8)
+        cost_status = "configured"
+    return {
+        "provider": "anthropic",
+        "model": str(model or "").strip(),
+        "operation": str(operation or "").strip(),
+        "request_count": 1,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "cost_estimation_status": cost_status,
+        **({"estimated_cost_usd": estimated_cost} if estimated_cost is not None else {}),
+    }
+
+
+def _free_usage_metadata(
+    *,
+    provider: str,
+    model: str,
+    operation: str,
+    request_count: int = 1,
+    input_text_count: int = 0,
+    vector_count: int = 0,
+    cost_status: str,
+) -> dict[str, Any]:
+    metadata = {
+        "provider": str(provider or "").strip(),
+        "model": str(model or "").strip(),
+        "operation": str(operation or "").strip(),
+        "request_count": max(0, int(request_count)),
+        "cost_estimation_status": str(cost_status or "free_local").strip(),
+        "estimated_cost_usd": 0.0,
+    }
+    if input_text_count > 0:
+        metadata["input_text_count"] = int(input_text_count)
+    if vector_count > 0:
+        metadata["vector_count"] = int(vector_count)
+    return metadata
+
+
+def _merge_usage_records(records: list[dict[str, Any] | None]) -> dict[str, Any]:
+    normalized_records = [record for record in records if isinstance(record, dict) and record]
+    if not normalized_records:
+        return {}
+
+    result: dict[str, Any] = {
+        "provider": normalized_records[0].get("provider") if len({str(item.get("provider") or "").strip() for item in normalized_records}) == 1 else "mixed",
+        "model": normalized_records[0].get("model") if len({str(item.get("model") or "").strip() for item in normalized_records}) == 1 else "mixed",
+        "operation": normalized_records[0].get("operation") if len({str(item.get("operation") or "").strip() for item in normalized_records}) == 1 else "mixed",
+        "request_count": sum(max(0, int(item.get("request_count") or 0)) for item in normalized_records),
+        "cost_estimation_status": normalized_records[0].get("cost_estimation_status") if len({str(item.get("cost_estimation_status") or "").strip() for item in normalized_records}) == 1 else "mixed",
+    }
+    for key in ("input_tokens", "output_tokens", "total_tokens", "prompt_tokens", "input_text_count", "vector_count"):
+        value = sum(max(0, int(item.get(key) or 0)) for item in normalized_records)
+        if value > 0:
+            result[key] = value
+    cost_values = [item.get("estimated_cost_usd") for item in normalized_records if item.get("estimated_cost_usd") is not None]
+    if cost_values:
+        result["estimated_cost_usd"] = round(sum(float(value) for value in cost_values), 8)
+    return result
+
+
 def _copy_evidence_citations(source: dict[str, Any], target: dict[str, Any]) -> None:
     for key in ("row_id", "chunk_id", "chunk_ref", "chunk_format"):
         value = str(source.get(key) or "").strip()
@@ -473,15 +562,35 @@ def _prepare_row(
     *,
     client: AnthropicClient | None,
     model: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     if client and client.is_enabled():
         try:
             return _prepare_row_with_llm(client, raw_text)
         except Exception as exc:
             fallback = _prepare_row_fallback(raw_text)
             fallback["quality_flags"] = list(fallback["quality_flags"]) + [f"llm_fallback:{exc}"]
-            return fallback
-    return _prepare_row_fallback(raw_text)
+            return (
+                fallback,
+                _free_usage_metadata(
+                    provider="deterministic-fallback",
+                    model="dataset-prepare-fallback-v1",
+                    operation="dataset_prepare",
+                    request_count=1,
+                    input_text_count=1,
+                    cost_status="free_fallback",
+                ),
+            )
+    return (
+        _prepare_row_fallback(raw_text),
+        _free_usage_metadata(
+            provider="deterministic-fallback",
+            model="dataset-prepare-fallback-v1",
+            operation="dataset_prepare",
+            request_count=1,
+            input_text_count=1,
+            cost_status="free_fallback",
+        ),
+    )
 
 
 def _prepare_rows(
@@ -490,37 +599,52 @@ def _prepare_rows(
     client: AnthropicClient | None,
     model: str,
     batch_size: int = 1,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if not raw_texts:
-        return []
+        return [], {}
     normalized_batch_size = max(1, int(batch_size or 1))
+    usage_records: list[dict[str, Any]] = []
     if client and client.is_enabled() and normalized_batch_size > 1:
         prepared_rows: list[dict[str, Any]] = []
         for start in range(0, len(raw_texts), normalized_batch_size):
             batch = raw_texts[start : start + normalized_batch_size]
             try:
-                prepared_rows.extend(_prepare_rows_with_llm(client, batch))
+                batch_rows, batch_usage = _prepare_rows_with_llm(client, batch)
+                prepared_rows.extend(batch_rows)
+                usage_records.append(batch_usage)
             except Exception as exc:
                 for raw_text in batch:
                     fallback = _prepare_row_fallback(raw_text)
                     fallback["quality_flags"] = list(fallback["quality_flags"]) + [f"llm_batch_fallback:{exc}"]
                     prepared_rows.append(fallback)
-        return prepared_rows
-    return [_prepare_row(raw_text, client=client, model=model) for raw_text in raw_texts]
+        return prepared_rows, _merge_usage_records(usage_records)
+    prepared_rows: list[dict[str, Any]] = []
+    for raw_text in raw_texts:
+        prepared, usage = _prepare_row(raw_text, client=client, model=model)
+        prepared_rows.append(prepared)
+        usage_records.append(usage)
+    return prepared_rows, _merge_usage_records(usage_records)
 
 
-def _prepare_row_with_llm(client: AnthropicClient, raw_text: str) -> dict[str, Any]:
+def _prepare_row_with_llm(client: AnthropicClient, raw_text: str) -> tuple[dict[str, Any], dict[str, Any]]:
     config = load_config()
     prompt_version, prompt = render_prepare_prompt(raw_text, version=config.anthropic_prepare_prompt_version)
-    response = client.create_json(prompt=prompt, schema=_prepare_schema(), max_tokens=600)
-    return _normalize_prepare_response(response, raw_text, prompt_version=prompt_version)
+    response = client.create_json_response(prompt=prompt, schema=_prepare_schema(), max_tokens=600)
+    return (
+        _normalize_prepare_response(response.body, raw_text, prompt_version=prompt_version),
+        _anthropic_usage_metadata(
+            response.usage,
+            operation="dataset_prepare",
+            model=client._config.model,
+        ),
+    )
 
 
-def _prepare_rows_with_llm(client: AnthropicClient, raw_texts: list[str]) -> list[dict[str, Any]]:
+def _prepare_rows_with_llm(client: AnthropicClient, raw_texts: list[str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     config = load_config()
     prompt_version, prompt = render_prepare_batch_prompt(raw_texts, version=config.anthropic_prepare_batch_prompt_version)
-    response = client.create_json(prompt=prompt, schema=_prepare_batch_schema(), max_tokens=max(800, 280 * len(raw_texts)))
-    prepared_rows = response.get("rows")
+    response = client.create_json_response(prompt=prompt, schema=_prepare_batch_schema(), max_tokens=max(800, 280 * len(raw_texts)))
+    prepared_rows = response.body.get("rows")
     if not isinstance(prepared_rows, list) or len(prepared_rows) != len(raw_texts):
         raise ValueError("prepare batch response row count mismatch")
     normalized_rows = []
@@ -528,7 +652,11 @@ def _prepare_rows_with_llm(client: AnthropicClient, raw_texts: list[str]) -> lis
         if not isinstance(prepared, dict):
             raise ValueError("prepare batch response row must be an object")
         normalized_rows.append(_normalize_prepare_response(prepared, raw_text, prompt_version=prompt_version))
-    return normalized_rows
+    return normalized_rows, _anthropic_usage_metadata(
+        response.usage,
+        operation="dataset_prepare",
+        model=client._config.model,
+    )
 
 
 def _normalize_prepare_response(response: dict[str, Any], raw_text: str, *, prompt_version: str) -> dict[str, Any]:
@@ -591,17 +719,22 @@ def _label_sentiment(text: str, *, client: AnthropicClient | None) -> dict[str, 
 def _label_sentiment_with_llm(client: AnthropicClient, text: str) -> dict[str, Any]:
     config = load_config()
     prompt_version, prompt = render_sentiment_prompt(text, version=config.anthropic_sentiment_prompt_version)
-    response = client.create_json(prompt=prompt, schema=_sentiment_schema(), max_tokens=400)
-    label = str(response.get("label") or "unknown").strip().lower()
+    response = client.create_json_response(prompt=prompt, schema=_sentiment_schema(), max_tokens=400)
+    label = str(response.body.get("label") or "unknown").strip().lower()
     if label not in SENTIMENT_LABELS:
         label = "unknown"
-    confidence = float(response.get("confidence") or 0.0)
+    confidence = float(response.body.get("confidence") or 0.0)
     confidence = max(0.0, min(1.0, round(confidence, 4)))
     return {
         "label": label,
         "confidence": confidence,
-        "reason": str(response.get("reason") or "").strip(),
+        "reason": str(response.body.get("reason") or "").strip(),
         "prompt_version": prompt_version,
+        "usage": _anthropic_usage_metadata(
+            response.usage,
+            operation="sentiment_label",
+            model=client._config.model,
+        ),
     }
 
 
@@ -613,6 +746,12 @@ def _label_sentiment_fallback(text: str) -> dict[str, Any]:
             "confidence": 0.2,
             "reason": "no meaningful tokens detected",
             "prompt_version": "sentiment-fallback-v1",
+            "usage": _free_usage_metadata(
+                provider="deterministic-fallback",
+                model="sentiment-fallback-v1",
+                operation="sentiment_label",
+                cost_status="free_fallback",
+            ),
         }
 
     positive_score = sum(1 for token in tokens if _matches_sentiment_term(token, POSITIVE_SENTIMENT_TERMS))
@@ -640,6 +779,12 @@ def _label_sentiment_fallback(text: str) -> dict[str, Any]:
         "confidence": confidence,
         "reason": reason,
         "prompt_version": "sentiment-fallback-v1",
+        "usage": _free_usage_metadata(
+            provider="deterministic-fallback",
+            model="sentiment-fallback-v1",
+            operation="sentiment_label",
+            cost_status="free_fallback",
+        ),
     }
 
 
@@ -833,13 +978,16 @@ def _normalize_planner_response(
 __all__ = [
     "_anthropic_client",
     "_anthropic_prepare_client",
+    "_anthropic_usage_metadata",
     "_compact_analysis_context",
     "_compact_evidence_documents_for_prompt",
     "_evidence_schema",
+    "_free_usage_metadata",
     "_label_sentiment",
     "_label_sentiment_fallback",
     "_label_sentiment_with_llm",
     "_matches_sentiment_term",
+    "_merge_usage_records",
     "_normalize_planner_response",
     "_planner_schema",
     "_prepare_row",

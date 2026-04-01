@@ -222,6 +222,7 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSI
 - `metadata.prepared_ref`
 - `metadata.prepared_format`
 - `metadata.prepare_regex_rule_names`
+- `metadata.prepare_usage`
 
 기본 regex 정제 규칙:
 
@@ -284,6 +285,7 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSI
 - `sentiment_uri`
 - `metadata.sentiment_ref`
 - `metadata.sentiment_format`
+- `metadata.sentiment_usage`
 
 
 ### 7-4. embedding 실행
@@ -303,6 +305,7 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSI
 - `metadata.embedding_index_backend = "pgvector"`
 - `metadata.embedding_vector_dim = 384`
 - `metadata.embedding_index_source_format = "parquet"`
+- `metadata.embedding_usage`
 
 
 ### 7-5. dataset version 전체 상태 조회
@@ -320,6 +323,9 @@ curl -sS "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID" \
 - `prepare_uri`
 - `sentiment_uri`
 - `embedding_uri`
+- `metadata.prepare_usage`
+- `metadata.sentiment_usage`
+- `metadata.embedding_usage`
 
 
 ### 7-6. 질문 제출 -> plan 생성
@@ -406,7 +412,10 @@ curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID/result" | python3 -m jso
 - `contract.artifact_keys`
 - `contract.skill_names`
 - `contract.evidence_artifact_keys`
+- `contract.usage_summary`
 - evidence artifact 안에 `prompt_compaction.analysis_context`, `prompt_compaction.selected_documents`가 있으면 evidence LLM 입력이 compaction된 것이다.
+
+`contract.usage_summary`는 현재 usage가 남은 artifact를 기준으로 집계한다. 가격 env를 넣지 않았으면 `estimated_cost_usd`는 비어 있거나 0으로 남을 수 있다.
 
 
 ### 7-10. waiting 상태면 resume

@@ -75,12 +75,24 @@ def _generate_openai_embeddings(
 
     if not vectors:
         return None
+    estimated_cost = _estimate_openai_embedding_cost(usage_prompt_tokens)
     return {
         "provider": "openai",
         "model": resolved_model,
         "dimensions": len(vectors[0]),
         "embeddings": vectors,
         "usage_prompt_tokens": usage_prompt_tokens,
+        "usage": {
+            "provider": "openai",
+            "model": resolved_model,
+            "operation": "embedding",
+            "request_count": max(1, (len(texts) + batch_size - 1) // batch_size),
+            "prompt_tokens": usage_prompt_tokens,
+            "input_text_count": len(texts),
+            "vector_count": len(vectors),
+            "cost_estimation_status": "configured" if estimated_cost is not None else "not_configured",
+            **({"estimated_cost_usd": estimated_cost} if estimated_cost is not None else {}),
+        },
     }
 
 
@@ -109,6 +121,16 @@ def _generate_local_embeddings(
         "dimensions": len(embeddings[0]),
         "embeddings": embeddings,
         "usage_prompt_tokens": 0,
+        "usage": {
+            "provider": "fastembed",
+            "model": resolved_model,
+            "operation": "embedding",
+            "request_count": 1,
+            "input_text_count": len(texts),
+            "vector_count": len(embeddings),
+            "cost_estimation_status": "free_local",
+            "estimated_cost_usd": 0.0,
+        },
     }
 
 
@@ -200,6 +222,14 @@ def _prepare_local_embedding_inputs(texts: list[str], *, model: str, task_type: 
         return [str(text or "") for text in texts]
     prefix = "query: " if task_type == "query" else "passage: "
     return [prefix + str(text or "") for text in texts]
+
+
+def _estimate_openai_embedding_cost(prompt_tokens: int) -> float | None:
+    config = load_config()
+    price_per_million = max(0.0, float(config.openai_embedding_price_per_million_tokens))
+    if price_per_million <= 0.0:
+        return None
+    return round((float(max(0, prompt_tokens)) * price_per_million) / 1_000_000.0, 8)
 
 
 __all__ = [

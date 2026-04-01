@@ -16,6 +16,12 @@ class AnthropicConfig:
     timeout_sec: float
 
 
+@dataclass(frozen=True)
+class AnthropicJSONResponse:
+    body: dict[str, Any]
+    usage: dict[str, Any]
+
+
 class AnthropicClient:
     def __init__(
         self,
@@ -35,6 +41,15 @@ class AnthropicClient:
         schema: dict[str, Any],
         max_tokens: int | None = None,
     ) -> dict[str, Any]:
+        return self.create_json_response(prompt=prompt, schema=schema, max_tokens=max_tokens).body
+
+    def create_json_response(
+        self,
+        *,
+        prompt: str,
+        schema: dict[str, Any],
+        max_tokens: int | None = None,
+    ) -> AnthropicJSONResponse:
         if not self.is_enabled():
             raise ValueError("ANTHROPIC_API_KEY is required")
 
@@ -76,7 +91,10 @@ class AnthropicClient:
         if not text_blocks:
             raise ValueError("anthropic response did not contain text blocks")
 
-        return _parse_json_text("".join(text_blocks))
+        return AnthropicJSONResponse(
+            body=_parse_json_text("".join(text_blocks)),
+            usage=body.get("usage") or {},
+        )
 
 
 def _parse_json_text(text: str) -> dict[str, Any]:

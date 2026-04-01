@@ -148,6 +148,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     regex_rule_hits: Counter[str] = Counter()
     prepared_batch: list[tuple[int, dict[str, Any], str, str, list[str]]] = []
     prepared_rows: list[dict[str, Any]] = []
+    usage_records: list[dict[str, Any]] = []
 
     handle = output_path.open("w", encoding="utf-8") if output_format == "jsonl" else None
     try:
@@ -160,12 +161,13 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
             regex_cleaned_text, applied_regex_rules = rt._apply_prepare_regex_rules(raw_text, normalized["regex_rule_names"])
             prepared_batch.append((source_index, row, raw_text, regex_cleaned_text, applied_regex_rules))
             if len(prepared_batch) >= normalized["prepare_batch_size"]:
-                batch_results = rt._prepare_rows(
+                batch_results, batch_usage = rt._prepare_rows(
                     [item[3] for item in prepared_batch],
                     client=client,
                     model=normalized["model"],
                     batch_size=normalized["prepare_batch_size"],
                 )
+                usage_records.append(batch_usage)
                 kept_count, review_count, dropped_count = _write_prepared_rows(
                     handle,
                     prepared_rows,
@@ -180,12 +182,13 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 prepared_batch = []
 
         if prepared_batch:
-            batch_results = rt._prepare_rows(
+            batch_results, batch_usage = rt._prepare_rows(
                 [item[3] for item in prepared_batch],
                 client=client,
                 model=normalized["model"],
                 batch_size=normalized["prepare_batch_size"],
             )
+            usage_records.append(batch_usage)
             kept_count, review_count, dropped_count = _write_prepared_rows(
                 handle,
                 prepared_rows,
@@ -225,6 +228,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     if client and client.is_enabled():
         prompt_version = "dataset-prepare-anthropic-batch-v1" if normalized["prepare_batch_size"] > 1 else "dataset-prepare-anthropic-v1"
         prepare_strategy = "anthropic-batch" if normalized["prepare_batch_size"] > 1 else "anthropic-row"
+    usage = rt._merge_usage_records(usage_records)
 
     return {
         "notes": notes,
@@ -254,6 +258,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 "prepare_regex_rule_names": list(normalized["regex_rule_names"]),
                 "prepare_regex_rule_hits": dict(regex_rule_hits),
             },
+            "usage": usage,
         },
     }
 
@@ -349,7 +354,6 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
     elif rt._looks_dense_embedding_model(normalized["embedding_model"]):
         embedding_model = rt.TOKEN_OVERLAP_EMBEDDING_MODEL
         notes.append("dense embedding unavailable; fell back to token-overlap")
-
     embedding_index_rows: list[dict[str, Any]] = []
     with embedding_path.open("w", encoding="utf-8") as handle:
         for chunk_index, chunk in enumerate(chunk_rows):
@@ -388,6 +392,19 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
             )
             chunk_count += 1
     rt._write_parquet_rows(embedding_index_path, embedding_index_rows)
+    usage = (
+        dict(dense_result.get("usage") or {})
+        if dense_result is not None
+        else rt._free_usage_metadata(
+            provider="token-overlap",
+            model=embedding_model,
+            operation="embedding",
+            request_count=1,
+            input_text_count=len(chunk_texts),
+            vector_count=chunk_count,
+            cost_status="free_fallback",
+        )
+    )
 
     return {
         "notes": notes,
@@ -414,6 +431,7 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
             "chunk_text_column": "chunk_text",
             "chunking_strategy": "text-window-v1",
             "storage_contract_version": "unstructured-storage-v1",
+            "usage": usage,
         },
     }
 
@@ -430,6 +448,7 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     skipped_rows = 0
     labeled_count = 0
     labeled_rows: list[dict[str, Any]] = []
+    usage_records: list[dict[str, Any]] = []
 
     handle = output_path.open("w", encoding="utf-8") if output_format == "jsonl" else None
     try:
@@ -439,6 +458,7 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
                 skipped_rows += 1
                 continue
             labeled = rt._label_sentiment(text, client=client)
+            usage_records.append(labeled.get("usage") or {})
             source_index = _stable_source_index(row, index)
             labeled_row = {
                 "source_row_index": source_index,
@@ -468,6 +488,7 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     if client and client.is_enabled():
         sentiment_model = client._config.model
         prompt_version = "sentiment-anthropic-v1"
+    usage = rt._merge_usage_records(usage_records)
 
     notes = [
         "sentiment label artifact generated by python-ai worker",
@@ -500,5 +521,6 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
                 "text_column": normalized["text_column"],
                 "label_counts": dict(sorted(label_counts.items())),
             },
+            "usage": usage,
         },
     }

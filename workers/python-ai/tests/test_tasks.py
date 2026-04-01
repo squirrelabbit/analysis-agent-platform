@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from python_ai_worker.anthropic_client import AnthropicJSONResponse
 from python_ai_worker.tasks import (
     run_cluster_label_candidates,
     run_deduplicate_documents,
@@ -60,6 +61,21 @@ class TaskTests(unittest.TestCase):
 
         def create_json(self, *, prompt: str, schema: dict[str, object], max_tokens: int | None = None) -> dict[str, object]:
             return {"rows": self._rows}
+
+        def create_json_response(
+            self,
+            *,
+            prompt: str,
+            schema: dict[str, object],
+            max_tokens: int | None = None,
+        ) -> AnthropicJSONResponse:
+            return AnthropicJSONResponse(
+                body={"rows": self._rows},
+                usage={
+                    "input_tokens": 120,
+                    "output_tokens": 30,
+                },
+            )
 
     def test_rule_based_planner_without_key(self) -> None:
         with patch.dict(
@@ -556,6 +572,10 @@ class TaskTests(unittest.TestCase):
         )
         self.assertEqual(result["artifact"]["summary"]["input_row_count"], 3)
         self.assertEqual(result["artifact"]["summary"]["output_row_count"], 2)
+        self.assertEqual(result["artifact"]["usage"]["provider"], "deterministic-fallback")
+        self.assertEqual(result["artifact"]["usage"]["request_count"], 2)
+        self.assertEqual(result["artifact"]["usage"]["input_text_count"], 2)
+        self.assertEqual(result["artifact"]["usage"]["cost_estimation_status"], "free_fallback")
         self.assertTrue(prepared_path.exists())
 
         prepared_rows = self._read_parquet_rows(prepared_path)
@@ -638,6 +658,9 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["prepare_strategy"], "anthropic-batch")
         self.assertEqual(result["artifact"]["prepare_batch_size"], 2)
         self.assertEqual(result["artifact"]["summary"]["review_count"], 1)
+        self.assertEqual(result["artifact"]["usage"]["provider"], "anthropic")
+        self.assertEqual(result["artifact"]["usage"]["total_tokens"], 150)
+        self.assertEqual(result["artifact"]["usage"]["request_count"], 1)
 
         prepared_rows = self._read_parquet_rows(prepared_path)
 
@@ -672,6 +695,9 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["sentiment_ref"], str(sentiment_path))
         self.assertEqual(result["artifact"]["row_id_column"], "row_id")
         self.assertEqual(result["artifact"]["summary"]["labeled_row_count"], 2)
+        self.assertEqual(result["artifact"]["usage"]["provider"], "deterministic-fallback")
+        self.assertEqual(result["artifact"]["usage"]["request_count"], 2)
+        self.assertEqual(result["artifact"]["usage"]["cost_estimation_status"], "free_fallback")
         self.assertTrue(sentiment_path.exists())
         labeled_rows = self._read_parquet_rows(sentiment_path)
         self.assertEqual(labeled_rows[0]["row_id"], "version-1:row:0")
@@ -1831,6 +1857,16 @@ class TaskTests(unittest.TestCase):
                 "dimensions": 3,
                 "embeddings": [[0.1, 0.2, 0.3]],
                 "usage_prompt_tokens": 12,
+                "usage": {
+                    "provider": "openai",
+                    "model": "text-embedding-3-small",
+                    "operation": "embedding",
+                    "request_count": 1,
+                    "prompt_tokens": 12,
+                    "input_text_count": 1,
+                    "vector_count": 1,
+                    "cost_estimation_status": "not_configured",
+                },
             },
         ):
             result = run_embedding(
@@ -1852,6 +1888,9 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["embedding_provider"], "openai")
         self.assertEqual(result["artifact"]["embedding_vector_dim"], 3)
         self.assertEqual(result["artifact"]["embedding_representation"], "dense+token-overlap")
+        self.assertEqual(result["artifact"]["usage"]["provider"], "openai")
+        self.assertEqual(result["artifact"]["usage"]["prompt_tokens"], 12)
+        self.assertEqual(result["artifact"]["usage"]["vector_count"], 1)
         self.assertEqual(embedding_rows[0]["embedding"], [0.1, 0.2, 0.3])
         self.assertEqual(embedding_rows[0]["embedding_dim"], 3)
         self.assertEqual(embedding_rows[0]["embedding_provider"], "openai")

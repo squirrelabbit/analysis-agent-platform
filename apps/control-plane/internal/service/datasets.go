@@ -311,6 +311,9 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if contractVersion := artifactString(response.Artifact, "storage_contract_version"); contractVersion != "" {
 		prepareMetadata["storage_contract_version"] = contractVersion
 	}
+	if usage := artifactMap(response.Artifact, "usage"); len(usage) > 0 {
+		prepareMetadata["prepare_usage"] = usage
+	}
 	version.Metadata = mergeStringAny(version.Metadata, prepareMetadata)
 	if promptVersion := artifactString(response.Artifact, "prepare_prompt_version"); promptVersion != "" {
 		version.PreparePromptVer = &promptVersion
@@ -476,6 +479,9 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 	if contractVersion := artifactString(response.Artifact, "storage_contract_version"); contractVersion != "" {
 		embeddingMetadata["storage_contract_version"] = contractVersion
 	}
+	if usage := artifactMap(response.Artifact, "usage"); len(usage) > 0 {
+		embeddingMetadata["embedding_usage"] = usage
+	}
 	version.Metadata = mergeStringAny(version.Metadata, embeddingMetadata)
 	if value, ok := response.Artifact["document_count"]; ok {
 		version.Metadata["document_count"] = value
@@ -606,6 +612,9 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 	}
 	if contractVersion := artifactString(response.Artifact, "storage_contract_version"); contractVersion != "" {
 		sentimentMetadata["storage_contract_version"] = contractVersion
+	}
+	if usage := artifactMap(response.Artifact, "usage"); len(usage) > 0 {
+		sentimentMetadata["sentiment_usage"] = usage
 	}
 	version.Metadata = mergeStringAny(version.Metadata, sentimentMetadata)
 	if sentimentURI := artifactString(response.Artifact, "sentiment_uri"); sentimentURI != "" {
@@ -846,6 +855,21 @@ func artifactString(artifact map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+func artifactMap(artifact map[string]any, key string) map[string]any {
+	if artifact == nil {
+		return nil
+	}
+	value, ok := artifact[key]
+	if !ok || value == nil {
+		return nil
+	}
+	typed, ok := value.(map[string]any)
+	if !ok || len(typed) == 0 {
+		return nil
+	}
+	return typed
 }
 
 func inferArtifactFormat(path string, fallback string) string {

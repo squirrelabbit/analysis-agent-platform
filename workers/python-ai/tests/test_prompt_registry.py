@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from python_ai_worker.anthropic_client import AnthropicJSONResponse
 from python_ai_worker.prompt_registry import (
     render_prepare_batch_prompt,
     render_prepare_prompt,
@@ -28,6 +29,19 @@ class _RecordingClient:
     def create_json(self, *, prompt: str, schema: dict[str, object], max_tokens: int | None = None) -> dict[str, object]:
         self.last_prompt = prompt
         return self._response
+
+    def create_json_response(
+        self,
+        *,
+        prompt: str,
+        schema: dict[str, object],
+        max_tokens: int | None = None,
+    ) -> AnthropicJSONResponse:
+        self.last_prompt = prompt
+        return AnthropicJSONResponse(
+            body=self._response,
+            usage={"input_tokens": 100, "output_tokens": 20},
+        )
 
 
 class PromptRegistryTests(unittest.TestCase):
@@ -84,9 +98,10 @@ class PromptRegistryTests(unittest.TestCase):
             },
             clear=False,
         ):
-            result = _prepare_row_with_llm(client, "결제 오류가 반복 발생했습니다!!!")
+            result, usage = _prepare_row_with_llm(client, "결제 오류가 반복 발생했습니다!!!")
 
         self.assertEqual(result["prompt_version"], "dataset-prepare-anthropic-v2")
+        self.assertEqual(usage["total_tokens"], 120)
         self.assertIn("Preserve the original language", client.last_prompt)
 
     def test_prepare_rows_with_llm_uses_configured_batch_prompt_version(self) -> None:
@@ -116,10 +131,11 @@ class PromptRegistryTests(unittest.TestCase):
             },
             clear=False,
         ):
-            results = _prepare_rows_with_llm(client, ["결제 오류가 반복 발생했습니다!!!", "로그인이 자주 실패합니다"])
+            results, usage = _prepare_rows_with_llm(client, ["결제 오류가 반복 발생했습니다!!!", "로그인이 자주 실패합니다"])
 
         self.assertEqual(results[0]["prompt_version"], "dataset-prepare-anthropic-batch-v2")
         self.assertEqual(results[1]["prompt_version"], "dataset-prepare-anthropic-batch-v2")
+        self.assertEqual(usage["total_tokens"], 120)
         self.assertIn("preserve issue-specific details", client.last_prompt)
 
     def test_label_sentiment_with_llm_uses_configured_prompt_version(self) -> None:

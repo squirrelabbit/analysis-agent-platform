@@ -386,6 +386,9 @@ func (a AnalysisActivities) MarkExecutionCompleted(ctx context.Context, input Co
 			"structured_notes": input.Result.Notes,
 		},
 	})
+	if len(input.Result.UsageSummary) > 0 {
+		execution.Events[len(execution.Events)-1].Payload["usage_summary"] = input.Result.UsageSummary
+	}
 
 	if err := repo.SaveExecution(execution); err != nil {
 		return ExecutionLifecycleResult{}, err

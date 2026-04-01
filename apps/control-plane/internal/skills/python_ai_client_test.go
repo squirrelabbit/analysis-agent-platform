@@ -33,6 +33,7 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 				"notes":["breakdown path completed"],
 				"artifact":{
 					"skill_name":"issue_breakdown_summary",
+					"usage":{"provider":"anthropic","model":"claude-sonnet-4-6","operation":"issue_breakdown_summary","request_count":1,"input_tokens":100,"output_tokens":20,"total_tokens":120,"cost_estimation_status":"not_configured"},
 					"summary":{"group_count":2,"top_group":"app"},
 					"breakdown":[{"dimension_value":"app","count":2}]
 				}
@@ -84,6 +85,7 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 				"notes":["python path completed"],
 				"artifact":{
 					"skill_name":"unstructured_issue_summary",
+					"usage":{"provider":"anthropic","model":"claude-sonnet-4-6","operation":"unstructured_issue_summary","request_count":1,"input_tokens":80,"output_tokens":10,"total_tokens":90,"cost_estimation_status":"not_configured"},
 					"summary":{"document_count":2},
 					"top_terms":[{"term":"error","count":3}]
 				}
@@ -310,12 +312,22 @@ func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 		case "/tasks/document_filter":
 			_, _ = w.Write([]byte(`{
 				"notes":["filter path completed"],
-				"artifact":{"skill_name":"document_filter","matched_indices":[0,2],"summary":{"filtered_row_count":2}}
+				"artifact":{
+					"skill_name":"document_filter",
+					"usage":{"provider":"anthropic","model":"claude-haiku","operation":"document_filter","request_count":1,"input_tokens":80,"output_tokens":40,"total_tokens":120,"cost_estimation_status":"not_configured"},
+					"matched_indices":[0,2],
+					"summary":{"filtered_row_count":2}
+				}
 			}`))
 		case "/tasks/keyword_frequency":
 			_, _ = w.Write([]byte(`{
 				"notes":["keyword path completed"],
-				"artifact":{"skill_name":"keyword_frequency","summary":{"document_count":2},"top_terms":[{"term":"결제","count":2}]}
+				"artifact":{
+					"skill_name":"keyword_frequency",
+					"usage":{"provider":"anthropic","model":"claude-haiku","operation":"keyword_frequency","request_count":1,"input_tokens":60,"output_tokens":30,"total_tokens":90,"cost_estimation_status":"not_configured"},
+					"summary":{"document_count":2},
+					"top_terms":[{"term":"결제","count":2}]
+				}
 			}`))
 		case "/tasks/time_bucket_count":
 			_, _ = w.Write([]byte(`{
@@ -367,6 +379,12 @@ func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 	}
 	if !strings.Contains(result.Artifacts["step:step-5:document_sample"], `"sample_count":2`) {
 		t.Fatalf("unexpected sample artifact: %s", result.Artifacts["step:step-5:document_sample"])
+	}
+	if result.UsageSummary == nil {
+		t.Fatalf("expected usage summary")
+	}
+	if totalTokens, ok := result.UsageSummary["total_tokens"].(int); !ok || totalTokens != 210 {
+		t.Fatalf("unexpected usage summary: %+v", result.UsageSummary)
 	}
 }
 

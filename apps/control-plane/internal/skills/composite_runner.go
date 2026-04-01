@@ -98,6 +98,7 @@ func mergeRunResult(target *ExecutionRunResult, incoming ExecutionRunResult) {
 	}
 	target.Notes = append(target.Notes, incoming.Notes...)
 	target.ProcessedSteps += incoming.ProcessedSteps
+	target.UsageSummary = mergeUsageSummary(target.UsageSummary, incoming.UsageSummary)
 }
 
 func appendEngine(engines []string, engine string) []string {
@@ -111,4 +112,69 @@ func appendEngine(engines []string, engine string) []string {
 		}
 	}
 	return append(engines, engine)
+}
+
+func mergeUsageSummary(left, right map[string]any) map[string]any {
+	if len(left) == 0 && len(right) == 0 {
+		return nil
+	}
+	result := map[string]any{}
+	for key, value := range left {
+		result[key] = value
+	}
+	for key, value := range right {
+		switch key {
+		case "request_count", "input_tokens", "output_tokens", "total_tokens", "prompt_tokens", "input_text_count", "vector_count":
+			result[key] = intValue(result[key]) + intValue(value)
+		case "estimated_cost_usd":
+			result[key] = roundCost(floatValue(result[key]) + floatValue(value))
+		case "provider", "model", "operation", "cost_estimation_status":
+			existing := strings.TrimSpace(stringValue(result[key]))
+			incoming := strings.TrimSpace(stringValue(value))
+			if existing == "" {
+				result[key] = incoming
+			} else if incoming == "" || existing == incoming {
+				result[key] = existing
+			} else {
+				result[key] = "mixed"
+			}
+		default:
+			if _, ok := result[key]; !ok {
+				result[key] = value
+			}
+		}
+	}
+	return result
+}
+
+func intValue(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
+}
+
+func floatValue(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	default:
+		return 0
+	}
+}
+
+func roundCost(value float64) float64 {
+	return float64(int(value*100000000+0.5)) / 100000000
 }

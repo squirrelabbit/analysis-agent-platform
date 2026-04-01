@@ -24,6 +24,7 @@
 - `Claude Sonnet` 기반 planner/evidence generation 경로와 fallback 경로가 Python AI worker에 반영돼 있다.
 - `issue_evidence_summary`는 trend/breakdown/compare/cluster/taxonomy/sentiment 계열 prior artifact를 `analysis_context`로 끌어와 근거 설명에 반영한다.
 - evidence LLM 입력은 현재 `analysis_context`와 selected evidence snippet 길이를 기준으로 prompt compaction을 적용하고, artifact에는 `prompt_compaction` metadata를 남긴다.
+- planner/evidence/prepare/sentiment/embedding 경로는 현재 provider/model/token usage metadata를 artifact에 남기고, 가격 env가 설정된 경우 `estimated_cost_usd`도 함께 계산한다.
 - `dataset_prepare`는 Anthropic prepare 경로가 켜지면 기본 `prepare_batch_size=8` 기준 batch 정제를 수행한다.
 - `dataset_prepare`에는 `regex_rule_names` 확장 포인트가 있고, 현재 기본 규칙은 `media_placeholder`, `html_artifact`, `url_cleanup`, `zero_width_cleanup` 4종이다.
 - 비정형 support skill에 `garbage_filter`가 추가돼 광고/협찬/링크 유도/placeholder/noise-only row를 downstream 분석 전에 제거할 수 있다.
@@ -35,6 +36,7 @@
 - `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 함께 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` sidecar와 token-overlap 경로로 fallback한다.
 - dataset build artifact는 현재 `row_id/ref/format` 메타데이터를 함께 남겨 다음 단계의 chunk/vector index 전환 기반을 잡아 두었다.
 - control plane은 `embedding` build가 끝나면 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection으로 바꾼 뒤 `embedding_index_chunks`에 적재한다. index source를 찾지 못할 때만 `embeddings.jsonl`로 fallback한다.
+- dataset version metadata에는 현재 `prepare_usage`, `sentiment_usage`, `embedding_usage`가 함께 저장되고, execution result contract에는 실행 artifact 기준 `usage_summary`가 집계된다.
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension, `embedding_index_chunks` table을 포함한다.
 - `dataset_prepare`와 `sentiment_label`은 기본 Haiku model을 쓰고, prompt version은 registry와 환경 변수로 선택할 수 있다.
 - 비정형 deterministic skill은 Python worker 안에서 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`, `issue_taxonomy_summary`까지 확장돼 있다.
@@ -76,6 +78,7 @@
 - raw upload는 `UPLOAD_ROOT`
 - prepare/sentiment/embedding 산출물은 `ARTIFACT_ROOT`
 - 일부 대용량 support skill 결과는 `ARTIFACT_ROOT/projects/<project_id>/executions/<execution_id>/steps/` 아래 sidecar로 저장하고, Postgres execution artifact에는 summary와 ref만 남긴다. 현재는 `garbage_filter`, `document_filter`, `deduplicate_documents`가 이 정책을 사용한다.
+- LLM/embedding 계열 artifact에는 `usage`가 포함될 수 있고, control plane은 이를 dataset metadata와 execution result contract로 다시 집계한다.
 - 현재 기본 포맷은 `prepare/sentiment/chunk=Parquet`, `embedding=JSONL`이며, 장기 전환안은 `docs/architecture/unstructured_storage_transition.md`를 기준으로 본다.
 - 검증 자산
   - Go unit test / build
@@ -201,6 +204,7 @@ Support skill:
 - `PYTHONPATH=workers/python-ai/src python3 -m python_ai_worker.devtools.run_skill_case --validate`
 - `PYTHONPATH=workers/python-ai/src python3 -m python_ai_worker.devtools.evaluate_embedding_model --model intfloat/multilingual-e5-small --format markdown`
 - `docker compose -f compose.dev.yml up -d --build`
+- 이번 turn 기준 usage/cost tracking 회귀는 Python unit test 65개, Go unit test 전체 패키지 통과로 다시 확인했다.
 - smoke script:
   - `smoke.sh`
   - `smoke_semantic.sh`

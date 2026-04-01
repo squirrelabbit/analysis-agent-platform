@@ -99,6 +99,19 @@ func stringValue(value any) string {
 	return strings.TrimSpace(fmt.Sprintf("%v", value))
 }
 
+func metadataUsageInt(t *testing.T, metadata map[string]any, key string, usageKey string) int {
+	t.Helper()
+	usage, ok := metadata[key].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected %s payload: %+v", key, metadata[key])
+	}
+	value, ok := anyToInt(usage[usageKey])
+	if !ok {
+		t.Fatalf("unexpected %s.%s payload: %+v", key, usageKey, usage)
+	}
+	return value
+}
+
 func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	repository := store.NewMemoryStore()
 	uploadRoot := t.TempDir()
@@ -141,6 +154,16 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 				"prepared_text_column":     "normalized_text",
 				"row_id_column":            "row_id",
 				"storage_contract_version": "unstructured-storage-v1",
+				"usage": map[string]any{
+					"provider":               "anthropic",
+					"model":                  "claude-haiku-test",
+					"operation":              "dataset_prepare",
+					"request_count":          2,
+					"input_tokens":           120,
+					"output_tokens":          40,
+					"total_tokens":           160,
+					"cost_estimation_status": "not_configured",
+				},
 				"summary": map[string]any{
 					"input_row_count":  10,
 					"output_row_count": 7,
@@ -177,6 +200,9 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	}
 	if version.PrepareStatus != "ready" {
 		t.Fatalf("unexpected prepare status: %s", version.PrepareStatus)
+	}
+	if totalTokens := metadataUsageInt(t, version.Metadata, "prepare_usage", "total_tokens"); totalTokens != 160 {
+		t.Fatalf("unexpected prepare usage: %+v", version.Metadata["prepare_usage"])
 	}
 	if version.PrepareURI == nil || *version.PrepareURI != "/tmp/issues.prepared.parquet" {
 		t.Fatalf("unexpected prepare uri: %+v", version.PrepareURI)
@@ -260,50 +286,60 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 		}
 		writeEmbeddingIndexParquet(t, requestedIndexOutputPath, []map[string]any{
 			{
-				"source_index":      0,
-				"row_id":            "version-1:row:0",
-				"chunk_id":          "version-1:row:0:chunk:0",
-				"chunk_index":       0,
-				"char_start":        0,
-				"char_end":          16,
-				"embedding_json":    "",
-				"embedding_dim":     0,
+				"source_index":       0,
+				"row_id":             "version-1:row:0",
+				"chunk_id":           "version-1:row:0:chunk:0",
+				"chunk_index":        0,
+				"char_start":         0,
+				"char_end":           16,
+				"embedding_json":     "",
+				"embedding_dim":      0,
 				"embedding_provider": "",
-				"token_counts_json": `{"결제":1,"오류":1}`,
+				"token_counts_json":  `{"결제":1,"오류":1}`,
 			},
 			{
-				"source_index":      1,
-				"row_id":            "version-1:row:1",
-				"chunk_id":          "version-1:row:1:chunk:0",
-				"chunk_index":       0,
-				"char_start":        0,
-				"char_end":          21,
-				"embedding_json":    "",
-				"embedding_dim":     0,
+				"source_index":       1,
+				"row_id":             "version-1:row:1",
+				"chunk_id":           "version-1:row:1:chunk:0",
+				"chunk_index":        0,
+				"char_start":         0,
+				"char_end":           21,
+				"embedding_json":     "",
+				"embedding_dim":      0,
 				"embedding_provider": "",
-				"token_counts_json": `{"로그인":1,"오류":1}`,
+				"token_counts_json":  `{"로그인":1,"오류":1}`,
 			},
 		})
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"notes": []string{"embedding completed"},
 			"artifact": map[string]any{
-				"embedding_uri":            "/tmp/issues.prepared.parquet.embeddings.jsonl",
-				"embedding_ref":            "/tmp/issues.prepared.parquet.embeddings.jsonl",
-				"embedding_format":         "jsonl",
-				"embedding_index_source_ref": requestedIndexOutputPath,
+				"embedding_uri":                 "/tmp/issues.prepared.parquet.embeddings.jsonl",
+				"embedding_ref":                 "/tmp/issues.prepared.parquet.embeddings.jsonl",
+				"embedding_format":              "jsonl",
+				"embedding_index_source_ref":    requestedIndexOutputPath,
 				"embedding_index_source_format": "parquet",
-				"chunk_ref":                "/tmp/issues.prepared.parquet.chunks.parquet",
-				"chunk_format":             "parquet",
-				"embedding_model":          "token-overlap-v1",
-				"document_count":           7,
-				"source_row_count":         5,
-				"chunk_count":              7,
-				"row_id_column":            "row_id",
-				"chunk_id_column":          "chunk_id",
-				"chunk_index_column":       "chunk_index",
-				"chunk_text_column":        "chunk_text",
-				"chunking_strategy":        "text-window-v1",
-				"storage_contract_version": "unstructured-storage-v1",
+				"chunk_ref":                     "/tmp/issues.prepared.parquet.chunks.parquet",
+				"chunk_format":                  "parquet",
+				"embedding_model":               "token-overlap-v1",
+				"document_count":                7,
+				"source_row_count":              5,
+				"chunk_count":                   7,
+				"row_id_column":                 "row_id",
+				"chunk_id_column":               "chunk_id",
+				"chunk_index_column":            "chunk_index",
+				"chunk_text_column":             "chunk_text",
+				"chunking_strategy":             "text-window-v1",
+				"storage_contract_version":      "unstructured-storage-v1",
+				"usage": map[string]any{
+					"provider":               "token-overlap",
+					"model":                  "token-overlap-v1",
+					"operation":              "embedding",
+					"request_count":          1,
+					"input_text_count":       7,
+					"vector_count":           7,
+					"cost_estimation_status": "free_fallback",
+					"estimated_cost_usd":     0.0,
+				},
 			},
 		})
 	}))
@@ -332,6 +368,9 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 	}
 	if result.EmbeddingStatus != "ready" {
 		t.Fatalf("unexpected embedding status: %s", result.EmbeddingStatus)
+	}
+	if vectorCount := metadataUsageInt(t, result.Metadata, "embedding_usage", "vector_count"); vectorCount != 7 {
+		t.Fatalf("unexpected embedding usage: %+v", result.Metadata["embedding_usage"])
 	}
 	if got := metadataString(result.Metadata, "embedding_ref", ""); got != "/tmp/issues.prepared.parquet.embeddings.jsonl" {
 		t.Fatalf("unexpected embedding ref: %s", got)
@@ -602,6 +641,16 @@ func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 				"sentiment_reason_column":     "sentiment_reason",
 				"row_id_column":               "row_id",
 				"storage_contract_version":    "unstructured-storage-v1",
+				"usage": map[string]any{
+					"provider":               "anthropic",
+					"model":                  "claude-haiku-test",
+					"operation":              "sentiment_label",
+					"request_count":          7,
+					"input_tokens":           210,
+					"output_tokens":          70,
+					"total_tokens":           280,
+					"cost_estimation_status": "not_configured",
+				},
 				"summary": map[string]any{
 					"labeled_row_count": 7,
 					"label_counts": map[string]any{
@@ -637,6 +686,9 @@ func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 	}
 	if result.SentimentURI == nil || *result.SentimentURI != "/tmp/issues.prepared.parquet.sentiment.parquet" {
 		t.Fatalf("unexpected sentiment uri: %+v", result.SentimentURI)
+	}
+	if totalTokens := metadataUsageInt(t, result.Metadata, "sentiment_usage", "total_tokens"); totalTokens != 280 {
+		t.Fatalf("unexpected sentiment usage: %+v", result.Metadata["sentiment_usage"])
 	}
 	if got := metadataString(result.Metadata, "sentiment_label_column", ""); got != "sentiment_label" {
 		t.Fatalf("unexpected sentiment label column: %s", got)

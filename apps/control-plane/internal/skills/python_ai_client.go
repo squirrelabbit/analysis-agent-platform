@@ -32,6 +32,7 @@ type pythonAIStepRequest struct {
 type pythonAITaskResponse struct {
 	Notes    []string       `json:"notes"`
 	Artifact map[string]any `json:"artifact"`
+	Usage    map[string]any `json:"usage,omitempty"`
 }
 
 func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSummary) (ExecutionRunResult, error) {
@@ -120,6 +121,10 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 		}
 		result.Artifacts[artifactKey(step)] = storedArtifact
 		result.Notes = append(result.Notes, taskResponse.Notes...)
+		result.UsageSummary = mergeUsageSummary(
+			result.UsageSummary,
+			extractUsageSummary(taskResponse),
+		)
 		result.ProcessedSteps++
 	}
 
@@ -250,6 +255,20 @@ func sidecarOutputFileName(skillName string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func extractUsageSummary(response pythonAITaskResponse) map[string]any {
+	if len(response.Usage) > 0 {
+		return response.Usage
+	}
+	if response.Artifact == nil {
+		return nil
+	}
+	usage, ok := response.Artifact["usage"].(map[string]any)
+	if !ok || len(usage) == 0 {
+		return nil
+	}
+	return usage
 }
 
 func compactDuplicateGroupsPreview(value any) []map[string]any {

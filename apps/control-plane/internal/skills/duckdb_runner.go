@@ -18,6 +18,7 @@ type StructuredPlanResult struct {
 	Notes          []string          `json:"notes,omitempty"`
 	ProcessedSteps int               `json:"processed_steps"`
 	Engine         string            `json:"engine"`
+	UsageSummary   map[string]any    `json:"usage_summary,omitempty"`
 }
 
 type ExecutionRunResult = StructuredPlanResult

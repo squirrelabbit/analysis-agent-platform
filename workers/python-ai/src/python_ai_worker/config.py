@@ -35,6 +35,9 @@ class WorkerConfig:
     anthropic_prepare_prompt_version: str = DEFAULT_PREPARE_PROMPT_VERSION
     anthropic_prepare_batch_prompt_version: str = DEFAULT_PREPARE_BATCH_PROMPT_VERSION
     anthropic_sentiment_prompt_version: str = DEFAULT_SENTIMENT_PROMPT_VERSION
+    anthropic_input_price_per_million_tokens: float = 0.0
+    anthropic_output_price_per_million_tokens: float = 0.0
+    openai_embedding_price_per_million_tokens: float = 0.0
     evidence_context_max_entries: int = 6
     evidence_context_max_chars: int = 900
     evidence_context_entry_max_chars: int = 180
@@ -67,6 +70,9 @@ def load_config() -> WorkerConfig:
         anthropic_prepare_prompt_version=os.getenv("ANTHROPIC_PREPARE_PROMPT_VERSION", DEFAULT_PREPARE_PROMPT_VERSION),
         anthropic_prepare_batch_prompt_version=os.getenv("ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION", DEFAULT_PREPARE_BATCH_PROMPT_VERSION),
         anthropic_sentiment_prompt_version=os.getenv("ANTHROPIC_SENTIMENT_PROMPT_VERSION", DEFAULT_SENTIMENT_PROMPT_VERSION),
+        anthropic_input_price_per_million_tokens=max(0.0, float(os.getenv("ANTHROPIC_INPUT_PRICE_PER_MILLION_TOKENS", "0"))),
+        anthropic_output_price_per_million_tokens=max(0.0, float(os.getenv("ANTHROPIC_OUTPUT_PRICE_PER_MILLION_TOKENS", "0"))),
+        openai_embedding_price_per_million_tokens=max(0.0, float(os.getenv("OPENAI_EMBEDDING_PRICE_PER_MILLION_TOKENS", "0"))),
         evidence_context_max_entries=max(1, int(os.getenv("EVIDENCE_CONTEXT_MAX_ENTRIES", "6"))),
         evidence_context_max_chars=max(60, int(os.getenv("EVIDENCE_CONTEXT_MAX_CHARS", "900"))),
         evidence_context_entry_max_chars=max(30, int(os.getenv("EVIDENCE_CONTEXT_ENTRY_MAX_CHARS", "180"))),

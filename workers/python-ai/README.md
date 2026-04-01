@@ -126,14 +126,17 @@
   - `OPENAI_API_URL`
   - `OPENAI_EMBEDDING_MODEL`
   - `OPENAI_EMBEDDING_DIMENSIONS`
-  - `OPENAI_EMBEDDING_BATCH_SIZE`
-  - `OPENAI_TIMEOUT_SEC`
+- `OPENAI_EMBEDDING_BATCH_SIZE`
+- `OPENAI_TIMEOUT_SEC`
 - `LOCAL_EMBEDDING_MODEL`
 - `EVIDENCE_CONTEXT_MAX_ENTRIES`
 - `EVIDENCE_CONTEXT_MAX_CHARS`
 - `EVIDENCE_CONTEXT_ENTRY_MAX_CHARS`
 - `EVIDENCE_DOCUMENT_TOTAL_CHARS`
 - `EVIDENCE_DOCUMENT_MAX_CHARS`
+- `ANTHROPIC_INPUT_PRICE_PER_MILLION_TOKENS`
+- `ANTHROPIC_OUTPUT_PRICE_PER_MILLION_TOKENS`
+- `OPENAI_EMBEDDING_PRICE_PER_MILLION_TOKENS`
 - 기본 LLM 설정:
   - provider: `anthropic`
   - planner/evidence model: `claude-sonnet-4-6`
@@ -144,6 +147,7 @@
 - `planner`와 `issue_evidence_summary`는 Claude Sonnet을 우선 시도하고 실패 시 deterministic fallback으로 내려간다.
 - `dataset_prepare`와 `sentiment_label`은 기본 `ANTHROPIC_PREPARE_MODEL=claude-3-5-haiku-latest`를 사용하고 실패 시 deterministic fallback으로 내려간다.
 - prepare/sentiment prompt는 `prompt_registry.py`에서 버전별로 관리하고, 기본 선택은 `ANTHROPIC_PREPARE_PROMPT_VERSION`, `ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION`, `ANTHROPIC_SENTIMENT_PROMPT_VERSION`으로 바꿀 수 있다.
+- planner/evidence/prepare/sentiment artifact는 현재 `usage` metadata를 함께 남긴다. provider/model/request_count/token 수를 포함하고, 가격 env가 설정되면 `estimated_cost_usd`를 추가한다.
 - `dataset_prepare`는 Anthropic prepare 경로가 켜져 있으면 기본 `prepare_batch_size=8` 기준 batch 정제를 사용한다.
 - `dataset_prepare` 기본 출력은 `prepared.parquet`이며, 각 row에 `row_id`를 부여하고 `prepared_ref`, `prepare_format=parquet`, `row_id_column`을 함께 남긴다. 명시적으로 `.jsonl` output path를 주면 호환용 JSONL도 계속 생성할 수 있다.
 - `dataset_prepare`에는 `regex_rule_names` 확장 포인트가 있고, 현재 기본 규칙은 `media_placeholder`, `html_artifact`, `url_cleanup`, `zero_width_cleanup`이다. row에는 `prepare_regex_applied_rules`, artifact summary에는 `prepare_regex_rule_hits`를 남긴다.
@@ -153,6 +157,7 @@
 - `embedding_model=text-embedding-*` override를 주면 OpenAI dense embedding 경로를 사용할 수 있다.
 - 예를 들어 기본값 `embedding_model=intfloat/multilingual-e5-small`이면 local model download 뒤 `384차원` embedding을 만들 수 있다.
 - `OPENAI_API_KEY`가 없거나 local/OpenAI dense 호출이 불가하면 `embedding`은 `token-overlap-v1` sidecar로 자동 fallback한다.
+- `embedding` artifact도 현재 `usage` metadata를 남긴다. local FastEmbed는 `free_local`, token-overlap fallback은 `free_fallback`, OpenAI 경로는 `prompt_tokens`와 선택적 `estimated_cost_usd`를 함께 기록한다.
 - dense가 성공해도 `embeddings.jsonl`에는 기존 `token_counts`, `norm`을 같이 남겨 fallback과 lexical guardrail 경로를 유지하고, 별도 `embeddings.index.parquet`를 index 적재용으로 만든다.
 - control plane은 build가 끝난 뒤 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 64차원 hashed projection vector로 바꿔 `pgvector` table `embedding_index_chunks`에 적재한다. index source를 못 읽을 때만 `embeddings.jsonl`로 fallback한다.
 - `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query embedding을 다시 만든다. task input도 `embedding_index_ref + chunk_ref`를 우선 쓰고, `embedding_uri`는 명시적 fallback일 때만 사용한다. 검색 결과에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.

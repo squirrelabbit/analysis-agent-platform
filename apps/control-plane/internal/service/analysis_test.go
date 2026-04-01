@@ -313,6 +313,60 @@ func TestSubmitAnalysisEnrichesSemanticSearchChunkInputs(t *testing.T) {
 	}
 }
 
+func TestBuildExecutionResultIncludesUsageSummary(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-usage",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-1",
+		Status:      "completed",
+		Artifacts: map[string]string{
+			"step:step-1:unstructured_issue_summary": `{"skill_name":"unstructured_issue_summary","usage":{"provider":"anthropic","model":"claude-haiku","operation":"unstructured_issue_summary","request_count":1,"input_tokens":100,"output_tokens":20,"total_tokens":120,"cost_estimation_status":"not_configured"}}`,
+			"step:step-2:evidence_pack":              `{"skill_name":"evidence_pack","usage":{"provider":"anthropic","model":"claude-haiku","operation":"evidence_pack","request_count":1,"input_tokens":60,"output_tokens":30,"total_tokens":90,"cost_estimation_status":"not_configured"}}`,
+		},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-usage",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "unstructured_issue_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+				{StepID: "step-2", SkillName: "evidence_pack", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		Events: []domain.ExecutionEvent{},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	result, err := service.BuildExecutionResult(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution result error: %v", err)
+	}
+
+	usage, ok := result.Contract["usage_summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected usage summary contract: %+v", result.Contract)
+	}
+	if totalTokens, ok := usage["total_tokens"].(int); !ok || totalTokens != 210 {
+		t.Fatalf("unexpected total tokens: %+v", usage)
+	}
+	if requestCount, ok := usage["request_count"].(int); !ok || requestCount != 2 {
+		t.Fatalf("unexpected request count: %+v", usage)
+	}
+	if provider, ok := usage["provider"].(string); !ok || provider != "anthropic" {
+		t.Fatalf("unexpected provider: %+v", usage)
+	}
+	if operation, ok := usage["operation"].(string); !ok || operation != "mixed" {
+		t.Fatalf("unexpected operation: %+v", usage)
+	}
+}
+
 func TestSubmitAnalysisEnrichesIssueSentimentSummaryInputs(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, fakePlanner{

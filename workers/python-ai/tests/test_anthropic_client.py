@@ -51,6 +51,36 @@ class AnthropicClientTests(unittest.TestCase):
         self.assertEqual(captured_request["headers"]["X-api-key"], "test-key")
         self.assertEqual(captured_request["headers"]["Anthropic-version"], "2023-06-01")
 
+    def test_create_json_response_preserves_usage(self) -> None:
+        def fake_urlopen(req, timeout=None):  # type: ignore[no-untyped-def]
+            return _FakeResponse(
+                {
+                    "content": [{"type": "text", "text": '{"ok": true}'}],
+                    "usage": {
+                        "input_tokens": 120,
+                        "output_tokens": 40,
+                    },
+                }
+            )
+
+        client = AnthropicClient(
+            AnthropicConfig(
+                api_key="test-key",
+                model="claude-sonnet-4-6",
+                api_url="https://api.anthropic.com/v1/messages",
+                version="2023-06-01",
+                max_tokens=512,
+                timeout_sec=12,
+            ),
+            urlopen=fake_urlopen,
+        )
+
+        result = client.create_json_response(prompt="hello", schema={"type": "object"})
+
+        self.assertEqual(result.body, {"ok": True})
+        self.assertEqual(result.usage["input_tokens"], 120)
+        self.assertEqual(result.usage["output_tokens"], 40)
+
 
 if __name__ == "__main__":
     unittest.main()
