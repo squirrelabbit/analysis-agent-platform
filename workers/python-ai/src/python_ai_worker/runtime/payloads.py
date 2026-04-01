@@ -12,6 +12,9 @@ from .constants import (
     DEFAULT_PREPARE_BATCH_SIZE,
 )
 
+DEFAULT_EMBEDDING_CHUNK_MAX_CHARS = 400
+DEFAULT_EMBEDDING_CHUNK_OVERLAP_CHARS = 40
+
 
 def _normalize_text_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
     step = payload.get("step") or {}
@@ -77,6 +80,13 @@ def _normalize_sentiment_summary_payload(payload: dict[str, Any]) -> dict[str, A
     step = normalized["step"]
     inputs = step.get("inputs") or {}
     normalized["sentiment_column"] = str(inputs.get("sentiment_column") or payload.get("sentiment_column") or "sentiment_label").strip()
+    normalized["prepared_dataset_name"] = str(
+        inputs.get("prepared_dataset_name") or payload.get("prepared_dataset_name") or ""
+    ).strip()
+    normalized["row_id_column"] = str(inputs.get("row_id_column") or payload.get("row_id_column") or "row_id").strip()
+    normalized["source_row_index_column"] = str(
+        inputs.get("source_row_index_column") or payload.get("source_row_index_column") or "source_row_index"
+    ).strip()
     return normalized
 
 
@@ -140,7 +150,7 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_name = str(payload.get("dataset_name") or "").strip()
     if not dataset_name:
         raise ValueError("dataset_name is required")
-    output_path = str(payload.get("output_path") or f"{dataset_name}.prepared.jsonl").strip()
+    output_path = str(payload.get("output_path") or f"{dataset_name}.prepared.parquet").strip()
     if not output_path:
         raise ValueError("output_path is required")
     text_column = str(payload.get("text_column") or "text").strip()
@@ -162,13 +172,23 @@ def _normalize_embedding_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("dataset_name is required")
     text_column = str(payload.get("text_column") or "text").strip()
     output_path = str(payload.get("output_path") or f"{dataset_name}.embeddings.jsonl").strip()
+    chunk_output_path = str(payload.get("chunk_output_path") or "").strip()
     embedding_model = str(payload.get("embedding_model") or DEFAULT_EMBEDDING_MODEL).strip()
+    embedding_dimensions = max(0, int(payload.get("embedding_dimensions") or 0))
+    chunk_max_chars = max(80, int(payload.get("chunk_max_chars") or DEFAULT_EMBEDDING_CHUNK_MAX_CHARS))
+    chunk_overlap_chars = max(0, int(payload.get("chunk_overlap_chars") or DEFAULT_EMBEDDING_CHUNK_OVERLAP_CHARS))
+    if chunk_overlap_chars >= chunk_max_chars:
+        chunk_overlap_chars = max(0, chunk_max_chars // 4)
     return {
         "dataset_version_id": str(payload.get("dataset_version_id") or "").strip(),
         "dataset_name": dataset_name,
         "text_column": text_column,
         "output_path": output_path,
+        "chunk_output_path": chunk_output_path,
+        "chunk_max_chars": chunk_max_chars,
+        "chunk_overlap_chars": chunk_overlap_chars,
         "embedding_model": embedding_model,
+        "embedding_dimensions": embedding_dimensions,
     }
 
 
@@ -176,7 +196,7 @@ def _normalize_sentiment_build_payload(payload: dict[str, Any]) -> dict[str, Any
     dataset_name = str(payload.get("dataset_name") or "").strip()
     if not dataset_name:
         raise ValueError("dataset_name is required")
-    output_path = str(payload.get("output_path") or f"{dataset_name}.sentiment.jsonl").strip()
+    output_path = str(payload.get("output_path") or f"{dataset_name}.sentiment.parquet").strip()
     if not output_path:
         raise ValueError("output_path is required")
     text_column = str(payload.get("text_column") or "normalized_text").strip()

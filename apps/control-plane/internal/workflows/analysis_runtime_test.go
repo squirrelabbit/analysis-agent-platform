@@ -243,7 +243,7 @@ func TestAnalysisExecutionWorkflowWaitsForEmbeddings(t *testing.T) {
 		DataType:         "unstructured",
 		Metadata:         map[string]any{},
 		PrepareStatus:    "ready",
-		PrepareURI:       stringPtr("issues.csv.prepared.jsonl"),
+		PrepareURI:       stringPtr("issues.csv.prepared.parquet"),
 		EmbeddingStatus:  "queued",
 		CreatedAt:        fixedNow,
 	}); err != nil {
@@ -336,7 +336,7 @@ func TestAnalysisExecutionWorkflowWaitsForClusterEmbeddings(t *testing.T) {
 		DataType:         "unstructured",
 		Metadata:         map[string]any{},
 		PrepareStatus:    "ready",
-		PrepareURI:       stringPtr("issues.csv.prepared.jsonl"),
+		PrepareURI:       stringPtr("issues.csv.prepared.parquet"),
 		EmbeddingStatus:  "queued",
 		CreatedAt:        fixedNow,
 	}); err != nil {
@@ -480,7 +480,7 @@ func TestAnalysisExecutionWorkflowWaitsForSentimentLabels(t *testing.T) {
 		Plan: domain.SkillPlan{
 			PlanID: "plan-5",
 			Steps: []domain.SkillPlanStep{
-				{StepID: "step-1", SkillName: "issue_sentiment_summary", DatasetName: "issues.sentiment.jsonl", Inputs: map[string]any{}},
+				{StepID: "step-1", SkillName: "issue_sentiment_summary", DatasetName: "issues.sentiment.parquet", Inputs: map[string]any{}},
 			},
 			CreatedAt: fixedNow,
 		},
@@ -496,7 +496,7 @@ func TestAnalysisExecutionWorkflowWaitsForSentimentLabels(t *testing.T) {
 		DataType:         "unstructured",
 		Metadata:         map[string]any{},
 		PrepareStatus:    "ready",
-		PrepareURI:       stringPtr("issues.csv.prepared.jsonl"),
+		PrepareURI:       stringPtr("issues.csv.prepared.parquet"),
 		SentimentStatus:  "queued",
 		EmbeddingStatus:  "not_requested",
 		CreatedAt:        fixedNow,

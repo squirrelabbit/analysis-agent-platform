@@ -75,8 +75,9 @@ type DatasetPrepareRequest struct {
 }
 
 type DatasetEmbeddingBuildRequest struct {
-	TextColumn *string `json:"text_column,omitempty"`
-	Force      *bool   `json:"force,omitempty"`
+	TextColumn     *string `json:"text_column,omitempty"`
+	EmbeddingModel *string `json:"embedding_model,omitempty"`
+	Force          *bool   `json:"force,omitempty"`
 }
 
 type DatasetSentimentBuildRequest struct {
@@ -84,6 +85,19 @@ type DatasetSentimentBuildRequest struct {
 	OutputPath *string `json:"output_path,omitempty"`
 	Model      *string `json:"model,omitempty"`
 	Force      *bool   `json:"force,omitempty"`
+}
+
+type EmbeddingIndexChunk struct {
+	ChunkID          string         `json:"chunk_id"`
+	DatasetVersionID string         `json:"dataset_version_id"`
+	RowID            string         `json:"row_id,omitempty"`
+	SourceRowIndex   int64          `json:"source_row_index,omitempty"`
+	ChunkIndex       int            `json:"chunk_index,omitempty"`
+	ChunkRef         string         `json:"chunk_ref,omitempty"`
+	EmbeddingModel   string         `json:"embedding_model,omitempty"`
+	VectorDim        int            `json:"vector_dim"`
+	Embedding        []float32      `json:"embedding"`
+	Metadata         map[string]any `json:"metadata,omitempty"`
 }
 
 type SkillPlanStep struct {

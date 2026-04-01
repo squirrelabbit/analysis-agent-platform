@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from python_ai_worker.runtime.artifacts import _analysis_context_entries, _select_evidence_candidates, _selected_source_indices
 from python_ai_worker.runtime.common import _match_taxonomies
 from python_ai_worker.runtime.constants import DEFAULT_TAXONOMY_RULES
+from python_ai_worker.runtime.embeddings import _generate_dense_embeddings, _generate_query_embedding
 from python_ai_worker.runtime.llm import _normalize_planner_response
 from python_ai_worker.runtime.payloads import _normalize_dictionary_tagging_payload
 
@@ -140,6 +142,50 @@ class RuntimeHelperTests(unittest.TestCase):
         )
 
         self.assertIs(result, fallback_result)
+
+    def test_generate_dense_embeddings_routes_openai_models_to_openai_backend(self) -> None:
+        with (
+            patch(
+                "python_ai_worker.runtime.embeddings._generate_openai_embeddings",
+                return_value={"provider": "openai", "model": "text-embedding-3-small", "dimensions": 3, "embeddings": [[0.1, 0.2, 0.3]]},
+            ) as generate_openai,
+            patch(
+                "python_ai_worker.runtime.embeddings._generate_local_embeddings",
+                return_value=None,
+            ) as generate_local,
+        ):
+            result = _generate_dense_embeddings(["결제 오류"], model="text-embedding-3-small")
+
+        self.assertEqual(result["provider"], "openai")
+        generate_openai.assert_called_once()
+        generate_local.assert_not_called()
+
+    def test_generate_dense_embeddings_routes_local_models_to_fastembed_backend(self) -> None:
+        with (
+            patch(
+                "python_ai_worker.runtime.embeddings._generate_local_embeddings",
+                return_value={"provider": "fastembed", "model": "intfloat/multilingual-e5-small", "dimensions": 384, "embeddings": [[0.1, 0.2]]},
+            ) as generate_local,
+            patch(
+                "python_ai_worker.runtime.embeddings._generate_openai_embeddings",
+                return_value=None,
+            ) as generate_openai,
+        ):
+            result = _generate_dense_embeddings(["결제 오류"], model="intfloat/multilingual-e5-small")
+
+        self.assertEqual(result["provider"], "fastembed")
+        generate_local.assert_called_once_with(["결제 오류"], model="intfloat/multilingual-e5-small", task_type="passage")
+        generate_openai.assert_not_called()
+
+    def test_generate_query_embedding_routes_local_models_to_query_backend(self) -> None:
+        with patch(
+            "python_ai_worker.runtime.embeddings._generate_local_embeddings",
+            return_value={"provider": "fastembed", "model": "intfloat/multilingual-e5-small", "dimensions": 2, "embeddings": [[0.9, 0.1]]},
+        ) as generate_local:
+            result = _generate_query_embedding("결제 오류", model="intfloat/multilingual-e5-small")
+
+        self.assertEqual(result, [0.9, 0.1])
+        generate_local.assert_called_once_with(["결제 오류"], model="intfloat/multilingual-e5-small", task_type="query")
 
 
 if __name__ == "__main__":

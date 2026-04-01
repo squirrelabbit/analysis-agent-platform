@@ -30,13 +30,21 @@
 - dataset build task `dataset_prepare`, `sentiment_label`, `embedding`이 연결돼 있다.
 - 비정형 support/core skill은 taxonomy, dedup, clustering 계열까지 현재 실행 경로에 포함된다.
 - `dataset_prepare`는 Anthropic prepare가 켜지면 batch 정제를 사용하고, `issue_evidence_summary`는 prior artifact를 `analysis_context`로 재사용한다.
-- dataset build artifact는 현재 JSONL이지만 `row_id`, `prepared_ref`, `sentiment_ref`, `embedding_ref` 같은 전환용 metadata를 함께 남긴다.
+- dataset build artifact는 현재 `prepare/sentiment=Parquet`, `embedding=JSONL sidecar` 구성이며 `row_id`, `prepared_ref`, `sentiment_ref`, `embedding_ref` 같은 전환용 metadata를 함께 남긴다.
+- `sentiment.parquet`는 현재 `row_id`, `source_row_index`, 감성 컬럼 중심 sidecar이고, `issue_sentiment_summary`는 prepared dataset ref를 받아 텍스트를 조인한다.
+- `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 `embeddings.jsonl` record에 함께 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1`로 fallback한다.
+- control plane은 embedding build 직후 `embeddings.jsonl`을 읽어 dense vector가 있으면 그대로, 없으면 64차원 hashed projection vector로 바꿔 `pgvector` 테이블 `embedding_index_chunks`에 적재한다.
+- `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query vector를 다시 만든다. 불가하면 `embeddings.jsonl` token-overlap fallback을 읽는다. 반환 artifact에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.
+- `embedding_cluster`는 현재 `embeddings.jsonl` sidecar를 읽되, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 우선 사용하고, 없으면 token-overlap cosine similarity로 fallback한다.
+- `issue_evidence_summary`와 `evidence_pack`은 `semantic_search`가 있을 때 chunk citation을 그대로 보존한다.
 - `dataset_prepare`, `sentiment_label`은 기본 Haiku model을 사용하고 prompt version을 registry로 관리한다.
 - plan skill 메타데이터는 공용 `skill bundle`인 `config/skill_bundle.json`으로 중앙화됐다.
 - Python worker 내부는 `task_router`, `planner`, `runtime`, `skills/support`, `skills/core` 중심으로 분리됐다.
 - 상세 skill 목록과 계약은 `docs/skill/skill_registry.md`를 기준으로 본다.
 - skill별 분석 기법은 `docs/skill/analysis_techniques.md`에 정리돼 있다.
-- 비정형 dataset build artifact는 현재 JSONL 중심이며, Parquet + vector index 전환안은 `docs/architecture/unstructured_storage_transition.md`에 분리해 정리했다.
+- Python worker runtime은 현재 `.parquet` reader를 지원하고, `sentiment_label`과 `issue_sentiment_summary`는 Parquet를 직접 읽는다.
+- 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension을 켜고 `embedding_index_chunks` table까지 만든다.
+- 비정형 dataset build는 현재 `prepare/sentiment/chunk Parquet` 단계와 sentiment join, chunk citation 경로까지 반영됐고, vector index 전환안은 `docs/architecture/unstructured_storage_transition.md`에 분리해 정리했다.
 - GitHub Actions CI는 Python worker 테스트와 Go 테스트/빌드를 현재 구조 기준으로 실행한다.
 
 ## 5. 문서 구분
@@ -50,5 +58,9 @@
 
 ## 6. 확인 필요
 
-- 이번 문서 갱신 turn에서는 Python worker 재빌드 후 smoke 8종을 다시 실행했다.
+- `pgvector` extension과 `embedding_index_chunks` table은 dev stack에서 확인했고, `semantic_search` smoke에서 `retrieval_backend=pgvector`를 확인했다.
+- 이번 turn의 `smoke_semantic.sh`, `smoke_cluster.sh`는 `intfloat/multilingual-e5-small` local model 기준으로 다시 실행했고 `embedding_index_backend=pgvector`, `embedding_vector_dim=384`, `retrieval_backend=pgvector`, `cluster_similarity_backend=dense-hybrid`를 확인했다.
+- 별도 컨테이너 검증에서도 `intfloat/multilingual-e5-small` local model download와 `fastembed`, `384차원` dense embedding 생성까지 확인했다.
+- 확인 필요: OpenAI key를 넣은 dense embedding end-to-end smoke는 이번 turn에 재현하지 않았다.
+- `pgvector` 이미지로 바꾼 뒤 기존 volume을 재사용하면 Postgres가 collation version mismatch warning을 출력했다. 운영/개발 초기화 절차는 별도 정리가 필요하다.
 - Rust worker를 실제 hot path로 넘길 성능 기준과 시점은 별도 측정이 필요하다.

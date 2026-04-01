@@ -9,6 +9,7 @@ flowchart LR
     Duck["DuckDB\nstructured skill runtime"]
     Py["Python AI Worker\nplanner + task router + runtime helper + support/core skills"]
     Artifact["Artifact Paths\ndata/uploads + data/artifacts"]
+    OpenAI["OpenAI Embeddings API\n선택 dense embedding 경로"]
 
     Client --> Control
     Control --> API
@@ -24,3 +25,4 @@ flowchart LR
     Temporal --> Py
     Temporal --> Artifact
     Py --> Registry
+    Py -. optional .-> OpenAI

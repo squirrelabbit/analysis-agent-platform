@@ -8,13 +8,18 @@
 
 ## 현재 구현 관찰
 
-- `dataset_prepare`는 `prepared.jsonl` artifact를 만든다.
-- `sentiment_label`은 `sentiment.jsonl` artifact를 만든다.
-- `embedding`은 `embeddings.jsonl` artifact를 만든다.
+- `dataset_prepare` 기본 출력은 `prepared.parquet` artifact다.
+- `sentiment_label` 기본 출력은 `sentiment.parquet` artifact다.
+- `embedding`은 현재 `chunks.parquet`를 먼저 만들고 `embeddings.jsonl` artifact를 만든다.
 - control plane은 `dataset_versions.prepare_uri`, `sentiment_uri`, `embedding_uri`에 이 경로를 저장한다.
-- Python worker는 `.csv`, `.jsonl`, `.txt`를 읽을 때 대부분 전체 row를 메모리 `list`로 올린다.
+- Python worker는 현재 `.csv`, `.jsonl`, `.parquet`, `.txt`를 읽을 수 있지만, 대부분 전체 row를 메모리 `list`로 올린다.
 - embedding sidecar도 전체 record를 메모리로 읽어 cosine similarity와 clustering에 사용한다.
-- 현재 `embedding`은 dense vector가 아니라 `token_counts + norm`을 저장하는 `token-overlap-v1`에 가깝다.
+- 현재 `embedding`은 기본 `intfloat/multilingual-e5-small` FastEmbed local model vector를 기록하고, 필요하면 OpenAI dense vector override를 받을 수 있다. dense 호출이 불가하면 `token_counts + norm` 중심의 `token-overlap-v1`로 fallback한다.
+- 현재 `semantic_search`와 `issue_evidence_summary`는 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 artifact까지 전달한다.
+- control plane은 현재 embedding build 직후 `embeddings.jsonl`을 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection vector로 바꾸고 `embedding_index_chunks`에 적재한다.
+- `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 embedding model로 query vector를 만든다. 불가하면 `embeddings.jsonl` scan으로 fallback한다.
+- `embedding_cluster`는 현재 같은 sidecar를 읽되, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 우선 사용하고, 없으면 token-overlap cosine similarity로 fallback한다.
+- 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension, `embedding_index_chunks` table을 가진다.
 
 현재 코드 기준 확인 지점:
 - `workers/python-ai/src/python_ai_worker/skills/dataset_build.py`
@@ -28,7 +33,7 @@
 1. 같은 dataset이 `raw -> prepared -> sentiment -> embedding`으로 갈수록 row 전체가 반복 저장된다.
 2. worker가 artifact를 다시 읽을 때 스트리밍보다 전체 메모리 적재에 가깝다.
 3. `dataset_name`, `prepare_uri`, `embedding_uri`가 파일 경로 중심이라 저장 포맷 교체가 어렵다.
-4. embedding 이름과 달리 실제로는 dense semantic retrieval이 아니라 token vector 기반 검색이다.
+4. dense embedding 경로가 들어갔지만, local/OpenAI 선택과 호출 실패 시 token vector fallback이 계속 남아 있어 혼합 운영 상태를 관리해야 한다.
 5. 이후 chunk 단위 embedding이나 ANN index를 붙이려면 `row_id`, `chunk_id` 같은 안정된 키가 먼저 필요하다.
 
 ## 목표 원칙
@@ -46,9 +51,9 @@
 | --- | --- | --- | --- | --- |
 | raw upload | 원본 CSV/TXT/JSONL | `dataset_version_id` | upload, replay, 감사 | 현재와 동일하게 보존 |
 | prepared dataset | `prepared.parquet` | `row_id`, `source_row_index` | filter, trend, breakdown, taxonomy | `normalized_text`, quality flag 포함 |
-| sentiment sidecar | `sentiment.parquet` | `row_id` | sentiment summary | prepared row를 다시 복제하지 않음 |
+| sentiment sidecar | `sentiment.parquet` | `row_id`, `source_row_index` | sentiment summary | 현재는 row-id 중심 sidecar와 prepared dataset join으로 구성된다 |
 | chunk dataset | `chunks.parquet` | `chunk_id`, `row_id`, `chunk_index` | embedding, evidence, retrieval | 긴 문서 chunk 분리 |
-| vector index | `pgvector` 1차 권장 | `chunk_id` | semantic search, clustering 후보 | Postgres 운영 경계를 재사용 |
+| vector index | `pgvector` 1차 권장 | `chunk_id` | semantic search, clustering 후보 | dense vector 또는 projection fallback을 저장 |
 | execution artifact | JSONB + artifact storage | `execution_id`, `step_id` | result, rerun, diff | 현재 계약 유지 |
 
 ## 목표 실행 흐름
@@ -61,7 +66,7 @@ flowchart LR
     Prepared --> Chunk["chunk builder"]
     Sentiment --> SentimentParquet["sentiment.parquet"]
     Chunk --> ChunkParquet["chunks.parquet"]
-    ChunkParquet --> Embed["dense embedding builder"]
+    ChunkParquet --> Embed["dense embedding builder / fallback sidecar"]
     Embed --> Index["pgvector index"]
     Prepared --> Duck["DuckDB scan"]
     SentimentParquet --> Duck
@@ -87,6 +92,7 @@ flowchart LR
 - `chunk_format=parquet`
 - `embedding_index_ref`
 - `embedding_provider`
+- `embedding_representation`
 - `embedding_vector_dim`
 - `row_id_column=row_id`
 - `chunk_id_column=chunk_id`
@@ -103,12 +109,12 @@ flowchart LR
 | 범위 | 현재 입력 | 목표 입력 | 전환 포인트 |
 | --- | --- | --- | --- |
 | `dataset_prepare` | raw file path | raw file path + output ref | 출력만 `prepared.parquet`로 변경 |
-| `sentiment_label` | prepared JSONL path | `prepared_ref` | row 복제 대신 `row_id` 기준 sidecar 생성 |
-| `embedding` | prepared dataset path | `chunk_ref` | chunk 생성과 embedding 생성을 분리 |
-| `semantic_search` | `embedding_uri` JSONL | `embedding_index_ref` | file scan에서 vector retrieval로 전환 |
+| `sentiment_label` | prepared dataset path | `prepared_ref` | 현재는 row-id 중심 Parquet sidecar를 생성 |
+| `embedding` | prepared dataset path | prepared path + internal chunk output | 현재 구현은 embedding build 안에서 chunk 생성과 embedding 생성을 함께 수행 |
+| `semantic_search` | `embedding_uri` JSONL | `embedding_index_ref` | 현재 `pgvector` 우선 + JSONL fallback 단계 |
 | `issue_evidence_summary` | selected snippets | `chunk_id -> chunk_text -> row_id` | citation granularity 향상 |
 | `document_filter` / `time_bucket_count` / `meta_group_count` | file path | `prepared_ref` 또는 resolved parquet path | DuckDB scan 또는 streaming reader와 연결 가능 |
-| `issue_sentiment_summary` | sentiment JSONL path | `sentiment_ref` | distribution 계산 시 row merge 필요 |
+| `issue_sentiment_summary` | sentiment sidecar path | `sentiment_ref` + `prepared_ref` | distribution 계산 시 prepared dataset join 필요 |
 
 ## 구현 순서
 
@@ -122,19 +128,23 @@ flowchart LR
 
 - `dataset_prepare`가 `prepared.parquet`를 쓴다.
 - 모든 prepared row에 `row_id`를 넣는다.
-- `sentiment_label`은 `row_id`, `sentiment_label`, `confidence`, `reason`, `prompt_version` 중심의 `sentiment.parquet`를 쓴다.
+- `sentiment_label`은 현재 `row_id`, `source_row_index`, `sentiment_label`, `confidence`, `reason`, `prompt_version` 중심의 `sentiment.parquet`를 쓴다.
 
 ### Phase 3. chunk / embedding 전환
 
 - prepared dataset에서 `chunks.parquet`를 만든다.
 - chunk는 `chunk_id`, `row_id`, `chunk_index`, `chunk_text`, `char_start`, `char_end`를 가진다.
-- dense embedding은 chunk 단위로 계산하고 vector index에 적재한다.
+- 현재 구현은 chunk 단위 sidecar에 dense embedding을 함께 기록할 수 있고, control plane은 dense vector를 그대로 `pgvector`에 적재한다.
+- dense embedding이 없으면 control plane은 token-overlap sidecar를 64차원 hashed projection으로 `pgvector`에 적재한다.
+- 확인 필요:
+  실제 OpenAI key를 넣은 dense embedding end-to-end smoke는 이번 turn에 재현하지 않았다.
 
 ### Phase 4. retrieval / evidence 전환
 
-- `semantic_search`는 vector index에서 `chunk_id`를 검색한다.
-- `issue_evidence_summary`는 chunk citation을 우선 사용한다.
-- clustering은 dense embedding 기반으로 옮기거나, 당분간 token fallback을 유지한다.
+- 현재 `semantic_search`와 `issue_evidence_summary`는 chunk citation 전파까지 반영됐고, `semantic_search`는 `pgvector` 조회까지 연결됐다.
+- 현재 `semantic_search`는 index metadata가 dense model이면 같은 model로 query embedding을 만든다.
+- 다음 단계는 dense embedding 실운영 검증과 `dense-hybrid` clustering 품질 평가다.
+- clustering은 현재 dense embedding 기반 `dense-hybrid` 경로와 token fallback을 함께 유지한다.
 
 ### Phase 5. JSONL 축소
 
@@ -146,11 +156,10 @@ flowchart LR
 
 1. `prepared.parquet` 전환
 2. `row_id` 도입
-3. `sentiment.parquet` 전환
+3. prepared/sentiment join 공통화
 4. `.parquet` reader + DuckDB scan 경로 도입
-5. chunk builder
-6. dense embedding + `pgvector`
-7. semantic retrieval 교체
+5. dense embedding + `pgvector`
+6. `dense-hybrid` clustering 품질 검증과 fallback 축소 여부 결정
 
 ## 기술 선택 메모
 
@@ -160,19 +169,31 @@ flowchart LR
   - 현재 stack에 이미 있고 Parquet scan과 잘 맞는다.
 - `pgvector`
   - 이미 Postgres가 있으므로 1차 운영 복잡도를 크게 늘리지 않는다.
+  - 현재 dev stack에는 extension과 table, embedding build 후 적재 경로를 반영했다.
+- `OpenAI Embeddings API`
+  - 현재 dense embedding code path 중 하나는 이 API 기준으로 구현돼 있다.
+  - 공식 문서: [Embeddings API](https://platform.openai.com/docs/api-reference/embeddings/create)
+- `FastEmbed`
+  - 현재 local dense embedding code path는 `fastembed`와 `intfloat/multilingual-e5-small` 같은 ONNX 모델 경로를 지원하고, 이번 turn의 compose smoke도 이 기본 local model로 재검증했다.
+  - 공식 문서: [FastEmbed README](https://github.com/qdrant/fastembed)
 - `Qdrant` 등 별도 vector DB
   - 확인 필요: chunk 수와 검색 latency 요구가 `pgvector` 범위를 넘을 때 별도 검토한다.
 
 ## 구현 시 주의점
 
-- 현재 `workers/python-ai/pyproject.toml`의 dependency는 비어 있다.
-- 확인 필요: Parquet writer는 `pyarrow`를 넣을지, DuckDB Python 경로를 추가할지 먼저 결정해야 한다.
+- 현재 `workers/python-ai/pyproject.toml`에는 `pyarrow`가 추가돼 있다.
+- 현재 구현은 `pyarrow`로 Parquet reader/writer를 처리한다.
 - 현재 control plane의 `datasetSourceForUnstructured`, `derivePrepareURI`, `deriveSentimentURI`, `deriveEmbeddingURI`는 파일 경로 계약을 전제로 한다.
 - 따라서 1차 구현은 필드 이름을 유지한 채 포맷과 metadata를 늘리는 방향이 안전하다.
+- 확인 필요:
+  `pgvector` 이미지 전환 뒤 기존 volume을 재사용하면 Postgres collation version mismatch warning이 관찰됐다.
 
 ## 완료 기준
 
 - `festival.csv` 같은 비정형 dataset에서 prepare와 sentiment가 JSONL이 아니라 Parquet로 생성된다.
 - unstructured support skill이 Parquet 입력을 읽을 수 있다.
+- embedding build 결과가 `embedding_index_chunks`에 적재된다.
 - semantic search가 dense vector index를 사용할 수 있다.
 - rerun/diff를 위한 execution contract는 기존과 같은 수준으로 유지된다.
+- 확인 필요:
+  OpenAI key를 넣은 dense embedding smoke와 local/OpenAI retrieval 품질 비교는 별도 검증이 필요하다.

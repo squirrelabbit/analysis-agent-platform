@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -611,8 +612,78 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 	return execution, nil
 }
 
+func (s *PostgresStore) ReplaceEmbeddingChunkIndex(datasetVersionID string, records []domain.EmbeddingIndexChunk) error {
+	if strings.TrimSpace(datasetVersionID) == "" {
+		return errors.New("datasetVersionID is required")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.Exec(`DELETE FROM embedding_index_chunks WHERE dataset_version_id = $1`, datasetVersionID); err != nil {
+		return err
+	}
+	for _, record := range records {
+		metadataJSON, marshalErr := json.Marshal(defaultMetadataMap(record.Metadata))
+		if marshalErr != nil {
+			err = marshalErr
+			return err
+		}
+		vectorLiteral := pgvectorLiteral(record.Embedding)
+		if _, err = tx.Exec(
+			`INSERT INTO embedding_index_chunks (
+				chunk_id, dataset_version_id, row_id, source_row_index, chunk_index, chunk_ref,
+				embedding_model, vector_dim, embedding, metadata
+			) VALUES (
+				$1, $2, $3, $4, $5, $6,
+				$7, $8, $9::vector, $10::jsonb
+			)
+			ON CONFLICT (chunk_id) DO UPDATE
+			SET dataset_version_id = EXCLUDED.dataset_version_id,
+			    row_id = EXCLUDED.row_id,
+			    source_row_index = EXCLUDED.source_row_index,
+			    chunk_index = EXCLUDED.chunk_index,
+			    chunk_ref = EXCLUDED.chunk_ref,
+			    embedding_model = EXCLUDED.embedding_model,
+			    vector_dim = EXCLUDED.vector_dim,
+			    embedding = EXCLUDED.embedding,
+			    metadata = EXCLUDED.metadata,
+			    created_at = NOW()`,
+			record.ChunkID,
+			record.DatasetVersionID,
+			nullIfEmpty(record.RowID),
+			record.SourceRowIndex,
+			record.ChunkIndex,
+			nullIfEmpty(record.ChunkRef),
+			nullIfEmpty(record.EmbeddingModel),
+			record.VectorDim,
+			vectorLiteral,
+			string(metadataJSON),
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 	statements := []string{
+		`DO $$
+		BEGIN
+			CREATE EXTENSION IF NOT EXISTS vector;
+		EXCEPTION
+			WHEN undefined_file THEN
+				RAISE NOTICE 'pgvector extension is not installed on this Postgres instance';
+			WHEN insufficient_privilege THEN
+				RAISE NOTICE 'pgvector extension could not be created due to insufficient privilege';
+		END
+		$$`,
 		`CREATE TABLE IF NOT EXISTS projects (
 			project_id UUID PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -704,6 +775,26 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			events JSONB,
 			created_at TIMESTAMPTZ NOT NULL
 		)`,
+		`DO $$
+		BEGIN
+			IF to_regtype('vector') IS NOT NULL THEN
+				EXECUTE 'CREATE TABLE IF NOT EXISTS embedding_index_chunks (
+					chunk_id TEXT PRIMARY KEY,
+					dataset_version_id TEXT NOT NULL,
+					row_id TEXT,
+					source_row_index BIGINT,
+					chunk_index INTEGER,
+					chunk_ref TEXT,
+					embedding_model TEXT,
+					vector_dim INTEGER,
+					embedding vector,
+					metadata JSONB NOT NULL DEFAULT ''{}''::jsonb,
+					created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+				)';
+				EXECUTE 'CREATE INDEX IF NOT EXISTS embedding_index_chunks_dataset_version_idx ON embedding_index_chunks(dataset_version_id)';
+			END IF;
+		END
+		$$`,
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
@@ -802,4 +893,27 @@ func nullableTime(value *time.Time) any {
 		return nil
 	}
 	return *value
+}
+
+func nullIfEmpty(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func defaultMetadataMap(metadata map[string]any) map[string]any {
+	if metadata == nil {
+		return map[string]any{}
+	}
+	return metadata
+}
+
+func pgvectorLiteral(values []float32) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, strconv.FormatFloat(float64(value), 'f', -1, 32))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }

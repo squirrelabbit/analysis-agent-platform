@@ -9,6 +9,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+try:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+except ImportError:  # pragma: no cover - exercised in environments without parquet support
+    pa = None
+    pq = None
+
 from .constants import DEFAULT_TAXONOMY_RULES, STOPWORDS, TOKEN_PATTERN
 
 
@@ -23,9 +30,11 @@ def _iter_rows(dataset_name: str) -> list[dict[str, Any]]:
         return _read_csv_rows(path)
     if suffix == ".jsonl":
         return _read_jsonl_rows(path)
+    if suffix == ".parquet":
+        return _read_parquet_rows(path)
     if suffix == ".txt":
         return [{"text": line.strip()} for line in path.read_text(encoding="utf-8").splitlines()]
-    raise ValueError("dataset_name must point to a .csv, .jsonl, or .txt file")
+    raise ValueError("dataset_name must point to a .csv, .jsonl, .parquet, or .txt file")
 
 
 def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
@@ -45,6 +54,24 @@ def _read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
             if isinstance(item, dict):
                 rows.append(item)
     return rows
+
+
+def _read_parquet_rows(path: Path) -> list[dict[str, Any]]:
+    _, parquet = _require_pyarrow()
+    table = parquet.read_table(path)
+    return [dict(row) for row in table.to_pylist()]
+
+
+def _write_parquet_rows(path: Path, rows: list[dict[str, Any]]) -> None:
+    arrow, parquet = _require_pyarrow()
+    table = arrow.Table.from_pylist(rows) if rows else arrow.table({})
+    parquet.write_table(table, path)
+
+
+def _require_pyarrow() -> tuple[Any, Any]:
+    if pa is None or pq is None:
+        raise RuntimeError("pyarrow is required for parquet dataset support")
+    return pa, pq
 
 
 def _coerce_string_list(value: Any) -> list[str]:
@@ -485,8 +512,10 @@ __all__ = [
     "_rank_documents",
     "_read_csv_rows",
     "_read_jsonl_rows",
+    "_read_parquet_rows",
     "_resolve_compare_periods",
     "_token_counter",
     "_tokenize",
     "_vector_norm",
+    "_write_parquet_rows",
 ]

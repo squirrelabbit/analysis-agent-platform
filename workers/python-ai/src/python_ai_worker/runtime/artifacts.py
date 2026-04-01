@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,21 @@ from .common import (
 )
 
 
+def _copy_citation_fields(source: dict[str, Any], target: dict[str, Any]) -> None:
+    for key in ("row_id", "chunk_id", "chunk_ref", "chunk_format"):
+        value = str(source.get(key) or "").strip()
+        if value:
+            target[key] = value
+    for key in ("chunk_index", "char_start", "char_end"):
+        value = source.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            target[key] = int(value)
+        except (TypeError, ValueError):
+            continue
+
+
 def _select_evidence_candidates(
     payload: dict[str, Any],
     normalized: dict[str, Any],
@@ -36,12 +52,7 @@ def _select_evidence_candidates(
                 "score": float(item.get("score") or 0),
                 "text": str(item.get("text") or ""),
             }
-            row_id = str(item.get("row_id") or "").strip()
-            if row_id:
-                selected_item["row_id"] = row_id
-            chunk_id = str(item.get("chunk_id") or "").strip()
-            if chunk_id:
-                selected_item["chunk_id"] = chunk_id
+            _copy_citation_fields(item, selected_item)
             selected.append(selected_item)
         return selected, "semantic_search"
 
@@ -55,12 +66,7 @@ def _select_evidence_candidates(
                 "score": float(item.get("score") or 0),
                 "text": str(item.get("text") or ""),
             }
-            row_id = str(item.get("row_id") or "").strip()
-            if row_id:
-                selected_item["row_id"] = row_id
-            chunk_id = str(item.get("chunk_id") or "").strip()
-            if chunk_id:
-                selected_item["chunk_id"] = chunk_id
+            _copy_citation_fields(item, selected_item)
             selected.append(selected_item)
         return selected, "document_sample"
 
@@ -416,6 +422,38 @@ def _selected_embedding_records(embedding_uri: str, prior_artifacts: Any) -> lis
     return records
 
 
+def _dense_embedding_vector(value: Any) -> list[float]:
+    if not isinstance(value, list):
+        return []
+    vector: list[float] = []
+    for item in value:
+        try:
+            vector.append(float(item))
+        except (TypeError, ValueError):
+            return []
+    norm = math.sqrt(sum(component * component for component in vector))
+    if norm <= 0:
+        return []
+    return [component / norm for component in vector]
+
+
+def _dense_cosine_similarity(left: list[float], right: list[float]) -> float:
+    if not left or not right or len(left) != len(right):
+        return 0.0
+    return sum(left[index] * right[index] for index in range(len(left)))
+
+
+def _cluster_similarity_backend(value: Any) -> str:
+    if not isinstance(value, set):
+        return "token-overlap"
+    normalized = {str(item).strip() for item in value if str(item).strip()}
+    if normalized == {"dense-hybrid"}:
+        return "dense-hybrid"
+    if normalized == {"token-overlap"} or not normalized:
+        return "token-overlap"
+    return "mixed"
+
+
 def _build_time_bucket_artifact(normalized: dict[str, Any], selected_rows: list[dict[str, Any]]) -> dict[str, Any]:
     bucket_counts: Counter[str] = Counter()
     bucket_terms: dict[str, Counter[str]] = {}
@@ -627,15 +665,27 @@ def _cluster_embedding_records(
     ordered_records = sorted(records, key=lambda item: int(item.get("source_index") or 0))
     for record in ordered_records:
         token_counts = _token_counter(record.get("token_counts") or {})
-        if not token_counts:
+        dense_vector = _dense_embedding_vector(record.get("embedding"))
+        if not token_counts and not dense_vector:
             continue
         best_cluster: dict[str, Any] | None = None
         best_score = 0.0
+        best_backend = "token-overlap"
         for cluster in working_clusters:
-            score = _cosine_similarity(token_counts, dict(cluster["aggregate_counts"]), float(cluster["aggregate_norm"]))
+            score = 0.0
+            backend = "token-overlap"
+            aggregate_embedding = list(cluster.get("aggregate_embedding") or [])
+            if dense_vector and aggregate_embedding and len(dense_vector) == len(aggregate_embedding):
+                dense_score = _dense_cosine_similarity(dense_vector, aggregate_embedding)
+                token_score = _cosine_similarity(token_counts, dict(cluster["aggregate_counts"]), float(cluster["aggregate_norm"]))
+                score = dense_score * max(token_score, 0.1)
+                backend = "dense-hybrid"
+            elif token_counts:
+                score = _cosine_similarity(token_counts, dict(cluster["aggregate_counts"]), float(cluster["aggregate_norm"]))
             if score > best_score:
                 best_score = score
                 best_cluster = cluster
+                best_backend = backend
         member = {
             "source_index": int(record.get("source_index") or 0),
             "row_id": str(record.get("row_id") or "").strip(),
@@ -644,17 +694,35 @@ def _cluster_embedding_records(
             "token_counts": token_counts,
         }
         if best_cluster is None or best_score < similarity_threshold:
+            backends = {"dense-hybrid"} if dense_vector else {"token-overlap"}
             working_clusters.append(
                 {
                     "members": [member],
                     "aggregate_counts": Counter(token_counts),
                     "aggregate_norm": _vector_norm(token_counts),
+                    "aggregate_embedding": list(dense_vector),
+                    "dense_member_count": 1 if dense_vector else 0,
+                    "similarity_backends": backends,
                 }
             )
             continue
         best_cluster["members"].append(member)
         best_cluster["aggregate_counts"].update(token_counts)
         best_cluster["aggregate_norm"] = _vector_norm(best_cluster["aggregate_counts"])
+        best_cluster.setdefault("similarity_backends", set()).add(best_backend)
+        if dense_vector:
+            aggregate_embedding = list(best_cluster.get("aggregate_embedding") or [])
+            dense_member_count = int(best_cluster.get("dense_member_count") or 0)
+            if not aggregate_embedding or len(aggregate_embedding) != len(dense_vector):
+                best_cluster["aggregate_embedding"] = list(dense_vector)
+                best_cluster["dense_member_count"] = 1
+            else:
+                merged = [
+                    ((aggregate_embedding[index] * dense_member_count) + dense_vector[index]) / float(dense_member_count + 1)
+                    for index in range(len(dense_vector))
+                ]
+                best_cluster["aggregate_embedding"] = _dense_embedding_vector(merged)
+                best_cluster["dense_member_count"] = dense_member_count + 1
 
     payload_clusters = []
     sorted_clusters = sorted(
@@ -667,6 +735,7 @@ def _cluster_embedding_records(
             {
                 "cluster_id": f"cluster-{rank:02d}",
                 "document_count": len(members),
+                "similarity_backend": _cluster_similarity_backend(cluster.get("similarity_backends")),
                 "member_source_indices": [int(member["source_index"]) for member in members],
                 "top_terms": [
                     {"term": term, "count": count}

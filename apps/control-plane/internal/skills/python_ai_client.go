@@ -22,6 +22,7 @@ type PythonAIClient struct {
 type pythonAIStepRequest struct {
 	ExecutionID    string                     `json:"execution_id"`
 	ProjectID      string                     `json:"project_id"`
+	DatasetVersion string                     `json:"dataset_version_id,omitempty"`
 	Step           domain.SkillPlanStep       `json:"step"`
 	PriorArtifacts map[string]json.RawMessage `json:"prior_artifacts,omitempty"`
 }
@@ -47,6 +48,10 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 		Notes:     []string{},
 		Engine:    "python-ai",
 	}
+	datasetVersionID := ""
+	if execution.DatasetVersionID != nil {
+		datasetVersionID = strings.TrimSpace(*execution.DatasetVersionID)
+	}
 
 	for _, step := range execution.Plan.Steps {
 		taskPath, ok := pythonAITaskPath(step.SkillName)
@@ -63,6 +68,7 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 		payload, err := json.Marshal(pythonAIStepRequest{
 			ExecutionID:    execution.ExecutionID,
 			ProjectID:      execution.ProjectID,
+			DatasetVersion: datasetVersionID,
 			Step:           step,
 			PriorArtifacts: priorArtifacts,
 		})

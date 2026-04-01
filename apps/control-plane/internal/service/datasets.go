@@ -1,12 +1,15 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,7 +22,8 @@ import (
 	"analysis-support-platform/control-plane/internal/store"
 )
 
-const DefaultEmbeddingModel = "token-overlap-v1"
+const DefaultEmbeddingModel = "intfloat/multilingual-e5-small"
+const tokenProjectionVectorDim = 64
 
 type DatasetService struct {
 	store             store.Repository
@@ -285,7 +289,7 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	}
 	prepareFormat := artifactString(response.Artifact, "prepare_format")
 	if prepareFormat == "" && prepareRef != "" {
-		prepareFormat = "jsonl"
+		prepareFormat = inferArtifactFormat(prepareRef, "jsonl")
 	}
 	prepareMetadata := map[string]any{
 		"prepare_notes":        response.Notes,
@@ -369,6 +373,14 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 	if err := ensureParentDir(outputPath); err != nil {
 		return domain.DatasetVersion{}, err
 	}
+	if input.EmbeddingModel != nil {
+		requestedModel := strings.TrimSpace(*input.EmbeddingModel)
+		if requestedModel == "" {
+			version.EmbeddingModel = nil
+		} else {
+			version.EmbeddingModel = &requestedModel
+		}
+	}
 	if version.EmbeddingModel == nil {
 		model := DefaultEmbeddingModel
 		version.EmbeddingModel = &model
@@ -400,7 +412,7 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 	}
 	embeddingFormat := artifactString(response.Artifact, "embedding_format")
 	if embeddingFormat == "" && embeddingRef != "" {
-		embeddingFormat = "jsonl"
+		embeddingFormat = inferArtifactFormat(embeddingRef, "jsonl")
 	}
 	embeddingMetadata := map[string]any{
 		"text_column":     textColumn,
@@ -412,14 +424,32 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 	if embeddingFormat != "" {
 		embeddingMetadata["embedding_format"] = embeddingFormat
 	}
+	if chunkRef := artifactString(response.Artifact, "chunk_ref"); chunkRef != "" {
+		embeddingMetadata["chunk_ref"] = chunkRef
+	}
+	if chunkFormat := artifactString(response.Artifact, "chunk_format"); chunkFormat != "" {
+		embeddingMetadata["chunk_format"] = chunkFormat
+	}
 	if rowIDColumn := artifactString(response.Artifact, "row_id_column"); rowIDColumn != "" {
 		embeddingMetadata["row_id_column"] = rowIDColumn
 	}
 	if chunkIDColumn := artifactString(response.Artifact, "chunk_id_column"); chunkIDColumn != "" {
 		embeddingMetadata["chunk_id_column"] = chunkIDColumn
 	}
+	if chunkIndexColumn := artifactString(response.Artifact, "chunk_index_column"); chunkIndexColumn != "" {
+		embeddingMetadata["chunk_index_column"] = chunkIndexColumn
+	}
+	if chunkTextColumn := artifactString(response.Artifact, "chunk_text_column"); chunkTextColumn != "" {
+		embeddingMetadata["chunk_text_column"] = chunkTextColumn
+	}
 	if chunkingStrategy := artifactString(response.Artifact, "chunking_strategy"); chunkingStrategy != "" {
 		embeddingMetadata["chunking_strategy"] = chunkingStrategy
+	}
+	if embeddingProvider := artifactString(response.Artifact, "embedding_provider"); embeddingProvider != "" {
+		embeddingMetadata["embedding_provider"] = embeddingProvider
+	}
+	if embeddingRepresentation := artifactString(response.Artifact, "embedding_representation"); embeddingRepresentation != "" {
+		embeddingMetadata["embedding_representation"] = embeddingRepresentation
 	}
 	if contractVersion := artifactString(response.Artifact, "storage_contract_version"); contractVersion != "" {
 		embeddingMetadata["storage_contract_version"] = contractVersion
@@ -428,11 +458,27 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 	if value, ok := response.Artifact["document_count"]; ok {
 		version.Metadata["document_count"] = value
 	}
+	if value, ok := response.Artifact["chunk_count"]; ok {
+		version.Metadata["chunk_count"] = value
+	}
+	if value, ok := response.Artifact["source_row_count"]; ok {
+		version.Metadata["source_row_count"] = value
+	}
+	if value, ok := response.Artifact["embedding_vector_dim"]; ok {
+		version.Metadata["embedding_vector_dim"] = value
+	}
 	if value, ok := response.Artifact["embedding_uri"].(string); ok && strings.TrimSpace(value) != "" {
 		version.EmbeddingURI = &value
 	}
 	if value, ok := response.Artifact["embedding_model"].(string); ok && strings.TrimSpace(value) != "" {
 		version.EmbeddingModel = &value
+	}
+	indexEmbeddingRef := resolveReadableEmbeddingRef(embeddingRef, outputPath, version.EmbeddingURI)
+	if err := s.syncEmbeddingIndex(version, indexEmbeddingRef, artifactString(response.Artifact, "chunk_ref")); err != nil {
+		version.EmbeddingStatus = "failed"
+		version.Metadata["embedding_error"] = err.Error()
+		_ = s.store.SaveDatasetVersion(version)
+		return domain.DatasetVersion{}, err
 	}
 	delete(version.Metadata, "embedding_error")
 	if err := s.store.SaveDatasetVersion(version); err != nil {
@@ -518,7 +564,7 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 	}
 	sentimentFormat := artifactString(response.Artifact, "sentiment_format")
 	if sentimentFormat == "" && sentimentRef != "" {
-		sentimentFormat = "jsonl"
+		sentimentFormat = inferArtifactFormat(sentimentRef, "jsonl")
 	}
 	sentimentMetadata := map[string]any{
 		"sentiment_notes":             response.Notes,
@@ -669,24 +715,24 @@ func (s *DatasetService) deriveSentimentURI(version domain.DatasetVersion) strin
 	if version.SentimentURI != nil && strings.TrimSpace(*version.SentimentURI) != "" {
 		return strings.TrimSpace(*version.SentimentURI)
 	}
-	if path, ok := s.datasetArtifactPath(version, "sentiment", "sentiment.jsonl"); ok {
+	if path, ok := s.datasetArtifactPath(version, "sentiment", "sentiment.parquet"); ok {
 		return path
 	}
 	base := strings.TrimSpace(version.StorageURI)
 	if requiresPrepare(version) {
 		base = s.derivePrepareURI(version)
 	}
-	return base + ".sentiment.jsonl"
+	return base + ".sentiment.parquet"
 }
 
 func (s *DatasetService) derivePrepareURI(version domain.DatasetVersion) string {
 	if version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != "" {
 		return strings.TrimSpace(*version.PrepareURI)
 	}
-	if path, ok := s.datasetArtifactPath(version, "prepare", "prepared.jsonl"); ok {
+	if path, ok := s.datasetArtifactPath(version, "prepare", "prepared.parquet"); ok {
 		return path
 	}
-	return strings.TrimSpace(version.StorageURI) + ".prepared.jsonl"
+	return strings.TrimSpace(version.StorageURI) + ".prepared.parquet"
 }
 
 func deriveEmbeddingURI(version domain.DatasetVersion) string {
@@ -704,14 +750,14 @@ func deriveSentimentURI(version domain.DatasetVersion) string {
 	if requiresPrepare(version) {
 		base = derivePrepareURI(version)
 	}
-	return base + ".sentiment.jsonl"
+	return base + ".sentiment.parquet"
 }
 
 func derivePrepareURI(version domain.DatasetVersion) string {
 	if version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != "" {
 		return strings.TrimSpace(*version.PrepareURI)
 	}
-	return strings.TrimSpace(version.StorageURI) + ".prepared.jsonl"
+	return strings.TrimSpace(version.StorageURI) + ".prepared.parquet"
 }
 
 func datasetSourceForUnstructured(version domain.DatasetVersion) string {
@@ -768,6 +814,173 @@ func artifactString(artifact map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+func inferArtifactFormat(path string, fallback string) string {
+	normalized := strings.ToLower(strings.TrimSpace(path))
+	switch {
+	case strings.HasSuffix(normalized, ".parquet"):
+		return "parquet"
+	case strings.HasSuffix(normalized, ".jsonl"):
+		return "jsonl"
+	default:
+		return fallback
+	}
+}
+
+func resolveReadableEmbeddingRef(primary string, fallback string, versionURI *string) string {
+	candidates := []string{
+		strings.TrimSpace(primary),
+		strings.TrimSpace(fallback),
+		strings.TrimSpace(derefString(versionURI)),
+	}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	for _, candidate := range candidates {
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func (s *DatasetService) syncEmbeddingIndex(version domain.DatasetVersion, embeddingRef string, chunkRef string) error {
+	indexer, ok := s.store.(store.EmbeddingChunkIndexer)
+	if !ok {
+		return nil
+	}
+	embeddingRef = strings.TrimSpace(embeddingRef)
+	if embeddingRef == "" {
+		return nil
+	}
+	records, err := loadEmbeddingIndexChunks(version.DatasetVersionID, embeddingRef, chunkRef, derefString(version.EmbeddingModel))
+	if err != nil {
+		return err
+	}
+	if err := indexer.ReplaceEmbeddingChunkIndex(version.DatasetVersionID, records); err != nil {
+		return err
+	}
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.Metadata["embedding_index_backend"] = "pgvector"
+	version.Metadata["embedding_index_ref"] = fmt.Sprintf("pgvector://embedding_index_chunks?dataset_version_id=%s", version.DatasetVersionID)
+	vectorDim := 0
+	if len(records) > 0 {
+		vectorDim = records[0].VectorDim
+	}
+	version.Metadata["embedding_vector_dim"] = vectorDim
+	version.Metadata["embedding_indexed_chunk_count"] = len(records)
+	return nil
+}
+
+type embeddingSidecarRecord struct {
+	SourceIndex       int64          `json:"source_index"`
+	RowID             string         `json:"row_id"`
+	ChunkID           string         `json:"chunk_id"`
+	ChunkIndex        int            `json:"chunk_index"`
+	CharStart         int            `json:"char_start"`
+	CharEnd           int            `json:"char_end"`
+	TokenCounts       map[string]int `json:"token_counts"`
+	Embedding         []float32      `json:"embedding"`
+	EmbeddingDim      int            `json:"embedding_dim"`
+	EmbeddingProvider string         `json:"embedding_provider"`
+}
+
+func loadEmbeddingIndexChunks(datasetVersionID string, embeddingRef string, chunkRef string, embeddingModel string) ([]domain.EmbeddingIndexChunk, error) {
+	handle, err := os.Open(embeddingRef)
+	if err != nil {
+		return nil, err
+	}
+	defer handle.Close()
+
+	scanner := bufio.NewScanner(handle)
+	scanner.Buffer(make([]byte, 1024), 4*1024*1024)
+	records := make([]domain.EmbeddingIndexChunk, 0)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var sidecar embeddingSidecarRecord
+		if err := json.Unmarshal([]byte(line), &sidecar); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(sidecar.ChunkID) == "" {
+			continue
+		}
+		vector := sidecar.Embedding
+		if len(vector) == 0 {
+			vector = projectTokenCountsToDenseVector(sidecar.TokenCounts, tokenProjectionVectorDim)
+		}
+		vectorDim := len(vector)
+		if vectorDim == 0 {
+			continue
+		}
+		metadata := map[string]any{
+			"char_start": sidecar.CharStart,
+			"char_end":   sidecar.CharEnd,
+		}
+		if provider := strings.TrimSpace(sidecar.EmbeddingProvider); provider != "" {
+			metadata["embedding_provider"] = provider
+		}
+		records = append(records, domain.EmbeddingIndexChunk{
+			ChunkID:          strings.TrimSpace(sidecar.ChunkID),
+			DatasetVersionID: datasetVersionID,
+			RowID:            strings.TrimSpace(sidecar.RowID),
+			SourceRowIndex:   sidecar.SourceIndex,
+			ChunkIndex:       sidecar.ChunkIndex,
+			ChunkRef:         strings.TrimSpace(chunkRef),
+			EmbeddingModel:   strings.TrimSpace(embeddingModel),
+			VectorDim:        vectorDim,
+			Embedding:        vector,
+			Metadata:         metadata,
+		})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func projectTokenCountsToDenseVector(tokenCounts map[string]int, dim int) []float32 {
+	if dim <= 0 {
+		return []float32{}
+	}
+	vector := make([]float32, dim)
+	for token, count := range tokenCounts {
+		token = strings.TrimSpace(token)
+		if token == "" || count == 0 {
+			continue
+		}
+		hash := fnv.New64a()
+		_, _ = hash.Write([]byte(token))
+		sum := hash.Sum64()
+		index := int(sum % uint64(dim))
+		sign := float32(1)
+		if (sum>>63)&1 == 1 {
+			sign = -1
+		}
+		vector[index] += sign * float32(count)
+	}
+	var norm float64
+	for _, value := range vector {
+		norm += float64(value * value)
+	}
+	if norm <= 0 {
+		return vector
+	}
+	scale := float32(1 / math.Sqrt(norm))
+	for index, value := range vector {
+		vector[index] = value * scale
+	}
+	return vector
 }
 
 func anyToInt(value any) (int, bool) {

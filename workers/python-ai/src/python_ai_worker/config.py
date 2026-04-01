@@ -25,6 +25,13 @@ class WorkerConfig:
     anthropic_version: str = "2023-06-01"
     anthropic_max_tokens: int = 2048
     anthropic_timeout_sec: float = 30.0
+    openai_api_key: str | None = None
+    openai_api_url: str = "https://api.openai.com/v1/embeddings"
+    openai_embedding_model: str = "text-embedding-3-small"
+    openai_embedding_dimensions: int = 0
+    openai_embedding_batch_size: int = 32
+    openai_timeout_sec: float = 30.0
+    local_embedding_model: str = "intfloat/multilingual-e5-small"
     anthropic_prepare_prompt_version: str = DEFAULT_PREPARE_PROMPT_VERSION
     anthropic_prepare_batch_prompt_version: str = DEFAULT_PREPARE_BATCH_PROMPT_VERSION
     anthropic_sentiment_prompt_version: str = DEFAULT_SENTIMENT_PROMPT_VERSION
@@ -45,6 +52,13 @@ def load_config() -> WorkerConfig:
         anthropic_version=os.getenv("ANTHROPIC_VERSION", "2023-06-01"),
         anthropic_max_tokens=int(os.getenv("ANTHROPIC_MAX_TOKENS", "2048")),
         anthropic_timeout_sec=float(os.getenv("ANTHROPIC_TIMEOUT_SEC", "30")),
+        openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+        openai_api_url=os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/embeddings"),
+        openai_embedding_model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+        openai_embedding_dimensions=int(os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "0")),
+        openai_embedding_batch_size=max(1, int(os.getenv("OPENAI_EMBEDDING_BATCH_SIZE", "32"))),
+        openai_timeout_sec=float(os.getenv("OPENAI_TIMEOUT_SEC", "30")),
+        local_embedding_model=os.getenv("LOCAL_EMBEDDING_MODEL", "intfloat/multilingual-e5-small"),
         anthropic_prepare_prompt_version=os.getenv("ANTHROPIC_PREPARE_PROMPT_VERSION", DEFAULT_PREPARE_PROMPT_VERSION),
         anthropic_prepare_batch_prompt_version=os.getenv("ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION", DEFAULT_PREPARE_BATCH_PROMPT_VERSION),
         anthropic_sentiment_prompt_version=os.getenv("ANTHROPIC_SENTIMENT_PROMPT_VERSION", DEFAULT_SENTIMENT_PROMPT_VERSION),

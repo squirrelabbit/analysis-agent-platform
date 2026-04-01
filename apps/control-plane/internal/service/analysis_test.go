@@ -201,7 +201,7 @@ func TestSubmitAnalysisEnrichesEmbeddingClusterInputs(t *testing.T) {
 			"raw_text_column": "text",
 		},
 		PrepareStatus:   "ready",
-		PrepareURI:      stringPtr("issues.prepared.jsonl"),
+		PrepareURI:      stringPtr("issues.prepared.parquet"),
 		EmbeddingStatus: "ready",
 		EmbeddingURI:    stringPtr("issues.embeddings.jsonl"),
 	}
@@ -229,8 +229,166 @@ func TestSubmitAnalysisEnrichesEmbeddingClusterInputs(t *testing.T) {
 	if got := response.Plan.Plan.Steps[1].Inputs["text_column"]; got != "normalized_text" {
 		t.Fatalf("unexpected cluster summary text column: %+v", response.Plan.Plan.Steps[1].Inputs)
 	}
-	if response.Plan.Plan.Steps[1].DatasetName != "issues.prepared.jsonl" {
+	if response.Plan.Plan.Steps[1].DatasetName != "issues.prepared.parquet" {
 		t.Fatalf("unexpected cluster summary dataset name: %+v", response.Plan.Plan.Steps[1])
+	}
+}
+
+func TestSubmitAnalysisEnrichesSemanticSearchChunkInputs(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, fakePlanner{
+		result: planner.PlanGenerationResult{
+			Plan: domain.SkillPlan{
+				Steps: []domain.SkillPlanStep{
+					{
+						SkillName:   "semantic_search",
+						DatasetName: "dataset_from_version",
+						Inputs:      map[string]any{},
+					},
+				},
+			},
+			PlannerType: "python-ai",
+		},
+	})
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"prepared_ref":         "issues.prepared.parquet",
+			"prepared_text_column": "normalized_text",
+			"embedding_index_ref":  "pgvector://embedding_index_chunks?dataset_version_id=version-1",
+			"chunk_ref":            "issues.chunks.parquet",
+			"chunk_format":         "parquet",
+		},
+		PrepareStatus:   "ready",
+		PrepareURI:      stringPtr("issues.prepared.parquet"),
+		EmbeddingStatus: "ready",
+		EmbeddingURI:    stringPtr("issues.embeddings.jsonl"),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	dataType := "unstructured"
+	datasetVersionID := version.DatasetVersionID
+	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
+		DatasetVersionID: &datasetVersionID,
+		DataType:         &dataType,
+		Goal:             "결제 오류 관련 근거를 찾아줘",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	if len(response.Plan.Plan.Steps) != 1 {
+		t.Fatalf("unexpected plan steps: %+v", response.Plan.Plan.Steps)
+	}
+	step := response.Plan.Plan.Steps[0]
+	if step.DatasetName != "issues.prepared.parquet" {
+		t.Fatalf("unexpected semantic search dataset name: %+v", step)
+	}
+	if got := step.Inputs["embedding_uri"]; got != "issues.embeddings.jsonl" {
+		t.Fatalf("unexpected embedding uri: %+v", step.Inputs)
+	}
+	if got := step.Inputs["chunk_ref"]; got != "issues.chunks.parquet" {
+		t.Fatalf("unexpected chunk ref: %+v", step.Inputs)
+	}
+	if got := step.Inputs["embedding_index_ref"]; got != "pgvector://embedding_index_chunks?dataset_version_id=version-1" {
+		t.Fatalf("unexpected embedding index ref: %+v", step.Inputs)
+	}
+	if got := step.Inputs["chunk_format"]; got != "parquet" {
+		t.Fatalf("unexpected chunk format: %+v", step.Inputs)
+	}
+}
+
+func TestSubmitAnalysisEnrichesIssueSentimentSummaryInputs(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, fakePlanner{
+		result: planner.PlanGenerationResult{
+			Plan: domain.SkillPlan{
+				Steps: []domain.SkillPlanStep{
+					{
+						SkillName:   "issue_sentiment_summary",
+						DatasetName: "dataset_from_version",
+						Inputs:      map[string]any{},
+					},
+				},
+			},
+			PlannerType: "python-ai",
+		},
+	})
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"prepared_ref":           "issues.prepared.parquet",
+			"prepared_text_column":   "normalized_text",
+			"sentiment_label_column": "sentiment_label",
+			"row_id_column":          "row_id",
+		},
+		PrepareStatus:   "ready",
+		PrepareURI:      stringPtr("issues.prepared.parquet"),
+		SentimentStatus: "ready",
+		SentimentURI:    stringPtr("issues.sentiment.parquet"),
+		EmbeddingStatus: "not_requested",
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	dataType := "unstructured"
+	datasetVersionID := version.DatasetVersionID
+	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
+		DatasetVersionID: &datasetVersionID,
+		DataType:         &dataType,
+		Goal:             "감성 분포를 보여줘",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	if len(response.Plan.Plan.Steps) != 1 {
+		t.Fatalf("unexpected plan steps: %+v", response.Plan.Plan.Steps)
+	}
+	step := response.Plan.Plan.Steps[0]
+	if step.DatasetName != "issues.sentiment.parquet" {
+		t.Fatalf("unexpected sentiment dataset name: %+v", step)
+	}
+	if got := step.Inputs["prepared_dataset_name"]; got != "issues.prepared.parquet" {
+		t.Fatalf("unexpected prepared dataset input: %+v", step.Inputs)
+	}
+	if got := step.Inputs["text_column"]; got != "normalized_text" {
+		t.Fatalf("unexpected text column: %+v", step.Inputs)
+	}
+	if got := step.Inputs["sentiment_column"]; got != "sentiment_label" {
+		t.Fatalf("unexpected sentiment column: %+v", step.Inputs)
+	}
+	if got := step.Inputs["row_id_column"]; got != "row_id" {
+		t.Fatalf("unexpected row id column: %+v", step.Inputs)
 	}
 }
 

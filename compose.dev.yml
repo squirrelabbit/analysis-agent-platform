@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     command:
       - postgres
       - -c
@@ -41,8 +41,15 @@ services:
       PYTHON_AI_WORKER_HOST: 0.0.0.0
       PYTHON_AI_WORKER_PORT: 8090
       PYTHON_AI_LLM_PROVIDER: anthropic
+      DATABASE_URL: postgresql://platform:platform@postgres:5432/analysis_support
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OPENAI_EMBEDDING_DIMENSIONS: ${OPENAI_EMBEDDING_DIMENSIONS:-0}
+      OPENAI_EMBEDDING_BATCH_SIZE: ${OPENAI_EMBEDDING_BATCH_SIZE:-32}
+      OPENAI_TIMEOUT_SEC: ${OPENAI_TIMEOUT_SEC:-30}
+      LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
     ports:
       - "18090:8090"
     volumes:

@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+import pyarrow as pa
+import pyarrow.parquet as pq
+
 from ..task_router import run_task, task_handlers
 
 
@@ -63,6 +66,11 @@ class SkillCaseContext:
             for row in rows:
                 handle.write(json.dumps(row, ensure_ascii=False))
                 handle.write("\n")
+        return path
+
+    def write_parquet(self, name: str, rows: list[dict[str, Any]]) -> Path:
+        path = self.temp_dir / name
+        pq.write_table(pa.Table.from_pylist(rows), path)
         return path
 
     @contextmanager
@@ -178,20 +186,20 @@ def _dataset_prepare_case(ctx: SkillCaseContext) -> dict[str, Any]:
             "dataset_version_id": "version-skill-case",
             "dataset_name": str(csv_path),
             "text_column": "text",
-            "output_path": str(ctx.temp_dir / "issues_raw.prepared.jsonl"),
+            "output_path": str(ctx.temp_dir / "issues_raw.prepared.parquet"),
         },
     )
 
 
 def _sentiment_label_case(ctx: SkillCaseContext) -> dict[str, Any]:
-    prepared_path = ctx.write_jsonl("issues.prepared.jsonl", _prepared_rows())
+    prepared_path = ctx.write_parquet("issues.prepared.parquet", _prepared_rows())
     return ctx.run(
         "sentiment_label",
         {
             "dataset_version_id": "version-skill-case",
             "dataset_name": str(prepared_path),
             "text_column": "normalized_text",
-            "output_path": str(ctx.temp_dir / "issues.sentiment.jsonl"),
+            "output_path": str(ctx.temp_dir / "issues.sentiment.parquet"),
         },
     )
 
@@ -680,21 +688,21 @@ def _issue_period_compare_case(ctx: SkillCaseContext) -> dict[str, Any]:
 
 
 def _issue_sentiment_summary_case(ctx: SkillCaseContext) -> dict[str, Any]:
-    prepared_path = ctx.write_jsonl("issues.prepared.jsonl", _prepared_rows())
+    prepared_path = ctx.write_parquet("issues.prepared.parquet", _prepared_rows())
     sentiment = ctx.run(
         "sentiment_label",
         {
             "dataset_version_id": "version-skill-case",
             "dataset_name": str(prepared_path),
             "text_column": "normalized_text",
-            "output_path": str(ctx.temp_dir / "issues.sentiment.jsonl"),
+            "output_path": str(ctx.temp_dir / "issues.sentiment.parquet"),
         },
     )
     sentiment_dataset = sentiment["artifact"]["sentiment_uri"]
     filtered = ctx.run(
         "document_filter",
         {
-            "dataset_name": sentiment_dataset,
+            "dataset_name": str(prepared_path),
             "text_column": "normalized_text",
             "query": "긍정 부정 감성 분포를 보여줘",
             "sample_n": 5,
@@ -703,7 +711,7 @@ def _issue_sentiment_summary_case(ctx: SkillCaseContext) -> dict[str, Any]:
     ctx.run(
         "document_sample",
         {
-            "dataset_name": sentiment_dataset,
+            "dataset_name": str(prepared_path),
             "text_column": "normalized_text",
             "query": "긍정 부정 감성 분포를 보여줘",
             "sample_n": 3,
@@ -714,6 +722,7 @@ def _issue_sentiment_summary_case(ctx: SkillCaseContext) -> dict[str, Any]:
         "issue_sentiment_summary",
         {
             "dataset_name": sentiment_dataset,
+            "prepared_dataset_name": str(prepared_path),
             "text_column": "normalized_text",
             "sentiment_column": "sentiment_label",
             "sample_n": 3,
@@ -824,7 +833,7 @@ SKILL_CASES: dict[str, SkillCase] = {
     "planner": SkillCase("planner", "rule-based planner fallback case", _planner_case),
     "dataset_prepare": SkillCase("dataset_prepare", "prepare raw rows into normalized jsonl", _dataset_prepare_case),
     "sentiment_label": SkillCase("sentiment_label", "label prepared rows with fallback sentiment", _sentiment_label_case),
-    "embedding": SkillCase("embedding", "build token-overlap embedding sidecar", _embedding_case),
+    "embedding": SkillCase("embedding", "build dense-or-token embedding sidecar", _embedding_case),
     "document_filter": SkillCase("document_filter", "lexical narrowing over issue rows", _document_filter_case),
     "deduplicate_documents": SkillCase("deduplicate_documents", "collapse duplicate or near-duplicate rows", _deduplicate_documents_case),
     "keyword_frequency": SkillCase("keyword_frequency", "count top terms from filtered rows", _keyword_frequency_case),
@@ -861,4 +870,3 @@ def validate_skill_cases() -> None:
 
 
 validate_skill_cases()
-

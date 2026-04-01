@@ -224,15 +224,47 @@ def run_issue_period_compare(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _prepared_text_lookup(dataset_name: str, text_column: str, prior_artifacts: Any) -> tuple[dict[str, str], dict[int, str]]:
+    by_row_id: dict[str, str] = {}
+    by_source_index: dict[int, str] = {}
+    if not dataset_name:
+        return by_row_id, by_source_index
+    for item in rt._selected_text_rows(dataset_name, text_column, prior_artifacts):
+        text = item["text"]
+        if not text:
+            continue
+        row_id = str(item.get("row_id") or "").strip()
+        if row_id:
+            by_row_id[row_id] = text
+        by_source_index[int(item["source_index"])] = text
+    return by_row_id, by_source_index
+
+
 def run_issue_sentiment_summary(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_sentiment_summary_payload(payload)
     label_counts: Counter[str] = Counter()
     label_samples: dict[str, list[str]] = {}
     unlabeled_rows = 0
+    prepared_by_row_id, prepared_by_source_index = _prepared_text_lookup(
+        normalized["prepared_dataset_name"],
+        normalized["text_column"],
+        payload.get("prior_artifacts"),
+    )
 
     for item in rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts")):
         row = item["row"]
         text = item["text"]
+        if not text and normalized["prepared_dataset_name"]:
+            row_id = str(row.get(normalized["row_id_column"]) or row.get("row_id") or "").strip()
+            if row_id:
+                text = prepared_by_row_id.get(row_id, "")
+            if not text:
+                source_index_value = row.get(normalized["source_row_index_column"])
+                try:
+                    source_index = int(source_index_value)
+                except (TypeError, ValueError):
+                    source_index = int(item["source_index"])
+                text = prepared_by_source_index.get(source_index, "")
         label = str(row.get(normalized["sentiment_column"]) or "").strip().lower()
         if not text or label not in rt.SENTIMENT_LABELS:
             unlabeled_rows += 1
@@ -261,6 +293,8 @@ def run_issue_sentiment_summary(payload: dict[str, Any]) -> dict[str, Any]:
         f"python-ai summarized sentiment labels across {total_labeled} rows",
         f"dataset source: {normalized['dataset_name']}",
     ]
+    if normalized["prepared_dataset_name"]:
+        notes.append(f"prepared dataset source: {normalized['prepared_dataset_name']}")
     if unlabeled_rows > 0:
         notes.append(f"unlabeled_rows={unlabeled_rows}")
     if not breakdown:
@@ -285,6 +319,7 @@ def run_issue_sentiment_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "skill_name": "issue_sentiment_summary",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
+            "prepared_dataset_name": normalized["prepared_dataset_name"],
             "text_column": normalized["text_column"],
             "sentiment_column": normalized["sentiment_column"],
             "summary": summary,

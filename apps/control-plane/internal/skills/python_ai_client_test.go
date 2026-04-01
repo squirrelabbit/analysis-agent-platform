@@ -50,6 +50,9 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 			if !strings.Contains(string(body), `"sentiment_column":"sentiment_label"`) {
 				t.Fatalf("unexpected sentiment request body: %s", string(body))
 			}
+			if !strings.Contains(string(body), `"prepared_dataset_name":"/tmp/issues.prepared.parquet"`) {
+				t.Fatalf("unexpected prepared dataset in sentiment request body: %s", string(body))
+			}
 			_, _ = w.Write([]byte(`{
 				"notes":["sentiment path completed"],
 				"artifact":{
@@ -86,12 +89,20 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 			if !strings.Contains(string(body), `"query":"관련 문서를 찾아줘"`) {
 				t.Fatalf("unexpected semantic search request body: %s", string(body))
 			}
+			if !strings.Contains(string(body), `"dataset_version_id":"version-1"`) {
+				t.Fatalf("unexpected semantic search dataset version in request body: %s", string(body))
+			}
+			if !strings.Contains(string(body), `"chunk_ref":"/tmp/issues.chunks.parquet"`) {
+				t.Fatalf("unexpected semantic search chunk ref in request body: %s", string(body))
+			}
 			_, _ = w.Write([]byte(`{
 				"notes":["semantic search completed"],
 				"artifact":{
 					"skill_name":"semantic_search",
-					"summary":{"match_count":2},
-					"matches":[{"rank":1,"score":0.9,"text":"결제 오류"}]
+					"citation_mode":"chunk",
+					"chunk_ref":"/tmp/issues.chunks.parquet",
+					"summary":{"match_count":2,"citation_mode":"chunk"},
+					"matches":[{"rank":1,"score":0.9,"text":"결제 오류","chunk_id":"row-1:chunk-0","char_start":0,"char_end":5}]
 				}
 			}`))
 		case "/tasks/evidence_pack":
@@ -115,8 +126,10 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 				"artifact":{
 					"skill_name":"evidence_pack",
 					"selection_source":"semantic_search",
+					"citation_mode":"chunk",
+					"chunk_ref":"/tmp/issues.chunks.parquet",
 					"summary":"대표 이슈 근거를 모았습니다",
-					"evidence":[{"rank":1,"source_index":0,"snippet":"결제 오류","rationale":"selected"}]
+					"evidence":[{"rank":1,"source_index":0,"snippet":"결제 오류","rationale":"selected","chunk_id":"row-1:chunk-0","char_start":0,"char_end":5}]
 				}
 			}`))
 		case "/tasks/issue_evidence_summary":
@@ -140,8 +153,10 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 				"artifact":{
 					"skill_name":"issue_evidence_summary",
 					"selection_source":"semantic_search",
+					"citation_mode":"chunk",
+					"chunk_ref":"/tmp/issues.chunks.parquet",
 					"summary":"대표 이슈 근거를 모았습니다",
-					"evidence":[{"rank":1,"source_index":0,"snippet":"결제 오류","rationale":"selected"}]
+					"evidence":[{"rank":1,"source_index":0,"snippet":"결제 오류","rationale":"selected","chunk_id":"row-1:chunk-0","char_start":0,"char_end":5}]
 				}
 			}`))
 		default:
@@ -154,10 +169,12 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 	}
+	datasetVersionID := "version-1"
 
 	result, err := client.Run(context.Background(), domain.ExecutionSummary{
-		ExecutionID: "exec-1",
-		ProjectID:   "project-1",
+		ExecutionID:      "exec-1",
+		ProjectID:        "project-1",
+		DatasetVersionID: &datasetVersionID,
 		Plan: domain.SkillPlan{
 			Steps: []domain.SkillPlanStep{
 				{
@@ -193,10 +210,11 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 				{
 					StepID:      "step-2",
 					SkillName:   "issue_sentiment_summary",
-					DatasetName: "/tmp/issues.sentiment.jsonl",
+					DatasetName: "/tmp/issues.sentiment.parquet",
 					Inputs: map[string]any{
-						"text_column":      "normalized_text",
-						"sentiment_column": "sentiment_label",
+						"text_column":           "normalized_text",
+						"sentiment_column":      "sentiment_label",
+						"prepared_dataset_name": "/tmp/issues.prepared.parquet",
 					},
 				},
 				{
@@ -216,6 +234,7 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 						"sample_n":      3,
 						"query":         "관련 문서를 찾아줘",
 						"embedding_uri": "/tmp/issues.csv.embeddings.jsonl",
+						"chunk_ref":     "/tmp/issues.chunks.parquet",
 					},
 				},
 				{
@@ -267,8 +286,14 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 	if !strings.Contains(searchArtifact, `"match_count":2`) {
 		t.Fatalf("unexpected semantic artifact: %s", searchArtifact)
 	}
+	if !strings.Contains(searchArtifact, `"chunk_ref":"/tmp/issues.chunks.parquet"`) {
+		t.Fatalf("unexpected semantic artifact: %s", searchArtifact)
+	}
 	evidenceArtifact := result.Artifacts["step:step-5:issue_evidence_summary"]
 	if !strings.Contains(evidenceArtifact, `"selection_source":"semantic_search"`) {
+		t.Fatalf("unexpected evidence artifact: %s", evidenceArtifact)
+	}
+	if !strings.Contains(evidenceArtifact, `"chunk_id":"row-1:chunk-0"`) {
 		t.Fatalf("unexpected evidence artifact: %s", evidenceArtifact)
 	}
 	if !strings.Contains(evidenceArtifact, `"summary":"대표 이슈 근거를 모았습니다"`) {

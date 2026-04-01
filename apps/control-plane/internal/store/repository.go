@@ -25,6 +25,10 @@ type Repository interface {
 	GetExecution(projectID, executionID string) (domain.ExecutionSummary, error)
 }
 
+type EmbeddingChunkIndexer interface {
+	ReplaceEmbeddingChunkIndex(datasetVersionID string, records []domain.EmbeddingIndexChunk) error
+}
+
 func NewRepository(cfg config.Config) (Repository, error) {
 	switch cfg.StoreBackend {
 	case "", "memory":

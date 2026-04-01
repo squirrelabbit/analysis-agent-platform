@@ -1,4 +1,4 @@
-FROM python:3.14-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,6 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tzdata \
+    && python -m pip install --no-cache-dir "fastembed>=0.8,<0.9" "pyarrow>=21,<22" "psycopg[binary]>=3.2,<3.3" \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -40,10 +40,11 @@
 ## Phase 4-1. 비정형 저장 포맷 전환
 
 - `dataset_prepare` 출력은 `prepared.parquet` 중심으로 옮긴다.
-- `sentiment_label`은 row 복제 JSONL 대신 `row_id` 기준 sidecar를 우선한다.
+- `sentiment_label`은 현재 `row_id`, `source_row_index` 기준 Parquet sidecar와 prepared join 경로까지 반영됐고, 다음 단계에서는 이 join 로직을 공통 계층으로 끌어올린다.
 - dense retrieval을 위해 `chunk_id`와 vector index를 도입한다.
+- `embedding`은 현재 `chunks.parquet` 생성과 chunk 단위 token vector 저장까지 반영됐다.
 - control plane과 worker는 파일 경로 문자열보다 `ref + format` 해석 계층을 점진적으로 도입한다.
-- 확인 필요: Parquet writer 의존성은 `pyarrow`와 DuckDB Python 경로 중 어느 쪽을 채택할지 합의가 필요하다.
+- 현재 구현은 `pyarrow`로 `prepared.parquet` writer/reader를 붙였고, sentiment sidecar Parquet 전환은 후속 단계로 남아 있다.
 
 ## Phase 5. Rust hot skill worker 추가
 

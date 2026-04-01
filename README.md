@@ -24,12 +24,19 @@
 - `Claude Sonnet` 기반 planner/evidence generation 경로와 fallback 경로가 Python AI worker에 반영돼 있다.
 - `issue_evidence_summary`는 trend/breakdown/compare/cluster/taxonomy/sentiment 계열 prior artifact를 `analysis_context`로 끌어와 근거 설명에 반영한다.
 - `dataset_prepare`는 Anthropic prepare 경로가 켜지면 기본 `prepare_batch_size=8` 기준 batch 정제를 수행한다.
-- `dataset_prepare`, `sentiment_label`, `embedding` JSONL artifact는 현재 `row_id/ref/format` 메타데이터를 함께 남겨 이후 Parquet 전환의 기반을 잡아 두었다.
+- `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding`은 아직 JSONL sidecar를 유지한다.
+- `sentiment_label` 기본 출력은 이제 `row_id`, `source_row_index`, 감성 컬럼 중심의 sidecar이고, `issue_sentiment_summary`는 `prepared_dataset_name`을 함께 받아 텍스트를 조인한다.
+- `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 `embeddings.jsonl` record에 함께 저장한다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1` sidecar로 자동 fallback한다.
+- `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 model로 query vector를 다시 만든다. 불가하면 `embeddings.jsonl` scan과 token-overlap 계산으로 fallback한다. 검색 결과는 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 반환하고, `issue_evidence_summary`는 이를 evidence artifact까지 유지한다.
+- `embedding_cluster`는 현재 `embeddings.jsonl` sidecar를 읽되, dense vector가 있으면 lexical guardrail을 함께 둔 `dense-hybrid` similarity를 우선 사용하고, 없으면 token-overlap cosine similarity로 fallback한다.
+- dataset build artifact는 현재 `row_id/ref/format` 메타데이터를 함께 남겨 다음 단계의 chunk/vector index 전환 기반을 잡아 두었다.
+- control plane은 `embedding` build가 끝나면 `embeddings.jsonl`을 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection으로 바꾼 뒤 `embedding_index_chunks`에 적재한다.
+- 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension, `embedding_index_chunks` table을 포함한다.
 - `dataset_prepare`와 `sentiment_label`은 기본 Haiku model을 쓰고, prompt version은 registry와 환경 변수로 선택할 수 있다.
 - 비정형 deterministic skill은 Python worker 안에서 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`, `issue_taxonomy_summary`까지 확장돼 있다.
 - Python AI worker는 현재 `task_router + planner + runtime helper + support/core skill module` 구조로 분리돼 있다.
 - Python skill-case devtool은 `python_ai_worker.devtools` 패키지와 `run_skill_case --validate` CLI로 정식 검증 경로를 가진다.
-- 비정형 dataset build artifact는 현재 JSONL 중심이고, Parquet + vector index 전환 설계는 `docs/architecture/unstructured_storage_transition.md`에 따로 정리했다.
+- 비정형 dataset build는 현재 `prepare/sentiment=Parquet`, `chunk=Parquet`, `embedding=JSONL sidecar` 단계이며, 다음 저장 구조 전환 설계는 `docs/architecture/unstructured_storage_transition.md`에 따로 정리했다.
 - 레거시 Python `src/` 디렉터리는 현재 저장소에 없다.
 - `workers/rust-skills/`는 아직 실사용 hot path가 연결되지 않은 선택 최적화 경로다.
 
@@ -63,7 +70,7 @@
 - 저장소 경로
   - raw upload는 `UPLOAD_ROOT`
   - prepare/sentiment/embedding 산출물은 `ARTIFACT_ROOT`
-  - 현재 기본 포맷은 JSONL이고, 장기 전환안은 `docs/architecture/unstructured_storage_transition.md`를 기준으로 본다.
+  - 현재 기본 포맷은 `prepare/sentiment/chunk=Parquet`, `embedding=JSONL`이며, 장기 전환안은 `docs/architecture/unstructured_storage_transition.md`를 기준으로 본다.
 - 검증 자산
   - Go unit test / build
   - Python unit test
@@ -195,11 +202,17 @@ Support skill:
   - `smoke_cluster.sh`
   - `smoke_taxonomy.sh`
   - smoke script는 source file을 `/uploads`로 올린 뒤 dataset version을 만들어 host/container 경로 차이를 줄인다.
+  - 이번 turn 기준 `smoke_semantic.sh`는 새 compose 이미지에서 다시 실행해 통과했다.
+  - 이번 turn의 compose 실행에서 `smoke_semantic.sh`, `smoke_cluster.sh`를 `embedding_model=intfloat/multilingual-e5-small` 기준으로 다시 실행해 `embedding_index_backend=pgvector`, `embedding_vector_dim=384`, `retrieval_backend=pgvector`, `cluster_similarity_backend=dense-hybrid`, `dominant_cluster_label=결제 / 오류`를 확인했다.
+  - 별도 컨테이너 검증과 end-to-end smoke 모두에서 `intfloat/multilingual-e5-small` local model download와 `fastembed`, `384차원` dense embedding 생성을 확인했다.
 
 확인 필요:
-- 이번 turn에서는 Python worker 재빌드 후 smoke 8종을 모두 다시 실행했다.
-- smoke 재실행 기준으로 `dataset_prepare`는 `dataset-prepare-anthropic-batch-v1`, `prepare batch size: 8` 메타데이터가 기록됐다.
-- smoke 재실행 기준으로 `issue_evidence_summary`는 compare/breakdown/trend/cluster/taxonomy/sentiment 시나리오에서 `analysis_context`를 포함했다.
+- `pgvector` 이미지 전환 뒤 기존 Postgres volume에서 collation version mismatch warning이 관찰됐다.
+- `embedding_cluster`는 현재 dense vector가 있으면 `dense-hybrid` similarity를 쓰고, 없으면 token-overlap fallback을 사용한다. dense-only clustering 품질은 추가 검증이 더 필요하다.
+- OpenAI key를 넣은 dense embedding end-to-end smoke는 이번 turn에 재현하지 않았다. 코드 경로와 unit test는 반영돼 있다.
+
+개발 메모:
+- Postgres collation warning이 보이면 [docs/architecture/dev_postgres_reset.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/architecture/dev_postgres_reset.md) 기준으로 dev volume만 재초기화한다.
 
 ## 디렉터리
 
@@ -242,6 +255,7 @@ Should:
 - [docs/project_summary.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/project_summary.md)
 - [docs/devlog/README.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/devlog/README.md)
 - [docs/architecture/target_stack.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/architecture/target_stack.md)
+- [docs/architecture/dev_postgres_reset.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/architecture/dev_postgres_reset.md)
 - [docs/architecture/language_roles.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/architecture/language_roles.md)
 - [docs/architecture/migration_plan.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/architecture/migration_plan.md)
 - [docs/skill/skill_registry.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/skill/skill_registry.md)

@@ -11,6 +11,7 @@ if [[ -f /workspace/apps/control-plane/dev/testdata/issues_cluster.csv ]]; then
 fi
 DATASET_NAME="${DATASET_NAME:-${DEFAULT_DATASET_PATH}}"
 GOAL="${GOAL:-결제 로그인 배송 관련 VOC를 군집으로 묶어줘}"
+EMBEDDING_MODEL="${EMBEDDING_MODEL:-intfloat/multilingual-e5-small}"
 
 post_json() {
   local method="$1"
@@ -54,16 +55,19 @@ PY
 prepare_json="$(post_json POST "/projects/${project_id}/datasets/${dataset_id}/versions/${version_id}/prepare" "$prepare_payload")"
 printf '%s\n' "$prepare_json"
 
-embedding_payload="$(python3 - <<'PY'
+embedding_payload="$(EMBEDDING_MODEL="$EMBEDDING_MODEL" python3 - <<'PY'
 import json
+import os
 print(json.dumps({
     "text_column": "text",
-    "embedding_model": "token-overlap-v1",
+    "embedding_model": os.environ["EMBEDDING_MODEL"],
 }, ensure_ascii=False))
 PY
 )"
 embedding_json="$(post_json POST "/projects/${project_id}/datasets/${dataset_id}/versions/${version_id}/embeddings" "$embedding_payload")"
 printf '%s\n' "$embedding_json"
+printf '%s' "$embedding_json" | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("embedding_model") == "intfloat/multilingual-e5-small", data; metadata=data.get("metadata") or {}; assert str(metadata.get("embedding_vector_dim")) == "384", metadata; assert metadata.get("embedding_index_backend") == "pgvector", metadata; print(json.dumps({"embedding_model": data.get("embedding_model"), "embedding_vector_dim": metadata.get("embedding_vector_dim"), "embedding_index_backend": metadata.get("embedding_index_backend")}, ensure_ascii=False))'
+printf '\n'
 
 analysis_payload="$(DATASET_VERSION_ID="$version_id" GOAL="$GOAL" python3 - <<'PY'
 import json
@@ -149,5 +153,5 @@ done
 
 result_json="$(post_json GET "/projects/${project_id}/executions/${execution_id}/result")"
 printf '%s\n' "$result_json"
-printf '%s' "$result_json" | python3 -c 'import json,sys; data=json.load(sys.stdin); artifacts=data["artifacts"]; dedup=[json.loads(value) for key,value in artifacts.items() if key.endswith(":deduplicate_documents")]; clusters=[json.loads(value) for key,value in artifacts.items() if key.endswith(":embedding_cluster")]; labels=[json.loads(value) for key,value in artifacts.items() if key.endswith(":cluster_label_candidates")]; summaries=[json.loads(value) for key,value in artifacts.items() if key.endswith(":issue_cluster_summary")]; evidence=[json.loads(value) for key,value in artifacts.items() if key.endswith(":issue_evidence_summary")]; assert dedup, "missing deduplicate_documents artifact"; assert clusters, "missing embedding_cluster artifact"; assert labels, "missing cluster_label_candidates artifact"; assert summaries, "missing issue_cluster_summary artifact"; assert evidence, "missing issue_evidence_summary artifact"; assert dedup[0]["summary"]["canonical_row_count"] == 5, dedup[0]["summary"]; assert clusters[0]["summary"]["clustered_document_count"] == 5, clusters[0]["summary"]; assert clusters[0]["summary"]["cluster_count"] == 3, clusters[0]["summary"]; assert labels[0]["summary"]["cluster_count"] == 3, labels[0]["summary"]; assert summaries[0]["summary"]["dominant_cluster_count"] == 2, summaries[0]["summary"]; assert any("결제" in cluster["label"] for cluster in summaries[0]["clusters"]), summaries[0]["clusters"]; print(json.dumps({"artifact_keys": sorted(artifacts), "canonical_row_count": dedup[0]["summary"]["canonical_row_count"], "cluster_count": summaries[0]["summary"]["cluster_count"], "dominant_cluster_label": summaries[0]["summary"].get("dominant_cluster_label")}, ensure_ascii=False))'
+printf '%s' "$result_json" | python3 -c 'import json,sys; data=json.load(sys.stdin); artifacts=data["artifacts"]; dedup=[json.loads(value) for key,value in artifacts.items() if key.endswith(":deduplicate_documents")]; clusters=[json.loads(value) for key,value in artifacts.items() if key.endswith(":embedding_cluster")]; labels=[json.loads(value) for key,value in artifacts.items() if key.endswith(":cluster_label_candidates")]; summaries=[json.loads(value) for key,value in artifacts.items() if key.endswith(":issue_cluster_summary")]; evidence=[json.loads(value) for key,value in artifacts.items() if key.endswith(":issue_evidence_summary")]; assert dedup, "missing deduplicate_documents artifact"; assert clusters, "missing embedding_cluster artifact"; assert labels, "missing cluster_label_candidates artifact"; assert summaries, "missing issue_cluster_summary artifact"; assert evidence, "missing issue_evidence_summary artifact"; assert dedup[0]["summary"]["canonical_row_count"] == 5, dedup[0]["summary"]; assert clusters[0]["summary"]["clustered_document_count"] == 5, clusters[0]["summary"]; assert clusters[0]["summary"]["cluster_count"] == 3, clusters[0]["summary"]; assert clusters[0]["summary"]["similarity_backend"] == "dense-hybrid", clusters[0]["summary"]; assert labels[0]["summary"]["cluster_count"] == 3, labels[0]["summary"]; assert summaries[0]["summary"]["dominant_cluster_count"] == 2, summaries[0]["summary"]; assert any("결제" in cluster["label"] for cluster in summaries[0]["clusters"]), summaries[0]["clusters"]; print(json.dumps({"artifact_keys": sorted(artifacts), "canonical_row_count": dedup[0]["summary"]["canonical_row_count"], "cluster_count": summaries[0]["summary"]["cluster_count"], "cluster_similarity_backend": clusters[0]["summary"]["similarity_backend"], "dominant_cluster_label": summaries[0]["summary"].get("dominant_cluster_label")}, ensure_ascii=False))'
 printf '\n'

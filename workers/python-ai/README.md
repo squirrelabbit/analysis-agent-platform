@@ -41,11 +41,14 @@
   - planner entrypoint와 rule-based planner
 - `src/python_ai_worker/prompt_registry.py`
   - prepare/sentiment prompt version registry
+- `src/python_ai_worker/openai_client.py`
+  - OpenAI Embeddings API client
 - `src/python_ai_worker/runtime/`
   - `constants.py`: 공통 상수
   - `payloads.py`: payload normalize와 기본 입력 merge
   - `common.py`: text/io/date/token helper
   - `artifacts.py`: prior artifact 선택과 집계 helper
+  - `embeddings.py`: dense embedding helper와 fallback 판단
   - `llm.py`: planner/evidence/prepare/sentiment LLM helper
 - `src/python_ai_worker/skills/`
   - `dataset_build.py`: `dataset_prepare`, `sentiment_label`, `embedding`
@@ -117,6 +120,13 @@
   - `ANTHROPIC_VERSION`
   - `ANTHROPIC_MAX_TOKENS`
   - `ANTHROPIC_TIMEOUT_SEC`
+  - `OPENAI_API_KEY`
+  - `OPENAI_API_URL`
+  - `OPENAI_EMBEDDING_MODEL`
+  - `OPENAI_EMBEDDING_DIMENSIONS`
+  - `OPENAI_EMBEDDING_BATCH_SIZE`
+  - `OPENAI_TIMEOUT_SEC`
+  - `LOCAL_EMBEDDING_MODEL`
 - 기본 LLM 설정:
   - provider: `anthropic`
   - planner/evidence model: `claude-sonnet-4-6`
@@ -128,14 +138,25 @@
 - `dataset_prepare`와 `sentiment_label`은 기본 `ANTHROPIC_PREPARE_MODEL=claude-3-5-haiku-latest`를 사용하고 실패 시 deterministic fallback으로 내려간다.
 - prepare/sentiment prompt는 `prompt_registry.py`에서 버전별로 관리하고, 기본 선택은 `ANTHROPIC_PREPARE_PROMPT_VERSION`, `ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION`, `ANTHROPIC_SENTIMENT_PROMPT_VERSION`으로 바꿀 수 있다.
 - `dataset_prepare`는 Anthropic prepare 경로가 켜져 있으면 기본 `prepare_batch_size=8` 기준 batch 정제를 사용한다.
-- `dataset_prepare` artifact는 현재 JSONL이지만 각 row에 `row_id`를 부여하고 `prepared_ref`, `prepare_format=jsonl`, `row_id_column`을 함께 남긴다.
-- `sentiment_label` artifact도 `row_id`를 유지하고 `sentiment_ref`, `sentiment_format=jsonl` metadata를 함께 남긴다.
+- `dataset_prepare` 기본 출력은 `prepared.parquet`이며, 각 row에 `row_id`를 부여하고 `prepared_ref`, `prepare_format=parquet`, `row_id_column`을 함께 남긴다. 명시적으로 `.jsonl` output path를 주면 호환용 JSONL도 계속 생성할 수 있다.
+- `sentiment_label` 기본 출력도 `sentiment.parquet`이며 `row_id`, `source_row_index`, `sentiment_ref`, `sentiment_format=parquet` metadata를 함께 남긴다.
+- `issue_sentiment_summary`는 `prepared_dataset_name` 입력을 함께 받아 `sentiment.parquet`와 `prepared.parquet`를 join해 텍스트 샘플을 복원한다.
+- `embedding` 기본값은 현재 `intfloat/multilingual-e5-small`이고, 입력 row를 text window로 잘라 `chunks.parquet`를 만든 뒤 `fastembed` local model 경로를 우선 시도한다.
+- `embedding_model=text-embedding-*` override를 주면 OpenAI dense embedding 경로를 사용할 수 있다.
+- 예를 들어 기본값 `embedding_model=intfloat/multilingual-e5-small`이면 local model download 뒤 `384차원` embedding을 만들 수 있다.
+- `OPENAI_API_KEY`가 없거나 local/OpenAI dense 호출이 불가하면 `embedding`은 `token-overlap-v1` sidecar로 자동 fallback한다.
+- dense가 성공해도 `embeddings.jsonl`에는 기존 `token_counts`, `norm`을 같이 남겨 fallback과 lexical guardrail 경로를 유지한다.
+- control plane은 build가 끝난 뒤 이 `embeddings.jsonl`을 읽어 dense vector가 있으면 그대로, 없으면 64차원 hashed projection vector로 바꿔 `pgvector` table `embedding_index_chunks`에 적재한다.
+- `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query embedding을 다시 만든다. 불가하면 `embeddings.jsonl`로 fallback한다. 검색 결과에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.
+- `BuildEmbeddings` request는 `embedding_model` override를 받아 dataset version에 저장된 기본 model을 바꿔 실행할 수 있다.
+- `issue_evidence_summary`와 `evidence_pack`은 `semantic_search` prior artifact가 있을 때 chunk citation을 evidence artifact까지 그대로 보존한다.
+- `runtime/common.py`는 `.parquet` reader를 지원하므로 `sentiment_label`, `document_filter`, `time_bucket_count` 같은 row 기반 task가 prepared Parquet를 직접 읽을 수 있다.
 - `issue_evidence_summary`는 `issue_trend_summary`, `issue_breakdown_summary`, `issue_period_compare`, `issue_cluster_summary`, `issue_taxonomy_summary`, `issue_sentiment_summary` 같은 prior artifact를 `analysis_context`로 반영한다.
-- `embedding`은 token-overlap 기반 sidecar file을 만들고, `semantic_search`와 `embedding_cluster`는 이 sidecar를 사용한다.
-- embedding sidecar record는 `row_id`, `chunk_id`, `chunk_index=0`를 함께 저장해 이후 chunk/vector index 전환 기반을 만든다.
+- `embedding_cluster`는 현재 `embeddings.jsonl` sidecar를 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 우선 사용한다.
+- embedding sidecar record는 `row_id`, `chunk_id`, `chunk_index`, `char_start`, `char_end`를 함께 저장하고, 별도 `chunks.parquet`에는 `chunk_text`와 chunk metadata를 남긴다.
 - `deduplicate_documents`는 정규화 텍스트 동일성 + token-set Jaccard similarity를 사용한다.
 - `dictionary_tagging`은 rule-based taxonomy tagging을 사용한다.
-- `embedding_cluster`는 token vector cosine similarity 기반 greedy clustering을 사용한다.
+- `embedding_cluster`는 dense vector가 있으면 dense cosine similarity에 token-overlap guardrail을 곱한 `dense-hybrid` greedy clustering을 사용하고, dense가 없으면 token vector cosine similarity로 fallback한다.
 - `cluster_label_candidates`는 cluster top term으로 label 후보를 만든다.
 - helper 단위 테스트는 `workers/python-ai/tests/test_runtime_helpers.py`에서 payload/artifact/planner helper를 직접 검증한다.
 

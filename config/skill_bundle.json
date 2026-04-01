@@ -366,11 +366,16 @@
       "requires_prepare": true,
       "requires_sentiment": true,
       "metadata_defaults": {
-        "sentiment_column": "sentiment_label_column"
+        "sentiment_column": "sentiment_label_column",
+        "prepared_dataset_name": "prepared_ref",
+        "row_id_column": "row_id_column"
       },
       "default_inputs": {
         "text_column": "text",
         "sentiment_column": "sentiment_label",
+        "prepared_dataset_name": "",
+        "row_id_column": "row_id",
+        "source_row_index_column": "source_row_index",
         "sample_n": 3
       }
     },
@@ -403,9 +408,17 @@
       "requires_prepare": true,
       "requires_embedding": true,
       "goal_input": "query",
+      "metadata_defaults": {
+        "embedding_index_ref": "embedding_index_ref",
+        "chunk_ref": "chunk_ref",
+        "chunk_format": "chunk_format"
+      },
       "default_inputs": {
         "text_column": "text",
-        "sample_n": 5
+        "sample_n": 5,
+        "embedding_index_ref": "",
+        "chunk_ref": "",
+        "chunk_format": "parquet"
       }
     },
     {
