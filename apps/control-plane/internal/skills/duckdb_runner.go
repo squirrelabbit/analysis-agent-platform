@@ -19,6 +19,7 @@ type StructuredPlanResult struct {
 	ProcessedSteps int               `json:"processed_steps"`
 	Engine         string            `json:"engine"`
 	UsageSummary   map[string]any    `json:"usage_summary,omitempty"`
+	StepHooks      []StepHookRecord  `json:"step_hooks,omitempty"`
 }
 
 type ExecutionRunResult = StructuredPlanResult
@@ -37,8 +38,9 @@ type UnstructuredPlanRunner interface {
 }
 
 type DuckDBRunner struct {
-	Path string
-	Open func(driverName, dataSourceName string) (*sql.DB, error)
+	Path  string
+	Open  func(driverName, dataSourceName string) (*sql.DB, error)
+	Hooks []StepHook
 }
 
 type structuredKPISummaryArtifact struct {
@@ -88,11 +90,30 @@ func (r DuckDBRunner) Run(ctx context.Context, execution domain.ExecutionSummary
 	for _, step := range execution.Plan.Steps {
 		switch step.SkillName {
 		case "structured_kpi_summary":
+			beforeRecords, err := executeBeforeStepHooks(ctx, r.Hooks, execution, step)
+			if err != nil {
+				return StructuredPlanResult{}, fmt.Errorf("step %s (%s) before hook: %w", step.StepID, step.SkillName, err)
+			}
+			result.StepHooks = append(result.StepHooks, beforeRecords...)
 			artifactJSON, err := r.runStructuredKPISummary(ctx, db, step)
 			if err != nil {
 				return StructuredPlanResult{}, fmt.Errorf("step %s (%s): %w", step.StepID, step.SkillName, err)
 			}
 			result.Artifacts[artifactKey(step)] = artifactJSON
+			afterRecords, err := executeAfterStepHooks(
+				ctx,
+				r.Hooks,
+				execution,
+				step,
+				StepHookOutcome{
+					Status:        "completed",
+					ArtifactBytes: len(artifactJSON),
+				},
+			)
+			if err != nil {
+				return StructuredPlanResult{}, fmt.Errorf("step %s (%s) after hook: %w", step.StepID, step.SkillName, err)
+			}
+			result.StepHooks = append(result.StepHooks, afterRecords...)
 			result.ProcessedSteps++
 		default:
 			result.Notes = append(result.Notes, fmt.Sprintf("unsupported skill skipped: %s", step.SkillName))

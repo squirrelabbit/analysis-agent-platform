@@ -37,6 +37,7 @@
 - dataset build artifact는 현재 `row_id/ref/format` 메타데이터를 함께 남겨 다음 단계의 chunk/vector index 전환 기반을 잡아 두었다.
 - control plane은 `embedding` build가 끝나면 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection으로 바꾼 뒤 `embedding_index_chunks`에 적재한다. index source를 찾지 못할 때만 `embeddings.jsonl`로 fallback한다.
 - dataset version metadata에는 현재 `prepare_usage`, `sentiment_usage`, `embedding_usage`가 함께 저장되고, execution result contract에는 실행 artifact 기준 `usage_summary`가 집계된다.
+- execution runner는 현재 기본 `pre/post step hook`를 사용해 각 step의 입력 키, artifact 크기, usage preview를 `step_hooks`로 남기고, 완료 이벤트와 execution result contract에서 확인할 수 있다.
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension, `embedding_index_chunks` table을 포함한다.
 - `dataset_prepare`와 `sentiment_label`은 기본 Haiku model을 쓰고, prompt version은 registry와 환경 변수로 선택할 수 있다.
 - 비정형 deterministic skill은 Python worker 안에서 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`, `issue_taxonomy_summary`까지 확장돼 있다.

@@ -19,6 +19,7 @@ type PythonAIClient struct {
 	BaseURL      string
 	HTTPClient   *http.Client
 	ArtifactRoot string
+	Hooks        []StepHook
 }
 
 type pythonAIStepRequest struct {
@@ -69,6 +70,11 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 			priorArtifacts[key] = value
 		}
 		requestStep := c.prepareStep(execution, step)
+		beforeRecords, err := executeBeforeStepHooks(ctx, c.Hooks, execution, requestStep)
+		if err != nil {
+			return ExecutionRunResult{}, err
+		}
+		result.StepHooks = append(result.StepHooks, beforeRecords...)
 
 		payload, err := json.Marshal(pythonAIStepRequest{
 			ExecutionID:    execution.ExecutionID,
@@ -125,6 +131,22 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 			result.UsageSummary,
 			extractUsageSummary(taskResponse),
 		)
+		afterRecords, err := executeAfterStepHooks(
+			ctx,
+			c.Hooks,
+			execution,
+			requestStep,
+			StepHookOutcome{
+				Status:        "completed",
+				ArtifactBytes: len(storedArtifact),
+				ArtifactRef:   stringValue(taskResponse.Artifact["artifact_ref"]),
+				UsageSummary:  extractUsageSummary(taskResponse),
+			},
+		)
+		if err != nil {
+			return ExecutionRunResult{}, err
+		}
+		result.StepHooks = append(result.StepHooks, afterRecords...)
 		result.ProcessedSteps++
 	}
 

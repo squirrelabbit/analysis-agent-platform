@@ -389,6 +389,9 @@ func (a AnalysisActivities) MarkExecutionCompleted(ctx context.Context, input Co
 	if len(input.Result.UsageSummary) > 0 {
 		execution.Events[len(execution.Events)-1].Payload["usage_summary"] = input.Result.UsageSummary
 	}
+	if len(input.Result.StepHooks) > 0 {
+		execution.Events[len(execution.Events)-1].Payload["step_hooks"] = input.Result.StepHooks
+	}
 
 	if err := repo.SaveExecution(execution); err != nil {
 		return ExecutionLifecycleResult{}, err

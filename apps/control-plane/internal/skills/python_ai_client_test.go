@@ -264,6 +264,15 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 	if result.ProcessedSteps != 7 {
 		t.Fatalf("unexpected processed steps: %d", result.ProcessedSteps)
 	}
+	if len(result.StepHooks) != 14 {
+		t.Fatalf("unexpected step hook count: %+v", result.StepHooks)
+	}
+	if result.StepHooks[0].Phase != "before" || result.StepHooks[0].StepID != "step-00" {
+		t.Fatalf("unexpected first step hook: %+v", result.StepHooks[0])
+	}
+	if result.StepHooks[1].Phase != "after" {
+		t.Fatalf("unexpected second step hook: %+v", result.StepHooks[1])
+	}
 	if len(result.Notes) != 7 {
 		t.Fatalf("unexpected notes: %+v", result.Notes)
 	}
@@ -385,6 +394,9 @@ func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 	}
 	if totalTokens, ok := result.UsageSummary["total_tokens"].(int); !ok || totalTokens != 210 {
 		t.Fatalf("unexpected usage summary: %+v", result.UsageSummary)
+	}
+	if len(result.StepHooks) != 10 {
+		t.Fatalf("unexpected step hook count: %+v", result.StepHooks)
 	}
 }
 

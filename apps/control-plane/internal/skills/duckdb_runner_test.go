@@ -63,6 +63,12 @@ func TestDuckDBRunnerBuildsStructuredKPISummaryArtifact(t *testing.T) {
 	if result.ProcessedSteps != 1 {
 		t.Fatalf("unexpected processed steps: %d", result.ProcessedSteps)
 	}
+	if len(result.StepHooks) != 2 {
+		t.Fatalf("unexpected step hook count: %+v", result.StepHooks)
+	}
+	if result.StepHooks[0].Phase != "before" || result.StepHooks[1].Phase != "after" {
+		t.Fatalf("unexpected step hooks: %+v", result.StepHooks)
+	}
 
 	rawArtifact, ok := result.Artifacts["step:step-1:structured_kpi_summary"]
 	if !ok {
@@ -85,5 +91,8 @@ func TestDuckDBRunnerBuildsStructuredKPISummaryArtifact(t *testing.T) {
 	}
 	if len(artifact.Series) != 3 {
 		t.Fatalf("unexpected series length: %d", len(artifact.Series))
+	}
+	if status, ok := result.StepHooks[1].Payload["status"].(string); !ok || status != "completed" {
+		t.Fatalf("unexpected after hook payload: %+v", result.StepHooks[1].Payload)
 	}
 }

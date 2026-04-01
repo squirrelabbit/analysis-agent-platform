@@ -16,6 +16,7 @@ func TestCompositeRunnerRunsStructuredAndUnstructured(t *testing.T) {
 				Notes:          []string{"structured done"},
 				ProcessedSteps: 1,
 				Engine:         "duckdb",
+				StepHooks:      []StepHookRecord{{Phase: "before", StepID: "step-1", SkillName: "structured_kpi_summary"}},
 			},
 		},
 		Unstructured: stubExecutionRunner{
@@ -34,6 +35,7 @@ func TestCompositeRunnerRunsStructuredAndUnstructured(t *testing.T) {
 				Notes:          []string{"filter done", "keywords done", "breakdown done", "compare done", "sentiment done", "trend done", "unstructured done", "semantic done", "evidence done"},
 				ProcessedSteps: 9,
 				Engine:         "python-ai",
+				StepHooks:      []StepHookRecord{{Phase: "before", StepID: "step-2", SkillName: "document_filter"}},
 			},
 		},
 	}
@@ -69,6 +71,9 @@ func TestCompositeRunnerRunsStructuredAndUnstructured(t *testing.T) {
 	}
 	if len(result.Notes) != 11 {
 		t.Fatalf("unexpected notes: %+v", result.Notes)
+	}
+	if len(result.StepHooks) != 2 {
+		t.Fatalf("unexpected step hooks: %+v", result.StepHooks)
 	}
 }
 

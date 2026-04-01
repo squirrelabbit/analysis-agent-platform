@@ -398,6 +398,7 @@ curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID" | python3 -m json.tool
 - `events`
 - `artifacts`
 - `artifacts["step:<step_id>:issue_evidence_summary"]` 또는 `artifacts["step:<step_id>:evidence_pack"]` 안의 `prompt_compaction`
+- 완료 이벤트 payload 안의 `step_hooks`
 
 
 ### 7-9. 최종 결과 조회
@@ -413,9 +414,11 @@ curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID/result" | python3 -m jso
 - `contract.skill_names`
 - `contract.evidence_artifact_keys`
 - `contract.usage_summary`
+- `contract.step_hooks`
 - evidence artifact 안에 `prompt_compaction.analysis_context`, `prompt_compaction.selected_documents`가 있으면 evidence LLM 입력이 compaction된 것이다.
 
 `contract.usage_summary`는 현재 usage가 남은 artifact를 기준으로 집계한다. 가격 env를 넣지 않았으면 `estimated_cost_usd`는 비어 있거나 0으로 남을 수 있다.
+`contract.step_hooks`는 현재 기본 runtime hook가 남긴 step 전/후 record다. 각 record에는 `phase`, `step_id`, `skill_name`, `payload.input_keys` 또는 `payload.artifact_bytes`, `payload.usage` 같은 값이 들어갈 수 있다.
 
 
 ### 7-10. waiting 상태면 resume

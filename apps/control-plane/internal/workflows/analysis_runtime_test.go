@@ -74,6 +74,10 @@ func TestAnalysisExecutionWorkflowCompletesAndPersistsExecution(t *testing.T) {
 					"step:step-1:structured_kpi_summary": `{"summary":{"row_count":3}}`,
 				},
 				Notes: []string{"structured path completed"},
+				StepHooks: []skills.StepHookRecord{
+					{Phase: "before", StepID: "step-1", SkillName: "structured_kpi_summary"},
+					{Phase: "after", StepID: "step-1", SkillName: "structured_kpi_summary", Payload: map[string]any{"status": "completed"}},
+				},
 			},
 		},
 		Now: func() time.Time {
@@ -135,6 +139,9 @@ func TestAnalysisExecutionWorkflowCompletesAndPersistsExecution(t *testing.T) {
 	}
 	if execution.Events[0].EventType != "WORKFLOW_STARTED" || execution.Events[1].EventType != "WORKFLOW_COMPLETED" {
 		t.Fatalf("unexpected events: %+v", execution.Events)
+	}
+	if hooks, ok := execution.Events[1].Payload["step_hooks"].([]skills.StepHookRecord); !ok || len(hooks) != 2 {
+		t.Fatalf("unexpected step hooks payload: %+v", execution.Events[1].Payload)
 	}
 }
 

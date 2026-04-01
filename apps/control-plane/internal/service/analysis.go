@@ -254,12 +254,28 @@ func (s *AnalysisService) BuildExecutionResult(projectID, executionID string) (d
 	if usageSummary := buildArtifactUsageSummary(execution.Artifacts); len(usageSummary) > 0 {
 		contract["usage_summary"] = usageSummary
 	}
+	if stepHooks := latestCompletedStepHooks(execution.Events); stepHooks != nil {
+		contract["step_hooks"] = stepHooks
+	}
 
 	return domain.ExecutionResultResponse{
 		ExecutionID: execution.ExecutionID,
 		Artifacts:   execution.Artifacts,
 		Contract:    contract,
 	}, nil
+}
+
+func latestCompletedStepHooks(events []domain.ExecutionEvent) any {
+	for index := len(events) - 1; index >= 0; index-- {
+		event := events[index]
+		if event.EventType != "WORKFLOW_COMPLETED" {
+			continue
+		}
+		if hooks, ok := event.Payload["step_hooks"]; ok {
+			return hooks
+		}
+	}
+	return nil
 }
 
 func buildArtifactUsageSummary(artifacts map[string]string) map[string]any {

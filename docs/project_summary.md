@@ -33,6 +33,7 @@
 - planner/evidence/prepare/sentiment/embedding artifact는 현재 `usage` metadata를 남기고, 가격 env가 설정되면 `estimated_cost_usd`를 함께 계산한다.
 - dataset build artifact는 현재 `prepare/sentiment/chunk=Parquet`, `embedding=JSONL sidecar + index source parquet` 구성이며 `row_id`, `prepared_ref`, `sentiment_ref`, `embedding_ref`, `embedding_index_source_ref` 같은 metadata를 함께 남긴다.
 - dataset version metadata에는 현재 `prepare_usage`, `sentiment_usage`, `embedding_usage`가 저장되고, execution result contract에는 실행 artifact 기준 `usage_summary`가 집계된다.
+- execution runtime은 현재 기본 `pre/post step hook`를 사용해 step별 입력 키, artifact 크기, usage preview를 `step_hooks`로 남기고, 완료 이벤트와 execution result contract에 함께 노출한다.
 - `sentiment.parquet`는 현재 `row_id`, `source_row_index`, 감성 컬럼 중심 sidecar이고, `issue_sentiment_summary`는 prepared dataset ref를 받아 텍스트를 조인한다.
 - `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 결과는 `embeddings.jsonl` fallback sidecar와 `embeddings.index.parquet` index source로 함께 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1`로 fallback한다.
 - control plane은 embedding build 직후 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 64차원 hashed projection vector로 바꿔 `pgvector` 테이블 `embedding_index_chunks`에 적재한다. index source가 없을 때만 `embeddings.jsonl` fallback을 사용한다.

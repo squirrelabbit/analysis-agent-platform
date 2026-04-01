@@ -99,6 +99,7 @@ func mergeRunResult(target *ExecutionRunResult, incoming ExecutionRunResult) {
 	target.Notes = append(target.Notes, incoming.Notes...)
 	target.ProcessedSteps += incoming.ProcessedSteps
 	target.UsageSummary = mergeUsageSummary(target.UsageSummary, incoming.UsageSummary)
+	target.StepHooks = append(target.StepHooks, incoming.StepHooks...)
 }
 
 func appendEngine(engines []string, engine string) []string {
