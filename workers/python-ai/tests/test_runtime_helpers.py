@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from python_ai_worker.runtime.artifacts import (
@@ -17,6 +20,13 @@ from python_ai_worker.runtime.llm import (
     _compact_analysis_context,
     _compact_evidence_documents_for_prompt,
     _normalize_planner_response,
+)
+from python_ai_worker.runtime.common import (
+    _apply_prepare_regex_rules,
+    _match_garbage_rules,
+    _normalize_garbage_rule_names,
+    _normalize_prepare_regex_rule_names,
+    _normalize_taxonomy_rules,
 )
 from python_ai_worker.runtime.payloads import _normalize_dictionary_tagging_payload
 
@@ -200,6 +210,83 @@ class RuntimeHelperTests(unittest.TestCase):
         )
 
         self.assertIs(result, fallback_result)
+
+    def test_rule_config_path_overrides_prepare_regex_defaults(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        rule_path = temp_dir / "rule-config.json"
+        rule_path.write_text(
+            json.dumps(
+                {
+                    "prepare_regex_rules": {
+                        "emoji_cleanup": {
+                            "description": "emoji 제거",
+                            "patterns": ["🙂"],
+                            "replacement": " ",
+                        }
+                    },
+                    "default_prepare_regex_rule_names": ["emoji_cleanup"],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.dict("os.environ", {"PYTHON_AI_RULE_CONFIG_PATH": str(rule_path)}, clear=False):
+            normalized_names = _normalize_prepare_regex_rule_names(None)
+            cleaned, applied = _apply_prepare_regex_rules("문의🙂내용", normalized_names)
+
+        self.assertEqual(normalized_names, ["emoji_cleanup"])
+        self.assertEqual(cleaned, "문의 내용")
+        self.assertEqual(applied, ["emoji_cleanup"])
+
+    def test_rule_config_json_overrides_garbage_defaults(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PYTHON_AI_RULE_CONFIG_JSON": json.dumps(
+                    {
+                        "garbage_rules": {
+                            "campaign_marker": {
+                                "description": "체험단 문구",
+                                "patterns": ["체험단후기"],
+                            }
+                        },
+                        "default_garbage_rule_names": ["campaign_marker"],
+                    },
+                    ensure_ascii=False,
+                )
+            },
+            clear=False,
+        ):
+            normalized_names = _normalize_garbage_rule_names(None)
+            matched = _match_garbage_rules("체험단후기 입니다", normalized_names)
+
+        self.assertEqual(normalized_names, ["campaign_marker"])
+        self.assertEqual(matched, ["campaign_marker"])
+
+    def test_rule_config_json_overrides_taxonomy_defaults(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PYTHON_AI_RULE_CONFIG_JSON": json.dumps(
+                    {
+                        "taxonomy_rules": {
+                            "custom_topic": {
+                                "label": "커스텀",
+                                "patterns": ["맞춤주제"],
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                )
+            },
+            clear=False,
+        ):
+            normalized = _normalize_taxonomy_rules(None)
+
+        self.assertIn("custom_topic", normalized)
+        self.assertEqual(normalized["custom_topic"]["label"], "커스텀")
+        self.assertEqual(normalized["custom_topic"]["patterns"], ["맞춤주제"])
 
     def test_generate_dense_embeddings_routes_openai_models_to_openai_backend(self) -> None:
         with (

@@ -50,6 +50,7 @@ curl -s http://127.0.0.1:18090/capabilities | python3 -m json.tool
 
 - 두 `/health`가 모두 HTTP 200이어야 한다.
 - `/capabilities`에는 `skill_bundle_version`과 task 목록이 보여야 한다.
+- worker `/health`에는 `rule_config.rule_config_path`, `rule_config.rule_config_inline`가 있으면 layered rule config가 현재 어떤 소스에서 켜졌는지 같이 확인할 수 있다.
 
 
 ## 3. 개발용 Postgres warning 확인

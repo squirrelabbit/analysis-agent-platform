@@ -112,6 +112,8 @@
   - `PYTHON_AI_WORKER_QUEUE`
   - `SKILL_BUNDLE_PATH`
   - `PYTHON_AI_LLM_PROVIDER`
+  - `PYTHON_AI_RULE_CONFIG_PATH`
+  - `PYTHON_AI_RULE_CONFIG_JSON`
   - `ANTHROPIC_API_KEY`
   - `ANTHROPIC_MODEL`
   - `ANTHROPIC_PREPARE_MODEL`
@@ -151,6 +153,8 @@
 - `dataset_prepare`는 Anthropic prepare 경로가 켜져 있으면 기본 `prepare_batch_size=8` 기준 batch 정제를 사용한다.
 - `dataset_prepare` 기본 출력은 `prepared.parquet`이며, 각 row에 `row_id`를 부여하고 `prepared_ref`, `prepare_format=parquet`, `row_id_column`을 함께 남긴다. 명시적으로 `.jsonl` output path를 주면 호환용 JSONL도 계속 생성할 수 있다.
 - `dataset_prepare`에는 `regex_rule_names` 확장 포인트가 있고, 현재 기본 규칙은 `media_placeholder`, `html_artifact`, `url_cleanup`, `zero_width_cleanup`이다. row에는 `prepare_regex_applied_rules`, artifact summary에는 `prepare_regex_rule_hits`를 남긴다.
+- prepare regex, garbage, taxonomy 규칙은 현재 `기본 상수 -> PYTHON_AI_RULE_CONFIG_PATH JSON -> PYTHON_AI_RULE_CONFIG_JSON inline JSON -> request payload override` 순서로 덮는다.
+- worker `/health`와 `--describe`에는 현재 `rule_config.rule_config_path`, `rule_config.rule_config_inline` 상태가 함께 노출된다.
 - `sentiment_label` 기본 출력도 `sentiment.parquet`이며 `row_id`, `source_row_index`, `sentiment_ref`, `sentiment_format=parquet` metadata를 함께 남긴다.
 - `issue_sentiment_summary`는 `prepared_dataset_name` 입력을 함께 받아 `sentiment.parquet`와 `prepared.parquet`를 join해 텍스트 샘플을 복원한다.
 - `embedding` 기본값은 현재 `intfloat/multilingual-e5-small`이고, 입력 row를 text window로 잘라 `chunks.parquet`를 만든 뒤 `fastembed` local model 경로를 우선 시도한다.

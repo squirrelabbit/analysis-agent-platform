@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from .config import load_config
+from .runtime.rule_config import rule_config_status
 from .skill_bundle import bundle_version
 from .task_router import capability_names, capability_payload, run_task
 
@@ -24,6 +25,7 @@ def describe() -> None:
         "openai_embedding_model": config.openai_embedding_model,
         "openai_embedding_dimensions": config.openai_embedding_dimensions,
         "local_embedding_model": config.local_embedding_model,
+        "rule_config": rule_config_status(),
         "skill_bundle_version": bundle_version(),
         "capabilities": capability_names(),
     }
@@ -46,6 +48,7 @@ def make_handler(config: Any) -> type[BaseHTTPRequestHandler]:
                         "openai_embedding_model": config.openai_embedding_model,
                         "openai_embedding_dimensions": config.openai_embedding_dimensions,
                         "local_embedding_model": config.local_embedding_model,
+                        "rule_config": rule_config_status(),
                         "skill_bundle_version": bundle_version(),
                         "capabilities": capability_names(),
                     },
@@ -105,6 +108,7 @@ def serve() -> None:
                 "openai_embedding_model": config.openai_embedding_model,
                 "openai_embedding_dimensions": config.openai_embedding_dimensions,
                 "local_embedding_model": config.local_embedding_model,
+                "rule_config": rule_config_status(),
                 "skill_bundle_version": bundle_version(),
                 "capabilities": capability_names(),
             },

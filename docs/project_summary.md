@@ -31,6 +31,7 @@
 - 비정형 support/core skill은 taxonomy, dedup, clustering 계열까지 현재 실행 경로에 포함된다.
 - `dataset_prepare`는 Anthropic prepare가 켜지면 batch 정제를 사용하고, `issue_evidence_summary`는 prior artifact를 `analysis_context`로 재사용한다.
 - planner/evidence/prepare/sentiment/embedding artifact는 현재 `usage` metadata를 남기고, 가격 env가 설정되면 `estimated_cost_usd`를 함께 계산한다.
+- prepare regex, garbage, taxonomy 규칙은 현재 기본 상수 위에 `PYTHON_AI_RULE_CONFIG_PATH`, `PYTHON_AI_RULE_CONFIG_JSON`, request payload override를 순서대로 덮는 layered config를 지원한다.
 - dataset build artifact는 현재 `prepare/sentiment/chunk=Parquet`, `embedding=JSONL sidecar + index source parquet` 구성이며 `row_id`, `prepared_ref`, `sentiment_ref`, `embedding_ref`, `embedding_index_source_ref` 같은 metadata를 함께 남긴다.
 - dataset version metadata에는 현재 `prepare_usage`, `sentiment_usage`, `embedding_usage`가 저장되고, execution result contract에는 실행 artifact 기준 `usage_summary`가 집계된다.
 - execution runtime은 현재 기본 `pre/post step hook`를 사용해 step별 입력 키, artifact 크기, usage preview를 `step_hooks`로 남기고, 완료 이벤트와 execution result contract에 함께 노출한다.

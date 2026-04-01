@@ -43,6 +43,8 @@ class WorkerConfig:
     evidence_context_entry_max_chars: int = 180
     evidence_document_total_chars: int = 1800
     evidence_document_max_chars: int = 320
+    rule_config_path: str = ""
+    rule_config_json: str = ""
 
 
 def load_config() -> WorkerConfig:
@@ -78,4 +80,6 @@ def load_config() -> WorkerConfig:
         evidence_context_entry_max_chars=max(30, int(os.getenv("EVIDENCE_CONTEXT_ENTRY_MAX_CHARS", "180"))),
         evidence_document_total_chars=max(120, int(os.getenv("EVIDENCE_DOCUMENT_TOTAL_CHARS", "1800"))),
         evidence_document_max_chars=max(40, int(os.getenv("EVIDENCE_DOCUMENT_MAX_CHARS", "320"))),
+        rule_config_path=os.getenv("PYTHON_AI_RULE_CONFIG_PATH", "").strip(),
+        rule_config_json=os.getenv("PYTHON_AI_RULE_CONFIG_JSON", "").strip(),
     )

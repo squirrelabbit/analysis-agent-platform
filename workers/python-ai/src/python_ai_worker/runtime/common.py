@@ -17,13 +17,15 @@ except ImportError:  # pragma: no cover - exercised in environments without parq
     pq = None
 
 from .constants import (
-    DEFAULT_GARBAGE_RULE_NAMES,
-    DEFAULT_PREPARE_REGEX_RULE_NAMES,
-    DEFAULT_TAXONOMY_RULES,
-    GARBAGE_RULES,
-    PREPARE_REGEX_RULES,
     STOPWORDS,
     TOKEN_PATTERN,
+)
+from .rule_config import (
+    resolve_default_garbage_rule_names,
+    resolve_default_prepare_regex_rule_names,
+    resolve_garbage_rules,
+    resolve_prepare_regex_rules,
+    resolve_taxonomy_rules,
 )
 
 
@@ -102,34 +104,37 @@ def _normalize_prepared_text(text: str) -> str:
 
 
 def _normalize_prepare_regex_rule_names(value: Any) -> list[str]:
+    prepare_rules = resolve_prepare_regex_rules()
     if not isinstance(value, list):
-        return list(DEFAULT_PREPARE_REGEX_RULE_NAMES)
+        return resolve_default_prepare_regex_rule_names()
     normalized: list[str] = []
     for item in value:
         name = str(item or "").strip()
-        if not name or name not in PREPARE_REGEX_RULES or name in normalized:
+        if not name or name not in prepare_rules or name in normalized:
             continue
         normalized.append(name)
-    return normalized or list(DEFAULT_PREPARE_REGEX_RULE_NAMES)
+    return normalized or resolve_default_prepare_regex_rule_names()
 
 
 def _normalize_garbage_rule_names(value: Any) -> list[str]:
+    garbage_rules = resolve_garbage_rules()
     if not isinstance(value, list):
-        return list(DEFAULT_GARBAGE_RULE_NAMES)
+        return resolve_default_garbage_rule_names()
     normalized: list[str] = []
     for item in value:
         name = str(item or "").strip()
-        if not name or name not in GARBAGE_RULES or name in normalized:
+        if not name or name not in garbage_rules or name in normalized:
             continue
         normalized.append(name)
-    return normalized or list(DEFAULT_GARBAGE_RULE_NAMES)
+    return normalized or resolve_default_garbage_rule_names()
 
 
 def _apply_prepare_regex_rules(text: str, rule_names: list[str]) -> tuple[str, list[str]]:
     current = str(text or "")
     applied: list[str] = []
+    prepare_rules = resolve_prepare_regex_rules()
     for name in _normalize_prepare_regex_rule_names(rule_names):
-        rule = PREPARE_REGEX_RULES.get(name) or {}
+        rule = prepare_rules.get(name) or {}
         replacement = str(rule.get("replacement") or " ")
         before = current
         for pattern in list(rule.get("patterns") or []):
@@ -141,15 +146,16 @@ def _apply_prepare_regex_rules(text: str, rule_names: list[str]) -> tuple[str, l
 
 def _match_garbage_rules(text: str, rule_names: list[str]) -> list[str]:
     raw_text = str(text or "")
-    normalized_text, _ = _apply_prepare_regex_rules(raw_text, DEFAULT_PREPARE_REGEX_RULE_NAMES)
+    normalized_text, _ = _apply_prepare_regex_rules(raw_text, resolve_default_prepare_regex_rule_names())
     prepared_text = _normalize_prepared_text(normalized_text)
     matched: list[str] = []
+    garbage_rules = resolve_garbage_rules()
     for name in _normalize_garbage_rule_names(rule_names):
         if name == "empty_or_noise":
             if not prepared_text or _looks_noise_only(prepared_text):
                 matched.append(name)
             continue
-        rule = GARBAGE_RULES.get(name) or {}
+        rule = garbage_rules.get(name) or {}
         for pattern in list(rule.get("patterns") or []):
             if re.search(str(pattern), raw_text, flags=re.IGNORECASE):
                 matched.append(name)
@@ -466,7 +472,7 @@ def _duplicate_similarity(
 
 def _normalize_taxonomy_rules(value: Any) -> dict[str, dict[str, Any]]:
     if not isinstance(value, dict):
-        return dict(DEFAULT_TAXONOMY_RULES)
+        return resolve_taxonomy_rules()
     normalized: dict[str, dict[str, Any]] = {}
     for taxonomy_id, raw_rule in value.items():
         taxonomy_key = str(taxonomy_id).strip()
@@ -486,7 +492,7 @@ def _normalize_taxonomy_rules(value: Any) -> dict[str, dict[str, Any]]:
             "patterns": patterns,
         }
     if not normalized:
-        return dict(DEFAULT_TAXONOMY_RULES)
+        return resolve_taxonomy_rules()
     return normalized
 
 

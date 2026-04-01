@@ -16,6 +16,7 @@
 - planner, evidence summary, dataset prepare, sentiment labeling은 Anthropic 경로가 있더라도 fallback 경로를 유지한다.
 - planner, evidence summary, dataset prepare, sentiment labeling, embedding은 현재 `usage` metadata를 남긴다. token 수나 vector 수처럼 합산 가능한 필드는 control plane에서도 다시 집계한다.
 - `dataset_prepare`는 현재 `regex_rule_names` 확장 포인트를 통해 명시적인 정규식 정제 규칙을 먼저 적용한 뒤 LLM/fallback normalize를 수행한다. 기본 규칙은 `media_placeholder`, `html_artifact`, `url_cleanup`, `zero_width_cleanup`이다.
+- prepare regex, garbage, taxonomy 규칙은 현재 `기본 상수 -> PYTHON_AI_RULE_CONFIG_PATH -> PYTHON_AI_RULE_CONFIG_JSON -> request payload override` 순서의 layered config를 지원한다.
 - 현재 `embedding`의 기본값은 `intfloat/multilingual-e5-small` FastEmbed local model 기반 dense 경로이고, 필요하면 OpenAI Embeddings API override를 줄 수 있다. 호출이 실패하면 `token-overlap-v1` fallback을 유지한다.
   - `embedding` task는 dense vector가 있더라도 `token_counts`와 `norm`을 같이 저장해 기존 clustering/debug 경로를 유지하고, index 적재용 `embeddings.index.parquet`도 함께 만든다.
 - `semantic_search`는 dense index metadata가 있으면 같은 model로 query embedding을 만들고, 없으면 token vector cosine similarity로 fallback한다. 현재 primary input은 `embedding_index_ref + chunk_ref`이고 `embedding_uri`는 명시적 fallback일 때만 사용한다.
