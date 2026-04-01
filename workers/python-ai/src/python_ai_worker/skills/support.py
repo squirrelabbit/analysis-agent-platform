@@ -289,7 +289,15 @@ def run_dictionary_tagging(payload: dict[str, Any]) -> dict[str, Any]:
 
 def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_embedding_cluster_payload(payload)
-    records = rt._selected_embedding_records(normalized["embedding_uri"], payload.get("prior_artifacts"))
+    inputs = normalized["step"].get("inputs") or {}
+    records, source_backend, source_ref = _embedding_cluster_records(
+        dataset_version_id=_semantic_dataset_version_id(payload, inputs),
+        embedding_index_ref=normalized["embedding_index_ref"],
+        embedding_uri=normalized["embedding_uri"],
+        prior_artifacts=payload.get("prior_artifacts"),
+        chunk_ref=normalized["chunk_ref"],
+        chunk_format=normalized["chunk_format"],
+    )
     clusters = rt._cluster_embedding_records(records, normalized["cluster_similarity_threshold"], normalized["sample_n"], normalized["top_n"])
     similarity_backends = {
         str(cluster.get("similarity_backend") or "").strip()
@@ -301,7 +309,8 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "notes": [
             f"embedding_cluster built {len(clusters)} clusters",
-            f"embedding source: {normalized['embedding_uri']}",
+            f"embedding source backend: {source_backend}",
+            f"embedding source: {source_ref}",
             f"similarity_backend: {similarity_backend}",
             f"cluster_similarity_threshold: {normalized['cluster_similarity_threshold']}",
         ],
@@ -310,12 +319,17 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
             "embedding_uri": normalized["embedding_uri"],
+            "embedding_index_ref": normalized["embedding_index_ref"],
+            "embedding_source_backend": source_backend,
+            "chunk_ref": normalized["chunk_ref"],
+            "chunk_format": normalized["chunk_format"],
             "summary": {
                 "cluster_count": len(clusters),
                 "clustered_document_count": len(records),
                 "noise_count": noise_count,
                 "similarity_backend": similarity_backend,
                 "cluster_similarity_threshold": normalized["cluster_similarity_threshold"],
+                "embedding_source_backend": source_backend,
             },
             "clusters": clusters,
         },
@@ -435,6 +449,81 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
             "matches": limited,
         },
     }
+
+
+def _embedding_cluster_records(
+    *,
+    dataset_version_id: str,
+    embedding_index_ref: str,
+    embedding_uri: str,
+    prior_artifacts: Any,
+    chunk_ref: str,
+    chunk_format: str,
+) -> tuple[list[dict[str, Any]], str, str]:
+    pgvector_records = _embedding_cluster_records_from_pgvector(
+        dataset_version_id=dataset_version_id,
+        embedding_index_ref=embedding_index_ref,
+        prior_artifacts=prior_artifacts,
+        fallback_chunk_ref=chunk_ref,
+        fallback_chunk_format=chunk_format,
+    )
+    if pgvector_records is not None:
+        source_ref = embedding_index_ref or f"pgvector://embedding_index_chunks?dataset_version_id={dataset_version_id}"
+        return pgvector_records, "pgvector", source_ref
+    if embedding_uri:
+        return rt._selected_embedding_records(embedding_uri, prior_artifacts), "jsonl-sidecar", embedding_uri
+    return [], "pgvector", embedding_index_ref or dataset_version_id
+
+
+def _embedding_cluster_records_from_pgvector(
+    *,
+    dataset_version_id: str,
+    embedding_index_ref: str,
+    prior_artifacts: Any,
+    fallback_chunk_ref: str,
+    fallback_chunk_format: str,
+) -> list[dict[str, Any]] | None:
+    if not dataset_version_id:
+        dataset_version_id = _dataset_version_id_from_index_ref(embedding_index_ref)
+    if not dataset_version_id:
+        return None
+    rows = _query_pgvector_cluster_rows(dataset_version_id)
+    if not rows:
+        return None
+    selected_indices = rt._selected_source_indices(prior_artifacts)
+    chunk_lookup = _chunk_rows_by_id(rows, fallback_chunk_ref)
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        source_index = int(row.get("source_row_index") or 0)
+        if selected_indices is not None and source_index not in selected_indices:
+            continue
+        chunk_id = str(row.get("chunk_id") or "").strip()
+        chunk_row = chunk_lookup.get(chunk_id, {})
+        chunk_text = str(chunk_row.get("chunk_text") or "").strip()
+        token_counts = Counter(rt._tokenize(chunk_text))
+        embedding_model = str(row.get("embedding_model") or "").strip()
+        dense_vector: list[float] = []
+        if rt._looks_dense_embedding_model(embedding_model):
+            dense_vector = _parse_pgvector_literal(row.get("embedding_literal"))
+        if not token_counts and not dense_vector:
+            continue
+        record = {
+            "source_index": source_index,
+            "row_id": str(row.get("row_id") or chunk_row.get("row_id") or "").strip(),
+            "chunk_id": chunk_id or str(chunk_row.get("chunk_id") or "").strip(),
+            "chunk_index": int(row.get("chunk_index") or chunk_row.get("chunk_index") or 0),
+            "text": chunk_text,
+            "token_counts": dict(token_counts),
+            "norm": rt._vector_norm(token_counts),
+            "chunk_ref": str(row.get("chunk_ref") or fallback_chunk_ref or "").strip(),
+            "chunk_format": fallback_chunk_format or ("parquet" if str(row.get("chunk_ref") or fallback_chunk_ref or "").endswith(".parquet") else ""),
+        }
+        if dense_vector:
+            record["embedding"] = dense_vector
+            record["embedding_dim"] = int(row.get("vector_dim") or len(dense_vector))
+            record["embedding_provider"] = "pgvector"
+        records.append(record)
+    return records or None
 
 
 def _semantic_matches_from_sidecar(
@@ -596,6 +685,34 @@ def _query_pgvector_rows(dataset_version_id: str, query_vector: list[float], sam
         return []
 
 
+def _query_pgvector_cluster_rows(dataset_version_id: str) -> list[dict[str, Any]]:
+    database_url = str(os.getenv("DATABASE_URL") or "").strip()
+    if not database_url or psycopg is None or dict_row is None:
+        return []
+    query = """
+        SELECT
+            chunk_id,
+            row_id,
+            source_row_index,
+            chunk_index,
+            chunk_ref,
+            embedding_model,
+            vector_dim,
+            embedding::text AS embedding_literal,
+            metadata
+        FROM embedding_index_chunks
+        WHERE dataset_version_id = %s
+        ORDER BY source_row_index, chunk_index, chunk_id
+    """
+    try:
+        with psycopg.connect(database_url, row_factory=dict_row) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query, (dataset_version_id,))
+                return [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        return []
+
+
 def _chunk_rows_by_id(rows: list[dict[str, Any]], fallback_chunk_ref: str) -> dict[str, dict[str, Any]]:
     refs: dict[str, set[str]] = {}
     for row in rows:
@@ -665,6 +782,29 @@ def _coerce_json_dict(value: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+def _parse_pgvector_literal(value: Any) -> list[float]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    if not text:
+        return []
+    vector: list[float] = []
+    for item in text.split(","):
+        piece = item.strip()
+        if not piece:
+            continue
+        try:
+            vector.append(float(piece))
+        except ValueError:
+            return []
+    norm = math.sqrt(sum(component * component for component in vector))
+    if norm <= 0:
+        return []
+    return [component / norm for component in vector]
 
 
 def _project_token_counts_to_dense_vector(token_counts: Counter[str], *, dim: int) -> list[float]:

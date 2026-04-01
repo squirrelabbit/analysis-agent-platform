@@ -18,7 +18,7 @@
 - 현재 `semantic_search`와 `issue_evidence_summary`는 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 artifact까지 전달한다.
 - control plane은 현재 embedding build 직후 `embeddings.jsonl`을 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection vector로 바꾸고 `embedding_index_chunks`에 적재한다.
 - `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 embedding model로 query vector를 만든다. 불가하면 `embeddings.jsonl` scan으로 fallback한다.
-- `embedding_cluster`는 현재 같은 sidecar를 읽되, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 우선 사용하고, 없으면 token-overlap cosine similarity로 fallback한다.
+- `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` fallback을 사용한다.
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension, `embedding_index_chunks` table을 가진다.
 
 현재 코드 기준 확인 지점:
@@ -144,7 +144,7 @@ flowchart LR
 - 현재 `semantic_search`와 `issue_evidence_summary`는 chunk citation 전파까지 반영됐고, `semantic_search`는 `pgvector` 조회까지 연결됐다.
 - 현재 `semantic_search`는 index metadata가 dense model이면 같은 model로 query embedding을 만든다.
 - 다음 단계는 dense embedding 실운영 검증과 `dense-hybrid` clustering 품질 평가다.
-- clustering은 현재 dense embedding 기반 `dense-hybrid` 경로와 token fallback을 함께 유지한다.
+- clustering은 현재 `pgvector + chunks.parquet` 기반 `dense-hybrid` 경로를 우선 사용하고, JSONL/token fallback을 보조 경로로 유지한다.
 
 ### Phase 5. JSONL 축소
 

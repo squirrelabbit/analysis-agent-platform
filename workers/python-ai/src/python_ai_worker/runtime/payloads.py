@@ -122,9 +122,19 @@ def _normalize_embedding_cluster_payload(payload: dict[str, Any]) -> dict[str, A
         or payload.get("embedding_uri")
         or f"{normalized['dataset_name']}.embeddings.jsonl"
     ).strip()
-    if not embedding_uri:
-        raise ValueError("embedding_uri is required")
+    embedding_index_ref = str(inputs.get("embedding_index_ref") or payload.get("embedding_index_ref") or "").strip()
+    chunk_ref = str(inputs.get("chunk_ref") or payload.get("chunk_ref") or "").strip()
+    if not chunk_ref and embedding_uri.endswith(".embeddings.jsonl"):
+        chunk_ref = f"{embedding_uri[:-len('.embeddings.jsonl')]}.chunks.parquet"
+    chunk_format = str(inputs.get("chunk_format") or payload.get("chunk_format") or "").strip()
+    if not chunk_format and chunk_ref.endswith(".parquet"):
+        chunk_format = "parquet"
+    if not embedding_uri and not embedding_index_ref:
+        raise ValueError("embedding_uri or embedding_index_ref is required")
     normalized["embedding_uri"] = embedding_uri
+    normalized["embedding_index_ref"] = embedding_index_ref
+    normalized["chunk_ref"] = chunk_ref
+    normalized["chunk_format"] = chunk_format
     normalized["cluster_similarity_threshold"] = round(
         max(
             0.0,

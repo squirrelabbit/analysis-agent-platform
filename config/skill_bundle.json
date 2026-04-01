@@ -237,10 +237,18 @@
       "dataset_source": "prepared",
       "requires_prepare": true,
       "requires_embedding": true,
+      "metadata_defaults": {
+        "embedding_index_ref": "embedding_index_ref",
+        "chunk_ref": "chunk_ref",
+        "chunk_format": "chunk_format"
+      },
       "default_inputs": {
         "sample_n": 3,
         "top_n": 5,
-        "cluster_similarity_threshold": 0.3
+        "cluster_similarity_threshold": 0.3,
+        "embedding_index_ref": "",
+        "chunk_ref": "",
+        "chunk_format": "parquet"
       }
     },
     {

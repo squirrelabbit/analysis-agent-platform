@@ -17,7 +17,7 @@
 - 현재 `embedding`의 기본값은 `intfloat/multilingual-e5-small` FastEmbed local model 기반 dense 경로이고, 필요하면 OpenAI Embeddings API override를 줄 수 있다. 호출이 실패하면 `token-overlap-v1` fallback을 유지한다.
   - `embedding` task는 dense vector가 있더라도 `token_counts`와 `norm`을 같이 저장해 기존 clustering/debug 경로를 유지한다.
   - `semantic_search`는 dense index metadata가 있으면 같은 model로 query embedding을 만들고, 없으면 token vector cosine similarity로 fallback한다.
-  - `embedding_cluster`는 dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 우선 사용하고, 없으면 token vector cosine similarity로 fallback한다.
+  - `embedding_cluster`는 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 token vector cosine similarity로 fallback한다.
 
 ## Structured
 
@@ -44,7 +44,7 @@
 | `meta_group_count` | 메타데이터 그룹 집계 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 메타데이터 차원값별 건수와 top term을 집계한다. | significance test, drill-down, 다중 dimension breakdown, low-volume suppression을 추가할 수 있다. |
 | `document_sample` | 대표 문서 샘플링 | `workers/python-ai/src/python_ai_worker/skills/support.py` | query overlap ranking 또는 source order로 대표 문서를 뽑는다. | MMR/diversity sampling, cluster-aware sampling, recency weighting, confidence-based sampling을 추가할 수 있다. |
 | `dictionary_tagging` | 사전 기반 태깅 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 사전 기반 taxonomy rule과 pattern matching으로 문서에 태그를 붙인다. | weighted rule, regex/operator 확장, synonym dictionary, weak supervision classifier를 추가할 수 있다. |
-| `embedding_cluster` | 임베딩 군집화 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 미리 생성된 chunk 단위 sidecar를 읽고, dense vector가 있으면 dense cosine similarity에 token-overlap guardrail을 곱한 `dense-hybrid` 점수로 greedy clustering을 수행한다. dense가 없으면 token vector cosine similarity로 fallback한다. `source_index`를 유지해 row 단위 prior filter/dedup artifact와 연결한다. | dense-only clustering 품질 비교, HDBSCAN/agglomerative clustering, automatic threshold search, cluster centroid 학습을 검토할 수 있다. |
+| `embedding_cluster` | 임베딩 군집화 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 가능하면 `pgvector`의 `embedding_index_chunks`와 `chunks.parquet`를 먼저 읽고, dense vector가 있으면 dense cosine similarity에 token-overlap guardrail을 곱한 `dense-hybrid` 점수로 greedy clustering을 수행한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` token vector cosine similarity로 fallback한다. `source_index`를 유지해 row 단위 prior filter/dedup artifact와 연결한다. | dense-only clustering 품질 비교, HDBSCAN/agglomerative clustering, automatic threshold search, cluster centroid 학습을 검토할 수 있다. |
 | `cluster_label_candidates` | 군집 라벨 후보 생성 | `workers/python-ai/src/python_ai_worker/skills/support.py` | cluster top term으로 heuristic label 후보를 만든다. | c-TF-IDF, representative document title generation, LLM-assisted label proposal을 붙일 수 있다. |
 | `semantic_search` | 의미 검색 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 가능하면 `pgvector`의 `embedding_index_chunks`를 먼저 조회한다. index metadata가 dense model이면 같은 model로 query embedding을 다시 만들고, dense가 아니면 token count를 같은 차원으로 projection해 조회한다. 불가하면 `embeddings.jsonl`의 chunk 단위 `token_counts` cosine similarity로 fallback한다. 결과는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`, `row_id`, `source_index`를 함께 보존한다. | dense semantic retrieval 품질 비교, hybrid search, reranker, claim-aware evidence ranking을 도입할 수 있다. |
 | `evidence_pack` | 근거 묶음 생성 | `workers/python-ai/src/python_ai_worker/skills/core.py` | 선택된 snippet을 묶고, 가능하면 LLM으로 요약하며 실패 시 fallback summarizer를 사용한다. 현재 `semantic_search` prior artifact가 있으면 chunk citation 필드를 그대로 보존한다. | citation scoring, redundancy 제거, evidence diversity ranking, claim-to-evidence linking을 추가할 수 있다. |
@@ -71,7 +71,7 @@
 ## 현재 해석 포인트
 
 - 현재 비정형 skill의 핵심 deterministic 기술은 `토큰화`, `사전 매칭`, `빈도 분석`, `bucket 집계`, `bag-of-words cosine similarity`, `greedy clustering`이다.
-- `semantic_search`는 이제 dense index metadata가 있으면 query embedding도 dense model로 맞춘다. `embedding_cluster`는 dense vector가 있으면 `dense-hybrid` 유사도를 우선 사용하고, 없으면 token vector 경로로 fallback한다.
+- `semantic_search`는 이제 dense index metadata가 있으면 query embedding도 dense model로 맞춘다. `embedding_cluster`는 `pgvector`와 chunk parquet를 우선 쓰고, dense vector가 있으면 `dense-hybrid` 유사도를 사용한다.
 - 현재 `pgvector` 적재는 dense model 출력 또는 token count projection fallback의 혼합 단계다.
 - `dense-hybrid`는 dense-only collapse를 막기 위한 guardrail로는 유효하지만, 범용 표현이 많이 겹치는 dataset에서는 여전히 1개 군집으로 뭉칠 수 있어 threshold와 fixture 검증을 계속 유지해야 한다.
 - LLM은 planner, evidence summary, dataset prepare, sentiment labeling에서 선택적으로 사용되고, 실패 시 deterministic fallback으로 내려간다.

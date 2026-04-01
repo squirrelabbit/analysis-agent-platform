@@ -860,6 +860,104 @@ class TaskTests(unittest.TestCase):
             [[0, 1], [2, 3], [4, 5]],
         )
 
+    def test_embedding_cluster_prefers_pgvector_when_available(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_cluster_pgvector.csv"
+        chunk_path = temp_dir / "issues_cluster_pgvector.chunks.parquet"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류"})
+            writer.writerow({"text": "인증 오류"})
+            writer.writerow({"text": "배송 문의"})
+
+        chunk_rows = [
+            {
+                "source_row_index": 0,
+                "row_id": "version-pgvector:row:0",
+                "chunk_id": "version-pgvector:row:0:chunk:0",
+                "chunk_index": 0,
+                "chunk_text": "결제 오류",
+                "char_start": 0,
+                "char_end": 5,
+            },
+            {
+                "source_row_index": 1,
+                "row_id": "version-pgvector:row:1",
+                "chunk_id": "version-pgvector:row:1:chunk:0",
+                "chunk_index": 0,
+                "chunk_text": "인증 오류",
+                "char_start": 0,
+                "char_end": 5,
+            },
+            {
+                "source_row_index": 2,
+                "row_id": "version-pgvector:row:2",
+                "chunk_id": "version-pgvector:row:2:chunk:0",
+                "chunk_index": 0,
+                "chunk_text": "배송 문의",
+                "char_start": 0,
+                "char_end": 5,
+            },
+        ]
+        pq.write_table(pa.Table.from_pylist(chunk_rows), chunk_path)
+
+        with patch(
+            "python_ai_worker.skills.support._query_pgvector_cluster_rows",
+            return_value=[
+                {
+                    "chunk_id": "version-pgvector:row:0:chunk:0",
+                    "row_id": "version-pgvector:row:0",
+                    "source_row_index": 0,
+                    "chunk_index": 0,
+                    "chunk_ref": str(chunk_path),
+                    "embedding_model": "intfloat/multilingual-e5-small",
+                    "vector_dim": 2,
+                    "embedding_literal": "[1.0,0.0]",
+                    "metadata": {},
+                },
+                {
+                    "chunk_id": "version-pgvector:row:1:chunk:0",
+                    "row_id": "version-pgvector:row:1",
+                    "source_row_index": 1,
+                    "chunk_index": 0,
+                    "chunk_ref": str(chunk_path),
+                    "embedding_model": "intfloat/multilingual-e5-small",
+                    "vector_dim": 2,
+                    "embedding_literal": "[0.98,0.02]",
+                    "metadata": {},
+                },
+                {
+                    "chunk_id": "version-pgvector:row:2:chunk:0",
+                    "row_id": "version-pgvector:row:2",
+                    "source_row_index": 2,
+                    "chunk_index": 0,
+                    "chunk_ref": str(chunk_path),
+                    "embedding_model": "intfloat/multilingual-e5-small",
+                    "vector_dim": 2,
+                    "embedding_literal": "[0.0,1.0]",
+                    "metadata": {},
+                },
+            ],
+        ):
+            cluster_result = run_embedding_cluster(
+                {
+                    "dataset_name": str(csv_path),
+                    "dataset_version_id": "version-pgvector",
+                    "embedding_index_ref": "pgvector://embedding_index_chunks?dataset_version_id=version-pgvector",
+                    "chunk_ref": str(chunk_path),
+                    "chunk_format": "parquet",
+                    "cluster_similarity_threshold": 0.2,
+                    "sample_n": 2,
+                    "top_n": 3,
+                }
+            )
+
+        self.assertEqual(cluster_result["artifact"]["summary"]["embedding_source_backend"], "pgvector")
+        self.assertEqual(cluster_result["artifact"]["summary"]["similarity_backend"], "dense-hybrid")
+        self.assertEqual(cluster_result["artifact"]["summary"]["cluster_count"], 2)
+        self.assertEqual(cluster_result["artifact"]["clusters"][0]["member_source_indices"], [0, 1])
+
     def test_issue_evidence_summary_alias(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues.csv"

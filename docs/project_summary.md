@@ -35,7 +35,7 @@
 - `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 `embeddings.jsonl` record에 함께 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1`로 fallback한다.
 - control plane은 embedding build 직후 `embeddings.jsonl`을 읽어 dense vector가 있으면 그대로, 없으면 64차원 hashed projection vector로 바꿔 `pgvector` 테이블 `embedding_index_chunks`에 적재한다.
 - `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query vector를 다시 만든다. 불가하면 `embeddings.jsonl` token-overlap fallback을 읽는다. 반환 artifact에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.
-- `embedding_cluster`는 현재 `embeddings.jsonl` sidecar를 읽되, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 우선 사용하고, 없으면 token-overlap cosine similarity로 fallback한다.
+- `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` token-overlap fallback으로 내려간다.
 - `issue_evidence_summary`와 `evidence_pack`은 `semantic_search`가 있을 때 chunk citation을 그대로 보존한다.
 - `dataset_prepare`, `sentiment_label`은 기본 Haiku model을 사용하고 prompt version을 registry로 관리한다.
 - plan skill 메타데이터는 공용 `skill bundle`인 `config/skill_bundle.json`으로 중앙화됐다.
@@ -59,7 +59,7 @@
 ## 6. 확인 필요
 
 - `pgvector` extension과 `embedding_index_chunks` table은 dev stack에서 확인했고, `semantic_search` smoke에서 `retrieval_backend=pgvector`를 확인했다.
-- 이번 turn의 `smoke_semantic.sh`, `smoke_cluster.sh`는 `intfloat/multilingual-e5-small` local model 기준으로 다시 실행했고 `embedding_index_backend=pgvector`, `embedding_vector_dim=384`, `retrieval_backend=pgvector`, `cluster_similarity_backend=dense-hybrid`를 확인했다.
+- 이번 turn의 `smoke_semantic.sh`, `smoke_cluster.sh`는 `intfloat/multilingual-e5-small` local model 기준으로 다시 실행했고 `embedding_index_backend=pgvector`, `embedding_vector_dim=384`, `retrieval_backend=pgvector`, `embedding_source_backend=pgvector`, `cluster_similarity_backend=dense-hybrid`를 확인했다.
 - 별도 컨테이너 검증에서도 `intfloat/multilingual-e5-small` local model download와 `fastembed`, `384차원` dense embedding 생성까지 확인했다.
 - 확인 필요: OpenAI key를 넣은 dense embedding end-to-end smoke는 이번 turn에 재현하지 않았다.
 - `pgvector` 이미지로 바꾼 뒤 기존 volume을 재사용하면 Postgres가 collation version mismatch warning을 출력했다. 운영/개발 초기화 절차는 별도 정리가 필요하다.

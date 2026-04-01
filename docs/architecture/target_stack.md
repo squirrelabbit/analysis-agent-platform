@@ -70,7 +70,7 @@
 - `sentiment.parquet`는 현재 `row_id`, `source_row_index` 중심 sidecar이고, `issue_sentiment_summary`는 prepared dataset ref를 함께 받아 join한다.
 - `embedding`은 현재 `chunks.parquet`를 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준 FastEmbed local model dense vector를 `embeddings.jsonl` record에 함께 기록한다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 실패하면 token-overlap record만 남긴다.
 - `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 embedding model로 query vector를 다시 만든다. 실패 시 `embeddings.jsonl` scan으로 fallback한다.
-- `embedding_cluster`는 현재 `embeddings.jsonl` sidecar를 읽되, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 우선 사용하고, 없으면 token-overlap cosine similarity로 fallback한다.
+- `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` token-overlap fallback을 사용한다.
 - `semantic_search`와 `issue_evidence_summary`는 현재 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 artifact까지 보존한다.
 - control plane은 현재 `embeddings.jsonl` sidecar를 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection vector로 바꾼 뒤 `embedding_index_chunks`에 적재한다.
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension을 켜고 `embedding_index_chunks` table까지 생성한다.
