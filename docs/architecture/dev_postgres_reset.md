@@ -25,6 +25,12 @@
 ./apps/control-plane/dev/reset_postgres_dev.sh
 ```
 
+경고만 먼저 확인:
+
+```bash
+./apps/control-plane/dev/reset_postgres_dev.sh --check-only
+```
+
 수동 절차:
 
 1. 현재 dev stack을 내린다.
@@ -68,5 +74,6 @@ docker compose -f compose.dev.yml logs postgres | rg 'collation|mismatch'
 - `analysis-support-platform_postgres_dev_data`는 기본 compose project name 기준 예시다.
 - 확인 필요: 실행 환경에서 compose project name을 바꿨다면 실제 volume 이름은 달라질 수 있다.
 - helper script [`reset_postgres_dev.sh`](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/reset_postgres_dev.sh)는 compose label 기준 volume을 먼저 찾고, 못 찾으면 기본 volume 이름으로 fallback한다.
+- helper script는 `--check-only` 옵션으로 non-destructive warning 확인만 먼저 수행할 수 있다.
 - 초기화 뒤에는 project, dataset version, execution metadata를 다시 만들어야 한다.
 - smoke 재검증은 [`smoke_semantic.sh`](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_semantic.sh), [`smoke_cluster.sh`](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_cluster.sh)부터 다시 돌리는 편이 안전하다.

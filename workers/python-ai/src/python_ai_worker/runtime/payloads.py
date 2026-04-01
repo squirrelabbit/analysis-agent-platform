@@ -117,12 +117,8 @@ def _normalize_embedding_cluster_payload(payload: dict[str, Any]) -> dict[str, A
     normalized = _normalize_text_task_payload(payload)
     step = normalized["step"]
     inputs = step.get("inputs") or {}
-    embedding_uri = str(
-        inputs.get("embedding_uri")
-        or payload.get("embedding_uri")
-        or f"{normalized['dataset_name']}.embeddings.jsonl"
-    ).strip()
     embedding_index_ref = str(inputs.get("embedding_index_ref") or payload.get("embedding_index_ref") or "").strip()
+    embedding_uri = str(inputs.get("embedding_uri") or payload.get("embedding_uri") or "").strip()
     chunk_ref = str(inputs.get("chunk_ref") or payload.get("chunk_ref") or "").strip()
     if not chunk_ref and embedding_uri.endswith(".embeddings.jsonl"):
         chunk_ref = f"{embedding_uri[:-len('.embeddings.jsonl')]}.chunks.parquet"

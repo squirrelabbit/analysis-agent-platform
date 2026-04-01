@@ -1142,7 +1142,6 @@ class TaskTests(unittest.TestCase):
                 {
                     "dataset_name": str(csv_path),
                     "dataset_version_id": "version-local-semantic",
-                    "embedding_uri": embedding_result["artifact"]["embedding_uri"],
                     "embedding_index_ref": "pgvector://embedding_index_chunks?dataset_version_id=version-local-semantic",
                     "chunk_ref": str(chunk_path),
                     "chunk_format": "parquet",
@@ -1153,6 +1152,7 @@ class TaskTests(unittest.TestCase):
             )
 
         self.assertEqual(result["artifact"]["retrieval_backend"], "pgvector")
+        self.assertEqual(result["artifact"]["embedding_uri"], "")
         self.assertEqual(result["artifact"]["matches"][0]["text"], "결제 오류가 반복 발생했습니다")
         self.assertEqual(result["artifact"]["matches"][1]["text"], "로그인이 자주 실패하고 오류가 보입니다")
         self.assertEqual(result["artifact"]["matches"][0]["chunk_ref"], str(chunk_path))
@@ -1251,6 +1251,7 @@ class TaskTests(unittest.TestCase):
             )
 
         self.assertEqual(cluster_result["artifact"]["summary"]["embedding_source_backend"], "pgvector")
+        self.assertEqual(cluster_result["artifact"]["embedding_uri"], "")
         self.assertEqual(cluster_result["artifact"]["summary"]["similarity_backend"], "dense-hybrid")
         self.assertEqual(cluster_result["artifact"]["summary"]["cluster_count"], 2)
         self.assertEqual(cluster_result["artifact"]["clusters"][0]["member_source_indices"], [0, 1])

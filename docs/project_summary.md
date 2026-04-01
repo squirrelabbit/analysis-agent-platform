@@ -34,12 +34,13 @@
 - `sentiment.parquet`는 현재 `row_id`, `source_row_index`, 감성 컬럼 중심 sidecar이고, `issue_sentiment_summary`는 prepared dataset ref를 받아 텍스트를 조인한다.
 - `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 결과는 `embeddings.jsonl` fallback sidecar와 `embeddings.index.parquet` index source로 함께 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1`로 fallback한다.
 - control plane은 embedding build 직후 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 64차원 hashed projection vector로 바꿔 `pgvector` 테이블 `embedding_index_chunks`에 적재한다. index source가 없을 때만 `embeddings.jsonl` fallback을 사용한다.
-- `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query vector를 다시 만든다. 불가하면 `embeddings.jsonl` token-overlap fallback을 읽는다. 반환 artifact에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.
+- `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query vector를 다시 만든다. 분석 plan과 worker input도 `embedding_index_ref + chunk_ref`를 우선 사용하고, `embedding_uri`는 명시적 fallback일 때만 읽는다. 반환 artifact에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.
 - `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 사용한다. generic overlap fixture가 unit test에 추가됐고, `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` token-overlap fallback으로 내려간다.
 - `issue_evidence_summary`와 `evidence_pack`은 `semantic_search`가 있을 때 chunk citation을 그대로 보존한다.
 - `dataset_prepare`, `sentiment_label`은 기본 Haiku model을 사용하고 prompt version을 registry로 관리한다.
 - plan skill 메타데이터는 공용 `skill bundle`인 `config/skill_bundle.json`으로 중앙화됐다.
 - Python worker 내부는 `task_router`, `planner`, `runtime`, `skills/support`, `skills/core` 중심으로 분리됐다.
+- 로컬 임베딩 품질 비교용으로 고정 fixture 기반 `evaluate_embedding_model` CLI와 unit test 자산이 추가됐다.
 - 상세 skill 목록과 계약은 `docs/skill/skill_registry.md`를 기준으로 본다.
 - skill별 분석 기법은 `docs/skill/analysis_techniques.md`에 정리돼 있다.
 - Python worker runtime은 현재 `.parquet` reader를 지원하고, `sentiment_label`과 `issue_sentiment_summary`는 Parquet를 직접 읽는다.
@@ -63,5 +64,5 @@
 - Python unit test에는 generic overlap fixture를 추가해 `dense-hybrid`가 `3개 군집`으로 분리되는 회귀 케이스를 고정했다.
 - 별도 컨테이너 검증에서도 `intfloat/multilingual-e5-small` local model download와 `fastembed`, `384차원` dense embedding 생성까지 확인했다.
 - 확인 필요: OpenAI key를 넣은 dense embedding end-to-end smoke는 이번 turn에 재현하지 않았다.
-- `pgvector` 이미지로 바꾼 뒤 기존 volume을 재사용하면 Postgres가 collation version mismatch warning을 출력했다. 개발용 초기화 절차와 스크립트는 [reset_postgres_dev.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/reset_postgres_dev.sh), [dev_postgres_reset.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/architecture/dev_postgres_reset.md)에 정리했다.
+- `pgvector` 이미지로 바꾼 뒤 기존 volume을 재사용하면 Postgres가 collation version mismatch warning을 출력했다. 개발용 초기화 절차와 `--check-only` 확인 경로는 [reset_postgres_dev.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/reset_postgres_dev.sh), [dev_postgres_reset.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/architecture/dev_postgres_reset.md)에 정리했다.
 - Rust worker를 실제 hot path로 넘길 성능 기준과 시점은 별도 측정이 필요하다.

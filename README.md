@@ -27,7 +27,7 @@
 - `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding`은 아직 JSONL sidecar를 유지한다.
 - `sentiment_label` 기본 출력은 이제 `row_id`, `source_row_index`, 감성 컬럼 중심의 sidecar이고, `issue_sentiment_summary`는 `prepared_dataset_name`을 함께 받아 텍스트를 조인한다.
 - `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 결과는 fallback/debug용 `embeddings.jsonl`과 index 적재용 `embeddings.index.parquet`를 함께 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1` sidecar로 자동 fallback한다.
-- `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 model로 query vector를 다시 만든다. 불가하면 `embeddings.jsonl` scan과 token-overlap 계산으로 fallback한다. 검색 결과는 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 반환하고, `issue_evidence_summary`는 이를 evidence artifact까지 유지한다.
+- `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 model로 query vector를 다시 만든다. 분석 plan과 worker 입력도 이제 `embedding_index_ref + chunk_ref`를 우선 사용하고, `embedding_uri`는 명시적 fallback일 때만 사용한다. 검색 결과는 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 반환하고, `issue_evidence_summary`는 이를 evidence artifact까지 유지한다.
 - `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 함께 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` sidecar와 token-overlap 경로로 fallback한다.
 - dataset build artifact는 현재 `row_id/ref/format` 메타데이터를 함께 남겨 다음 단계의 chunk/vector index 전환 기반을 잡아 두었다.
 - control plane은 `embedding` build가 끝나면 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection으로 바꾼 뒤 `embedding_index_chunks`에 적재한다. index source를 찾지 못할 때만 `embeddings.jsonl`로 fallback한다.
@@ -36,6 +36,7 @@
 - 비정형 deterministic skill은 Python worker 안에서 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`, `issue_taxonomy_summary`까지 확장돼 있다.
 - Python AI worker는 현재 `task_router + planner + runtime helper + support/core skill module` 구조로 분리돼 있다.
 - Python skill-case devtool은 `python_ai_worker.devtools` 패키지와 `run_skill_case --validate` CLI로 정식 검증 경로를 가진다.
+- 로컬 임베딩 모델 평가는 고정 fixture 기반 `evaluate_embedding_model` CLI와 unit test 자산으로 별도 검증할 수 있다.
 - 비정형 dataset build는 현재 `prepare/sentiment=Parquet`, `chunk=Parquet`, `embedding=JSONL sidecar` 단계이며, 다음 저장 구조 전환 설계는 `docs/architecture/unstructured_storage_transition.md`에 따로 정리했다.
 - 레거시 Python `src/` 디렉터리는 현재 저장소에 없다.
 - `workers/rust-skills/`는 아직 실사용 hot path가 연결되지 않은 선택 최적화 경로다.
@@ -191,6 +192,7 @@ Support skill:
 - `cd apps/control-plane && go test ./... && go build ./...`
 - `PYTHONPATH=workers/python-ai/src python3 -m unittest discover -s workers/python-ai/tests -p 'test_*.py'`
 - `PYTHONPATH=workers/python-ai/src python3 -m python_ai_worker.devtools.run_skill_case --validate`
+- `PYTHONPATH=workers/python-ai/src python3 -m python_ai_worker.devtools.evaluate_embedding_model --model intfloat/multilingual-e5-small --format markdown`
 - `docker compose -f compose.dev.yml up -d --build`
 - smoke script:
   - `smoke.sh`
@@ -206,6 +208,7 @@ Support skill:
   - 이번 turn의 compose 실행에서 `smoke_semantic.sh`, `smoke_cluster.sh`를 `embedding_model=intfloat/multilingual-e5-small` 기준으로 다시 실행해 `embedding_index_backend=pgvector`, `embedding_index_source_format=parquet`, `embedding_vector_dim=384`, `retrieval_backend=pgvector`, `embedding_source_backend=pgvector`, `cluster_similarity_backend=dense-hybrid`, `dominant_cluster_label=결제 / 오류`를 확인했다.
   - 별도 컨테이너 검증과 end-to-end smoke 모두에서 `intfloat/multilingual-e5-small` local model download와 `fastembed`, `384차원` dense embedding 생성을 확인했다.
   - Python unit test에는 generic overlap fixture를 추가해 `dense-hybrid`가 `결제/로그인/배송`처럼 공통 표현이 많은 데이터에서도 `3개 군집`으로 분리되는 케이스를 고정했다.
+  - 별도 평가 자산은 local embedding fixture를 기준으로 `semantic_search` top ranking, `embedding_cluster` membership, `dense-only` 대비 `dense-hybrid` 우위를 리포트할 수 있게 정리했다.
 
 확인 필요:
 - `pgvector` 이미지 전환 뒤 기존 Postgres volume에서 collation version mismatch warning이 관찰됐다.
@@ -213,7 +216,7 @@ Support skill:
 - OpenAI key를 넣은 dense embedding end-to-end smoke는 이번 turn에 재현하지 않았다. 코드 경로와 unit test는 반영돼 있다.
 
 개발 메모:
-- Postgres collation warning이 보이면 [reset_postgres_dev.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/reset_postgres_dev.sh) 또는 [docs/architecture/dev_postgres_reset.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/architecture/dev_postgres_reset.md) 기준으로 dev volume만 재초기화한다.
+- Postgres collation warning은 먼저 `./apps/control-plane/dev/reset_postgres_dev.sh --check-only`로 확인하고, 실제 reset이 필요할 때만 [reset_postgres_dev.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/reset_postgres_dev.sh) 또는 [docs/architecture/dev_postgres_reset.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/architecture/dev_postgres_reset.md) 기준으로 dev volume을 재초기화한다.
 
 ## 디렉터리
 

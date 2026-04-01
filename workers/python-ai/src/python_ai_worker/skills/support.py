@@ -378,13 +378,11 @@ def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
 def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_text_task_payload(payload)
     inputs = (normalized["step"].get("inputs") or {})
-    embedding_uri = str(
-        inputs.get("embedding_uri")
-        or payload.get("embedding_uri")
-        or f"{normalized['dataset_name']}.embeddings.jsonl"
-    ).strip()
-    if not embedding_uri:
-        raise ValueError("embedding_uri is required")
+    dataset_version_id = _semantic_dataset_version_id(payload, inputs)
+    embedding_index_ref = str(inputs.get("embedding_index_ref") or payload.get("embedding_index_ref") or "").strip()
+    embedding_uri = str(inputs.get("embedding_uri") or payload.get("embedding_uri") or "").strip()
+    if not embedding_uri and not embedding_index_ref:
+        raise ValueError("embedding_uri or embedding_index_ref is required")
     chunk_ref = str(inputs.get("chunk_ref") or payload.get("chunk_ref") or "").strip()
     if not chunk_ref and embedding_uri.endswith(".embeddings.jsonl"):
         chunk_ref = f"{embedding_uri[:-len('.embeddings.jsonl')]}.chunks.parquet"
@@ -396,8 +394,8 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
     retrieval_backend = "jsonl-sidecar"
     note_prefix = "semantic search executed with precomputed embeddings"
     matches = _semantic_matches_from_pgvector(
-        dataset_version_id=_semantic_dataset_version_id(payload, inputs),
-        embedding_index_ref=str(inputs.get("embedding_index_ref") or payload.get("embedding_index_ref") or "").strip(),
+        dataset_version_id=dataset_version_id,
+        embedding_index_ref=embedding_index_ref,
         query=normalized["query"],
         query_counts=query_counts,
         sample_n=normalized["sample_n"],
@@ -421,11 +419,14 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
     for rank, item in enumerate(limited, start=1):
         item["rank"] = rank
     citation_mode = "chunk" if any(str(item.get("chunk_id") or "").strip() for item in limited) else "row"
+    source_ref = embedding_uri
+    if retrieval_backend == "pgvector":
+        source_ref = embedding_index_ref or f"pgvector://embedding_index_chunks?dataset_version_id={dataset_version_id}"
 
     return {
         "notes": [
             note_prefix,
-            f"embedding source: {embedding_uri}",
+            f"embedding source: {source_ref}",
             f"retrieval_backend: {retrieval_backend}",
             f"citation_mode: {citation_mode}",
         ],
@@ -434,6 +435,7 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
             "embedding_uri": embedding_uri,
+            "embedding_index_ref": embedding_index_ref,
             "retrieval_backend": retrieval_backend,
             "query": normalized["query"],
             "citation_mode": citation_mode,

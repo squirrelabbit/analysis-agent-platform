@@ -299,9 +299,6 @@ func TestSubmitAnalysisEnrichesSemanticSearchChunkInputs(t *testing.T) {
 	if step.DatasetName != "issues.prepared.parquet" {
 		t.Fatalf("unexpected semantic search dataset name: %+v", step)
 	}
-	if got := step.Inputs["embedding_uri"]; got != "issues.embeddings.jsonl" {
-		t.Fatalf("unexpected embedding uri: %+v", step.Inputs)
-	}
 	if got := step.Inputs["chunk_ref"]; got != "issues.chunks.parquet" {
 		t.Fatalf("unexpected chunk ref: %+v", step.Inputs)
 	}
@@ -310,6 +307,9 @@ func TestSubmitAnalysisEnrichesSemanticSearchChunkInputs(t *testing.T) {
 	}
 	if got := step.Inputs["chunk_format"]; got != "parquet" {
 		t.Fatalf("unexpected chunk format: %+v", step.Inputs)
+	}
+	if _, ok := step.Inputs["embedding_uri"]; ok {
+		t.Fatalf("semantic search should prefer pgvector metadata without embedding_uri fallback: %+v", step.Inputs)
 	}
 }
 

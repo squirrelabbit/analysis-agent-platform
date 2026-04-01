@@ -570,7 +570,7 @@ func enrichInputsForSkill(step *domain.SkillPlanStep, version domain.DatasetVers
 	if definition.GoalInput != "" && !inputPresent(step.Inputs, definition.GoalInput) && strings.TrimSpace(goal) != "" {
 		step.Inputs[definition.GoalInput] = strings.TrimSpace(goal)
 	}
-	if definition.RequiresEmbedding && !inputPresent(step.Inputs, "embedding_uri") {
+	if definition.RequiresEmbedding && !inputPresent(step.Inputs, "embedding_uri") && !inputPresent(step.Inputs, "embedding_index_ref") {
 		step.Inputs["embedding_uri"] = deriveEmbeddingURI(version)
 	}
 }

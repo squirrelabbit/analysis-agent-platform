@@ -147,7 +147,7 @@
 - `OPENAI_API_KEY`가 없거나 local/OpenAI dense 호출이 불가하면 `embedding`은 `token-overlap-v1` sidecar로 자동 fallback한다.
 - dense가 성공해도 `embeddings.jsonl`에는 기존 `token_counts`, `norm`을 같이 남겨 fallback과 lexical guardrail 경로를 유지하고, 별도 `embeddings.index.parquet`를 index 적재용으로 만든다.
 - control plane은 build가 끝난 뒤 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 64차원 hashed projection vector로 바꿔 `pgvector` table `embedding_index_chunks`에 적재한다. index source를 못 읽을 때만 `embeddings.jsonl`로 fallback한다.
-- `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query embedding을 다시 만든다. 불가하면 `embeddings.jsonl`로 fallback한다. 검색 결과에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.
+- `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query embedding을 다시 만든다. task input도 `embedding_index_ref + chunk_ref`를 우선 쓰고, `embedding_uri`는 명시적 fallback일 때만 사용한다. 검색 결과에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.
 - `BuildEmbeddings` request는 `embedding_model` override를 받아 dataset version에 저장된 기본 model을 바꿔 실행할 수 있다.
 - `issue_evidence_summary`와 `evidence_pack`은 `semantic_search` prior artifact가 있을 때 chunk citation을 evidence artifact까지 그대로 보존한다.
 - `runtime/common.py`는 `.parquet` reader를 지원하므로 `sentiment_label`, `document_filter`, `time_bucket_count` 같은 row 기반 task가 prepared Parquet를 직접 읽을 수 있다.
@@ -155,6 +155,7 @@
 - `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 우선 사용한다. generic overlap 회귀 fixture가 unit test에 추가됐고, `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` token fallback을 사용한다.
 - 테스트에는 `dense-only`와 `dense-hybrid`를 같은 generic overlap fixture에서 비교하는 helper 케이스가 있고, 현재 기준으로 `dense-only`는 1개 군집으로 붕괴되고 `dense-hybrid`는 `3개 군집`을 유지한다.
 - 테스트에는 local embedding fixture를 직접 주입해 `semantic_search` top ranking과 `embedding_cluster` membership이 기대 토픽 그룹을 유지하는지 확인하는 회귀 케이스도 포함한다.
+- 고정 평가셋 리포트는 `python_ai_worker.devtools.evaluate_embedding_model` CLI로 만들 수 있고, search top-1/top-k와 cluster `dense-only`/`dense-hybrid` 비교 결과를 markdown/json으로 출력한다.
 - embedding sidecar record는 `row_id`, `chunk_id`, `chunk_index`, `char_start`, `char_end`를 함께 저장하고, 별도 `chunks.parquet`에는 `chunk_text`와 chunk metadata를 남긴다.
 - `deduplicate_documents`는 정규화 텍스트 동일성 + token-set Jaccard similarity를 사용한다.
 - `dictionary_tagging`은 rule-based taxonomy tagging을 사용한다.
@@ -189,6 +190,8 @@
   - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --list`
 - registry와 샘플 케이스 정합성만 빠르게 확인
   - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --validate`
+- 로컬 임베딩 평가 리포트
+  - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.evaluate_embedding_model --model intfloat/multilingual-e5-small --format markdown`
 - 개별 skill 직접 실행
   - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --skill semantic_search --pretty`
   - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --skill issue_cluster_summary --pretty --keep-tempdir`

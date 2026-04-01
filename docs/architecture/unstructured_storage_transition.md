@@ -17,7 +17,7 @@
 - 현재 `embedding`은 기본 `intfloat/multilingual-e5-small` FastEmbed local model vector를 기록하고, 필요하면 OpenAI dense vector override를 받을 수 있다. dense 호출이 불가하면 `token_counts + norm` 중심의 `token-overlap-v1`로 fallback한다.
 - 현재 `semantic_search`와 `issue_evidence_summary`는 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 artifact까지 전달한다.
 - control plane은 현재 embedding build 직후 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection vector로 바꾸고 `embedding_index_chunks`에 적재한다. index source가 없을 때만 `embeddings.jsonl` fallback을 읽는다.
-- `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 embedding model로 query vector를 만든다. 불가하면 `embeddings.jsonl` scan으로 fallback한다.
+- `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 embedding model로 query vector를 만든다. 분석 plan과 worker input도 `embedding_index_ref + chunk_ref`를 우선 사용하고, `embeddings.jsonl`은 명시적 fallback일 때만 읽는다.
 - `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` fallback을 사용한다.
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension, `embedding_index_chunks` table을 가진다.
 
@@ -111,7 +111,7 @@ flowchart LR
 | `dataset_prepare` | raw file path | raw file path + output ref | 출력만 `prepared.parquet`로 변경 |
 | `sentiment_label` | prepared dataset path | `prepared_ref` | 현재는 row-id 중심 Parquet sidecar를 생성 |
 | `embedding` | prepared dataset path | prepared path + internal chunk output | 현재 구현은 embedding build 안에서 chunk 생성과 embedding 생성을 함께 수행 |
-| `semantic_search` | `embedding_uri` JSONL | `embedding_index_ref` | 현재 `pgvector` 우선 + JSONL fallback 단계 |
+| `semantic_search` | `embedding_uri` JSONL | `embedding_index_ref` | 현재는 `embedding_index_ref + chunk_ref` 우선, `embedding_uri`는 명시적 fallback 단계 |
 | `issue_evidence_summary` | selected snippets | `chunk_id -> chunk_text -> row_id` | citation granularity 향상 |
 | `document_filter` / `time_bucket_count` / `meta_group_count` | file path | `prepared_ref` 또는 resolved parquet path | DuckDB scan 또는 streaming reader와 연결 가능 |
 | `issue_sentiment_summary` | sentiment sidecar path | `sentiment_ref` + `prepared_ref` | distribution 계산 시 prepared dataset join 필요 |
@@ -149,8 +149,8 @@ flowchart LR
 
 ### Phase 5. JSONL 축소
 
-- smoke와 worker가 Parquet를 기본 경로로 사용하게 바꾼다.
-- JSONL은 debug export 또는 migration fallback으로만 남긴다.
+- smoke와 worker가 Parquet와 index ref를 기본 경로로 사용하게 바꾼다.
+- JSONL은 debug export 또는 명시적 migration fallback으로만 남긴다.
 - `embedding_uri`라는 이름도 장기적으로는 `embedding_index_ref`로 바꾸는 편이 낫다.
 
 ## 구현 우선순위

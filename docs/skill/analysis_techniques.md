@@ -16,7 +16,7 @@
 - planner, evidence summary, dataset prepare, sentiment labeling은 Anthropic 경로가 있더라도 fallback 경로를 유지한다.
 - 현재 `embedding`의 기본값은 `intfloat/multilingual-e5-small` FastEmbed local model 기반 dense 경로이고, 필요하면 OpenAI Embeddings API override를 줄 수 있다. 호출이 실패하면 `token-overlap-v1` fallback을 유지한다.
   - `embedding` task는 dense vector가 있더라도 `token_counts`와 `norm`을 같이 저장해 기존 clustering/debug 경로를 유지하고, index 적재용 `embeddings.index.parquet`도 함께 만든다.
-  - `semantic_search`는 dense index metadata가 있으면 같은 model로 query embedding을 만들고, 없으면 token vector cosine similarity로 fallback한다.
+- `semantic_search`는 dense index metadata가 있으면 같은 model로 query embedding을 만들고, 없으면 token vector cosine similarity로 fallback한다. 현재 primary input은 `embedding_index_ref + chunk_ref`이고 `embedding_uri`는 명시적 fallback일 때만 사용한다.
   - `embedding_cluster`는 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 token vector cosine similarity로 fallback한다.
 
 ## Structured
@@ -75,6 +75,7 @@
 - 현재 `pgvector` 적재는 dense model 출력 또는 token count projection fallback의 혼합 단계다.
 - `dense-hybrid`는 dense-only collapse를 막기 위한 guardrail로는 유효하고, 현재 generic overlap 회귀 fixture도 추가됐다. 다만 threshold와 fixture 검증은 계속 유지해야 한다.
 - 현재 테스트 자산에는 `dense-only`와 `dense-hybrid`를 같은 fixture에서 직접 비교하는 helper 회귀가 있고, local embedding fixture를 주입해 `semantic_search`, `embedding_cluster` 결과를 평가하는 task 회귀도 포함한다.
+- 로컬 임베딩 평가 리포트는 `python_ai_worker.devtools.evaluate_embedding_model` CLI로 생성할 수 있고, search top-1/top-k 통과 수와 cluster `dense-only`/`dense-hybrid` 비교를 markdown/json으로 출력한다.
 - LLM은 planner, evidence summary, dataset prepare, sentiment labeling에서 선택적으로 사용되고, 실패 시 deterministic fallback으로 내려간다.
 - 확인 필요: OpenAI key를 넣은 dense embedding end-to-end smoke와 local/OpenAI retrieval 품질 비교는 아직 별도 검증이 더 필요하다.
 - 확인 필요: 실제 운영 단계에서 clustering, dedup, retrieval 중 어떤 부분을 Rust hot path 또는 별도 inference path로 옮길지는 성능 측정 결과와 분석팀 품질 기준을 함께 보고 결정해야 한다.
