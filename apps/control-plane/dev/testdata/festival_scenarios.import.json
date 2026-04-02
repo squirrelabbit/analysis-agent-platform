@@ -1,0 +1,281 @@
+{
+  "rows": [
+    {
+      "scenario_id": "S1",
+      "planning_mode": "strict",
+      "user_query": "이번 벚꽃 축제 반응 어때?",
+      "query_type": "여론 요약",
+      "interpretation": "전체 여론 및 분위기 파악",
+      "analysis_scope": "축제 기간",
+      "step": 1,
+      "function_name": "가비지 필터링",
+      "runtime_skill_name": "garbage_filter",
+      "result_description": "분석 대상 정제"
+    },
+    {
+      "scenario_id": "S1",
+      "planning_mode": "strict",
+      "user_query": "이번 벚꽃 축제 반응 어때?",
+      "query_type": "여론 요약",
+      "interpretation": "전체 여론 및 분위기 파악",
+      "analysis_scope": "축제 기간",
+      "step": 2,
+      "function_name": "감성 비율 집계",
+      "runtime_skill_name": "issue_sentiment_summary",
+      "result_description": "긍/부정 비율"
+    },
+    {
+      "scenario_id": "S1",
+      "planning_mode": "strict",
+      "user_query": "이번 벚꽃 축제 반응 어때?",
+      "query_type": "여론 요약",
+      "interpretation": "전체 여론 및 분위기 파악",
+      "analysis_scope": "축제 기간",
+      "step": 3,
+      "function_name": "빈도 기반 키워드 추출",
+      "runtime_skill_name": "keyword_frequency",
+      "parameter_text": "top_n=10",
+      "parameters": {
+        "top_n": 10
+      },
+      "result_description": "주요 키워드"
+    },
+    {
+      "scenario_id": "S1",
+      "planning_mode": "strict",
+      "user_query": "이번 벚꽃 축제 반응 어때?",
+      "query_type": "여론 요약",
+      "interpretation": "전체 여론 및 분위기 파악",
+      "analysis_scope": "축제 기간",
+      "step": 4,
+      "function_name": "전체 담론 요약",
+      "runtime_skill_name": "issue_evidence_summary",
+      "result_description": "종합 의견 요약"
+    },
+    {
+      "scenario_id": "S2",
+      "planning_mode": "strict",
+      "user_query": "축제 반응 흐름 어떻게 변했어?",
+      "query_type": "트렌드 분석",
+      "interpretation": "시간에 따른 변화 파악",
+      "analysis_scope": "축제 기간",
+      "step": 1,
+      "function_name": "가비지 필터링",
+      "runtime_skill_name": "garbage_filter",
+      "result_description": "데이터 정제"
+    },
+    {
+      "scenario_id": "S2",
+      "planning_mode": "strict",
+      "user_query": "축제 반응 흐름 어떻게 변했어?",
+      "query_type": "트렌드 분석",
+      "interpretation": "시간에 따른 변화 파악",
+      "analysis_scope": "축제 기간",
+      "step": 2,
+      "function_name": "기간별 문서량 추이",
+      "runtime_skill_name": "time_bucket_count",
+      "parameter_text": "bucket=day",
+      "parameters": {
+        "bucket": "day"
+      },
+      "result_description": "언급량 변화"
+    },
+    {
+      "scenario_id": "S2",
+      "planning_mode": "strict",
+      "user_query": "축제 반응 흐름 어떻게 변했어?",
+      "query_type": "트렌드 분석",
+      "interpretation": "시간에 따른 변화 파악",
+      "analysis_scope": "축제 기간",
+      "step": 3,
+      "function_name": "기간별 담론 요약",
+      "runtime_skill_name": "issue_trend_summary",
+      "parameter_text": "bucket=day",
+      "parameters": {
+        "bucket": "day"
+      },
+      "result_description": "흐름 요약"
+    },
+    {
+      "scenario_id": "S2",
+      "planning_mode": "strict",
+      "user_query": "축제 반응 흐름 어떻게 변했어?",
+      "query_type": "트렌드 분석",
+      "interpretation": "시간에 따른 변화 파악",
+      "analysis_scope": "축제 기간",
+      "step": 4,
+      "function_name": "근거 요약",
+      "runtime_skill_name": "issue_evidence_summary",
+      "parameter_text": "query=축제 반응 흐름과 변화 근거를 요약해줘",
+      "parameters": {
+        "query": "축제 반응 흐름과 변화 근거를 요약해줘"
+      },
+      "result_description": "변화 근거 요약"
+    },
+    {
+      "scenario_id": "S3",
+      "planning_mode": "strict",
+      "user_query": "축제 전이랑 끝난 후 반응 차이 뭐야?",
+      "query_type": "비교 분석",
+      "interpretation": "시기별 변화 비교",
+      "analysis_scope": "전/중/후",
+      "step": 1,
+      "function_name": "가비지 필터링",
+      "runtime_skill_name": "garbage_filter",
+      "result_description": "데이터 정제"
+    },
+    {
+      "scenario_id": "S3",
+      "planning_mode": "strict",
+      "user_query": "축제 전이랑 끝난 후 반응 차이 뭐야?",
+      "query_type": "비교 분석",
+      "interpretation": "시기별 변화 비교",
+      "analysis_scope": "전/중/후",
+      "step": 2,
+      "function_name": "기간 구간 문서량 비교",
+      "runtime_skill_name": "issue_period_compare",
+      "parameter_text": "bucket=day, window_size=3",
+      "parameters": {
+        "bucket": "day",
+        "window_size": 3
+      },
+      "result_description": "최근 3일 vs 직전 3일 관심도 변화"
+    },
+    {
+      "scenario_id": "S3",
+      "planning_mode": "strict",
+      "user_query": "축제 전이랑 끝난 후 반응 차이 뭐야?",
+      "query_type": "비교 분석",
+      "interpretation": "시기별 변화 비교",
+      "analysis_scope": "전/중/후",
+      "step": 3,
+      "function_name": "기간 구간 키워드 비교",
+      "runtime_skill_name": "keyword_frequency",
+      "parameter_text": "top_n=10",
+      "parameters": {
+        "top_n": 10
+      },
+      "result_description": "비교 구간 주요 키워드"
+    },
+    {
+      "scenario_id": "S3",
+      "planning_mode": "strict",
+      "user_query": "축제 전이랑 끝난 후 반응 차이 뭐야?",
+      "query_type": "비교 분석",
+      "interpretation": "시기별 변화 비교",
+      "analysis_scope": "전/중/후",
+      "step": 4,
+      "function_name": "기간별 담론 요약",
+      "runtime_skill_name": "issue_evidence_summary",
+      "parameter_text": "query=최근 구간과 직전 구간의 반응 차이와 근거를 요약해줘",
+      "parameters": {
+        "query": "최근 구간과 직전 구간의 반응 차이와 근거를 요약해줘"
+      },
+      "result_description": "차이 요약"
+    },
+    {
+      "scenario_id": "S4",
+      "planning_mode": "strict",
+      "user_query": "이번 축제 문제 뭐였어?",
+      "query_type": "이슈 분석",
+      "interpretation": "부정 의견 중심 문제 파악",
+      "analysis_scope": "축제 기간",
+      "step": 1,
+      "function_name": "가비지 필터링",
+      "runtime_skill_name": "garbage_filter",
+      "result_description": "데이터 정제"
+    },
+    {
+      "scenario_id": "S4",
+      "planning_mode": "strict",
+      "user_query": "이번 축제 문제 뭐였어?",
+      "query_type": "이슈 분석",
+      "interpretation": "부정 의견 중심 문제 파악",
+      "analysis_scope": "축제 기간",
+      "step": 2,
+      "function_name": "문서 단위 감성 분류",
+      "runtime_skill_name": "issue_sentiment_summary",
+      "result_description": "감성 분류"
+    },
+    {
+      "scenario_id": "S4",
+      "planning_mode": "strict",
+      "user_query": "이번 축제 문제 뭐였어?",
+      "query_type": "이슈 분석",
+      "interpretation": "부정 의견 중심 문제 파악",
+      "analysis_scope": "축제 기간",
+      "step": 3,
+      "function_name": "감성별 키워드 분석",
+      "runtime_skill_name": "noun_frequency",
+      "parameter_text": "top_n=10",
+      "parameters": {
+        "top_n": 10
+      },
+      "result_description": "문제 추정 명사 키워드"
+    },
+    {
+      "scenario_id": "S4",
+      "planning_mode": "strict",
+      "user_query": "이번 축제 문제 뭐였어?",
+      "query_type": "이슈 분석",
+      "interpretation": "부정 의견 중심 문제 파악",
+      "analysis_scope": "축제 기간",
+      "step": 4,
+      "function_name": "감성별 담론 요약",
+      "runtime_skill_name": "issue_evidence_summary",
+      "parameter_text": "query=부정 의견 중심으로 이번 축제의 주요 문제와 근거를 요약해줘",
+      "parameters": {
+        "query": "부정 의견 중심으로 이번 축제의 주요 문제와 근거를 요약해줘"
+      },
+      "result_description": "문제 요약"
+    },
+    {
+      "scenario_id": "S5",
+      "planning_mode": "strict",
+      "user_query": "이번 축제 언제 가장 많이 언급됐어?",
+      "query_type": "피크 분석",
+      "interpretation": "문서 발생량 기준 관심도 최고 시점",
+      "analysis_scope": "축제 기간",
+      "step": 1,
+      "function_name": "기간별 문서량 추이",
+      "runtime_skill_name": "time_bucket_count",
+      "parameter_text": "bucket=day",
+      "parameters": {
+        "bucket": "day"
+      },
+      "result_description": "문서량 시계열"
+    },
+    {
+      "scenario_id": "S5",
+      "planning_mode": "strict",
+      "user_query": "이번 축제 언제 가장 많이 언급됐어?",
+      "query_type": "피크 분석",
+      "interpretation": "문서 발생량 기준 관심도 최고 시점",
+      "analysis_scope": "축제 기간",
+      "step": 2,
+      "function_name": "피크 시점 탐지",
+      "runtime_skill_name": "issue_trend_summary",
+      "parameter_text": "bucket=day",
+      "parameters": {
+        "bucket": "day"
+      },
+      "result_description": "피크 시점과 흐름 요약"
+    },
+    {
+      "scenario_id": "S5",
+      "planning_mode": "strict",
+      "user_query": "이번 축제 언제 가장 많이 언급됐어?",
+      "query_type": "피크 분석",
+      "interpretation": "문서 발생량 기준 관심도 최고 시점",
+      "analysis_scope": "축제 기간",
+      "step": 3,
+      "function_name": "피크 근거 요약",
+      "runtime_skill_name": "issue_evidence_summary",
+      "parameter_text": "query=언급량이 가장 높았던 시점과 그 근거를 요약해줘",
+      "parameters": {
+        "query": "언급량이 가장 높았던 시점과 그 근거를 요약해줘"
+      },
+      "result_description": "최대 문서량 시점 근거"
+    }
+  ]
+}

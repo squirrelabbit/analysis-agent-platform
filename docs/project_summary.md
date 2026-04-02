@@ -10,6 +10,7 @@
 - 프로젝트와 dataset, dataset version을 등록한다.
 - project 단위로 재사용 가능한 분석 시나리오를 `strict` 모드로 등록하고, 저장된 시나리오에서 분석 요청과 plan을 생성하거나 바로 execution까지 enqueue할 수 있다.
 - 시나리오 표가 row 단위로 정리돼 있으면 `scenario_id` 기준으로 묶어 여러 시나리오를 한 번에 등록할 수 있다.
+- 저장소에는 축제 대표 질문 `S1~S5`를 현재 strict skill 조합으로 옮긴 import fixture와 매핑 문서가 포함돼 있다.
 - 원본 dataset을 upload한 뒤 필요하면 `prepare`, `sentiment`, `embedding` 산출물을 만든다.
 - 분석 요청을 제출하면 planner가 최소 skill plan을 만들고, Temporal workflow가 실행과 `waiting / resume`를 오케스트레이션한다.
 - 실행 결과는 artifact와 execution metadata로 남고, 같은 execution context 기준으로 `rerun / diff` 할 수 있다.

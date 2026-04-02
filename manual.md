@@ -163,6 +163,7 @@ docker compose -f compose.dev.yml exec -T python-ai-worker \
 
 시나리오 등록과 시나리오 기반 `plan / execute`는 별도 endpoint로 수동 확인할 수 있다.
 아래 시나리오 등록 명령은 `PROJECT_ID`가 준비된 상태를 전제로 한다. `scenario -> plan` 생성과 `scenario -> execute`는 `VERSION_ID`가 필요하므로 `7-1` 이후에 실행한다.
+저장소에는 현재 축제 질문 기준 strict 시나리오 fixture가 [festival_scenarios.import.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/testdata/festival_scenarios.import.json) 로 들어 있다.
 
 ### 7-0. 시나리오 등록 / 일괄 등록 / 목록 / 상세 조회
 
@@ -248,6 +249,15 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios/import" \
 | python3 -m json.tool
 ```
 
+fixture 파일을 그대로 쓰려면 아래처럼 등록한다.
+
+```bash
+curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios/import" \
+  -H 'Content-Type: application/json' \
+  --data-binary @/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/testdata/festival_scenarios.import.json \
+| python3 -m json.tool
+```
+
 결과 확인:
 
 - `scenario_id`
@@ -273,6 +283,7 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios/import" \
 - 직접 매핑되지 않는 step은 시나리오 등록 시 `runtime_skill_name`을 명시해야 한다.
 - `guided`나 guardrail 기반 planner는 아직 backlog다.
 - 일괄 등록에서는 같은 `scenario_id`의 `user_query`, `query_type`, `interpretation`, `analysis_scope`, `planning_mode`가 서로 다르면 에러를 돌린다.
+- [scenario_templates.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/skill/scenario_templates.md)에 축제 시나리오 `S1~S5`의 현재 strict 매핑 기준과 원본 대비 차이를 정리해 두었다.
 
 ### 7-1. 프로젝트 생성, dataset 생성, 업로드
 

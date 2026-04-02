@@ -33,6 +33,7 @@
 - 비정형 support skill에 `noun_frequency`, `sentence_split`이 추가돼 한국어 명사 중심 집계와 문장 단위 span/citation 준비를 직접 실행할 수 있다. 가능하면 `kiwipiepy`, `kss`를 사용하고, 없으면 regex fallback으로 내려간다.
 - control plane에는 현재 `scenario` 등록 기반이 추가돼 `scenario_id`, `planning_mode=strict`, `user_query`, `query_type`, `interpretation`, `analysis_scope`, `steps[]`를 project 단위로 저장하고, 저장된 시나리오에서 `analysis_request + plan`을 자동 생성하거나 바로 execution까지 enqueue할 수 있다.
 - 시나리오 표가 row 단위로 정리돼 있으면 `scenarios/import` API로 `scenario_id` 기준 일괄 등록할 수 있다.
+- 저장소에는 축제 질문 기준 strict 시나리오 import fixture [festival_scenarios.import.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/testdata/festival_scenarios.import.json) 와 매핑 설명 [scenario_templates.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/skill/scenario_templates.md) 가 포함돼 있다.
 - `garbage_filter`는 execution 안에서 실행되면 row 단위 결과를 `rows.parquet` sidecar로 저장하고, execution artifact JSON에는 summary와 `artifact_ref`만 남긴다.
 - `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding` 운영 기본 출력은 `embeddings.index.parquet + pgvector`다.
 - `sentiment_label` 기본 출력은 이제 `row_id`, `source_row_index`, 감성 컬럼 중심의 sidecar이고, `issue_sentiment_summary`는 `prepared_dataset_name`을 함께 받아 텍스트를 조인한다.
