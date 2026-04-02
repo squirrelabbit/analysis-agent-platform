@@ -1810,7 +1810,7 @@ class TaskTests(unittest.TestCase):
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues.csv"
         embedding_path = temp_dir / "issues.csv.embeddings.jsonl"
-        chunk_path = temp_dir / "issues.csv.chunks.parquet"
+        chunk_path = temp_dir / "issues.csv.embeddings.chunks.parquet"
         embedding_index_path = temp_dir / "issues.csv.embeddings.index.parquet"
         with csv_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=["text"])
@@ -1830,6 +1830,7 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(embedding_result["artifact"]["embedding_uri"], str(embedding_path))
         self.assertEqual(embedding_result["artifact"]["embedding_ref"], str(embedding_path))
         self.assertEqual(embedding_result["artifact"]["embedding_format"], "jsonl")
+        self.assertTrue(embedding_result["artifact"]["embedding_debug_export_enabled"])
         self.assertEqual(embedding_result["artifact"]["embedding_index_source_ref"], str(embedding_index_path))
         self.assertEqual(embedding_result["artifact"]["embedding_index_source_format"], "parquet")
         self.assertEqual(embedding_result["artifact"]["chunk_ref"], str(chunk_path))
@@ -1875,6 +1876,32 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(search_result["artifact"]["matches"][0]["char_end"], len("결제 오류가 반복 발생했습니다"))
         self.assertEqual(search_result["artifact"]["chunk_ref"], str(chunk_path))
         self.assertEqual(search_result["artifact"]["chunk_format"], "parquet")
+
+    def test_embedding_defaults_to_index_parquet_without_jsonl_export(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_default.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"text": "로그인이 자주 실패하고 오류가 보입니다"})
+
+        result = run_embedding(
+            {
+                "dataset_version_id": "version-default",
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+            }
+        )
+
+        chunk_path = Path(str(result["artifact"]["chunk_ref"]))
+        embedding_index_path = Path(str(result["artifact"]["embedding_index_source_ref"]))
+        self.assertEqual(result["artifact"]["embedding_uri"], "")
+        self.assertEqual(result["artifact"]["embedding_ref"], "")
+        self.assertEqual(result["artifact"]["embedding_format"], "")
+        self.assertFalse(result["artifact"]["embedding_debug_export_enabled"])
+        self.assertTrue(chunk_path.exists())
+        self.assertTrue(embedding_index_path.exists())
 
     def test_semantic_search_prefers_pgvector_when_available(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())

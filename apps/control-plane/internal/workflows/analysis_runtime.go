@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
@@ -283,7 +284,11 @@ func (a AnalysisActivities) CheckExecutionReadiness(ctx context.Context, input A
 		}
 	}
 	if needsEmbedding {
-		if version.EmbeddingStatus != "ready" || version.EmbeddingURI == nil || *version.EmbeddingURI == "" {
+		hasEmbeddingArtifact := (version.EmbeddingURI != nil && strings.TrimSpace(*version.EmbeddingURI) != "") ||
+			strings.TrimSpace(fmt.Sprintf("%v", version.Metadata["embedding_index_ref"])) != "" ||
+			strings.TrimSpace(fmt.Sprintf("%v", version.Metadata["embedding_index_source_ref"])) != ""
+		embeddingReady := version.EmbeddingStatus == "ready" && hasEmbeddingArtifact
+		if !embeddingReady {
 			return ExecutionReadinessResult{
 				Ready:      false,
 				Status:     "waiting",

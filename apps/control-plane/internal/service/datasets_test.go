@@ -275,14 +275,18 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 		}
 		requestedDatasetName = payload["dataset_name"].(string)
 		requestedTextColumn = payload["text_column"].(string)
-		requestedOutputPath = payload["output_path"].(string)
+		if value, ok := payload["output_path"].(string); ok {
+			requestedOutputPath = value
+		}
 		requestedIndexOutputPath = payload["index_output_path"].(string)
 		requestedEmbeddingModel = payload["embedding_model"].(string)
-		if err := os.WriteFile(requestedOutputPath, []byte(strings.Join([]string{
-			`{"source_index":0,"row_id":"version-1:row:0","chunk_id":"version-1:row:0:chunk:0","chunk_index":0,"char_start":0,"char_end":16,"token_counts":{"결제":1,"오류":1}}`,
-			`{"source_index":1,"row_id":"version-1:row:1","chunk_id":"version-1:row:1:chunk:0","chunk_index":0,"char_start":0,"char_end":21,"token_counts":{"로그인":1,"오류":1}}`,
-		}, "\n")), 0o644); err != nil {
-			t.Fatalf("unexpected write error: %v", err)
+		if requestedOutputPath != "" {
+			if err := os.WriteFile(requestedOutputPath, []byte(strings.Join([]string{
+				`{"source_index":0,"row_id":"version-1:row:0","chunk_id":"version-1:row:0:chunk:0","chunk_index":0,"char_start":0,"char_end":16,"token_counts":{"결제":1,"오류":1}}`,
+				`{"source_index":1,"row_id":"version-1:row:1","chunk_id":"version-1:row:1:chunk:0","chunk_index":0,"char_start":0,"char_end":21,"token_counts":{"로그인":1,"오류":1}}`,
+			}, "\n")), 0o644); err != nil {
+				t.Fatalf("unexpected write error: %v", err)
+			}
 		}
 		writeEmbeddingIndexParquet(t, requestedIndexOutputPath, []map[string]any{
 			{
@@ -313,23 +317,24 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"notes": []string{"embedding completed"},
 			"artifact": map[string]any{
-				"embedding_uri":                 "/tmp/issues.prepared.parquet.embeddings.jsonl",
-				"embedding_ref":                 "/tmp/issues.prepared.parquet.embeddings.jsonl",
-				"embedding_format":              "jsonl",
-				"embedding_index_source_ref":    requestedIndexOutputPath,
-				"embedding_index_source_format": "parquet",
-				"chunk_ref":                     "/tmp/issues.prepared.parquet.chunks.parquet",
-				"chunk_format":                  "parquet",
-				"embedding_model":               "token-overlap-v1",
-				"document_count":                7,
-				"source_row_count":              5,
-				"chunk_count":                   7,
-				"row_id_column":                 "row_id",
-				"chunk_id_column":               "chunk_id",
-				"chunk_index_column":            "chunk_index",
-				"chunk_text_column":             "chunk_text",
-				"chunking_strategy":             "text-window-v1",
-				"storage_contract_version":      "unstructured-storage-v1",
+				"embedding_uri":                  "",
+				"embedding_ref":                  "",
+				"embedding_format":               "",
+				"embedding_debug_export_enabled": false,
+				"embedding_index_source_ref":     requestedIndexOutputPath,
+				"embedding_index_source_format":  "parquet",
+				"chunk_ref":                      "/tmp/issues.prepared.parquet.chunks.parquet",
+				"chunk_format":                   "parquet",
+				"embedding_model":                "token-overlap-v1",
+				"document_count":                 7,
+				"source_row_count":               5,
+				"chunk_count":                    7,
+				"row_id_column":                  "row_id",
+				"chunk_id_column":                "chunk_id",
+				"chunk_index_column":             "chunk_index",
+				"chunk_text_column":              "chunk_text",
+				"chunking_strategy":              "text-window-v1",
+				"storage_contract_version":       "unstructured-storage-v1",
 				"usage": map[string]any{
 					"provider":               "token-overlap",
 					"model":                  "token-overlap-v1",
@@ -360,8 +365,8 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 	if requestedEmbeddingModel != DefaultEmbeddingModel {
 		t.Fatalf("unexpected embedding model: %s", requestedEmbeddingModel)
 	}
-	if !strings.HasPrefix(requestedOutputPath, artifactRoot) {
-		t.Fatalf("unexpected embedding output path: %s", requestedOutputPath)
+	if requestedOutputPath != "" {
+		t.Fatalf("embedding output path should be empty without debug export: %s", requestedOutputPath)
 	}
 	if !strings.HasPrefix(requestedIndexOutputPath, artifactRoot) {
 		t.Fatalf("unexpected embedding index output path: %s", requestedIndexOutputPath)
@@ -372,7 +377,7 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 	if vectorCount := metadataUsageInt(t, result.Metadata, "embedding_usage", "vector_count"); vectorCount != 7 {
 		t.Fatalf("unexpected embedding usage: %+v", result.Metadata["embedding_usage"])
 	}
-	if got := metadataString(result.Metadata, "embedding_ref", ""); got != "/tmp/issues.prepared.parquet.embeddings.jsonl" {
+	if got := metadataString(result.Metadata, "embedding_ref", ""); got != "" {
 		t.Fatalf("unexpected embedding ref: %s", got)
 	}
 	if got := metadataString(result.Metadata, "chunk_ref", ""); got != "/tmp/issues.prepared.parquet.chunks.parquet" {
@@ -381,8 +386,14 @@ func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 	if got := metadataString(result.Metadata, "chunk_format", ""); got != "parquet" {
 		t.Fatalf("unexpected chunk format: %s", got)
 	}
-	if got := metadataString(result.Metadata, "embedding_format", ""); got != "jsonl" {
+	if got := metadataString(result.Metadata, "embedding_format", ""); got != "" {
 		t.Fatalf("unexpected embedding format: %s", got)
+	}
+	if result.EmbeddingURI != nil {
+		t.Fatalf("embedding uri should be empty by default: %+v", result.EmbeddingURI)
+	}
+	if got := metadataString(result.Metadata, "embedding_debug_export_jsonl", ""); got != "false" {
+		t.Fatalf("unexpected embedding debug export flag: %s", got)
 	}
 	if got := metadataString(result.Metadata, "embedding_index_source_ref", ""); got != requestedIndexOutputPath {
 		t.Fatalf("unexpected embedding index source ref: %s", got)
@@ -537,6 +548,7 @@ func TestBuildEmbeddingsAllowsModelOverride(t *testing.T) {
 	}
 
 	var requestedEmbeddingModel string
+	var requestedOutputPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -544,6 +556,7 @@ func TestBuildEmbeddingsAllowsModelOverride(t *testing.T) {
 		}
 		requestedEmbeddingModel = payload["embedding_model"].(string)
 		outputPath := payload["output_path"].(string)
+		requestedOutputPath = outputPath
 		if err := os.WriteFile(outputPath, []byte(`{"source_index":0,"row_id":"version-override:row:0","chunk_id":"version-override:row:0:chunk:0","chunk_index":0,"char_start":0,"char_end":16,"token_counts":{"결제":1,"오류":1}}`), 0o644); err != nil {
 			t.Fatalf("unexpected write error: %v", err)
 		}
@@ -562,7 +575,8 @@ func TestBuildEmbeddingsAllowsModelOverride(t *testing.T) {
 	service.pythonAIWorkerURL = server.URL
 
 	result, err := service.BuildEmbeddings(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{
-		EmbeddingModel: datasetStringPtr("intfloat/multilingual-e5-small"),
+		EmbeddingModel:   datasetStringPtr("intfloat/multilingual-e5-small"),
+		DebugExportJSONL: datasetBoolPtr(true),
 	})
 	if err != nil {
 		t.Fatalf("unexpected build embeddings error: %v", err)
@@ -570,8 +584,14 @@ func TestBuildEmbeddingsAllowsModelOverride(t *testing.T) {
 	if requestedEmbeddingModel != "intfloat/multilingual-e5-small" {
 		t.Fatalf("unexpected requested embedding model: %s", requestedEmbeddingModel)
 	}
+	if !strings.HasSuffix(requestedOutputPath, ".jsonl") {
+		t.Fatalf("unexpected debug export output path: %s", requestedOutputPath)
+	}
 	if result.EmbeddingModel == nil || *result.EmbeddingModel != "intfloat/multilingual-e5-small" {
 		t.Fatalf("unexpected embedding model: %+v", result.EmbeddingModel)
+	}
+	if result.EmbeddingURI == nil || strings.TrimSpace(*result.EmbeddingURI) == "" {
+		t.Fatalf("expected embedding uri when debug export is enabled: %+v", result.EmbeddingURI)
 	}
 }
 
@@ -702,5 +722,9 @@ func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 }
 
 func datasetStringPtr(value string) *string {
+	return &value
+}
+
+func datasetBoolPtr(value bool) *bool {
 	return &value
 }

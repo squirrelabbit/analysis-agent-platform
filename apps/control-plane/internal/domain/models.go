@@ -75,9 +75,10 @@ type DatasetPrepareRequest struct {
 }
 
 type DatasetEmbeddingBuildRequest struct {
-	TextColumn     *string `json:"text_column,omitempty"`
-	EmbeddingModel *string `json:"embedding_model,omitempty"`
-	Force          *bool   `json:"force,omitempty"`
+	TextColumn       *string `json:"text_column,omitempty"`
+	EmbeddingModel   *string `json:"embedding_model,omitempty"`
+	DebugExportJSONL *bool   `json:"debug_export_jsonl,omitempty"`
+	Force            *bool   `json:"force,omitempty"`
 }
 
 type DatasetSentimentBuildRequest struct {

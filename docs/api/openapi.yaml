@@ -796,6 +796,14 @@ components:
           type:
             - string
             - "null"
+        embedding_model:
+          type:
+            - string
+            - "null"
+        debug_export_jsonl:
+          type:
+            - boolean
+            - "null"
         force:
           type:
             - boolean

@@ -354,7 +354,7 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 	}
 
 	force := input.Force != nil && *input.Force
-	if version.EmbeddingStatus == "ready" && version.EmbeddingURI != nil && !force {
+	if embeddingBuildReady(version) && !force {
 		return version, nil
 	}
 
@@ -374,11 +374,17 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 	}
 	version.Metadata["text_column"] = textColumn
 	version.Metadata["embedding_dataset_name"] = datasetName
-	outputPath := s.deriveEmbeddingURI(version)
 	indexOutputPath := s.deriveEmbeddingIndexSourceURI(version)
-	version.EmbeddingURI = &outputPath
-	if err := ensureParentDir(outputPath); err != nil {
-		return domain.DatasetVersion{}, err
+	debugExportJSONL := input.DebugExportJSONL != nil && *input.DebugExportJSONL
+	outputPath := ""
+	if debugExportJSONL {
+		outputPath = s.deriveEmbeddingURI(version)
+		version.EmbeddingURI = &outputPath
+		if err := ensureParentDir(outputPath); err != nil {
+			return domain.DatasetVersion{}, err
+		}
+	} else {
+		version.EmbeddingURI = nil
 	}
 	if err := ensureParentDir(indexOutputPath); err != nil {
 		return domain.DatasetVersion{}, err
@@ -399,14 +405,17 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 		return domain.DatasetVersion{}, err
 	}
 
-	response, err := s.runWorkerTask(context.Background(), "/tasks/embedding", map[string]any{
+	payload := map[string]any{
 		"dataset_version_id": version.DatasetVersionID,
 		"dataset_name":       datasetName,
 		"text_column":        textColumn,
-		"output_path":        outputPath,
 		"index_output_path":  indexOutputPath,
 		"embedding_model":    derefString(version.EmbeddingModel),
-	})
+	}
+	if debugExportJSONL {
+		payload["output_path"] = outputPath
+	}
+	response, err := s.runWorkerTask(context.Background(), "/tasks/embedding", payload)
 	if err != nil {
 		version.EmbeddingStatus = "failed"
 		version.Metadata["embedding_error"] = err.Error()
@@ -423,7 +432,7 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 	}
 	embeddingFormat := artifactString(response.Artifact, "embedding_format")
 	if embeddingFormat == "" && embeddingRef != "" {
-		embeddingFormat = inferArtifactFormat(embeddingRef, "jsonl")
+		embeddingFormat = inferArtifactFormat(embeddingRef, "")
 	}
 	embeddingIndexSourceRef := artifactString(response.Artifact, "embedding_index_source_ref")
 	if embeddingIndexSourceRef == "" {
@@ -434,14 +443,19 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 		embeddingIndexSourceFormat = inferArtifactFormat(embeddingIndexSourceRef, "parquet")
 	}
 	embeddingMetadata := map[string]any{
-		"text_column":     textColumn,
-		"embedding_notes": response.Notes,
+		"text_column":                  textColumn,
+		"embedding_notes":              response.Notes,
+		"embedding_debug_export_jsonl": debugExportJSONL,
 	}
 	if embeddingRef != "" {
 		embeddingMetadata["embedding_ref"] = embeddingRef
+	} else {
+		delete(version.Metadata, "embedding_ref")
 	}
 	if embeddingFormat != "" {
 		embeddingMetadata["embedding_format"] = embeddingFormat
+	} else {
+		delete(version.Metadata, "embedding_format")
 	}
 	if embeddingIndexSourceRef != "" {
 		embeddingMetadata["embedding_index_source_ref"] = embeddingIndexSourceRef
@@ -497,6 +511,8 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 	}
 	if value, ok := response.Artifact["embedding_uri"].(string); ok && strings.TrimSpace(value) != "" {
 		version.EmbeddingURI = &value
+	} else {
+		version.EmbeddingURI = nil
 	}
 	if value, ok := response.Artifact["embedding_model"].(string); ok && strings.TrimSpace(value) != "" {
 		version.EmbeddingModel = &value
@@ -844,6 +860,22 @@ func isPrepareReady(version domain.DatasetVersion) bool {
 
 func isSentimentReady(version domain.DatasetVersion) bool {
 	return version.SentimentStatus == "ready" && version.SentimentURI != nil && strings.TrimSpace(*version.SentimentURI) != ""
+}
+
+func embeddingBuildReady(version domain.DatasetVersion) bool {
+	if version.EmbeddingStatus != "ready" {
+		return false
+	}
+	if version.EmbeddingURI != nil && strings.TrimSpace(*version.EmbeddingURI) != "" {
+		return true
+	}
+	if strings.TrimSpace(metadataString(version.Metadata, "embedding_index_source_ref", "")) != "" {
+		return true
+	}
+	if strings.TrimSpace(metadataString(version.Metadata, "embedding_index_ref", "")) != "" {
+		return true
+	}
+	return false
 }
 
 func artifactString(artifact map[string]any, key string) string {

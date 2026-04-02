@@ -186,8 +186,8 @@ def _normalize_embedding_cluster_payload(payload: dict[str, Any]) -> dict[str, A
     embedding_index_ref = str(inputs.get("embedding_index_ref") or payload.get("embedding_index_ref") or "").strip()
     embedding_uri = str(inputs.get("embedding_uri") or payload.get("embedding_uri") or "").strip()
     chunk_ref = str(inputs.get("chunk_ref") or payload.get("chunk_ref") or "").strip()
-    if not chunk_ref and embedding_uri.endswith(".embeddings.jsonl"):
-        chunk_ref = f"{embedding_uri[:-len('.embeddings.jsonl')]}.chunks.parquet"
+    if not chunk_ref and embedding_uri.endswith(".jsonl"):
+        chunk_ref = f"{embedding_uri[:-len('.jsonl')]}.chunks.parquet"
     chunk_format = str(inputs.get("chunk_format") or payload.get("chunk_format") or "").strip()
     if not chunk_format and chunk_ref.endswith(".parquet"):
         chunk_format = "parquet"
@@ -245,7 +245,13 @@ def _normalize_embedding_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if not dataset_name:
         raise ValueError("dataset_name is required")
     text_column = str(payload.get("text_column") or "text").strip()
-    output_path = str(payload.get("output_path") or f"{dataset_name}.embeddings.jsonl").strip()
+    output_path = str(payload.get("output_path") or "").strip()
+    index_output_path = str(payload.get("index_output_path") or "").strip()
+    if not index_output_path:
+        if output_path.endswith(".jsonl"):
+            index_output_path = f"{output_path[:-len('.jsonl')]}.index.parquet"
+        else:
+            index_output_path = f"{dataset_name}.embeddings.index.parquet"
     chunk_output_path = str(payload.get("chunk_output_path") or "").strip()
     embedding_model = str(payload.get("embedding_model") or DEFAULT_EMBEDDING_MODEL).strip()
     embedding_dimensions = max(0, int(payload.get("embedding_dimensions") or 0))
@@ -258,6 +264,7 @@ def _normalize_embedding_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "dataset_name": dataset_name,
         "text_column": text_column,
         "output_path": output_path,
+        "index_output_path": index_output_path,
         "chunk_output_path": chunk_output_path,
         "chunk_max_chars": chunk_max_chars,
         "chunk_overlap_chars": chunk_overlap_chars,

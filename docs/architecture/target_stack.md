@@ -66,13 +66,13 @@
 - Python worker에는 planner, evidence, semantic search뿐 아니라 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `issue_cluster_summary`, `issue_taxonomy_summary`가 현재 구현돼 있다.
 - GitHub Actions CI는 Go 테스트/빌드와 Python worker 테스트를 현재 구조 기준으로 실행한다.
 - 개발용 smoke script는 `/uploads` API를 통해 입력 파일을 먼저 올리고 dataset version을 생성하도록 정리돼 있다.
-- 현재 비정형 dataset build는 `prepare/sentiment/chunk=Parquet`, `embedding=JSONL sidecar + index source parquet` 단계까지 반영돼 있다.
+- 현재 비정형 dataset build는 `prepare/sentiment/chunk=Parquet`, `embedding=index source parquet + pgvector` 단계까지 반영돼 있다. `embeddings.jsonl`은 debug/export용 legacy 경로로만 유지한다.
 - `sentiment.parquet`는 현재 `row_id`, `source_row_index` 중심 sidecar이고, `issue_sentiment_summary`는 prepared dataset ref를 함께 받아 join한다.
-- `embedding`은 현재 `chunks.parquet`를 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준 FastEmbed local model dense vector를 생성한다. 결과는 `embeddings.jsonl` fallback sidecar와 `embeddings.index.parquet` index source로 함께 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 실패하면 token-overlap record만 남긴다.
+- `embedding`은 현재 `chunks.parquet`를 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준 FastEmbed local model dense vector를 생성한다. 운영 기본 결과는 `embeddings.index.parquet` index source와 `pgvector` 적재이며, `embeddings.jsonl`은 `debug_export_jsonl=true`로 요청했을 때만 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 실패하면 token-overlap projection만 남긴다.
 - `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 embedding model로 query vector를 다시 만든다. 실패 시 `embeddings.jsonl` scan으로 fallback한다.
 - `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` token-overlap fallback을 사용한다.
 - `semantic_search`와 `issue_evidence_summary`는 현재 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 artifact까지 보존한다.
-- control plane은 현재 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection vector로 바꾼 뒤 `embedding_index_chunks`에 적재한다. index source가 없을 때만 `embeddings.jsonl` fallback을 사용한다.
+- control plane은 현재 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection vector로 바꾼 뒤 `embedding_index_chunks`에 적재한다. index source가 없을 때만 `embeddings.jsonl` legacy fallback을 사용한다.
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension을 켜고 `embedding_index_chunks` table까지 생성한다.
 - 확인 필요:
   dense-only clustering 품질과 `dense-hybrid` guardrail의 장기 유지 여부는 추가 검증이 필요하다.
@@ -86,7 +86,7 @@
   structured dataset scan, 집계, 순위, 기간 비교
 - `Artifact storage`
   result bundle, logs, evidence pack
-- 비정형 dataset build artifact는 현재 `prepare/sentiment/chunk=Parquet`, `embedding=JSONL sidecar` 상태이고, 다음 vector index 전환 설계는 `docs/architecture/unstructured_storage_transition.md`에 별도로 정리한다.
+- 비정형 dataset build artifact는 현재 `prepare/sentiment/chunk=Parquet`, `embedding=index parquet + optional debug JSONL` 상태이고, 다음 vector index 전환 설계는 `docs/architecture/unstructured_storage_transition.md`에 별도로 정리한다.
 - 확인 필요:
   비정형 원문 저장을 Postgres 중심으로 둘지, object storage까지 확장할지는 별도 합의가 필요하다.
   현재 `embedding_index_chunks`의 vector는 dense model 출력 또는 token count projection fallback일 수 있다.

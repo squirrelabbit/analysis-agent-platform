@@ -199,12 +199,14 @@ func TestSubmitAnalysisEnrichesEmbeddingClusterInputs(t *testing.T) {
 		StorageURI:       "issues.csv",
 		DataType:         "unstructured",
 		Metadata: map[string]any{
-			"raw_text_column": "text",
+			"raw_text_column":     "text",
+			"embedding_index_ref": "pgvector://embedding_index_chunks?dataset_version_id=version-1",
+			"chunk_ref":           "issues.chunks.parquet",
+			"chunk_format":        "parquet",
 		},
 		PrepareStatus:   "ready",
 		PrepareURI:      stringPtr("issues.prepared.parquet"),
 		EmbeddingStatus: "ready",
-		EmbeddingURI:    stringPtr("issues.embeddings.jsonl"),
 	}
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
@@ -221,8 +223,14 @@ func TestSubmitAnalysisEnrichesEmbeddingClusterInputs(t *testing.T) {
 		t.Fatalf("unexpected submit error: %v", err)
 	}
 
-	if got := response.Plan.Plan.Steps[0].Inputs["embedding_uri"]; got != "issues.embeddings.jsonl" {
-		t.Fatalf("unexpected embedding uri: %+v", response.Plan.Plan.Steps[0].Inputs)
+	if got := response.Plan.Plan.Steps[0].Inputs["embedding_index_ref"]; got != "pgvector://embedding_index_chunks?dataset_version_id=version-1" {
+		t.Fatalf("unexpected embedding index ref: %+v", response.Plan.Plan.Steps[0].Inputs)
+	}
+	if got := response.Plan.Plan.Steps[0].Inputs["chunk_ref"]; got != "issues.chunks.parquet" {
+		t.Fatalf("unexpected chunk ref: %+v", response.Plan.Plan.Steps[0].Inputs)
+	}
+	if _, ok := response.Plan.Plan.Steps[0].Inputs["embedding_uri"]; ok {
+		t.Fatalf("embedding cluster should prefer pgvector metadata without embedding_uri fallback: %+v", response.Plan.Plan.Steps[0].Inputs)
 	}
 	if got := response.Plan.Plan.Steps[0].Inputs["cluster_similarity_threshold"]; got != 0.3 {
 		t.Fatalf("unexpected cluster threshold: %+v", response.Plan.Plan.Steps[0].Inputs)

@@ -33,11 +33,11 @@
 - `garbage_filter`는 execution 안에서 실행되면 row 단위 결과를 `rows.parquet` sidecar로 저장하고, execution artifact JSON에는 summary와 `artifact_ref`만 남긴다.
 - `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding`은 아직 JSONL sidecar를 유지한다.
 - `sentiment_label` 기본 출력은 이제 `row_id`, `source_row_index`, 감성 컬럼 중심의 sidecar이고, `issue_sentiment_summary`는 `prepared_dataset_name`을 함께 받아 텍스트를 조인한다.
-- `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 결과는 fallback/debug용 `embeddings.jsonl`과 index 적재용 `embeddings.index.parquet`를 함께 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1` sidecar로 자동 fallback한다.
+- `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 운영 기본 산출물은 `embeddings.index.parquet`와 `pgvector` 적재이며, `embeddings.jsonl`은 `debug_export_jsonl=true`로 명시했을 때만 debug/export용으로 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1` projection fallback으로 내려간다.
 - `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 model로 query vector를 다시 만든다. 분석 plan과 worker 입력도 이제 `embedding_index_ref + chunk_ref`를 우선 사용하고, `embedding_uri`는 명시적 fallback일 때만 사용한다. 검색 결과는 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 반환하고, `issue_evidence_summary`는 이를 evidence artifact까지 유지한다.
 - `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 함께 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` sidecar와 token-overlap 경로로 fallback한다.
 - dataset build artifact는 현재 `row_id/ref/format` 메타데이터를 함께 남겨 다음 단계의 chunk/vector index 전환 기반을 잡아 두었다.
-- control plane은 `embedding` build가 끝나면 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection으로 바꾼 뒤 `embedding_index_chunks`에 적재한다. index source를 찾지 못할 때만 `embeddings.jsonl`로 fallback한다.
+- control plane은 `embedding` build가 끝나면 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection으로 바꾼 뒤 `embedding_index_chunks`에 적재한다. index source를 찾지 못할 때만 `embeddings.jsonl` legacy fallback을 사용한다.
 - dataset version metadata에는 현재 `prepare_usage`, `sentiment_usage`, `embedding_usage`가 함께 저장되고, execution result contract에는 실행 artifact 기준 `usage_summary`가 집계된다.
 - execution runner는 현재 기본 `pre/post step hook`를 사용해 각 step의 입력 키, artifact 크기, usage preview를 `step_hooks`로 남기고, 완료 이벤트와 execution result contract에서 확인할 수 있다.
 - execution result API는 기존 `artifacts + contract`를 유지하면서, 현재 `result_v1`에 사용자용 `answer`, `step_results`, `warnings`, `waiting`, `usage_summary`를 함께 내려준다.

@@ -10,8 +10,8 @@
 
 - `dataset_prepare` 기본 출력은 `prepared.parquet` artifact다.
 - `sentiment_label` 기본 출력은 `sentiment.parquet` artifact다.
-- `embedding`은 현재 `chunks.parquet`를 먼저 만들고 `embeddings.jsonl` fallback artifact와 `embeddings.index.parquet` index source artifact를 함께 만든다.
-- control plane은 `dataset_versions.prepare_uri`, `sentiment_uri`, `embedding_uri`에 이 경로를 저장한다.
+- `embedding`은 현재 `chunks.parquet`를 먼저 만들고 `embeddings.index.parquet` index source artifact를 기본으로 만든다. `embeddings.jsonl`은 `debug_export_jsonl=true`일 때만 debug/export artifact로 남긴다.
+- control plane은 `dataset_versions.prepare_uri`, `sentiment_uri`, `embedding_uri`를 유지하되, embedding 주 경로는 metadata의 `embedding_index_source_ref`, `embedding_index_ref`를 우선 사용한다.
 - Python worker는 현재 `.csv`, `.jsonl`, `.parquet`, `.txt`를 읽을 수 있지만, 대부분 전체 row를 메모리 `list`로 올린다.
 - embedding sidecar도 전체 record를 메모리로 읽어 cosine similarity와 clustering에 사용한다.
 - 현재 `embedding`은 기본 `intfloat/multilingual-e5-small` FastEmbed local model vector를 기록하고, 필요하면 OpenAI dense vector override를 받을 수 있다. dense 호출이 불가하면 `token_counts + norm` 중심의 `token-overlap-v1`로 fallback한다.

@@ -45,6 +45,8 @@ def _artifact_output_format(path: Path, artifact_name: str) -> str:
 
 def _derive_chunk_output_path(embedding_path: Path) -> Path:
     name = embedding_path.name
+    if name.endswith(".index.parquet"):
+        return embedding_path.with_name(name[: -len(".index.parquet")] + ".chunks.parquet")
     if name.endswith(".embeddings.jsonl"):
         return embedding_path.with_name(name[: -len(".embeddings.jsonl")] + ".chunks.parquet")
     if name.endswith(".jsonl"):
@@ -306,10 +308,11 @@ def _write_prepared_rows(
 def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_embedding_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
-    embedding_path = Path(normalized["output_path"])
-    chunk_path = Path(normalized["chunk_output_path"]) if normalized["chunk_output_path"] else _derive_chunk_output_path(embedding_path)
-    embedding_index_path = _derive_embedding_index_output_path(embedding_path)
-    embedding_path.parent.mkdir(parents=True, exist_ok=True)
+    embedding_path = Path(normalized["output_path"]) if normalized["output_path"] else None
+    embedding_index_path = Path(normalized["index_output_path"])
+    chunk_path = Path(normalized["chunk_output_path"]) if normalized["chunk_output_path"] else _derive_chunk_output_path(embedding_index_path)
+    if embedding_path is not None:
+        embedding_path.parent.mkdir(parents=True, exist_ok=True)
     chunk_path.parent.mkdir(parents=True, exist_ok=True)
     embedding_index_path.parent.mkdir(parents=True, exist_ok=True)
     chunk_rows, source_row_count = _build_chunk_rows(
@@ -355,7 +358,8 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
         embedding_model = rt.TOKEN_OVERLAP_EMBEDDING_MODEL
         notes.append("dense embedding unavailable; fell back to token-overlap")
     embedding_index_rows: list[dict[str, Any]] = []
-    with embedding_path.open("w", encoding="utf-8") as handle:
+    handle = embedding_path.open("w", encoding="utf-8") if embedding_path is not None else None
+    try:
         for chunk_index, chunk in enumerate(chunk_rows):
             document = str(chunk.get("chunk_text") or "").strip()
             token_counts = Counter(rt._tokenize(document))
@@ -374,8 +378,9 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
                 record["embedding"] = list(dense_vectors[chunk_index])
                 record["embedding_dim"] = embedding_vector_dim
                 record["embedding_provider"] = embedding_provider
-            handle.write(json.dumps(record, ensure_ascii=False))
-            handle.write("\n")
+            if handle is not None:
+                handle.write(json.dumps(record, ensure_ascii=False))
+                handle.write("\n")
             embedding_index_rows.append(
                 {
                     "source_index": record["source_index"],
@@ -391,7 +396,14 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
                 }
             )
             chunk_count += 1
+    finally:
+        if handle is not None:
+            handle.close()
     rt._write_parquet_rows(embedding_index_path, embedding_index_rows)
+    if embedding_path is None:
+        notes.append("embedding jsonl debug export disabled; primary source is embeddings.index.parquet")
+    else:
+        notes.append(f"embedding debug export: {embedding_path}")
     usage = (
         dict(dense_result.get("usage") or {})
         if dense_result is not None
@@ -411,9 +423,10 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
         "artifact": {
             "skill_name": "embedding",
             "dataset_name": normalized["dataset_name"],
-            "embedding_uri": str(embedding_path),
-            "embedding_ref": str(embedding_path),
-            "embedding_format": "jsonl",
+            "embedding_uri": str(embedding_path) if embedding_path is not None else "",
+            "embedding_ref": str(embedding_path) if embedding_path is not None else "",
+            "embedding_format": "jsonl" if embedding_path is not None else "",
+            "embedding_debug_export_enabled": embedding_path is not None,
             "embedding_index_source_ref": str(embedding_index_path),
             "embedding_index_source_format": "parquet",
             "chunk_ref": str(chunk_path),

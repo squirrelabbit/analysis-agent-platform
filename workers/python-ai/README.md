@@ -166,7 +166,7 @@
 - 예를 들어 기본값 `embedding_model=intfloat/multilingual-e5-small`이면 local model download 뒤 `384차원` embedding을 만들 수 있다.
 - `OPENAI_API_KEY`가 없거나 local/OpenAI dense 호출이 불가하면 `embedding`은 `token-overlap-v1` sidecar로 자동 fallback한다.
 - `embedding` artifact도 현재 `usage` metadata를 남긴다. local FastEmbed는 `free_local`, token-overlap fallback은 `free_fallback`, OpenAI 경로는 `prompt_tokens`와 선택적 `estimated_cost_usd`를 함께 기록한다.
-- dense가 성공해도 `embeddings.jsonl`에는 기존 `token_counts`, `norm`을 같이 남겨 fallback과 lexical guardrail 경로를 유지하고, 별도 `embeddings.index.parquet`를 index 적재용으로 만든다.
+- 기본 embedding build는 `embeddings.index.parquet`를 주 산출물로 만들고, `embeddings.jsonl`은 `debug_export_jsonl=true` 또는 명시적 `.jsonl` output path를 준 경우에만 debug/export용으로 남긴다.
 - control plane은 build가 끝난 뒤 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 64차원 hashed projection vector로 바꿔 `pgvector` table `embedding_index_chunks`에 적재한다. index source를 못 읽을 때만 `embeddings.jsonl`로 fallback한다.
 - `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query embedding을 다시 만든다. task input도 `embedding_index_ref + chunk_ref`를 우선 쓰고, `embedding_uri`는 명시적 fallback일 때만 사용한다. 검색 결과에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.
 - `BuildEmbeddings` request는 `embedding_model` override를 받아 dataset version에 저장된 기본 model을 바꿔 실행할 수 있다.

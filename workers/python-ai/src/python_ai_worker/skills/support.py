@@ -739,8 +739,8 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
     if not embedding_uri and not embedding_index_ref:
         raise ValueError("embedding_uri or embedding_index_ref is required")
     chunk_ref = str(inputs.get("chunk_ref") or payload.get("chunk_ref") or "").strip()
-    if not chunk_ref and embedding_uri.endswith(".embeddings.jsonl"):
-        chunk_ref = f"{embedding_uri[:-len('.embeddings.jsonl')]}.chunks.parquet"
+    if not chunk_ref and embedding_uri.endswith(".jsonl"):
+        chunk_ref = f"{embedding_uri[:-len('.jsonl')]}.chunks.parquet"
     chunk_format = str(inputs.get("chunk_format") or payload.get("chunk_format") or "").strip()
     if not chunk_format and chunk_ref.endswith(".parquet"):
         chunk_format = "parquet"

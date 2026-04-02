@@ -302,10 +302,19 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSI
 
 - `embedding_status = "ready"`
 - `embedding_model = "intfloat/multilingual-e5-small"`
-- `embedding_uri`
+- `metadata.embedding_index_source_ref`
 - `metadata.embedding_index_backend = "pgvector"`
 - `metadata.embedding_vector_dim = 384`
 - `metadata.embedding_index_source_format = "parquet"`
+
+JSONL debug export가 필요하면 아래처럼 명시합니다.
+
+```bash
+curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID/embeddings" \
+  -H 'Content-Type: application/json' \
+  -d '{"embedding_model":"intfloat/multilingual-e5-small","debug_export_jsonl":true}' \
+| python3 -m json.tool
+```
 - `metadata.embedding_usage`
 
 
