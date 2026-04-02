@@ -17,6 +17,7 @@ type ProjectCreateRequest struct {
 type Scenario struct {
 	ScenarioID     string         `json:"scenario_id"`
 	ProjectID      string         `json:"project_id"`
+	PlanningMode   string         `json:"planning_mode"`
 	UserQuery      string         `json:"user_query"`
 	QueryType      string         `json:"query_type"`
 	Interpretation string         `json:"interpretation"`
@@ -36,6 +37,7 @@ type ScenarioStep struct {
 
 type ScenarioCreateRequest struct {
 	ScenarioID     string         `json:"scenario_id"`
+	PlanningMode   *string        `json:"planning_mode,omitempty"`
 	UserQuery      string         `json:"user_query"`
 	QueryType      string         `json:"query_type"`
 	Interpretation string         `json:"interpretation"`

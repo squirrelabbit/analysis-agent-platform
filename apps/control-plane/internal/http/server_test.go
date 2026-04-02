@@ -288,6 +288,9 @@ func TestScenarioEndpoints(t *testing.T) {
 	if created["scenario_id"] != "S1" {
 		t.Fatalf("unexpected created scenario: %+v", created)
 	}
+	if created["planning_mode"] != "strict" {
+		t.Fatalf("unexpected planning mode: %+v", created)
+	}
 
 	listResponse := map[string]any{}
 	readJSONResponse(
@@ -410,6 +413,9 @@ func TestScenarioPlanEndpoint(t *testing.T) {
 	scenarioContext := request["context"].(map[string]any)["scenario"].(map[string]any)
 	if scenarioContext["scenario_id"] != "S1" {
 		t.Fatalf("unexpected scenario context: %+v", scenarioContext)
+	}
+	if scenarioContext["planning_mode"] != "strict" {
+		t.Fatalf("unexpected scenario planning mode: %+v", scenarioContext)
 	}
 }
 

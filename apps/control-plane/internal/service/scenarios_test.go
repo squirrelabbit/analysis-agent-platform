@@ -46,6 +46,9 @@ func TestCreateScenarioStoresStructuredSteps(t *testing.T) {
 	if scenario.ScenarioID != "S1" {
 		t.Fatalf("unexpected scenario id: %+v", scenario)
 	}
+	if scenario.PlanningMode != scenarioPlanningModeStrict {
+		t.Fatalf("unexpected planning mode: %+v", scenario)
+	}
 	if len(scenario.Steps) != 2 {
 		t.Fatalf("unexpected scenario steps: %+v", scenario.Steps)
 	}
@@ -67,6 +70,39 @@ func TestCreateScenarioStoresStructuredSteps(t *testing.T) {
 	}
 	if loaded.UserQuery != "이번 벚꽃 축제 반응 어때?" {
 		t.Fatalf("unexpected loaded scenario: %+v", loaded)
+	}
+}
+
+func TestCreateScenarioRejectsUnsupportedPlanningMode(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewScenarioService(repository)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	mode := "guided"
+	_, err := service.CreateScenario(project.ProjectID, domain.ScenarioCreateRequest{
+		ScenarioID:     "S3",
+		PlanningMode:   &mode,
+		UserQuery:      "이번 벚꽃 축제 반응 어때?",
+		QueryType:      "여론 요약",
+		Interpretation: "전체 여론 및 분위기 파악",
+		AnalysisScope:  "축제 기간",
+		Steps: []domain.ScenarioStep{
+			{
+				Step:              1,
+				FunctionName:      "가비지 필터링",
+				ResultDescription: "분석 대상 정제",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected unsupported planning mode error")
+	}
+	if err.Error() != `planning_mode "guided" is not supported yet; use "strict"` {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -130,6 +166,9 @@ func TestBuildScenarioAnalysisSubmitRequestMapsFunctionNames(t *testing.T) {
 	}
 	if scenarioContext["scenario_id"] != "S1" {
 		t.Fatalf("unexpected scenario context: %+v", scenarioContext)
+	}
+	if scenarioContext["planning_mode"] != scenarioPlanningModeStrict {
+		t.Fatalf("unexpected scenario planning mode: %+v", scenarioContext)
 	}
 }
 

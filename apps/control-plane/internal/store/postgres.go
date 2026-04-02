@@ -97,18 +97,20 @@ func (s *PostgresStore) SaveScenario(scenario domain.Scenario) error {
 	}
 	_, err = s.db.Exec(
 		`INSERT INTO scenarios (
-			project_id, scenario_id, user_query, query_type, interpretation, analysis_scope, steps, created_at
+			project_id, scenario_id, planning_mode, user_query, query_type, interpretation, analysis_scope, steps, created_at
 		) VALUES (
-			$1::uuid, $2, $3, $4, $5, $6, $7::jsonb, $8
+			$1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9
 		)
 		ON CONFLICT (project_id, scenario_id) DO UPDATE
-		SET user_query = EXCLUDED.user_query,
+		SET planning_mode = EXCLUDED.planning_mode,
+		    user_query = EXCLUDED.user_query,
 		    query_type = EXCLUDED.query_type,
 		    interpretation = EXCLUDED.interpretation,
 		    analysis_scope = EXCLUDED.analysis_scope,
 		    steps = EXCLUDED.steps`,
 		scenario.ProjectID,
 		scenario.ScenarioID,
+		scenario.PlanningMode,
 		scenario.UserQuery,
 		scenario.QueryType,
 		scenario.Interpretation,
@@ -121,7 +123,7 @@ func (s *PostgresStore) SaveScenario(scenario domain.Scenario) error {
 
 func (s *PostgresStore) GetScenario(projectID, scenarioID string) (domain.Scenario, error) {
 	row := s.db.QueryRow(
-		`SELECT project_id::text, scenario_id, user_query, query_type, interpretation, analysis_scope, steps, created_at
+		`SELECT project_id::text, scenario_id, planning_mode, user_query, query_type, interpretation, analysis_scope, steps, created_at
 		 FROM scenarios
 		 WHERE project_id = $1::uuid AND scenario_id = $2`,
 		projectID,
@@ -132,6 +134,7 @@ func (s *PostgresStore) GetScenario(projectID, scenarioID string) (domain.Scenar
 	if err := row.Scan(
 		&scenario.ProjectID,
 		&scenario.ScenarioID,
+		&scenario.PlanningMode,
 		&scenario.UserQuery,
 		&scenario.QueryType,
 		&scenario.Interpretation,
@@ -152,7 +155,7 @@ func (s *PostgresStore) GetScenario(projectID, scenarioID string) (domain.Scenar
 
 func (s *PostgresStore) ListScenarios(projectID string) ([]domain.Scenario, error) {
 	rows, err := s.db.Query(
-		`SELECT project_id::text, scenario_id, user_query, query_type, interpretation, analysis_scope, steps, created_at
+		`SELECT project_id::text, scenario_id, planning_mode, user_query, query_type, interpretation, analysis_scope, steps, created_at
 		 FROM scenarios
 		 WHERE project_id = $1::uuid
 		 ORDER BY created_at ASC, scenario_id ASC`,
@@ -170,6 +173,7 @@ func (s *PostgresStore) ListScenarios(projectID string) ([]domain.Scenario, erro
 		if err := rows.Scan(
 			&scenario.ProjectID,
 			&scenario.ScenarioID,
+			&scenario.PlanningMode,
 			&scenario.UserQuery,
 			&scenario.QueryType,
 			&scenario.Interpretation,
@@ -916,6 +920,7 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS scenarios (
 			project_id UUID NOT NULL REFERENCES projects(project_id),
 			scenario_id TEXT NOT NULL,
+			planning_mode TEXT NOT NULL DEFAULT 'strict',
 			user_query TEXT NOT NULL,
 			query_type TEXT NOT NULL,
 			interpretation TEXT NOT NULL,
@@ -924,6 +929,7 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			created_at TIMESTAMPTZ NOT NULL,
 			PRIMARY KEY (project_id, scenario_id)
 		)`,
+		`ALTER TABLE scenarios ADD COLUMN IF NOT EXISTS planning_mode TEXT NOT NULL DEFAULT 'strict'`,
 		`CREATE TABLE IF NOT EXISTS datasets (
 			dataset_id UUID PRIMARY KEY,
 			project_id UUID NOT NULL REFERENCES projects(project_id),

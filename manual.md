@@ -171,6 +171,7 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios" \
   -H 'Content-Type: application/json' \
   -d '{
     "scenario_id":"S1",
+    "planning_mode":"strict",
     "user_query":"이번 벚꽃 축제 반응 어때?",
     "query_type":"여론 요약",
     "interpretation":"전체 여론 및 분위기 파악",
@@ -201,6 +202,7 @@ curl -sS "$API/projects/$PROJECT_ID/scenarios/S1" | python3 -m json.tool
 
 - `scenario_id`
 - `user_query`
+- `planning_mode`
 - `query_type`
 - `interpretation`
 - `analysis_scope`
@@ -214,7 +216,9 @@ curl -sS "$API/projects/$PROJECT_ID/scenarios/S1" | python3 -m json.tool
 주의:
 
 - 자동 plan 생성은 `runtime_skill_name`이 있거나 현재 control plane이 지원하는 `function_name -> runtime skill` 매핑이 있는 step만 처리한다.
+- 현재 `planning_mode`는 `strict`만 지원한다.
 - 직접 매핑되지 않는 step은 시나리오 등록 시 `runtime_skill_name`을 명시해야 한다.
+- `guided`나 guardrail 기반 planner는 아직 backlog다.
 
 ### 7-1. 프로젝트 생성, dataset 생성, 업로드
 

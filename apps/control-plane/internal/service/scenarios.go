@@ -17,6 +17,8 @@ type ScenarioService struct {
 	store store.Repository
 }
 
+const scenarioPlanningModeStrict = "strict"
+
 func NewScenarioService(repository store.Repository) *ScenarioService {
 	return &ScenarioService{store: repository}
 }
@@ -45,6 +47,10 @@ func (s *ScenarioService) CreateScenario(projectID string, input domain.Scenario
 	}
 	if len(input.Steps) == 0 {
 		return domain.Scenario{}, ErrInvalidArgument{Message: "steps is required"}
+	}
+	planningMode, err := normalizeScenarioPlanningMode(input.PlanningMode)
+	if err != nil {
+		return domain.Scenario{}, err
 	}
 
 	normalizedSteps := make([]domain.ScenarioStep, 0, len(input.Steps))
@@ -85,6 +91,7 @@ func (s *ScenarioService) CreateScenario(projectID string, input domain.Scenario
 	scenario := domain.Scenario{
 		ScenarioID:     strings.TrimSpace(input.ScenarioID),
 		ProjectID:      projectID,
+		PlanningMode:   planningMode,
 		UserQuery:      strings.TrimSpace(input.UserQuery),
 		QueryType:      strings.TrimSpace(input.QueryType),
 		Interpretation: strings.TrimSpace(input.Interpretation),
@@ -143,6 +150,11 @@ func (s *ScenarioService) BuildAnalysisSubmitRequest(projectID, scenarioID strin
 	if datasetVersionID == "" {
 		return domain.AnalysisSubmitRequest{}, ErrInvalidArgument{Message: "dataset_version_id is required"}
 	}
+	if scenario.PlanningMode != scenarioPlanningModeStrict {
+		return domain.AnalysisSubmitRequest{}, ErrInvalidArgument{
+			Message: fmt.Sprintf("scenario planning_mode %q is not supported yet; only %q is available", scenario.PlanningMode, scenarioPlanningModeStrict),
+		}
+	}
 
 	goal := scenario.UserQuery
 	if input.Goal != nil && strings.TrimSpace(*input.Goal) != "" {
@@ -160,6 +172,7 @@ func (s *ScenarioService) BuildAnalysisSubmitRequest(projectID, scenarioID strin
 	}
 	context["scenario"] = map[string]any{
 		"scenario_id":           scenario.ScenarioID,
+		"planning_mode":         scenario.PlanningMode,
 		"user_query":            scenario.UserQuery,
 		"query_type":            scenario.QueryType,
 		"interpretation":        scenario.Interpretation,
@@ -340,4 +353,17 @@ var scenarioFunctionSkillAliases = map[string]string{
 	"문서 단위 감성 분류":  "issue_sentiment_summary",
 	"전체 담론 요약":     "issue_evidence_summary",
 	"기간별 담론 요약":    "issue_trend_summary",
+}
+
+func normalizeScenarioPlanningMode(raw *string) (string, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return scenarioPlanningModeStrict, nil
+	}
+	mode := strings.ToLower(strings.TrimSpace(*raw))
+	if mode != scenarioPlanningModeStrict {
+		return "", ErrInvalidArgument{
+			Message: fmt.Sprintf("planning_mode %q is not supported yet; use %q", mode, scenarioPlanningModeStrict),
+		}
+	}
+	return mode, nil
 }
