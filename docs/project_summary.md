@@ -8,7 +8,7 @@
 ## 2. 핵심 흐름
 
 - 프로젝트와 dataset, dataset version을 등록한다.
-- project 단위로 재사용 가능한 분석 시나리오를 `strict` 모드로 등록하고, 저장된 시나리오에서 분석 요청과 plan을 바로 생성할 수 있다.
+- project 단위로 재사용 가능한 분석 시나리오를 `strict` 모드로 등록하고, 저장된 시나리오에서 분석 요청과 plan을 생성하거나 바로 execution까지 enqueue할 수 있다.
 - 시나리오 표가 row 단위로 정리돼 있으면 `scenario_id` 기준으로 묶어 여러 시나리오를 한 번에 등록할 수 있다.
 - 원본 dataset을 upload한 뒤 필요하면 `prepare`, `sentiment`, `embedding` 산출물을 만든다.
 - 분석 요청을 제출하면 planner가 최소 skill plan을 만들고, Temporal workflow가 실행과 `waiting / resume`를 오케스트레이션한다.
@@ -44,9 +44,8 @@
 - execution이 완료되면 control plane은 현재 `result_v1 snapshot`을 execution metadata에 함께 저장하고, `/executions/{id}/result`는 저장된 snapshot을 우선 사용한다.
 - `GET /projects/{project_id}/executions`는 현재 execution 목록을 `result_v1 snapshot` preview와 함께 보여준다.
 - `POST /projects/{project_id}/report_drafts`, `GET /projects/{project_id}/report_drafts/{draft_id}`는 선택한 execution snapshot을 묶어 `report-draft-v1` 문서를 저장/조회한다.
-- `POST /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios/{scenario_id}`, `POST /projects/{project_id}/scenarios/{scenario_id}/plans`는 현재 `planning_mode=strict` 기준의 시나리오를 저장하고 `analysis_request + plan`을 생성하는 기반이다.
+- `POST /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios/{scenario_id}`, `POST /projects/{project_id}/scenarios/{scenario_id}/plans`, `POST /projects/{project_id}/scenarios/{scenario_id}/execute`는 현재 `planning_mode=strict` 기준의 시나리오를 저장하고 `analysis_request + plan` 생성 또는 one-shot 실행을 처리하는 경로다.
 - `POST /projects/{project_id}/scenarios/import`는 row 기반 시나리오 표를 `scenario_id` 기준으로 묶어 등록하는 bulk import 경로다.
-- 확인 필요: 시나리오에서 바로 execution까지 enqueue하는 one-shot endpoint는 아직 없다.
 - 확인 필요: `guided` planner나 mandatory/optional/allowed skill 가드레일은 아직 backlog다.
 - `sentiment.parquet`는 현재 `row_id`, `source_row_index`, 감성 컬럼 중심 sidecar이고, `issue_sentiment_summary`는 prepared dataset ref를 받아 텍스트를 조인한다.
 - `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 운영 기본 산출물은 `embeddings.index.parquet` index source와 `pgvector` 적재이고, `embeddings.jsonl`은 `debug_export_jsonl=true`일 때만 debug/export로 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1`로 fallback한다.

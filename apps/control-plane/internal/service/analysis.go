@@ -218,6 +218,23 @@ func (s *AnalysisService) ExecutePlan(projectID, planID string) (domain.PlanExec
 	}, nil
 }
 
+func (s *AnalysisService) SubmitAndExecute(projectID string, input domain.AnalysisSubmitRequest) (domain.AnalysisExecuteResponse, error) {
+	planned, err := s.SubmitAnalysis(projectID, input)
+	if err != nil {
+		return domain.AnalysisExecuteResponse{}, err
+	}
+	executed, err := s.ExecutePlan(projectID, planned.Plan.PlanID)
+	if err != nil {
+		return domain.AnalysisExecuteResponse{}, err
+	}
+	return domain.AnalysisExecuteResponse{
+		Request:   planned.Request,
+		Plan:      executed.Plan,
+		Execution: executed.Execution,
+		JobID:     executed.JobID,
+	}, nil
+}
+
 func (s *AnalysisService) GetExecution(projectID, executionID string) (domain.ExecutionSummary, error) {
 	execution, err := s.store.GetExecution(projectID, executionID)
 	if err != nil {

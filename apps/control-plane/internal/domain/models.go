@@ -224,6 +224,13 @@ type AnalysisPlanResponse struct {
 	Plan    PlanRecord      `json:"plan"`
 }
 
+type AnalysisExecuteResponse struct {
+	Request   AnalysisRequest  `json:"request"`
+	Plan      PlanRecord       `json:"plan"`
+	Execution ExecutionSummary `json:"execution"`
+	JobID     *string          `json:"job_id,omitempty"`
+}
+
 type ExecutionEvent struct {
 	ExecutionID string         `json:"execution_id"`
 	TS          time.Time      `json:"ts"`

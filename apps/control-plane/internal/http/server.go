@@ -79,6 +79,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /projects/{project_id}/scenarios", s.handleListScenarios)
 	s.mux.HandleFunc("GET /projects/{project_id}/scenarios/{scenario_id}", s.handleGetScenario)
 	s.mux.HandleFunc("POST /projects/{project_id}/scenarios/{scenario_id}/plans", s.handleCreateScenarioPlan)
+	s.mux.HandleFunc("POST /projects/{project_id}/scenarios/{scenario_id}/execute", s.handleExecuteScenario)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets", s.handleCreateDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}", s.handleGetDataset)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/uploads", s.handleUploadDataset)
@@ -221,6 +222,29 @@ func (s *Server) handleCreateScenarioPlan(w stdhttp.ResponseWriter, r *stdhttp.R
 		return
 	}
 	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+func (s *Server) handleExecuteScenario(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ScenarioPlanCreateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	submitRequest, err := s.scenarioService.BuildAnalysisSubmitRequest(
+		r.PathValue("project_id"),
+		r.PathValue("scenario_id"),
+		payload,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	response, err := s.analysisService.SubmitAndExecute(r.PathValue("project_id"), submitRequest)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusAccepted, response)
 }
 
 func (s *Server) handleCreateDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {

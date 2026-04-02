@@ -482,6 +482,100 @@ func TestScenarioImportEndpoint(t *testing.T) {
 	}
 }
 
+func TestScenarioExecuteEndpoint(t *testing.T) {
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"scenario-execute-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/scenarios",
+		`{
+		  "scenario_id":"S1",
+		  "planning_mode":"strict",
+		  "user_query":"이번 벚꽃 축제 반응 어때?",
+		  "query_type":"여론 요약",
+		  "interpretation":"전체 여론 및 분위기 파악",
+		  "analysis_scope":"축제 기간",
+		  "steps":[
+		    {
+		      "step":1,
+		      "function_name":"가비지 필터링",
+		      "result_description":"분석 대상 정제"
+		    },
+		    {
+		      "step":2,
+		      "runtime_skill_name":"issue_evidence_summary",
+		      "function_name":"전체 담론 요약",
+		      "result_description":"종합 의견 요약"
+		    }
+		  ]
+		}`,
+		http.StatusCreated,
+		&map[string]any{},
+	)
+
+	dataset := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets",
+		`{"name":"festival","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&dataset,
+	)
+	datasetID := dataset["dataset_id"].(string)
+
+	version := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"festival.csv","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&version,
+	)
+	versionID := version["dataset_version_id"].(string)
+
+	response := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/scenarios/S1/execute",
+		`{"dataset_version_id":"`+versionID+`"}`,
+		http.StatusAccepted,
+		&response,
+	)
+
+	if response["job_id"] == nil {
+		t.Fatalf("expected job_id in scenario execute response: %+v", response)
+	}
+	request := response["request"].(map[string]any)
+	plan := response["plan"].(map[string]any)
+	execution := response["execution"].(map[string]any)
+	if request["goal"] != "이번 벚꽃 축제 반응 어때?" {
+		t.Fatalf("unexpected request payload: %+v", request)
+	}
+	if plan["plan_id"] == "" {
+		t.Fatalf("expected plan_id: %+v", plan)
+	}
+	if execution["status"] != "queued" {
+		t.Fatalf("unexpected execution: %+v", execution)
+	}
+}
+
 func TestResponsesRenderTimestampsInKST(t *testing.T) {
 	server := NewServer(config.Config{
 		BindAddr:       ":0",
