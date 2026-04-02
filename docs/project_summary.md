@@ -11,6 +11,7 @@
 - 원본 dataset을 upload한 뒤 필요하면 `prepare`, `sentiment`, `embedding` 산출물을 만든다.
 - 분석 요청을 제출하면 planner가 최소 skill plan을 만들고, Temporal workflow가 실행과 `waiting / resume`를 오케스트레이션한다.
 - 실행 결과는 artifact와 execution metadata로 남고, 같은 execution context 기준으로 `rerun / diff` 할 수 있다.
+- 완료된 execution은 `result_v1 snapshot`으로도 저장되고, 실행 목록 preview와 report draft 초안 생성에서 같은 snapshot을 재사용한다.
 
 ## 3. 현재 런타임 경계
 
@@ -39,6 +40,8 @@
 - execution runtime은 현재 기본 `pre/post step hook`를 사용해 step별 입력 키, artifact 크기, usage preview를 `step_hooks`로 남기고, 완료 이벤트와 execution result contract에 함께 노출한다.
 - execution result API는 기존 `artifacts + contract`를 유지하면서, 현재 `result_v1`에 사용자용 `answer`, `step_results`, `warnings`, `waiting`, `usage_summary`를 함께 내려준다.
 - execution이 완료되면 control plane은 현재 `result_v1 snapshot`을 execution metadata에 함께 저장하고, `/executions/{id}/result`는 저장된 snapshot을 우선 사용한다.
+- `GET /projects/{project_id}/executions`는 현재 execution 목록을 `result_v1 snapshot` preview와 함께 보여준다.
+- `POST /projects/{project_id}/report_drafts`, `GET /projects/{project_id}/report_drafts/{draft_id}`는 선택한 execution snapshot을 묶어 `report-draft-v1` 문서를 저장/조회한다.
 - `sentiment.parquet`는 현재 `row_id`, `source_row_index`, 감성 컬럼 중심 sidecar이고, `issue_sentiment_summary`는 prepared dataset ref를 받아 텍스트를 조인한다.
 - `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 운영 기본 산출물은 `embeddings.index.parquet` index source와 `pgvector` 적재이고, `embeddings.jsonl`은 `debug_export_jsonl=true`일 때만 debug/export로 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1`로 fallback한다.
 - control plane은 embedding build 직후 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 64차원 hashed projection vector로 바꿔 `pgvector` 테이블 `embedding_index_chunks`에 적재한다. index source가 없을 때만 `embeddings.jsonl` legacy fallback을 사용한다.

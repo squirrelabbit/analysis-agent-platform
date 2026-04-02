@@ -84,11 +84,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /projects/{project_id}/analysis_requests/{request_id}", s.handleGetRequest)
 	s.mux.HandleFunc("GET /projects/{project_id}/plans/{plan_id}", s.handleGetPlan)
 	s.mux.HandleFunc("POST /projects/{project_id}/plans/{plan_id}/execute", s.handleExecutePlan)
+	s.mux.HandleFunc("GET /projects/{project_id}/executions", s.handleListExecutions)
 	s.mux.HandleFunc("GET /projects/{project_id}/executions/{execution_id}", s.handleGetExecution)
 	s.mux.HandleFunc("GET /projects/{project_id}/executions/{execution_id}/result", s.handleGetExecutionResult)
 	s.mux.HandleFunc("POST /projects/{project_id}/executions/{execution_id}/resume", s.handleResumeExecution)
 	s.mux.HandleFunc("POST /projects/{project_id}/executions/{execution_id}/rerun", s.handleRerunExecution)
 	s.mux.HandleFunc("GET /projects/{project_id}/executions/diff", s.handleDiffExecutions)
+	s.mux.HandleFunc("POST /projects/{project_id}/report_drafts", s.handleCreateReportDraft)
+	s.mux.HandleFunc("GET /projects/{project_id}/report_drafts/{draft_id}", s.handleGetReportDraft)
 }
 
 func writeJSON(w stdhttp.ResponseWriter, status int, payload any) {
@@ -375,8 +378,40 @@ func (s *Server) handleExecutePlan(w stdhttp.ResponseWriter, r *stdhttp.Request)
 	writeJSON(w, stdhttp.StatusAccepted, response)
 }
 
+func (s *Server) handleListExecutions(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.analysisService.ListExecutions(r.PathValue("project_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
 func (s *Server) handleGetExecution(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	response, err := s.analysisService.GetExecution(r.PathValue("project_id"), r.PathValue("execution_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleCreateReportDraft(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ReportDraftCreateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.analysisService.CreateReportDraft(r.PathValue("project_id"), payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+func (s *Server) handleGetReportDraft(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.analysisService.GetReportDraft(r.PathValue("project_id"), r.PathValue("draft_id"))
 	if err != nil {
 		s.writeServiceError(w, err)
 		return

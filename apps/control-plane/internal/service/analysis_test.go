@@ -497,6 +497,166 @@ func TestBuildExecutionResultUsesStoredSnapshotWhenPresent(t *testing.T) {
 	}
 }
 
+func TestListExecutionsBuildsSnapshotPreview(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	executions := []domain.ExecutionSummary{
+		{
+			ExecutionID: "exec-older",
+			ProjectID:   project.ProjectID,
+			RequestID:   "request-1",
+			Status:      "completed",
+			CreatedAt:   now.Add(-time.Hour),
+			Plan:        domain.SkillPlan{PlanID: "plan-1"},
+			ResultV1Snapshot: &domain.ExecutionResultV1{
+				SchemaVersion:    "execution-result-v1",
+				Status:           "completed",
+				PrimarySkillName: stringPtr("issue_cluster_summary"),
+				Answer:           &domain.ExecutionResultAnswer{Summary: "이전 실행 요약"},
+				Warnings:         []string{"fallback used"},
+			},
+		},
+		{
+			ExecutionID: "exec-newer",
+			ProjectID:   project.ProjectID,
+			RequestID:   "request-2",
+			Status:      "completed",
+			CreatedAt:   now,
+			Plan:        domain.SkillPlan{PlanID: "plan-2"},
+			ResultV1Snapshot: &domain.ExecutionResultV1{
+				SchemaVersion:    "execution-result-v1",
+				Status:           "completed",
+				PrimarySkillName: stringPtr("issue_evidence_summary"),
+				Answer:           &domain.ExecutionResultAnswer{Summary: "최신 실행 요약"},
+			},
+		},
+	}
+	for _, execution := range executions {
+		if err := repository.SaveExecution(execution); err != nil {
+			t.Fatalf("unexpected save execution error: %v", err)
+		}
+	}
+
+	response, err := service.ListExecutions(project.ProjectID)
+	if err != nil {
+		t.Fatalf("unexpected list executions error: %v", err)
+	}
+	if len(response.Items) != 2 {
+		t.Fatalf("unexpected execution items: %+v", response.Items)
+	}
+	if response.Items[0].ExecutionID != "exec-newer" {
+		t.Fatalf("expected newest execution first: %+v", response.Items)
+	}
+	if response.Items[0].AnswerPreview == nil || *response.Items[0].AnswerPreview != "최신 실행 요약" {
+		t.Fatalf("unexpected answer preview: %+v", response.Items[0])
+	}
+	if response.Items[1].WarningCount != 1 {
+		t.Fatalf("unexpected warning count: %+v", response.Items[1])
+	}
+}
+
+func TestCreateReportDraftBuildsSnapshotSections(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	executions := []domain.ExecutionSummary{
+		{
+			ExecutionID: "exec-1",
+			ProjectID:   project.ProjectID,
+			RequestID:   "request-1",
+			Status:      "completed",
+			CreatedAt:   now.Add(-time.Minute),
+			Plan:        domain.SkillPlan{PlanID: "plan-1"},
+			ResultV1Snapshot: &domain.ExecutionResultV1{
+				SchemaVersion:    "execution-result-v1",
+				Status:           "completed",
+				PrimarySkillName: stringPtr("issue_evidence_summary"),
+				Answer: &domain.ExecutionResultAnswer{
+					Summary:           "결제 오류가 반복 발생했습니다.",
+					KeyFindings:       []string{"결제 오류 관련 VOC가 반복된다."},
+					Evidence:          []map[string]any{{"snippet": "결제 오류가 반복 발생했습니다"}},
+					FollowUpQuestions: []string{"결제 실패 구간을 더 볼까요?"},
+				},
+				UsageSummary: map[string]any{"request_count": 1, "total_tokens": 10},
+			},
+		},
+		{
+			ExecutionID: "exec-2",
+			ProjectID:   project.ProjectID,
+			RequestID:   "request-2",
+			Status:      "completed",
+			CreatedAt:   now,
+			Plan:        domain.SkillPlan{PlanID: "plan-2"},
+			ResultV1Snapshot: &domain.ExecutionResultV1{
+				SchemaVersion:    "execution-result-v1",
+				Status:           "completed",
+				PrimarySkillName: stringPtr("issue_breakdown_summary"),
+				Answer: &domain.ExecutionResultAnswer{
+					Summary:     "앱 채널 비중이 가장 높습니다.",
+					KeyFindings: []string{"앱 채널이 최다 그룹이다."},
+				},
+				UsageSummary: map[string]any{"request_count": 1, "total_tokens": 20},
+				Warnings:     []string{"fallback summary used"},
+			},
+		},
+	}
+	for _, execution := range executions {
+		if err := repository.SaveExecution(execution); err != nil {
+			t.Fatalf("unexpected save execution error: %v", err)
+		}
+	}
+
+	title := "주요 VOC 보고서 초안"
+	draft, err := service.CreateReportDraft(project.ProjectID, domain.ReportDraftCreateRequest{
+		Title:        &title,
+		ExecutionIDs: []string{"exec-1", "exec-2"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected create report draft error: %v", err)
+	}
+	if draft.Content.SchemaVersion != "report-draft-v1" {
+		t.Fatalf("unexpected report draft schema: %+v", draft.Content)
+	}
+	if draft.Content.ExecutionCount != 2 {
+		t.Fatalf("unexpected execution count: %+v", draft.Content)
+	}
+	if len(draft.Content.Sections) != 2 {
+		t.Fatalf("unexpected report sections: %+v", draft.Content)
+	}
+	if draft.Content.Sections[0].ExecutionID != "exec-1" {
+		t.Fatalf("expected selected order to be preserved: %+v", draft.Content.Sections)
+	}
+	if got := draft.Content.UsageSummary["total_tokens"]; got != 30 {
+		t.Fatalf("unexpected usage summary: %+v", draft.Content.UsageSummary)
+	}
+	if len(draft.Content.KeyFindings) < 2 {
+		t.Fatalf("expected merged key findings: %+v", draft.Content)
+	}
+	if len(draft.Content.Warnings) != 1 {
+		t.Fatalf("expected merged warnings: %+v", draft.Content)
+	}
+	loaded, err := service.GetReportDraft(project.ProjectID, draft.DraftID)
+	if err != nil {
+		t.Fatalf("unexpected get report draft error: %v", err)
+	}
+	if loaded.Content.Overview == "" {
+		t.Fatalf("expected stored overview: %+v", loaded.Content)
+	}
+}
+
 func TestSubmitAnalysisEnrichesIssueSentimentSummaryInputs(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, fakePlanner{

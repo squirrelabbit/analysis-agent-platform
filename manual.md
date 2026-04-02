@@ -442,7 +442,78 @@ curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID/result" | python3 -m jso
 execution이 `completed` 상태가 되면 control plane은 현재 `result_v1 snapshot`을 execution metadata에 저장한다. 이후 `/executions/{id}/result`는 이 저장된 snapshot을 우선 사용하므로, 나중에 리스트 선택이나 보고서 초안 생성에서 같은 answer를 재사용하기 쉽다.
 
 
-### 7-10. waiting 상태면 resume
+### 7-10. execution 목록 preview 조회
+
+```bash
+curl -sS "$API/projects/$PROJECT_ID/executions" | python3 -m json.tool
+```
+
+결과 확인:
+
+- `items[].execution_id`
+- `items[].status`
+- `items[].created_at`
+- `items[].primary_skill_name`
+- `items[].answer_preview`
+- `items[].warning_count`
+- `items[].waiting`
+
+이 endpoint는 현재 `result_v1 snapshot`이 있으면 그 snapshot 기준으로 preview를 만들고, snapshot이 없으면 최소 상태 정보만 보여준다.
+
+
+### 7-11. report draft 생성
+
+```bash
+DRAFT_JSON=$(
+  curl -sS -X POST "$API/projects/$PROJECT_ID/report_drafts" \
+    -H 'Content-Type: application/json' \
+    -d "{
+      \"title\":\"축제 VOC 보고서 초안\",
+      \"execution_ids\":[\"$EXEC_ID\"]
+    }"
+)
+
+echo "$DRAFT_JSON" | python3 -m json.tool
+
+DRAFT_ID=$(
+  printf '%s' "$DRAFT_JSON" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["draft_id"])'
+)
+```
+
+결과 확인:
+
+- `draft_id`
+- `content.schema_version = "report-draft-v1"`
+- `content.title`
+- `content.overview`
+- `content.execution_count`
+- `content.sections`
+- `content.key_findings`
+- `content.evidence`
+- `content.follow_up_questions`
+- `content.usage_summary`
+- `content.warnings`
+
+현재 report draft는 선택한 execution의 `result_v1 snapshot`을 묶어 만든 저장형 초안이다.
+
+
+### 7-12. report draft 조회
+
+```bash
+curl -sS "$API/projects/$PROJECT_ID/report_drafts/$DRAFT_ID" | python3 -m json.tool
+```
+
+결과 확인:
+
+- `draft_id`
+- `title`
+- `execution_ids`
+- `content`
+- `created_at`
+
+
+### 7-13. waiting 상태면 resume
 
 `status = "waiting"`이면 필요한 dependency를 먼저 준비한 뒤 다시 resume하면 된다.
 
@@ -509,11 +580,14 @@ docker compose -f compose.dev.yml logs postgres
 | LLM 플래너 경로 | 완료 | dev compose에서는 `PLANNER_BACKEND=python-ai` |
 | plan 저장 / 조회 | 완료 | `skill_plans`와 조회 API 구현 |
 | Temporal 실행 | 완료 | execute / resume / rerun / diff 포함 |
+| execution 목록 preview | 완료 | `GET /projects/{project_id}/executions` |
 | 스킬 실행 결과 저장 | 완료 | `executions.artifacts`, `events` 저장 |
 | waiting 판정 | 완료 | prepare / sentiment / embedding readiness 확인 |
 | waiting 후 resume | 완료 | 수동 resume 가능 |
 | 최종 evidence 해석 artifact | 완료 | `issue_evidence_summary`, `evidence_pack` |
-| 최종 사용자 답변 전용 API | 부분완료 | artifact는 있지만 최종 natural language answer 전용 레이어는 약함 |
+| execution 결과 스냅샷 저장 | 완료 | `result_v1_snapshot` 저장 후 `/executions/{id}/result`에서 재사용 |
+| report draft 생성 / 조회 | 완료 | execution snapshot 기반 `report-draft-v1` 저장 |
+| 최종 사용자 답변 전용 API | 부분완료 | `result_v1`는 있으나 별도 conversation answer orchestration은 아직 약함 |
 | 업로드부터 분석까지 one-shot API | 미구현 | 단일 orchestration endpoint 없음 |
 | 운영 auth / approval | 미구현 | 별도 백로그 |
 | observability | 미구현 | 별도 백로그 |

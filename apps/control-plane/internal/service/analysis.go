@@ -175,6 +175,7 @@ func (s *AnalysisService) ExecutePlan(projectID, planID string) (domain.PlanExec
 		RequestID:          plan.RequestID,
 		Plan:               plan.Plan,
 		Status:             "queued",
+		CreatedAt:          now,
 		RequiredHashes:     []string{},
 		Artifacts:          map[string]string{},
 		DatasetVersionID:   plan.DatasetVersionID,
@@ -228,6 +229,24 @@ func (s *AnalysisService) GetExecution(projectID, executionID string) (domain.Ex
 	return execution, nil
 }
 
+func (s *AnalysisService) ListExecutions(projectID string) (domain.ExecutionListResponse, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.ExecutionListResponse{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.ExecutionListResponse{}, err
+	}
+	executions, err := s.store.ListExecutions(projectID)
+	if err != nil {
+		return domain.ExecutionListResponse{}, err
+	}
+	items := make([]domain.ExecutionListItem, 0, len(executions))
+	for _, execution := range executions {
+		items = append(items, executionresult.BuildListItem(execution))
+	}
+	return domain.ExecutionListResponse{Items: items}, nil
+}
+
 func (s *AnalysisService) BuildExecutionResult(projectID, executionID string) (domain.ExecutionResultResponse, error) {
 	execution, err := s.GetExecution(projectID, executionID)
 	if err != nil {
@@ -267,11 +286,69 @@ func (s *AnalysisService) BuildExecutionResult(projectID, executionID string) (d
 	}, nil
 }
 
+func (s *AnalysisService) CreateReportDraft(projectID string, input domain.ReportDraftCreateRequest) (domain.ReportDraft, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.ReportDraft{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.ReportDraft{}, err
+	}
+	if len(input.ExecutionIDs) == 0 {
+		return domain.ReportDraft{}, ErrInvalidArgument{Message: "execution_ids is required"}
+	}
+	executionIDs := uniqueNonEmptyStrings(input.ExecutionIDs)
+	if len(executionIDs) == 0 {
+		return domain.ReportDraft{}, ErrInvalidArgument{Message: "execution_ids is required"}
+	}
+	executions := make([]domain.ExecutionSummary, 0, len(executionIDs))
+	for _, executionID := range executionIDs {
+		execution, err := s.GetExecution(projectID, executionID)
+		if err != nil {
+			return domain.ReportDraft{}, err
+		}
+		executions = append(executions, execution)
+	}
+	title := strings.TrimSpace(optionalStringValue(input.Title))
+	if title == "" {
+		title = "실행 결과 보고서 초안"
+	}
+	draft := domain.ReportDraft{
+		DraftID:      id.New(),
+		ProjectID:    projectID,
+		Title:        title,
+		ExecutionIDs: executionIDs,
+		Content:      executionresult.BuildReportDraftV1(title, executions),
+		CreatedAt:    time.Now().UTC(),
+	}
+	if err := s.store.SaveReportDraft(draft); err != nil {
+		return domain.ReportDraft{}, err
+	}
+	return draft, nil
+}
+
+func (s *AnalysisService) GetReportDraft(projectID, draftID string) (domain.ReportDraft, error) {
+	draft, err := s.store.GetReportDraft(projectID, draftID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return domain.ReportDraft{}, ErrNotFound{Resource: "report draft"}
+		}
+		return domain.ReportDraft{}, err
+	}
+	return draft, nil
+}
+
 func buildExecutionResultV1(execution domain.ExecutionSummary, contract map[string]any) domain.ExecutionResultV1 {
 	if execution.ResultV1Snapshot != nil {
 		return *execution.ResultV1Snapshot
 	}
 	return executionresult.BuildV1(execution)
+}
+
+func optionalStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func latestCompletedStepHooks(events []domain.ExecutionEvent) any {

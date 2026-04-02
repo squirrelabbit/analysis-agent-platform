@@ -489,6 +489,9 @@ func (s *PostgresStore) GetPlan(projectID, planID string) (domain.PlanRecord, er
 }
 
 func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
+	if execution.CreatedAt.IsZero() {
+		execution.CreatedAt = time.Now().UTC()
+	}
 	eventsJSON, err := marshalJSON(execution.Events)
 	if err != nil {
 		return err
@@ -512,7 +515,7 @@ func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
 		     required_hashes, artifacts, dataset_version_id, code_version, params_hash,
 		     skill_bundle_version, events, result_v1_snapshot, created_at
 		 ) VALUES (
-		     $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13::jsonb, $14::jsonb, NOW()
+		     $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15
 		 )
 		 ON CONFLICT (execution_id) DO UPDATE
 		 SET status = EXCLUDED.status,
@@ -540,6 +543,7 @@ func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
 		nullableString(execution.SkillBundleVersion),
 		eventsJSON,
 		resultV1SnapshotJSON,
+		execution.CreatedAt,
 	)
 	return err
 }
@@ -549,6 +553,7 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 		`SELECT e.execution_id::text, e.project_id::text, p.request_id::text, p.plan,
 		        e.status, e.ended_at, e.required_hashes, e.embedding_model_version, e.artifacts,
 		        e.dataset_version_id, e.code_version, e.params_hash, e.skill_bundle_version, e.events,
+		        e.created_at,
 		        e.result_v1_snapshot
 		 FROM executions e
 		 JOIN skill_plans p ON p.plan_id = e.plan_id
@@ -583,6 +588,7 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 		&paramsHash,
 		&skillBundleVersion,
 		&eventsRaw,
+		&execution.CreatedAt,
 		&resultV1SnapshotRaw,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -622,6 +628,111 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 		execution.SkillBundleVersion = &skillBundleVersion.String
 	}
 	return execution, nil
+}
+
+func (s *PostgresStore) ListExecutions(projectID string) ([]domain.ExecutionSummary, error) {
+	rows, err := s.db.Query(
+		`SELECT execution_id::text, project_id::text, status, created_at, ended_at, dataset_version_id, result_v1_snapshot
+		 FROM executions
+		 WHERE project_id = $1::uuid
+		 ORDER BY created_at DESC`,
+		projectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.ExecutionSummary, 0)
+	for rows.Next() {
+		var execution domain.ExecutionSummary
+		var datasetVersionID sql.NullString
+		var resultV1SnapshotRaw []byte
+		if err := rows.Scan(
+			&execution.ExecutionID,
+			&execution.ProjectID,
+			&execution.Status,
+			&execution.CreatedAt,
+			&execution.EndedAt,
+			&datasetVersionID,
+			&resultV1SnapshotRaw,
+		); err != nil {
+			return nil, err
+		}
+		if datasetVersionID.Valid {
+			execution.DatasetVersionID = &datasetVersionID.String
+		}
+		if err := unmarshalJSON(resultV1SnapshotRaw, &execution.ResultV1Snapshot, (*domain.ExecutionResultV1)(nil)); err != nil {
+			return nil, err
+		}
+		items = append(items, execution)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *PostgresStore) SaveReportDraft(draft domain.ReportDraft) error {
+	executionIDsJSON, err := marshalJSON(draft.ExecutionIDs)
+	if err != nil {
+		return err
+	}
+	contentJSON, err := marshalJSON(draft.Content)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(
+		`INSERT INTO report_drafts (
+			draft_id, project_id, title, execution_ids, content, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, $3, $4::jsonb, $5::jsonb, $6
+		)
+		ON CONFLICT (draft_id) DO UPDATE
+		SET title = EXCLUDED.title,
+		    execution_ids = EXCLUDED.execution_ids,
+		    content = EXCLUDED.content`,
+		draft.DraftID,
+		draft.ProjectID,
+		draft.Title,
+		executionIDsJSON,
+		contentJSON,
+		draft.CreatedAt,
+	)
+	return err
+}
+
+func (s *PostgresStore) GetReportDraft(projectID, draftID string) (domain.ReportDraft, error) {
+	row := s.db.QueryRow(
+		`SELECT draft_id::text, project_id::text, title, execution_ids, content, created_at
+		 FROM report_drafts
+		 WHERE project_id = $1::uuid AND draft_id = $2::uuid`,
+		projectID,
+		draftID,
+	)
+	var draft domain.ReportDraft
+	var executionIDsRaw []byte
+	var contentRaw []byte
+	if err := row.Scan(
+		&draft.DraftID,
+		&draft.ProjectID,
+		&draft.Title,
+		&executionIDsRaw,
+		&contentRaw,
+		&draft.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ReportDraft{}, ErrNotFound
+		}
+		return domain.ReportDraft{}, err
+	}
+	if err := unmarshalJSON(executionIDsRaw, &draft.ExecutionIDs, []string{}); err != nil {
+		return domain.ReportDraft{}, err
+	}
+	if err := unmarshalJSON(contentRaw, &draft.Content, domain.ReportDraftV1{}); err != nil {
+		return domain.ReportDraft{}, err
+	}
+	return draft, nil
 }
 
 func (s *PostgresStore) ReplaceEmbeddingChunkIndex(datasetVersionID string, records []domain.EmbeddingIndexChunk) error {
@@ -789,6 +900,14 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			created_at TIMESTAMPTZ NOT NULL
 		)`,
 		`ALTER TABLE executions ADD COLUMN IF NOT EXISTS result_v1_snapshot JSONB`,
+		`CREATE TABLE IF NOT EXISTS report_drafts (
+			draft_id UUID PRIMARY KEY,
+			project_id UUID NOT NULL REFERENCES projects(project_id),
+			title TEXT NOT NULL,
+			execution_ids JSONB NOT NULL,
+			content JSONB NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL
+		)`,
 		`DO $$
 		BEGIN
 			IF to_regtype('vector') IS NOT NULL THEN
@@ -830,6 +949,7 @@ func (s *PostgresStore) promoteTimestampColumnsToTimestamptz(ctx context.Context
 		{tableName: "skill_plans", columnName: "created_at"},
 		{tableName: "executions", columnName: "ended_at"},
 		{tableName: "executions", columnName: "created_at"},
+		{tableName: "report_drafts", columnName: "created_at"},
 	}
 	for _, column := range columns {
 		dataType, err := s.columnDataType(ctx, column.tableName, column.columnName)

@@ -172,6 +172,7 @@ type ExecutionSummary struct {
 	RequestID          string             `json:"request_id"`
 	Plan               SkillPlan          `json:"plan"`
 	Status             string             `json:"status"`
+	CreatedAt          time.Time          `json:"created_at"`
 	EndedAt            *time.Time         `json:"ended_at,omitempty"`
 	RequiredHashes     []string           `json:"required_hashes"`
 	EmbeddingModel     *string            `json:"embedding_model_version,omitempty"`
@@ -182,6 +183,22 @@ type ExecutionSummary struct {
 	SkillBundleVersion *string            `json:"skill_bundle_version,omitempty"`
 	Events             []ExecutionEvent   `json:"events"`
 	ResultV1Snapshot   *ExecutionResultV1 `json:"-"`
+}
+
+type ExecutionListItem struct {
+	ExecutionID      string                 `json:"execution_id"`
+	Status           string                 `json:"status"`
+	CreatedAt        time.Time              `json:"created_at"`
+	EndedAt          *time.Time             `json:"ended_at,omitempty"`
+	DatasetVersionID *string                `json:"dataset_version_id,omitempty"`
+	PrimarySkillName *string                `json:"primary_skill_name,omitempty"`
+	AnswerPreview    *string                `json:"answer_preview,omitempty"`
+	WarningCount     int                    `json:"warning_count"`
+	Waiting          *ExecutionWaitingState `json:"waiting,omitempty"`
+}
+
+type ExecutionListResponse struct {
+	Items []ExecutionListItem `json:"items"`
 }
 
 type PlanExecuteResponse struct {
@@ -210,6 +227,44 @@ type ExecutionResultResponse struct {
 	Artifacts   map[string]string `json:"artifacts"`
 	Contract    map[string]any    `json:"contract"`
 	ResultV1    ExecutionResultV1 `json:"result_v1"`
+}
+
+type ReportDraftCreateRequest struct {
+	Title        *string  `json:"title,omitempty"`
+	ExecutionIDs []string `json:"execution_ids"`
+}
+
+type ReportDraft struct {
+	DraftID      string        `json:"draft_id"`
+	ProjectID    string        `json:"project_id"`
+	Title        string        `json:"title"`
+	ExecutionIDs []string      `json:"execution_ids"`
+	Content      ReportDraftV1 `json:"content"`
+	CreatedAt    time.Time     `json:"created_at"`
+}
+
+type ReportDraftV1 struct {
+	SchemaVersion     string               `json:"schema_version"`
+	Title             string               `json:"title"`
+	Overview          string               `json:"overview"`
+	ExecutionCount    int                  `json:"execution_count"`
+	Sections          []ReportDraftSection `json:"sections,omitempty"`
+	KeyFindings       []string             `json:"key_findings,omitempty"`
+	Evidence          []map[string]any     `json:"evidence,omitempty"`
+	FollowUpQuestions []string             `json:"follow_up_questions,omitempty"`
+	UsageSummary      map[string]any       `json:"usage_summary,omitempty"`
+	Warnings          []string             `json:"warnings,omitempty"`
+}
+
+type ReportDraftSection struct {
+	ExecutionID      string           `json:"execution_id"`
+	Status           string           `json:"status"`
+	CreatedAt        time.Time        `json:"created_at"`
+	PrimarySkillName *string          `json:"primary_skill_name,omitempty"`
+	Summary          string           `json:"summary"`
+	KeyFindings      []string         `json:"key_findings,omitempty"`
+	Evidence         []map[string]any `json:"evidence,omitempty"`
+	WarningCount     int              `json:"warning_count"`
 }
 
 type ExecutionResultV1 struct {

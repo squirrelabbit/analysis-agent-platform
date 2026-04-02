@@ -23,6 +23,9 @@ type Repository interface {
 	GetPlan(projectID, planID string) (domain.PlanRecord, error)
 	SaveExecution(execution domain.ExecutionSummary) error
 	GetExecution(projectID, executionID string) (domain.ExecutionSummary, error)
+	ListExecutions(projectID string) ([]domain.ExecutionSummary, error)
+	SaveReportDraft(draft domain.ReportDraft) error
+	GetReportDraft(projectID, draftID string) (domain.ReportDraft, error)
 }
 
 type EmbeddingChunkIndexer interface {

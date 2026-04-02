@@ -1,7 +1,9 @@
 package store
 
 import (
+	"sort"
 	"sync"
+	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
 )
@@ -14,6 +16,7 @@ type MemoryStore struct {
 	requests   map[string]domain.AnalysisRequest
 	plans      map[string]domain.PlanRecord
 	executions map[string]domain.ExecutionSummary
+	reports    map[string]domain.ReportDraft
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -24,6 +27,7 @@ func NewMemoryStore() *MemoryStore {
 		requests:   make(map[string]domain.AnalysisRequest),
 		plans:      make(map[string]domain.PlanRecord),
 		executions: make(map[string]domain.ExecutionSummary),
+		reports:    make(map[string]domain.ReportDraft),
 	}
 }
 
@@ -115,6 +119,12 @@ func (s *MemoryStore) GetPlan(projectID, planID string) (domain.PlanRecord, erro
 func (s *MemoryStore) SaveExecution(execution domain.ExecutionSummary) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if existing, ok := s.executions[execution.ExecutionID]; ok && execution.CreatedAt.IsZero() {
+		execution.CreatedAt = existing.CreatedAt
+	}
+	if execution.CreatedAt.IsZero() {
+		execution.CreatedAt = time.Now().UTC()
+	}
 	s.executions[execution.ExecutionID] = execution
 	return nil
 }
@@ -127,4 +137,38 @@ func (s *MemoryStore) GetExecution(projectID, executionID string) (domain.Execut
 		return domain.ExecutionSummary{}, ErrNotFound
 	}
 	return execution, nil
+}
+
+func (s *MemoryStore) ListExecutions(projectID string) ([]domain.ExecutionSummary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := make([]domain.ExecutionSummary, 0)
+	for _, execution := range s.executions {
+		if execution.ProjectID != projectID {
+			continue
+		}
+		items = append(items, execution)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	return items, nil
+}
+
+func (s *MemoryStore) SaveReportDraft(draft domain.ReportDraft) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reports[draft.DraftID] = draft
+	return nil
+}
+
+func (s *MemoryStore) GetReportDraft(projectID, draftID string) (domain.ReportDraft, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	draft, ok := s.reports[draftID]
+	if !ok || draft.ProjectID != projectID {
+		return domain.ReportDraft{}, ErrNotFound
+	}
+	return draft, nil
 }

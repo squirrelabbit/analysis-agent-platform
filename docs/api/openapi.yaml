@@ -359,6 +359,22 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/executions:
+    get:
+      tags: [Executions]
+      summary: List executions with snapshot preview
+      operationId: listExecutions
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Execution list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/executions/{execution_id}:
     get:
       tags: [Executions]
@@ -461,6 +477,51 @@ paths:
                 $ref: "#/components/schemas/ExecutionDiffResponse"
         "400":
           $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/report_drafts:
+    post:
+      tags: [Executions]
+      summary: Create report draft from selected executions
+      operationId: createReportDraft
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportDraftCreateRequest"
+      responses:
+        "201":
+          description: Report draft created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportDraft"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/report_drafts/{draft_id}:
+    get:
+      tags: [Executions]
+      summary: Get stored report draft
+      operationId: getReportDraft
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: draft_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Report draft detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportDraft"
         "404":
           $ref: "#/components/responses/ErrorResponse"
 components:
@@ -988,6 +1049,9 @@ components:
           $ref: "#/components/schemas/SkillPlan"
         status:
           type: string
+        created_at:
+          type: string
+          format: date-time
         ended_at:
           type:
             - string
@@ -1028,9 +1092,52 @@ components:
         - request_id
         - plan
         - status
+        - created_at
         - required_hashes
         - artifacts
         - events
+    ExecutionListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutionListItem"
+      required: [items]
+    ExecutionListItem:
+      type: object
+      properties:
+        execution_id:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        ended_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        dataset_version_id:
+          type:
+            - string
+            - "null"
+        primary_skill_name:
+          type:
+            - string
+            - "null"
+        answer_preview:
+          type:
+            - string
+            - "null"
+        warning_count:
+          type: integer
+        waiting:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionWaitingState"
+            - type: "null"
+      required: [execution_id, status, created_at, warning_count]
     PlanExecuteResponse:
       type: object
       properties:
@@ -1180,6 +1287,98 @@ components:
         reason:
           type: string
       required: [waiting_for]
+    ReportDraftCreateRequest:
+      type: object
+      properties:
+        title:
+          type:
+            - string
+            - "null"
+        execution_ids:
+          type: array
+          items:
+            type: string
+      required: [execution_ids]
+    ReportDraft:
+      type: object
+      properties:
+        draft_id:
+          type: string
+        project_id:
+          type: string
+        title:
+          type: string
+        execution_ids:
+          type: array
+          items:
+            type: string
+        content:
+          $ref: "#/components/schemas/ReportDraftV1"
+        created_at:
+          type: string
+          format: date-time
+      required: [draft_id, project_id, title, execution_ids, content, created_at]
+    ReportDraftV1:
+      type: object
+      properties:
+        schema_version:
+          type: string
+        title:
+          type: string
+        overview:
+          type: string
+        execution_count:
+          type: integer
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportDraftSection"
+        key_findings:
+          type: array
+          items:
+            type: string
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnyMap"
+        follow_up_questions:
+          type: array
+          items:
+            type: string
+        usage_summary:
+          $ref: "#/components/schemas/AnyMap"
+        warnings:
+          type: array
+          items:
+            type: string
+      required: [schema_version, title, overview, execution_count]
+    ReportDraftSection:
+      type: object
+      properties:
+        execution_id:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        primary_skill_name:
+          type:
+            - string
+            - "null"
+        summary:
+          type: string
+        key_findings:
+          type: array
+          items:
+            type: string
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnyMap"
+        warning_count:
+          type: integer
+      required: [execution_id, status, created_at, summary, warning_count]
     ExecutionDiffStep:
       type: object
       properties:

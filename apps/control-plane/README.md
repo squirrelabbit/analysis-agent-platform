@@ -32,11 +32,14 @@
 - `GET /projects/{project_id}/analysis_requests/{request_id}`
 - `GET /projects/{project_id}/plans/{plan_id}`
 - `POST /projects/{project_id}/plans/{plan_id}/execute`
+- `GET /projects/{project_id}/executions`
 - `GET /projects/{project_id}/executions/{execution_id}`
 - `GET /projects/{project_id}/executions/{execution_id}/result`
 - `POST /projects/{project_id}/executions/{execution_id}/resume`
 - `POST /projects/{project_id}/executions/{execution_id}/rerun`
 - `GET /projects/{project_id}/executions/diff?from=...&to=...`
+- `POST /projects/{project_id}/report_drafts`
+- `GET /projects/{project_id}/report_drafts/{draft_id}`
 
 ## 현재 연결된 skill 경로
 
@@ -77,6 +80,7 @@
 - `PLANNER_BACKEND=python-ai`로 두면 plan 생성을 Python AI worker에 위임한다.
 - `WORKFLOW_ENGINE=temporal`이면 Go control plane이 Temporal workflow를 시작한다.
 - `cmd/temporal-worker`는 execution lifecycle activity와 DuckDB/Python worker runtime을 함께 등록한다.
+- execution 목록 API는 `result_v1_snapshot` 기준 preview를 만들고, 보고서 초안 API는 선택한 execution snapshot을 `report-draft-v1`로 저장한다.
 - 관련 설정:
   - `TEMPORAL_ADDRESS`
   - `TEMPORAL_NAMESPACE`

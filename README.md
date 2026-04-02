@@ -42,6 +42,8 @@
 - execution runner는 현재 기본 `pre/post step hook`를 사용해 각 step의 입력 키, artifact 크기, usage preview를 `step_hooks`로 남기고, 완료 이벤트와 execution result contract에서 확인할 수 있다.
 - execution result API는 기존 `artifacts + contract`를 유지하면서, 현재 `result_v1`에 사용자용 `answer`, `step_results`, `warnings`, `waiting`, `usage_summary`를 함께 내려준다.
 - execution이 완료되면 control plane은 현재 `result_v1 snapshot`을 execution metadata에 함께 저장하고, `/executions/{id}/result`는 저장된 snapshot을 우선 사용한다.
+- execution 목록 API는 현재 `result_v1 snapshot` 기준 preview를 내려주고, `primary_skill_name`, `answer_preview`, `warning_count`, `waiting`을 함께 보여준다.
+- report draft API는 현재 선택한 execution들의 `result_v1 snapshot`을 묶어 `report-draft-v1` 초안을 저장하고, 이후 같은 draft를 다시 조회할 수 있다.
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension, `embedding_index_chunks` table을 포함한다.
 - `dataset_prepare`와 `sentiment_label`은 기본 Haiku model을 쓰고, prompt version은 registry와 환경 변수로 선택할 수 있다.
 - 비정형 deterministic skill은 Python worker 안에서 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`, `issue_taxonomy_summary`까지 확장돼 있다.
@@ -85,6 +87,8 @@
 - 일부 대용량 support skill 결과는 `ARTIFACT_ROOT/projects/<project_id>/executions/<execution_id>/steps/` 아래 sidecar로 저장하고, Postgres execution artifact에는 summary와 ref만 남긴다. 현재는 `garbage_filter`, `document_filter`, `deduplicate_documents`가 이 정책을 사용한다.
 - LLM/embedding 계열 artifact에는 `usage`가 포함될 수 있고, control plane은 이를 dataset metadata와 execution result contract로 다시 집계한다.
 - 현재 기본 포맷은 `prepare/sentiment/chunk=Parquet`, `embedding=JSONL`이며, 장기 전환안은 `docs/architecture/unstructured_storage_transition.md`를 기준으로 본다.
+- `GET /projects/{project_id}/executions`는 현재 저장된 snapshot 기준 실행 목록 preview를 반환한다.
+- `POST /projects/{project_id}/report_drafts`, `GET /projects/{project_id}/report_drafts/{draft_id}`는 현재 보고서 초안 저장/조회 API다.
 - 검증 자산
   - Go unit test / build
   - Python unit test

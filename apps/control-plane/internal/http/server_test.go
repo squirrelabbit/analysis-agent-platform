@@ -134,6 +134,112 @@ func TestControlPlaneFlow(t *testing.T) {
 	}
 }
 
+func TestExecutionListAndReportDraftEndpoints(t *testing.T) {
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"draft-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	dataset := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets",
+		`{"name":"issues","data_type":"structured"}`,
+		http.StatusCreated,
+		&dataset,
+	)
+	datasetID := dataset["dataset_id"].(string)
+
+	version := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"issues.csv","data_type":"structured"}`,
+		http.StatusCreated,
+		&version,
+	)
+	versionID := version["dataset_version_id"].(string)
+
+	analysis := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/analysis_requests",
+		`{"dataset_version_id":"`+versionID+`","data_type":"structured","goal":"이슈를 정리해줘"}`,
+		http.StatusCreated,
+		&analysis,
+	)
+	planID := analysis["plan"].(map[string]any)["plan_id"].(string)
+
+	executionResponse := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/plans/"+planID+"/execute",
+		"",
+		http.StatusAccepted,
+		&executionResponse,
+	)
+	executionID := executionResponse["execution"].(map[string]any)["execution_id"].(string)
+
+	listResponse := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/executions",
+		"",
+		http.StatusOK,
+		&listResponse,
+	)
+	items, ok := listResponse["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one execution list item: %+v", listResponse)
+	}
+
+	reportDraft := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/report_drafts",
+		`{"title":"테스트 초안","execution_ids":["`+executionID+`"]}`,
+		http.StatusCreated,
+		&reportDraft,
+	)
+	draftID := reportDraft["draft_id"].(string)
+	content := reportDraft["content"].(map[string]any)
+	if content["schema_version"] != "report-draft-v1" {
+		t.Fatalf("unexpected report draft schema: %+v", content)
+	}
+
+	loadedDraft := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/report_drafts/"+draftID,
+		"",
+		http.StatusOK,
+		&loadedDraft,
+	)
+	if loadedDraft["draft_id"] != draftID {
+		t.Fatalf("unexpected loaded draft: %+v", loadedDraft)
+	}
+}
+
 func TestResponsesRenderTimestampsInKST(t *testing.T) {
 	server := NewServer(config.Config{
 		BindAddr:       ":0",
