@@ -90,6 +90,106 @@ func (s *PostgresStore) GetProject(projectID string) (domain.Project, error) {
 	return project, nil
 }
 
+func (s *PostgresStore) SaveScenario(scenario domain.Scenario) error {
+	stepsJSON, err := marshalJSON(scenario.Steps)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(
+		`INSERT INTO scenarios (
+			project_id, scenario_id, user_query, query_type, interpretation, analysis_scope, steps, created_at
+		) VALUES (
+			$1::uuid, $2, $3, $4, $5, $6, $7::jsonb, $8
+		)
+		ON CONFLICT (project_id, scenario_id) DO UPDATE
+		SET user_query = EXCLUDED.user_query,
+		    query_type = EXCLUDED.query_type,
+		    interpretation = EXCLUDED.interpretation,
+		    analysis_scope = EXCLUDED.analysis_scope,
+		    steps = EXCLUDED.steps`,
+		scenario.ProjectID,
+		scenario.ScenarioID,
+		scenario.UserQuery,
+		scenario.QueryType,
+		scenario.Interpretation,
+		scenario.AnalysisScope,
+		stepsJSON,
+		scenario.CreatedAt,
+	)
+	return err
+}
+
+func (s *PostgresStore) GetScenario(projectID, scenarioID string) (domain.Scenario, error) {
+	row := s.db.QueryRow(
+		`SELECT project_id::text, scenario_id, user_query, query_type, interpretation, analysis_scope, steps, created_at
+		 FROM scenarios
+		 WHERE project_id = $1::uuid AND scenario_id = $2`,
+		projectID,
+		scenarioID,
+	)
+	var scenario domain.Scenario
+	var stepsRaw []byte
+	if err := row.Scan(
+		&scenario.ProjectID,
+		&scenario.ScenarioID,
+		&scenario.UserQuery,
+		&scenario.QueryType,
+		&scenario.Interpretation,
+		&scenario.AnalysisScope,
+		&stepsRaw,
+		&scenario.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Scenario{}, ErrNotFound
+		}
+		return domain.Scenario{}, err
+	}
+	if err := unmarshalJSON(stepsRaw, &scenario.Steps, []domain.ScenarioStep{}); err != nil {
+		return domain.Scenario{}, err
+	}
+	return scenario, nil
+}
+
+func (s *PostgresStore) ListScenarios(projectID string) ([]domain.Scenario, error) {
+	rows, err := s.db.Query(
+		`SELECT project_id::text, scenario_id, user_query, query_type, interpretation, analysis_scope, steps, created_at
+		 FROM scenarios
+		 WHERE project_id = $1::uuid
+		 ORDER BY created_at ASC, scenario_id ASC`,
+		projectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.Scenario, 0)
+	for rows.Next() {
+		var scenario domain.Scenario
+		var stepsRaw []byte
+		if err := rows.Scan(
+			&scenario.ProjectID,
+			&scenario.ScenarioID,
+			&scenario.UserQuery,
+			&scenario.QueryType,
+			&scenario.Interpretation,
+			&scenario.AnalysisScope,
+			&stepsRaw,
+			&scenario.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(stepsRaw, &scenario.Steps, []domain.ScenarioStep{}); err != nil {
+			return nil, err
+		}
+		items = append(items, scenario)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (s *PostgresStore) SaveDataset(dataset domain.Dataset) error {
 	_, err := s.db.Exec(
 		`INSERT INTO datasets (dataset_id, project_id, name, description, data_type, created_at)
@@ -813,6 +913,17 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			description TEXT,
 			created_at TIMESTAMPTZ NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS scenarios (
+			project_id UUID NOT NULL REFERENCES projects(project_id),
+			scenario_id TEXT NOT NULL,
+			user_query TEXT NOT NULL,
+			query_type TEXT NOT NULL,
+			interpretation TEXT NOT NULL,
+			analysis_scope TEXT NOT NULL,
+			steps JSONB NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			PRIMARY KEY (project_id, scenario_id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS datasets (
 			dataset_id UUID PRIMARY KEY,
 			project_id UUID NOT NULL REFERENCES projects(project_id),
@@ -940,6 +1051,7 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 func (s *PostgresStore) promoteTimestampColumnsToTimestamptz(ctx context.Context) error {
 	columns := []timestampColumn{
 		{tableName: "projects", columnName: "created_at"},
+		{tableName: "scenarios", columnName: "created_at"},
 		{tableName: "datasets", columnName: "created_at"},
 		{tableName: "dataset_versions", columnName: "prepared_at"},
 		{tableName: "dataset_versions", columnName: "sentiment_labeled_at"},

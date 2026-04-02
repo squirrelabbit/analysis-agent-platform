@@ -88,6 +88,66 @@ paths:
                 $ref: "#/components/schemas/Project"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/scenarios:
+    post:
+      tags: [Projects]
+      summary: Register scenario
+      operationId: createScenario
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScenarioCreateRequest"
+      responses:
+        "201":
+          description: Scenario created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Scenario"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      tags: [Projects]
+      summary: List registered scenarios
+      operationId: listScenarios
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Scenario list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/scenarios/{scenario_id}:
+    get:
+      tags: [Projects]
+      summary: Get registered scenario
+      operationId: getScenario
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: scenario_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Scenario detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Scenario"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets:
     post:
       tags: [Datasets]
@@ -634,6 +694,75 @@ components:
             - string
             - "null"
       required: [name]
+    Scenario:
+      type: object
+      properties:
+        scenario_id:
+          type: string
+        project_id:
+          type: string
+        user_query:
+          type: string
+        query_type:
+          type: string
+        interpretation:
+          type: string
+        analysis_scope:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScenarioStep"
+        created_at:
+          type: string
+          format: date-time
+      required: [scenario_id, project_id, user_query, query_type, interpretation, analysis_scope, steps, created_at]
+    ScenarioCreateRequest:
+      type: object
+      properties:
+        scenario_id:
+          type: string
+        user_query:
+          type: string
+        query_type:
+          type: string
+        interpretation:
+          type: string
+        analysis_scope:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScenarioStep"
+      required: [scenario_id, user_query, query_type, interpretation, analysis_scope, steps]
+    ScenarioStep:
+      type: object
+      properties:
+        step:
+          type: integer
+        function_name:
+          type: string
+        runtime_skill_name:
+          type:
+            - string
+            - "null"
+        parameter_text:
+          type:
+            - string
+            - "null"
+        parameters:
+          $ref: "#/components/schemas/AnyMap"
+        result_description:
+          type: string
+      required: [step, function_name, result_description]
+    ScenarioListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Scenario"
+      required: [items]
     Dataset:
       type: object
       properties:

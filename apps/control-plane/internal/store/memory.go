@@ -11,6 +11,7 @@ import (
 type MemoryStore struct {
 	mu         sync.RWMutex
 	projects   map[string]domain.Project
+	scenarios  map[string]domain.Scenario
 	datasets   map[string]domain.Dataset
 	versions   map[string]domain.DatasetVersion
 	requests   map[string]domain.AnalysisRequest
@@ -22,6 +23,7 @@ type MemoryStore struct {
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		projects:   make(map[string]domain.Project),
+		scenarios:  make(map[string]domain.Scenario),
 		datasets:   make(map[string]domain.Dataset),
 		versions:   make(map[string]domain.DatasetVersion),
 		requests:   make(map[string]domain.AnalysisRequest),
@@ -38,6 +40,10 @@ func (s *MemoryStore) SaveProject(project domain.Project) error {
 	return nil
 }
 
+func scenarioKey(projectID, scenarioID string) string {
+	return projectID + "::" + scenarioID
+}
+
 func (s *MemoryStore) GetProject(projectID string) (domain.Project, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -46,6 +52,42 @@ func (s *MemoryStore) GetProject(projectID string) (domain.Project, error) {
 		return domain.Project{}, ErrNotFound
 	}
 	return project, nil
+}
+
+func (s *MemoryStore) SaveScenario(scenario domain.Scenario) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.scenarios[scenarioKey(scenario.ProjectID, scenario.ScenarioID)] = scenario
+	return nil
+}
+
+func (s *MemoryStore) GetScenario(projectID, scenarioID string) (domain.Scenario, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	scenario, ok := s.scenarios[scenarioKey(projectID, scenarioID)]
+	if !ok {
+		return domain.Scenario{}, ErrNotFound
+	}
+	return scenario, nil
+}
+
+func (s *MemoryStore) ListScenarios(projectID string) ([]domain.Scenario, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.Scenario, 0)
+	for _, scenario := range s.scenarios {
+		if scenario.ProjectID != projectID {
+			continue
+		}
+		items = append(items, scenario)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ScenarioID < items[j].ScenarioID
+		}
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+	return items, nil
 }
 
 func (s *MemoryStore) SaveDataset(dataset domain.Dataset) error {

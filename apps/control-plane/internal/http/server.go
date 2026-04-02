@@ -24,6 +24,7 @@ type Server struct {
 	cfg             config.Config
 	mux             *stdhttp.ServeMux
 	projectService  *service.ProjectService
+	scenarioService *service.ScenarioService
 	datasetService  *service.DatasetService
 	analysisService *service.AnalysisService
 }
@@ -46,6 +47,7 @@ func NewServer(cfg config.Config) *Server {
 		cfg:             cfg,
 		mux:             mux,
 		projectService:  service.NewProjectService(repository),
+		scenarioService: service.NewScenarioService(repository),
 		datasetService:  service.NewDatasetService(repository, cfg.PythonAIWorkerURL, cfg.UploadRoot, cfg.ArtifactRoot),
 		analysisService: service.NewAnalysisService(repository, starter, planGenerator),
 	}
@@ -72,6 +74,9 @@ func (s *Server) routes() {
 	})
 	s.mux.HandleFunc("POST /projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /projects/{project_id}", s.handleGetProject)
+	s.mux.HandleFunc("POST /projects/{project_id}/scenarios", s.handleCreateScenario)
+	s.mux.HandleFunc("GET /projects/{project_id}/scenarios", s.handleListScenarios)
+	s.mux.HandleFunc("GET /projects/{project_id}/scenarios/{scenario_id}", s.handleGetScenario)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets", s.handleCreateDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}", s.handleGetDataset)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/uploads", s.handleUploadDataset)
@@ -145,6 +150,38 @@ func (s *Server) handleGetProject(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 		return
 	}
 	writeJSON(w, stdhttp.StatusOK, project)
+}
+
+func (s *Server) handleCreateScenario(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ScenarioCreateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.scenarioService.CreateScenario(r.PathValue("project_id"), payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+func (s *Server) handleListScenarios(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.scenarioService.ListScenarios(r.PathValue("project_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleGetScenario(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.scenarioService.GetScenario(r.PathValue("project_id"), r.PathValue("scenario_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
 }
 
 func (s *Server) handleCreateDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {

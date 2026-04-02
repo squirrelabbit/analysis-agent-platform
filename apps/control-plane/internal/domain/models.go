@@ -14,6 +14,39 @@ type ProjectCreateRequest struct {
 	Description *string `json:"description,omitempty"`
 }
 
+type Scenario struct {
+	ScenarioID     string         `json:"scenario_id"`
+	ProjectID      string         `json:"project_id"`
+	UserQuery      string         `json:"user_query"`
+	QueryType      string         `json:"query_type"`
+	Interpretation string         `json:"interpretation"`
+	AnalysisScope  string         `json:"analysis_scope"`
+	Steps          []ScenarioStep `json:"steps"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
+type ScenarioStep struct {
+	Step              int            `json:"step"`
+	FunctionName      string         `json:"function_name"`
+	RuntimeSkillName  *string        `json:"runtime_skill_name,omitempty"`
+	ParameterText     *string        `json:"parameter_text,omitempty"`
+	Parameters        map[string]any `json:"parameters,omitempty"`
+	ResultDescription string         `json:"result_description"`
+}
+
+type ScenarioCreateRequest struct {
+	ScenarioID     string         `json:"scenario_id"`
+	UserQuery      string         `json:"user_query"`
+	QueryType      string         `json:"query_type"`
+	Interpretation string         `json:"interpretation"`
+	AnalysisScope  string         `json:"analysis_scope"`
+	Steps          []ScenarioStep `json:"steps"`
+}
+
+type ScenarioListResponse struct {
+	Items []Scenario `json:"items"`
+}
+
 type Dataset struct {
 	DatasetID   string    `json:"dataset_id"`
 	ProjectID   string    `json:"project_id"`

@@ -240,6 +240,85 @@ func TestExecutionListAndReportDraftEndpoints(t *testing.T) {
 	}
 }
 
+func TestScenarioEndpoints(t *testing.T) {
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"scenario-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	createBody := `{
+	  "scenario_id":"S1",
+	  "user_query":"이번 벚꽃 축제 반응 어때?",
+	  "query_type":"여론 요약",
+	  "interpretation":"전체 여론 및 분위기 파악",
+	  "analysis_scope":"축제 기간",
+	  "steps":[
+	    {
+	      "step":1,
+	      "function_name":"가비지 필터링",
+	      "runtime_skill_name":"garbage_filter",
+	      "result_description":"분석 대상 정제"
+	    },
+	    {
+	      "step":2,
+	      "function_name":"빈도 기반 키워드 추출",
+	      "parameter_text":"top_n=10",
+	      "parameters":{"top_n":10},
+	      "result_description":"주요 키워드"
+	    }
+	  ]
+	}`
+
+	created := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/scenarios",
+		createBody,
+		http.StatusCreated,
+		&created,
+	)
+	if created["scenario_id"] != "S1" {
+		t.Fatalf("unexpected created scenario: %+v", created)
+	}
+
+	listResponse := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/scenarios",
+		"",
+		http.StatusOK,
+		&listResponse,
+	)
+	items, ok := listResponse["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("unexpected scenario list response: %+v", listResponse)
+	}
+
+	loaded := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/scenarios/S1",
+		"",
+		http.StatusOK,
+		&loaded,
+	)
+	if loaded["user_query"] != "이번 벚꽃 축제 반응 어때?" {
+		t.Fatalf("unexpected loaded scenario: %+v", loaded)
+	}
+}
+
 func TestResponsesRenderTimestampsInKST(t *testing.T) {
 	server := NewServer(config.Config{
 		BindAddr:       ":0",

@@ -161,6 +161,56 @@ docker compose -f compose.dev.yml exec -T python-ai-worker \
 
 아래 예시는 `festival.csv`를 직접 업로드하고 `prepare -> sentiment -> embedding -> analysis -> execution result`까지 따라가는 절차다.
 
+시나리오 등록 기반은 별도 endpoint로 수동 확인할 수 있다.
+아래 명령은 `7-1`까지 실행해 `PROJECT_ID`가 준비된 상태를 전제로 한다.
+
+### 7-0. 시나리오 등록 / 목록 / 상세 조회
+
+```bash
+curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "scenario_id":"S1",
+    "user_query":"이번 벚꽃 축제 반응 어때?",
+    "query_type":"여론 요약",
+    "interpretation":"전체 여론 및 분위기 파악",
+    "analysis_scope":"축제 기간",
+    "steps":[
+      {
+        "step":1,
+        "function_name":"가비지 필터링",
+        "runtime_skill_name":"garbage_filter",
+        "result_description":"분석 대상 정제"
+      },
+      {
+        "step":2,
+        "function_name":"빈도 기반 키워드 추출",
+        "parameter_text":"top_n=10",
+        "parameters":{"top_n":10},
+        "result_description":"주요 키워드"
+      }
+    ]
+  }' \
+| python3 -m json.tool
+
+curl -sS "$API/projects/$PROJECT_ID/scenarios" | python3 -m json.tool
+curl -sS "$API/projects/$PROJECT_ID/scenarios/S1" | python3 -m json.tool
+```
+
+결과 확인:
+
+- `scenario_id`
+- `user_query`
+- `query_type`
+- `interpretation`
+- `analysis_scope`
+- `steps[].step`
+- `steps[].function_name`
+- `steps[].runtime_skill_name`
+- `steps[].parameter_text`
+- `steps[].parameters`
+- `steps[].result_description`
+
 ### 7-1. 프로젝트 생성, dataset 생성, 업로드
 
 ```bash
@@ -562,6 +612,8 @@ docker compose -f compose.dev.yml logs postgres
 | 항목 | 상태 | 설명 |
 | --- | --- | --- |
 | 프로젝트 생성 | 완료 | `POST /projects` 가능 |
+| 시나리오 등록 | 완료 | `POST /projects/{project_id}/scenarios` |
+| 시나리오 목록 / 상세 조회 | 완료 | `GET /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios/{scenario_id}` |
 | dataset 생성 | 완료 | `POST /projects/{project_id}/datasets` 가능 |
 | 파일 업로드 | 완료 | upload와 dataset version 생성 가능 |
 | dataset version 저장 | 완료 | `dataset_versions`에 상태, 모델, URI 저장 |
