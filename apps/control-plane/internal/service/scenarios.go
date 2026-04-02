@@ -19,6 +19,16 @@ type ScenarioService struct {
 
 const scenarioPlanningModeStrict = "strict"
 
+type groupedScenario struct {
+	planningMode   *string
+	userQuery      string
+	queryType      string
+	interpretation string
+	analysisScope  string
+	steps          []domain.ScenarioStep
+	seenSteps      map[int]struct{}
+}
+
 func NewScenarioService(repository store.Repository) *ScenarioService {
 	return &ScenarioService{store: repository}
 }
@@ -131,6 +141,90 @@ func (s *ScenarioService) ListScenarios(projectID string) (domain.ScenarioListRe
 		return domain.ScenarioListResponse{}, err
 	}
 	return domain.ScenarioListResponse{Items: scenarios}, nil
+}
+
+func (s *ScenarioService) ImportScenarios(projectID string, input domain.ScenarioImportRequest) (domain.ScenarioImportResponse, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.ScenarioImportResponse{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.ScenarioImportResponse{}, err
+	}
+	if len(input.Rows) == 0 {
+		return domain.ScenarioImportResponse{}, ErrInvalidArgument{Message: "rows is required"}
+	}
+
+	grouped := make(map[string]*groupedScenario)
+	order := make([]string, 0)
+	for _, row := range input.Rows {
+		scenarioID := strings.TrimSpace(row.ScenarioID)
+		if scenarioID == "" {
+			return domain.ScenarioImportResponse{}, ErrInvalidArgument{Message: "rows[].scenario_id is required"}
+		}
+		if _, exists := grouped[scenarioID]; !exists {
+			grouped[scenarioID] = &groupedScenario{
+				planningMode:   row.PlanningMode,
+				userQuery:      strings.TrimSpace(row.UserQuery),
+				queryType:      strings.TrimSpace(row.QueryType),
+				interpretation: strings.TrimSpace(row.Interpretation),
+				analysisScope:  strings.TrimSpace(row.AnalysisScope),
+				steps:          []domain.ScenarioStep{},
+				seenSteps:      map[int]struct{}{},
+			}
+			order = append(order, scenarioID)
+		}
+
+		group := grouped[scenarioID]
+		if err := validateScenarioImportHeader(row, group); err != nil {
+			return domain.ScenarioImportResponse{}, err
+		}
+		if row.Step <= 0 {
+			return domain.ScenarioImportResponse{}, ErrInvalidArgument{
+				Message: fmt.Sprintf("scenario %q step must be greater than 0", scenarioID),
+			}
+		}
+		if _, exists := group.seenSteps[row.Step]; exists {
+			return domain.ScenarioImportResponse{}, ErrInvalidArgument{
+				Message: fmt.Sprintf("scenario %q has duplicated step %d", scenarioID, row.Step),
+			}
+		}
+		group.seenSteps[row.Step] = struct{}{}
+		group.steps = append(group.steps, domain.ScenarioStep{
+			Step:              row.Step,
+			FunctionName:      row.FunctionName,
+			RuntimeSkillName:  row.RuntimeSkillName,
+			ParameterText:     row.ParameterText,
+			Parameters:        row.Parameters,
+			ResultDescription: row.ResultDescription,
+		})
+	}
+
+	items := make([]domain.Scenario, 0, len(order))
+	for _, scenarioID := range order {
+		group := grouped[scenarioID]
+		sort.SliceStable(group.steps, func(i, j int) bool {
+			return group.steps[i].Step < group.steps[j].Step
+		})
+		scenario, err := s.CreateScenario(projectID, domain.ScenarioCreateRequest{
+			ScenarioID:     scenarioID,
+			PlanningMode:   group.planningMode,
+			UserQuery:      group.userQuery,
+			QueryType:      group.queryType,
+			Interpretation: group.interpretation,
+			AnalysisScope:  group.analysisScope,
+			Steps:          group.steps,
+		})
+		if err != nil {
+			return domain.ScenarioImportResponse{}, err
+		}
+		items = append(items, scenario)
+	}
+
+	return domain.ScenarioImportResponse{
+		ScenarioCount: len(items),
+		RowCount:      len(input.Rows),
+		Items:         items,
+	}, nil
 }
 
 func (s *ScenarioService) BuildAnalysisSubmitRequest(projectID, scenarioID string, input domain.ScenarioPlanCreateRequest) (domain.AnalysisSubmitRequest, error) {
@@ -366,4 +460,39 @@ func normalizeScenarioPlanningMode(raw *string) (string, error) {
 		}
 	}
 	return mode, nil
+}
+
+func validateScenarioImportHeader(row domain.ScenarioImportRow, group *groupedScenario) error {
+	if group == nil {
+		return nil
+	}
+	if strings.TrimSpace(row.UserQuery) != group.userQuery {
+		return ErrInvalidArgument{Message: fmt.Sprintf("scenario %q has inconsistent user_query values", strings.TrimSpace(row.ScenarioID))}
+	}
+	if strings.TrimSpace(row.QueryType) != group.queryType {
+		return ErrInvalidArgument{Message: fmt.Sprintf("scenario %q has inconsistent query_type values", strings.TrimSpace(row.ScenarioID))}
+	}
+	if strings.TrimSpace(row.Interpretation) != group.interpretation {
+		return ErrInvalidArgument{Message: fmt.Sprintf("scenario %q has inconsistent interpretation values", strings.TrimSpace(row.ScenarioID))}
+	}
+	if strings.TrimSpace(row.AnalysisScope) != group.analysisScope {
+		return ErrInvalidArgument{Message: fmt.Sprintf("scenario %q has inconsistent analysis_scope values", strings.TrimSpace(row.ScenarioID))}
+	}
+	currentMode := strings.TrimSpace(optionalImportMode(group.planningMode))
+	incomingMode := strings.TrimSpace(optionalImportMode(row.PlanningMode))
+	if currentMode == "" {
+		group.planningMode = row.PlanningMode
+		currentMode = strings.TrimSpace(optionalImportMode(group.planningMode))
+	}
+	if currentMode != "" && incomingMode != "" && currentMode != incomingMode {
+		return ErrInvalidArgument{Message: fmt.Sprintf("scenario %q has inconsistent planning_mode values", strings.TrimSpace(row.ScenarioID))}
+	}
+	return nil
+}
+
+func optionalImportMode(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

@@ -127,6 +127,30 @@ paths:
                 $ref: "#/components/schemas/ScenarioListResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/scenarios/import:
+    post:
+      tags: [Projects]
+      summary: Import scenarios from row-oriented sheet payload
+      operationId: importScenarios
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScenarioImportRequest"
+      responses:
+        "201":
+          description: Scenarios imported
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioImportResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/scenarios/{scenario_id}:
     get:
       tags: [Projects]
@@ -798,6 +822,60 @@ components:
           items:
             $ref: "#/components/schemas/Scenario"
       required: [items]
+    ScenarioImportRow:
+      type: object
+      properties:
+        scenario_id:
+          type: string
+        planning_mode:
+          type:
+            - string
+            - "null"
+        user_query:
+          type: string
+        query_type:
+          type: string
+        interpretation:
+          type: string
+        analysis_scope:
+          type: string
+        step:
+          type: integer
+        function_name:
+          type: string
+        runtime_skill_name:
+          type:
+            - string
+            - "null"
+        parameter_text:
+          type:
+            - string
+            - "null"
+        parameters:
+          $ref: "#/components/schemas/AnyMap"
+        result_description:
+          type: string
+      required: [scenario_id, user_query, query_type, interpretation, analysis_scope, step, function_name, result_description]
+    ScenarioImportRequest:
+      type: object
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScenarioImportRow"
+      required: [rows]
+    ScenarioImportResponse:
+      type: object
+      properties:
+        scenario_count:
+          type: integer
+        row_count:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Scenario"
+      required: [scenario_count, row_count, items]
     ScenarioPlanCreateRequest:
       type: object
       properties:

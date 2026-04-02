@@ -164,7 +164,7 @@ docker compose -f compose.dev.yml exec -T python-ai-worker \
 시나리오 등록과 시나리오 기반 plan 생성은 별도 endpoint로 수동 확인할 수 있다.
 아래 시나리오 등록 명령은 `PROJECT_ID`가 준비된 상태를 전제로 한다. `scenario -> plan` 생성은 `VERSION_ID`가 필요하므로 `7-1` 이후에 실행한다.
 
-### 7-0. 시나리오 등록 / 목록 / 상세 조회
+### 7-0. 시나리오 등록 / 일괄 등록 / 목록 / 상세 조회
 
 ```bash
 curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios" \
@@ -198,6 +198,56 @@ curl -sS "$API/projects/$PROJECT_ID/scenarios" | python3 -m json.tool
 curl -sS "$API/projects/$PROJECT_ID/scenarios/S1" | python3 -m json.tool
 ```
 
+row 형태 표가 있으면 아래처럼 한 번에 넣을 수 있다.
+
+```bash
+curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios/import" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "rows":[
+      {
+        "scenario_id":"S1",
+        "planning_mode":"strict",
+        "user_query":"이번 벚꽃 축제 반응 어때?",
+        "query_type":"여론 요약",
+        "interpretation":"전체 여론 및 분위기 파악",
+        "analysis_scope":"축제 기간",
+        "step":1,
+        "function_name":"가비지 필터링",
+        "runtime_skill_name":"garbage_filter",
+        "result_description":"분석 대상 정제"
+      },
+      {
+        "scenario_id":"S1",
+        "planning_mode":"strict",
+        "user_query":"이번 벚꽃 축제 반응 어때?",
+        "query_type":"여론 요약",
+        "interpretation":"전체 여론 및 분위기 파악",
+        "analysis_scope":"축제 기간",
+        "step":2,
+        "function_name":"빈도 기반 키워드 추출",
+        "runtime_skill_name":"keyword_frequency",
+        "parameter_text":"top_n=10",
+        "parameters":{"top_n":10},
+        "result_description":"주요 키워드"
+      },
+      {
+        "scenario_id":"S2",
+        "planning_mode":"strict",
+        "user_query":"이번 축제 문제 뭐였어?",
+        "query_type":"이슈 분석",
+        "interpretation":"부정 의견 중심 문제 파악",
+        "analysis_scope":"축제 기간",
+        "step":1,
+        "function_name":"문서 단위 감성 분류",
+        "runtime_skill_name":"issue_sentiment_summary",
+        "result_description":"감성 분류"
+      }
+    ]
+  }' \
+| python3 -m json.tool
+```
+
 결과 확인:
 
 - `scenario_id`
@@ -212,6 +262,9 @@ curl -sS "$API/projects/$PROJECT_ID/scenarios/S1" | python3 -m json.tool
 - `steps[].parameter_text`
 - `steps[].parameters`
 - `steps[].result_description`
+- `POST /scenarios/import` 결과의 `scenario_count`
+- `POST /scenarios/import` 결과의 `row_count`
+- `POST /scenarios/import` 결과의 `items[].scenario_id`
 
 주의:
 
@@ -219,6 +272,7 @@ curl -sS "$API/projects/$PROJECT_ID/scenarios/S1" | python3 -m json.tool
 - 현재 `planning_mode`는 `strict`만 지원한다.
 - 직접 매핑되지 않는 step은 시나리오 등록 시 `runtime_skill_name`을 명시해야 한다.
 - `guided`나 guardrail 기반 planner는 아직 backlog다.
+- 일괄 등록에서는 같은 `scenario_id`의 `user_query`, `query_type`, `interpretation`, `analysis_scope`, `planning_mode`가 서로 다르면 에러를 돌린다.
 
 ### 7-1. 프로젝트 생성, dataset 생성, 업로드
 
@@ -640,6 +694,7 @@ docker compose -f compose.dev.yml logs postgres
 | --- | --- | --- |
 | 프로젝트 생성 | 완료 | `POST /projects` 가능 |
 | 시나리오 등록 | 완료 | `POST /projects/{project_id}/scenarios` |
+| 시나리오 일괄 등록 | 완료 | `POST /projects/{project_id}/scenarios/import` |
 | 시나리오 목록 / 상세 조회 | 완료 | `GET /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios/{scenario_id}` |
 | 시나리오 기반 plan 생성 | 완료 | `POST /projects/{project_id}/scenarios/{scenario_id}/plans` |
 | dataset 생성 | 완료 | `POST /projects/{project_id}/datasets` 가능 |

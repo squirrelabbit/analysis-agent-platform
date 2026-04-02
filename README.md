@@ -32,6 +32,7 @@
 - 비정형 support skill에 `garbage_filter`가 추가돼 광고/협찬/링크 유도/placeholder/noise-only row를 downstream 분석 전에 제거할 수 있다.
 - 비정형 support skill에 `noun_frequency`, `sentence_split`이 추가돼 한국어 명사 중심 집계와 문장 단위 span/citation 준비를 직접 실행할 수 있다. 가능하면 `kiwipiepy`, `kss`를 사용하고, 없으면 regex fallback으로 내려간다.
 - control plane에는 현재 `scenario` 등록 기반이 추가돼 `scenario_id`, `planning_mode=strict`, `user_query`, `query_type`, `interpretation`, `analysis_scope`, `steps[]`를 project 단위로 저장하고, 저장된 시나리오에서 `analysis_request + plan`을 자동 생성할 수 있다.
+- 시나리오 표가 row 단위로 정리돼 있으면 `scenarios/import` API로 `scenario_id` 기준 일괄 등록할 수 있다.
 - `garbage_filter`는 execution 안에서 실행되면 row 단위 결과를 `rows.parquet` sidecar로 저장하고, execution artifact JSON에는 summary와 `artifact_ref`만 남긴다.
 - `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding` 운영 기본 출력은 `embeddings.index.parquet + pgvector`다.
 - `sentiment_label` 기본 출력은 이제 `row_id`, `source_row_index`, 감성 컬럼 중심의 sidecar이고, `issue_sentiment_summary`는 `prepared_dataset_name`을 함께 받아 텍스트를 조인한다.
@@ -92,6 +93,7 @@
 - `GET /projects/{project_id}/executions`는 현재 저장된 snapshot 기준 실행 목록 preview를 반환한다.
 - `POST /projects/{project_id}/report_drafts`, `GET /projects/{project_id}/report_drafts/{draft_id}`는 현재 보고서 초안 저장/조회 API다.
 - `POST /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios/{scenario_id}`, `POST /projects/{project_id}/scenarios/{scenario_id}/plans`는 현재 시나리오 등록/plan 생성 API다.
+- `POST /projects/{project_id}/scenarios/import`는 row 기반 시나리오 표를 `scenario_id`별로 묶어 한 번에 등록하는 API다.
 - 현재 시나리오 planning mode는 `strict`만 지원하고, `guided`나 guardrail 기반 planner 확장은 backlog다.
 - 검증 자산
   - Go unit test / build

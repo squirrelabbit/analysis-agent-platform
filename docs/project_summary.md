@@ -9,6 +9,7 @@
 
 - 프로젝트와 dataset, dataset version을 등록한다.
 - project 단위로 재사용 가능한 분석 시나리오를 `strict` 모드로 등록하고, 저장된 시나리오에서 분석 요청과 plan을 바로 생성할 수 있다.
+- 시나리오 표가 row 단위로 정리돼 있으면 `scenario_id` 기준으로 묶어 여러 시나리오를 한 번에 등록할 수 있다.
 - 원본 dataset을 upload한 뒤 필요하면 `prepare`, `sentiment`, `embedding` 산출물을 만든다.
 - 분석 요청을 제출하면 planner가 최소 skill plan을 만들고, Temporal workflow가 실행과 `waiting / resume`를 오케스트레이션한다.
 - 실행 결과는 artifact와 execution metadata로 남고, 같은 execution context 기준으로 `rerun / diff` 할 수 있다.
@@ -44,6 +45,7 @@
 - `GET /projects/{project_id}/executions`는 현재 execution 목록을 `result_v1 snapshot` preview와 함께 보여준다.
 - `POST /projects/{project_id}/report_drafts`, `GET /projects/{project_id}/report_drafts/{draft_id}`는 선택한 execution snapshot을 묶어 `report-draft-v1` 문서를 저장/조회한다.
 - `POST /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios/{scenario_id}`, `POST /projects/{project_id}/scenarios/{scenario_id}/plans`는 현재 `planning_mode=strict` 기준의 시나리오를 저장하고 `analysis_request + plan`을 생성하는 기반이다.
+- `POST /projects/{project_id}/scenarios/import`는 row 기반 시나리오 표를 `scenario_id` 기준으로 묶어 등록하는 bulk import 경로다.
 - 확인 필요: 시나리오에서 바로 execution까지 enqueue하는 one-shot endpoint는 아직 없다.
 - 확인 필요: `guided` planner나 mandatory/optional/allowed skill 가드레일은 아직 backlog다.
 - `sentiment.parquet`는 현재 `row_id`, `source_row_index`, 감성 컬럼 중심 sidecar이고, `issue_sentiment_summary`는 prepared dataset ref를 받아 텍스트를 조인한다.

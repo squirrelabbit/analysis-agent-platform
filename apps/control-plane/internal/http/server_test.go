@@ -419,6 +419,69 @@ func TestScenarioPlanEndpoint(t *testing.T) {
 	}
 }
 
+func TestScenarioImportEndpoint(t *testing.T) {
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"scenario-import-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	imported := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/scenarios/import",
+		`{
+		  "rows":[
+		    {
+		      "scenario_id":"S1",
+		      "user_query":"이번 벚꽃 축제 반응 어때?",
+		      "query_type":"여론 요약",
+		      "interpretation":"전체 여론 및 분위기 파악",
+		      "analysis_scope":"축제 기간",
+		      "step":2,
+		      "function_name":"빈도 기반 키워드 추출",
+		      "parameter_text":"top_n=10",
+		      "result_description":"주요 키워드"
+		    },
+		    {
+		      "scenario_id":"S1",
+		      "user_query":"이번 벚꽃 축제 반응 어때?",
+		      "query_type":"여론 요약",
+		      "interpretation":"전체 여론 및 분위기 파악",
+		      "analysis_scope":"축제 기간",
+		      "step":1,
+		      "function_name":"가비지 필터링",
+		      "result_description":"분석 대상 정제"
+		    }
+		  ]
+		}`,
+		http.StatusCreated,
+		&imported,
+	)
+	if imported["scenario_count"] != float64(1) || imported["row_count"] != float64(2) {
+		t.Fatalf("unexpected import response: %+v", imported)
+	}
+	items := imported["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("unexpected import items: %+v", imported)
+	}
+	scenario := items[0].(map[string]any)
+	if scenario["planning_mode"] != "strict" {
+		t.Fatalf("unexpected imported planning mode: %+v", scenario)
+	}
+	steps := scenario["steps"].([]any)
+	if steps[0].(map[string]any)["step"] != float64(1) {
+		t.Fatalf("expected sorted imported steps: %+v", steps)
+	}
+}
+
 func TestResponsesRenderTimestampsInKST(t *testing.T) {
 	server := NewServer(config.Config{
 		BindAddr:       ":0",

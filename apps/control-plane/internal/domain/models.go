@@ -49,6 +49,31 @@ type ScenarioListResponse struct {
 	Items []Scenario `json:"items"`
 }
 
+type ScenarioImportRow struct {
+	ScenarioID        string         `json:"scenario_id"`
+	PlanningMode      *string        `json:"planning_mode,omitempty"`
+	UserQuery         string         `json:"user_query"`
+	QueryType         string         `json:"query_type"`
+	Interpretation    string         `json:"interpretation"`
+	AnalysisScope     string         `json:"analysis_scope"`
+	Step              int            `json:"step"`
+	FunctionName      string         `json:"function_name"`
+	RuntimeSkillName  *string        `json:"runtime_skill_name,omitempty"`
+	ParameterText     *string        `json:"parameter_text,omitempty"`
+	Parameters        map[string]any `json:"parameters,omitempty"`
+	ResultDescription string         `json:"result_description"`
+}
+
+type ScenarioImportRequest struct {
+	Rows []ScenarioImportRow `json:"rows"`
+}
+
+type ScenarioImportResponse struct {
+	ScenarioCount int        `json:"scenario_count"`
+	RowCount      int        `json:"row_count"`
+	Items         []Scenario `json:"items"`
+}
+
 type ScenarioPlanCreateRequest struct {
 	DatasetVersionID string         `json:"dataset_version_id"`
 	Goal             *string        `json:"goal,omitempty"`

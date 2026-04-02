@@ -75,6 +75,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /projects/{project_id}", s.handleGetProject)
 	s.mux.HandleFunc("POST /projects/{project_id}/scenarios", s.handleCreateScenario)
+	s.mux.HandleFunc("POST /projects/{project_id}/scenarios/import", s.handleImportScenarios)
 	s.mux.HandleFunc("GET /projects/{project_id}/scenarios", s.handleListScenarios)
 	s.mux.HandleFunc("GET /projects/{project_id}/scenarios/{scenario_id}", s.handleGetScenario)
 	s.mux.HandleFunc("POST /projects/{project_id}/scenarios/{scenario_id}/plans", s.handleCreateScenarioPlan)
@@ -160,6 +161,20 @@ func (s *Server) handleCreateScenario(w stdhttp.ResponseWriter, r *stdhttp.Reque
 		return
 	}
 	response, err := s.scenarioService.CreateScenario(r.PathValue("project_id"), payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+func (s *Server) handleImportScenarios(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ScenarioImportRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.scenarioService.ImportScenarios(r.PathValue("project_id"), payload)
 	if err != nil {
 		s.writeServiceError(w, err)
 		return

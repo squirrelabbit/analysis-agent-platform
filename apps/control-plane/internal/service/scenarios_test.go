@@ -208,3 +208,106 @@ func TestBuildScenarioAnalysisSubmitRequestRejectsUnsupportedFunctionName(t *tes
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestImportScenariosGroupsRowsByScenarioID(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewScenarioService(repository)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	response, err := service.ImportScenarios(project.ProjectID, domain.ScenarioImportRequest{
+		Rows: []domain.ScenarioImportRow{
+			{
+				ScenarioID:        "S1",
+				UserQuery:         "이번 벚꽃 축제 반응 어때?",
+				QueryType:         "여론 요약",
+				Interpretation:    "전체 여론 및 분위기 파악",
+				AnalysisScope:     "축제 기간",
+				Step:              2,
+				FunctionName:      "빈도 기반 키워드 추출",
+				ParameterText:     stringPointer("top_n=10"),
+				ResultDescription: "주요 키워드",
+			},
+			{
+				ScenarioID:        "S1",
+				UserQuery:         "이번 벚꽃 축제 반응 어때?",
+				QueryType:         "여론 요약",
+				Interpretation:    "전체 여론 및 분위기 파악",
+				AnalysisScope:     "축제 기간",
+				Step:              1,
+				FunctionName:      "가비지 필터링",
+				ResultDescription: "분석 대상 정제",
+			},
+			{
+				ScenarioID:        "S2",
+				UserQuery:         "이번 축제 문제 뭐였어?",
+				QueryType:         "이슈 분석",
+				Interpretation:    "부정 의견 중심 문제 파악",
+				AnalysisScope:     "축제 기간",
+				Step:              1,
+				FunctionName:      "문서 단위 감성 분류",
+				RuntimeSkillName:  stringPointer("issue_sentiment_summary"),
+				ResultDescription: "감성 분류",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected import scenarios error: %v", err)
+	}
+	if response.ScenarioCount != 2 || response.RowCount != 3 {
+		t.Fatalf("unexpected import response: %+v", response)
+	}
+	if len(response.Items) != 2 {
+		t.Fatalf("unexpected imported items: %+v", response.Items)
+	}
+	if response.Items[0].PlanningMode != scenarioPlanningModeStrict {
+		t.Fatalf("expected default strict planning mode: %+v", response.Items[0])
+	}
+	if response.Items[0].Steps[0].Step != 1 || response.Items[0].Steps[1].Step != 2 {
+		t.Fatalf("expected sorted steps: %+v", response.Items[0].Steps)
+	}
+}
+
+func TestImportScenariosRejectsInconsistentHeaderValues(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewScenarioService(repository)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	_, err := service.ImportScenarios(project.ProjectID, domain.ScenarioImportRequest{
+		Rows: []domain.ScenarioImportRow{
+			{
+				ScenarioID:        "S1",
+				UserQuery:         "이번 벚꽃 축제 반응 어때?",
+				QueryType:         "여론 요약",
+				Interpretation:    "전체 여론 및 분위기 파악",
+				AnalysisScope:     "축제 기간",
+				Step:              1,
+				FunctionName:      "가비지 필터링",
+				ResultDescription: "분석 대상 정제",
+			},
+			{
+				ScenarioID:        "S1",
+				UserQuery:         "이번 벚꽃 축제 반응 어때?",
+				QueryType:         "트렌드 분석",
+				Interpretation:    "전체 여론 및 분위기 파악",
+				AnalysisScope:     "축제 기간",
+				Step:              2,
+				FunctionName:      "빈도 기반 키워드 추출",
+				ResultDescription: "주요 키워드",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected inconsistent header error")
+	}
+	if err.Error() != `scenario "S1" has inconsistent query_type values` {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
