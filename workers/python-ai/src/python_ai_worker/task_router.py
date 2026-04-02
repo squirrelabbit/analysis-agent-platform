@@ -27,7 +27,9 @@ from .skills.support import (
     run_garbage_filter,
     run_keyword_frequency,
     run_meta_group_count,
+    run_noun_frequency,
     run_semantic_search,
+    run_sentence_split,
     run_time_bucket_count,
 )
 
@@ -76,6 +78,8 @@ def task_handlers() -> dict[str, Any]:
         "document_filter": run_document_filter,
         "deduplicate_documents": run_deduplicate_documents,
         "keyword_frequency": run_keyword_frequency,
+        "noun_frequency": run_noun_frequency,
+        "sentence_split": run_sentence_split,
         "time_bucket_count": run_time_bucket_count,
         "meta_group_count": run_meta_group_count,
         "document_sample": run_document_sample,

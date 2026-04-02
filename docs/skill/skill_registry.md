@@ -60,6 +60,8 @@ Unstructured support:
 - `document_filter`
 - `deduplicate_documents`
 - `keyword_frequency`
+- `noun_frequency`
+- `sentence_split`
 - `time_bucket_count`
 - `meta_group_count`
 - `document_sample`
@@ -90,16 +92,16 @@ Unstructured core:
 즉, `/skills`가 반환하는 공식 plan skill 목록과 dataset build API가 직접 호출하는 worker task는 구분해서 본다.
 현재 bundle에서도 build task는 `kind=dataset_build`, `plan_enabled=false`로 구분한다.
 
-## 후보와 backlog
-
-아래 항목은 분석팀 전처리 자산과 현재 코드 구조를 비교해 본 후보이며, 아직 공식 runtime bundle에는 올라가 있지 않다.
+## 전처리 확장 메모
 
 - `noun_frequency`
-  - `keyword_frequency` 옆에 두는 한국어 명사 중심 후보 support skill이다.
-  - Kiwi 같은 형태소 분석기, 사용자 사전, 불용어 사전을 함께 써서 명사 토큰 빈도를 집계하는 방향을 우선 본다.
+  - `keyword_frequency` 옆에 두는 한국어 명사 중심 support skill이다.
+  - 가능하면 Kiwi 형태소 분석기를 쓰고, 없으면 regex token fallback으로 내려간다.
+  - `top_nouns`에 `term_frequency`, `document_frequency`를 함께 남긴다.
 - `sentence_split`
-  - 문장 단위 citation, 문장 단위 sentiment, 긴 문서 evidence ranking이 필요할 때를 위한 backlog다.
-  - 현재는 chunk 기반 retrieval이 있어 즉시 필수는 아니다.
+  - 문장 단위 citation과 sentence-level downstream 처리를 위한 support skill이다.
+  - 가능하면 `kss`를 쓰고, 없으면 regex fallback으로 내려간다.
+  - 실행 안에서는 문장 row를 `rows.parquet` sidecar로 저장할 수 있다.
 
 ## 아직 TODO로 남겨둔 범위
 

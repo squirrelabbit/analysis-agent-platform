@@ -25,7 +25,9 @@ from .skills.support import (  # noqa: F401
     run_garbage_filter,
     run_keyword_frequency,
     run_meta_group_count,
+    run_noun_frequency,
     run_semantic_search,
+    run_sentence_split,
     run_time_bucket_count,
 )
 from .task_router import (  # noqa: F401
@@ -62,9 +64,11 @@ __all__ = [
     "run_issue_trend_summary",
     "run_keyword_frequency",
     "run_meta_group_count",
+    "run_noun_frequency",
     "run_planner",
     "run_semantic_search",
     "run_sentiment_label",
+    "run_sentence_split",
     "run_task",
     "run_time_bucket_count",
     "supported_capabilities",

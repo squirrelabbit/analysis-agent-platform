@@ -10,6 +10,16 @@ from pathlib import Path
 from typing import Any
 
 try:
+    import kss
+except ImportError:  # pragma: no cover - optional sentence splitter dependency
+    kss = None
+
+try:
+    from kiwipiepy import Kiwi
+except ImportError:  # pragma: no cover - optional noun analyzer dependency
+    Kiwi = None
+
+try:
     import pyarrow as pa
     import pyarrow.parquet as pq
 except ImportError:  # pragma: no cover - exercised in environments without parquet support
@@ -27,6 +37,8 @@ from .rule_config import (
     resolve_prepare_regex_rules,
     resolve_taxonomy_rules,
 )
+
+_KIWI_INSTANCES: dict[str, Any] = {}
 
 
 def _iter_documents(dataset_name: str, text_column: str) -> list[str]:
@@ -92,6 +104,30 @@ def _coerce_string_list(value: Any) -> list[str]:
         text = str(item).strip()
         if text:
             normalized.append(text)
+    return normalized
+
+
+def _normalize_stopwords(value: Any) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in _coerce_string_list(value):
+        token = _normalize_token(item)
+        if not token or token in seen:
+            continue
+        normalized.append(token)
+        seen.add(token)
+    return normalized
+
+
+def _normalize_pos_prefixes(value: Any) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in _coerce_string_list(value):
+        prefix = str(item).strip().upper()
+        if not prefix or prefix in seen:
+            continue
+        normalized.append(prefix)
+        seen.add(prefix)
     return normalized
 
 
@@ -189,6 +225,119 @@ def _normalize_token(token: str) -> str:
     return normalized
 
 
+def _extract_noun_tokens(
+    text: str,
+    *,
+    stopwords: list[str] | set[str] | None = None,
+    user_dictionary_path: str = "",
+    min_token_length: int = 2,
+    allowed_pos_prefixes: list[str] | None = None,
+) -> tuple[list[str], str]:
+    normalized_text = _normalize_prepared_text(str(text or ""))
+    if not normalized_text:
+        return [], "empty"
+
+    stopword_set = {token for token in STOPWORDS}
+    if stopwords:
+        stopword_set.update(_normalize_stopwords(list(stopwords)))
+    min_length = max(1, int(min_token_length))
+    prefixes = _normalize_pos_prefixes(allowed_pos_prefixes or ["N"])
+
+    if Kiwi is not None:
+        try:
+            kiwi = _get_kiwi(user_dictionary_path)
+            noun_tokens: list[str] = []
+            for token in kiwi.tokenize(normalized_text):
+                tag = str(getattr(token, "tag", "") or "").strip().upper()
+                if prefixes and not any(tag.startswith(prefix) for prefix in prefixes):
+                    continue
+                surface = _normalize_token(str(getattr(token, "form", "") or ""))
+                if not surface or len(surface) < min_length or surface in stopword_set:
+                    continue
+                noun_tokens.append(surface)
+            return noun_tokens, "kiwi"
+        except Exception:
+            pass
+
+    noun_tokens = []
+    for token in _tokenize(normalized_text):
+        if len(token) < min_length or token in stopword_set:
+            continue
+        noun_tokens.append(token)
+    return noun_tokens, "regex_fallback"
+
+
+def _get_kiwi(user_dictionary_path: str = "") -> Any:
+    if Kiwi is None:
+        raise RuntimeError("kiwipiepy is not installed")
+    dictionary_path = str(user_dictionary_path or "").strip()
+    cached = _KIWI_INSTANCES.get(dictionary_path)
+    if cached is not None:
+        return cached
+
+    kiwi = Kiwi()
+    if dictionary_path:
+        path = Path(dictionary_path)
+        if not path.is_file():
+            raise ValueError(f"user_dictionary_path does not exist: {dictionary_path}")
+        kiwi.load_user_dictionary(str(path))
+    _KIWI_INSTANCES[dictionary_path] = kiwi
+    return kiwi
+
+
+def _sentence_spans(text: str, *, language: str = "ko") -> tuple[list[dict[str, Any]], str]:
+    normalized_text = str(text or "").strip()
+    if not normalized_text:
+        return [], "empty"
+
+    sentences, backend = _split_sentences(normalized_text, language=language)
+    spans: list[dict[str, Any]] = []
+    cursor = 0
+    for sentence_index, sentence in enumerate(sentences):
+        current = str(sentence).strip()
+        if not current:
+            continue
+        start = normalized_text.find(current, cursor)
+        if start < 0:
+            start = cursor
+        end = start + len(current)
+        cursor = end
+        spans.append(
+            {
+                "sentence_index": sentence_index,
+                "sentence_text": current,
+                "char_start": start,
+                "char_end": end,
+            }
+        )
+    return spans, backend
+
+
+def _split_sentences(text: str, *, language: str = "ko") -> tuple[list[str], str]:
+    normalized_text = str(text or "").strip()
+    if not normalized_text:
+        return [], "empty"
+
+    normalized_language = str(language or "ko").strip().lower()
+    if kss is not None and normalized_language in {"ko", "kr", "korean", "auto"}:
+        try:
+            sentences = [str(item).strip() for item in kss.split_sentences(normalized_text)]
+            sentences = [item for item in sentences if item]
+            if sentences:
+                return sentences, "kss"
+        except Exception:
+            pass
+
+    sentences = [
+        item.strip()
+        for item in re.split(r"(?<=[.!?。！？])\s+|\n+", normalized_text)
+        if str(item).strip()
+    ]
+    if sentences:
+        return sentences, "regex"
+    return [normalized_text], "regex"
+
+
 def _looks_unstructured(goal: str) -> bool:
     keywords = ("issue", "voc", "text", "document", "review", "이슈", "문의", "리뷰", "문서", "텍스트")
     return any(keyword in goal for keyword in keywords)
@@ -231,6 +380,16 @@ def _looks_duplicate_goal(goal: str) -> bool:
 
 def _looks_sentiment_goal(goal: str) -> bool:
     keywords = ("sentiment", "positive", "negative", "neutral", "긍정", "부정", "중립", "감성", "감정", "호감", "불만", "만족")
+    return any(keyword in goal for keyword in keywords)
+
+
+def _looks_noun_frequency_goal(goal: str) -> bool:
+    keywords = ("noun", "nouns", "명사", "명사 추출", "명사 빈도", "명사 키워드")
+    return any(keyword in goal for keyword in keywords)
+
+
+def _looks_sentence_split_goal(goal: str) -> bool:
+    keywords = ("sentence split", "sentence-level", "문장 분리", "문장단위", "문장 단위", "문장별", "문장으로 나눠")
     return any(keyword in goal for keyword in keywords)
 
 
@@ -556,6 +715,7 @@ __all__ = [
     "_cosine_similarity",
     "_duplicate_similarity",
     "_evidence_rationale",
+    "_extract_noun_tokens",
     "_fallback_evidence_summary",
     "_fallback_follow_up_questions",
     "_apply_prepare_regex_rules",
@@ -567,17 +727,21 @@ __all__ = [
     "_looks_cluster_goal",
     "_looks_compare_goal",
     "_looks_duplicate_goal",
+    "_looks_noun_frequency_goal",
     "_looks_noise_only",
     "_looks_semantic_search_goal",
     "_looks_sentiment_goal",
+    "_looks_sentence_split_goal",
     "_looks_taxonomy_goal",
     "_looks_trend_goal",
     "_looks_unstructured",
     "_match_taxonomies",
     "_match_garbage_rules",
     "_normalize_garbage_rule_names",
+    "_normalize_pos_prefixes",
     "_normalize_prepared_text",
     "_normalize_prepare_regex_rule_names",
+    "_normalize_stopwords",
     "_normalize_taxonomy_rules",
     "_normalize_token",
     "_parse_timestamp",
@@ -588,6 +752,7 @@ __all__ = [
     "_read_jsonl_rows",
     "_read_parquet_rows",
     "_resolve_compare_periods",
+    "_sentence_spans",
     "_token_counter",
     "_tokenize",
     "_vector_norm",

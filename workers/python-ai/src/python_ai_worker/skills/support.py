@@ -408,6 +408,170 @@ def run_keyword_frequency(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def run_noun_frequency(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = rt._normalize_noun_frequency_payload(payload)
+    selected_rows = rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
+    term_frequency: Counter[str] = Counter()
+    document_frequency: Counter[str] = Counter()
+    analyzer_backend_counts: Counter[str] = Counter()
+    sample_rows: list[dict[str, Any]] = []
+    total_terms = 0
+    document_count = 0
+
+    for item in selected_rows:
+        text = item["text"]
+        if not text:
+            continue
+        noun_tokens, analyzer_backend = rt._extract_noun_tokens(
+            text,
+            stopwords=normalized["stopwords"],
+            user_dictionary_path=normalized["user_dictionary_path"],
+            min_token_length=normalized["min_token_length"],
+            allowed_pos_prefixes=normalized["allowed_pos_prefixes"],
+        )
+        analyzer_backend_counts.update([analyzer_backend])
+        if not noun_tokens:
+            continue
+        unique_terms = set(noun_tokens)
+        term_frequency.update(noun_tokens)
+        document_frequency.update(unique_terms)
+        total_terms += len(noun_tokens)
+        document_count += 1
+        if len(sample_rows) < normalized["sample_n"]:
+            sample_rows.append(
+                {
+                    "row_id": str(item.get("row_id") or "").strip(),
+                    "source_index": int(item["source_index"]),
+                    "text": text[:240],
+                    "noun_tokens": noun_tokens[: normalized["top_n"]],
+                }
+            )
+
+    analyzer_backend = analyzer_backend_counts.most_common(1)[0][0] if analyzer_backend_counts else "empty"
+    top_nouns = []
+    for term, count in term_frequency.most_common(normalized["top_n"]):
+        top_nouns.append(
+            {
+                "term": term,
+                "term_frequency": count,
+                "document_frequency": int(document_frequency.get(term) or 0),
+            }
+        )
+
+    return {
+        "notes": [
+            f"noun_frequency counted noun tokens across {document_count} rows",
+            f"dataset source: {normalized['dataset_name']}",
+            f"analyzer_backend: {analyzer_backend}",
+        ],
+        "artifact": {
+            "skill_name": "noun_frequency",
+            "step_id": normalized["step"].get("step_id"),
+            "dataset_name": normalized["dataset_name"],
+            "user_dictionary_path": normalized["user_dictionary_path"],
+            "stopwords": list(normalized["stopwords"]),
+            "allowed_pos_prefixes": list(normalized["allowed_pos_prefixes"]),
+            "summary": {
+                "document_count": document_count,
+                "unique_terms": len(term_frequency),
+                "total_terms": total_terms,
+                "min_token_length": normalized["min_token_length"],
+                "analyzer_backend": analyzer_backend,
+            },
+            "top_nouns": top_nouns,
+            "sample_rows": sample_rows,
+        },
+    }
+
+
+def run_sentence_split(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = rt._normalize_sentence_split_payload(payload)
+    selected_rows = rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
+    artifact_rows: list[dict[str, Any]] = []
+    sample_documents: list[dict[str, Any]] = []
+    splitter_backend_counts: Counter[str] = Counter()
+    document_count = 0
+    sentence_count = 0
+    max_sentences_per_document = 0
+
+    for item in selected_rows:
+        text = item["text"]
+        if not text:
+            continue
+        sentence_spans, splitter_backend = rt._sentence_spans(text, language=normalized["language"])
+        splitter_backend_counts.update([splitter_backend])
+        sentence_count += len(sentence_spans)
+        max_sentences_per_document = max(max_sentences_per_document, len(sentence_spans))
+        document_count += 1
+
+        preview_sentences = []
+        for sentence in sentence_spans:
+            row = {
+                "row_id": str(item.get("row_id") or "").strip(),
+                "source_index": int(item["source_index"]),
+                "sentence_index": int(sentence["sentence_index"]),
+                "sentence_text": str(sentence["sentence_text"]),
+                "char_start": int(sentence["char_start"]),
+                "char_end": int(sentence["char_end"]),
+            }
+            artifact_rows.append(row)
+            if len(preview_sentences) < normalized["preview_sentences_per_row"]:
+                preview_sentences.append(dict(row))
+
+        if preview_sentences and len(sample_documents) < normalized["sample_n"]:
+            sample_documents.append(
+                {
+                    "row_id": str(item.get("row_id") or "").strip(),
+                    "source_index": int(item["source_index"]),
+                    "sentence_count": len(sentence_spans),
+                    "sentences": preview_sentences,
+                }
+            )
+
+    artifact_ref = ""
+    artifact_format = ""
+    if normalized["artifact_output_path"]:
+        artifact_path = Path(normalized["artifact_output_path"])
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        rt._write_parquet_rows(artifact_path, artifact_rows)
+        artifact_ref = str(artifact_path)
+        artifact_format = "parquet"
+
+    splitter_backend = splitter_backend_counts.most_common(1)[0][0] if splitter_backend_counts else "empty"
+    average_sentences_per_document = round(sentence_count / document_count, 2) if document_count > 0 else 0.0
+
+    return {
+        "notes": [
+            f"sentence_split produced {sentence_count} sentences from {document_count} rows",
+            f"dataset source: {normalized['dataset_name']}",
+            f"splitter_backend: {splitter_backend}",
+        ],
+        "artifact": {
+            "skill_name": "sentence_split",
+            "step_id": normalized["step"].get("step_id"),
+            "dataset_name": normalized["dataset_name"],
+            "language": normalized["language"],
+            "artifact_storage_mode": "sidecar_ref" if artifact_ref else "inline_preview",
+            "artifact_ref": artifact_ref,
+            "artifact_format": artifact_format,
+            "row_id_column": "row_id",
+            "source_index_column": "source_index",
+            "sentence_index_column": "sentence_index",
+            "sentence_text_column": "sentence_text",
+            "char_start_column": "char_start",
+            "char_end_column": "char_end",
+            "summary": {
+                "document_count": document_count,
+                "sentence_count": sentence_count,
+                "average_sentences_per_document": average_sentences_per_document,
+                "max_sentences_per_document": max_sentences_per_document,
+                "splitter_backend": splitter_backend,
+            },
+            "sample_documents": sample_documents,
+        },
+    }
+
+
 def run_time_bucket_count(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_trend_task_payload(payload)
     selected_rows = rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))

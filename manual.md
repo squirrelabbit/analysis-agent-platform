@@ -488,6 +488,8 @@ docker compose -f compose.dev.yml logs postgres
 | prepare 단독 실행 | 완료 | `POST .../prepare` |
 | sentiment 단독 실행 | 완료 | `POST .../sentiment` |
 | embedding 단독 실행 | 완료 | `POST .../embeddings` |
+| noun_frequency 단독 실행 | 완료 | worker `POST /tasks/noun_frequency` |
+| sentence_split 단독 실행 | 완료 | worker `POST /tasks/sentence_split` |
 | prepare 결과 Parquet 저장 | 완료 | `prepared.parquet` 경로 |
 | sentiment 결과 Parquet 저장 | 완료 | `sentiment.parquet` 경로 |
 | chunk Parquet 생성 | 완료 | embedding 전에 chunk dataset 생성 |

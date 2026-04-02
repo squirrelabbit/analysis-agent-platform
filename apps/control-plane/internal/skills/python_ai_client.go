@@ -250,6 +250,24 @@ func compactPythonArtifactForStorage(step domain.SkillPlanStep, artifact map[str
 				"duplicate_records":             artifact["duplicate_records"],
 				"duplicate_groups_preview":      compactDuplicateGroupsPreview(artifact["duplicate_groups"]),
 			}
+		case "sentence_split":
+			compacted = map[string]any{
+				"skill_name":            artifact["skill_name"],
+				"step_id":               artifact["step_id"],
+				"dataset_name":          artifact["dataset_name"],
+				"language":              artifact["language"],
+				"artifact_storage_mode": artifact["artifact_storage_mode"],
+				"artifact_ref":          ref,
+				"artifact_format":       artifact["artifact_format"],
+				"row_id_column":         artifact["row_id_column"],
+				"source_index_column":   artifact["source_index_column"],
+				"sentence_index_column": artifact["sentence_index_column"],
+				"sentence_text_column":  artifact["sentence_text_column"],
+				"char_start_column":     artifact["char_start_column"],
+				"char_end_column":       artifact["char_end_column"],
+				"summary":               artifact["summary"],
+				"sample_documents":      artifact["sample_documents"],
+			}
 		}
 		if compacted != nil {
 			payload, err := json.Marshal(compacted)
@@ -274,6 +292,8 @@ func sidecarOutputFileName(skillName string) (string, bool) {
 		return "document_filter.matches.parquet", true
 	case "deduplicate_documents":
 		return "deduplicate_documents.rows.parquet", true
+	case "sentence_split":
+		return "sentence_split.rows.parquet", true
 	default:
 		return "", false
 	}

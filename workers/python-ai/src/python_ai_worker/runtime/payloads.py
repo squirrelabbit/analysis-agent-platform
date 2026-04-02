@@ -3,14 +3,24 @@ from __future__ import annotations
 from typing import Any
 
 from ..skill_bundle import default_inputs_for_skill
-from .common import _normalize_garbage_rule_names, _normalize_prepare_regex_rule_names, _normalize_taxonomy_rules
+from .common import (
+    _normalize_garbage_rule_names,
+    _normalize_pos_prefixes,
+    _normalize_prepare_regex_rule_names,
+    _normalize_stopwords,
+    _normalize_taxonomy_rules,
+)
 from .constants import (
     DEFAULT_CLUSTER_SIMILARITY_THRESHOLD,
     DEFAULT_DUPLICATE_THRESHOLD,
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_GARBAGE_RULE_NAMES,
     DEFAULT_MAX_TAGS_PER_DOCUMENT,
+    DEFAULT_NOUN_ALLOWED_POS_PREFIXES,
+    DEFAULT_NOUN_MIN_TOKEN_LENGTH,
     DEFAULT_PREPARE_BATCH_SIZE,
+    DEFAULT_SENTENCE_PREVIEW_PER_ROW,
+    DEFAULT_SENTENCE_SPLIT_LANGUAGE,
 )
 
 DEFAULT_EMBEDDING_CHUNK_MAX_CHARS = 400
@@ -123,6 +133,45 @@ def _normalize_garbage_filter_payload(payload: dict[str, Any]) -> dict[str, Any]
     inputs = step.get("inputs") or {}
     normalized["garbage_rule_names"] = _normalize_garbage_rule_names(
         inputs.get("garbage_rule_names") or payload.get("garbage_rule_names") or DEFAULT_GARBAGE_RULE_NAMES
+    )
+    normalized["artifact_output_path"] = str(
+        inputs.get("artifact_output_path") or payload.get("artifact_output_path") or ""
+    ).strip()
+    return normalized
+
+
+def _normalize_noun_frequency_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_text_task_payload(payload)
+    step = normalized["step"]
+    inputs = step.get("inputs") or {}
+    normalized["stopwords"] = _normalize_stopwords(inputs.get("stopwords") or payload.get("stopwords") or [])
+    normalized["user_dictionary_path"] = str(
+        inputs.get("user_dictionary_path") or payload.get("user_dictionary_path") or ""
+    ).strip()
+    normalized["min_token_length"] = max(
+        1,
+        int(inputs.get("min_token_length") or payload.get("min_token_length") or DEFAULT_NOUN_MIN_TOKEN_LENGTH),
+    )
+    normalized["allowed_pos_prefixes"] = _normalize_pos_prefixes(
+        inputs.get("allowed_pos_prefixes") or payload.get("allowed_pos_prefixes") or DEFAULT_NOUN_ALLOWED_POS_PREFIXES
+    ) or list(DEFAULT_NOUN_ALLOWED_POS_PREFIXES)
+    return normalized
+
+
+def _normalize_sentence_split_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_text_task_payload(payload)
+    step = normalized["step"]
+    inputs = step.get("inputs") or {}
+    normalized["language"] = str(
+        inputs.get("language") or payload.get("language") or DEFAULT_SENTENCE_SPLIT_LANGUAGE
+    ).strip().lower() or DEFAULT_SENTENCE_SPLIT_LANGUAGE
+    normalized["preview_sentences_per_row"] = max(
+        1,
+        int(
+            inputs.get("preview_sentences_per_row")
+            or payload.get("preview_sentences_per_row")
+            or DEFAULT_SENTENCE_PREVIEW_PER_ROW
+        ),
     )
     normalized["artifact_output_path"] = str(
         inputs.get("artifact_output_path") or payload.get("artifact_output_path") or ""
@@ -258,9 +307,11 @@ __all__ = [
     "_normalize_embedding_cluster_payload",
     "_normalize_embedding_payload",
     "_normalize_inputs",
+    "_normalize_noun_frequency_payload",
     "_normalize_prepare_payload",
     "_normalize_sentiment_build_payload",
     "_normalize_sentiment_summary_payload",
+    "_normalize_sentence_split_payload",
     "_normalize_text_task_payload",
     "_normalize_trend_task_payload",
 ]

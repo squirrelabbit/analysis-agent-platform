@@ -3,7 +3,11 @@ name = "python-ai-worker"
 version = "0.1.0"
 description = "AI worker scaffold for planning, embeddings, semantic search, and evidence generation."
 requires-python = ">=3.11"
-dependencies = ["fastembed>=0.8,<0.9", "pyarrow>=21,<22", "psycopg[binary]>=3.2,<3.3"]
+dependencies = [
+  "fastembed>=0.8,<0.9",
+  "pyarrow>=21,<22",
+  "psycopg[binary]>=3.2,<3.3",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

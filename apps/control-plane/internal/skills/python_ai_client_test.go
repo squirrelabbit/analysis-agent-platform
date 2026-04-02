@@ -338,6 +338,16 @@ func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 					"top_terms":[{"term":"결제","count":2}]
 				}
 			}`))
+		case "/tasks/noun_frequency":
+			_, _ = w.Write([]byte(`{
+				"notes":["noun path completed"],
+				"artifact":{
+					"skill_name":"noun_frequency",
+					"usage":{"provider":"local","model":"kiwi","operation":"noun_frequency","request_count":1,"input_tokens":0,"output_tokens":0,"total_tokens":0,"cost_estimation_status":"free"},
+					"summary":{"document_count":2,"analyzer_backend":"kiwi"},
+					"top_nouns":[{"term":"결제","term_frequency":2,"document_frequency":2}]
+				}
+			}`))
 		case "/tasks/time_bucket_count":
 			_, _ = w.Write([]byte(`{
 				"notes":["time bucket path completed"],
@@ -371,23 +381,27 @@ func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 			Steps: []domain.SkillPlanStep{
 				{StepID: "step-1", SkillName: "document_filter", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "query": "결제 오류"}},
 				{StepID: "step-2", SkillName: "keyword_frequency", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "top_n": 3}},
-				{StepID: "step-3", SkillName: "time_bucket_count", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "time_column": "occurred_at", "bucket": "day"}},
-				{StepID: "step-4", SkillName: "meta_group_count", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "dimension_column": "channel"}},
-				{StepID: "step-5", SkillName: "document_sample", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "query": "결제 오류"}},
+				{StepID: "step-3", SkillName: "noun_frequency", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "top_n": 3}},
+				{StepID: "step-4", SkillName: "time_bucket_count", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "time_column": "occurred_at", "bucket": "day"}},
+				{StepID: "step-5", SkillName: "meta_group_count", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "dimension_column": "channel"}},
+				{StepID: "step-6", SkillName: "document_sample", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "query": "결제 오류"}},
 			},
 		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.ProcessedSteps != 5 {
+	if result.ProcessedSteps != 6 {
 		t.Fatalf("unexpected processed steps: %d", result.ProcessedSteps)
 	}
 	if !strings.Contains(result.Artifacts["step:step-2:keyword_frequency"], `"결제"`) {
 		t.Fatalf("unexpected keyword artifact: %s", result.Artifacts["step:step-2:keyword_frequency"])
 	}
-	if !strings.Contains(result.Artifacts["step:step-5:document_sample"], `"sample_count":2`) {
-		t.Fatalf("unexpected sample artifact: %s", result.Artifacts["step:step-5:document_sample"])
+	if !strings.Contains(result.Artifacts["step:step-3:noun_frequency"], `"analyzer_backend":"kiwi"`) {
+		t.Fatalf("unexpected noun artifact: %s", result.Artifacts["step:step-3:noun_frequency"])
+	}
+	if !strings.Contains(result.Artifacts["step:step-6:document_sample"], `"sample_count":2`) {
+		t.Fatalf("unexpected sample artifact: %s", result.Artifacts["step:step-6:document_sample"])
 	}
 	if result.UsageSummary == nil {
 		t.Fatalf("expected usage summary")
@@ -395,7 +409,7 @@ func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 	if totalTokens, ok := result.UsageSummary["total_tokens"].(int); !ok || totalTokens != 210 {
 		t.Fatalf("unexpected usage summary: %+v", result.UsageSummary)
 	}
-	if len(result.StepHooks) != 10 {
+	if len(result.StepHooks) != 12 {
 		t.Fatalf("unexpected step hook count: %+v", result.StepHooks)
 	}
 }
@@ -680,5 +694,83 @@ func TestPythonAIClientStoresDeduplicateDocumentsAsSidecarRefButKeepsRuntimeArti
 	}
 	if !strings.Contains(result.Artifacts["step:step-2:keyword_frequency"], `"document_count":2`) {
 		t.Fatalf("unexpected keyword_frequency artifact: %s", result.Artifacts["step:step-2:keyword_frequency"])
+	}
+}
+
+func TestPythonAIClientStoresSentenceSplitAsSidecarRef(t *testing.T) {
+	artifactRoot := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("unexpected read error: %v", err)
+		}
+		switch r.URL.Path {
+		case "/tasks/sentence_split":
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("unexpected unmarshal error: %v", err)
+			}
+			step := payload["step"].(map[string]any)
+			inputs := step["inputs"].(map[string]any)
+			outputPath := inputs["artifact_output_path"].(string)
+			expectedSuffix := filepath.Join("steps", "step-1.sentence_split.rows.parquet")
+			if !strings.HasPrefix(outputPath, artifactRoot) || !strings.HasSuffix(outputPath, expectedSuffix) {
+				t.Fatalf("unexpected sentence_split output path: %s", outputPath)
+			}
+			if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+				t.Fatalf("unexpected mkdir error: %v", err)
+			}
+			if err := os.WriteFile(outputPath, []byte("parquet-placeholder"), 0o644); err != nil {
+				t.Fatalf("unexpected write error: %v", err)
+			}
+			_, _ = w.Write([]byte(`{
+				"notes":["sentence split completed"],
+				"artifact":{
+					"skill_name":"sentence_split",
+					"language":"ko",
+					"artifact_storage_mode":"sidecar_ref",
+					"artifact_ref":"` + outputPath + `",
+					"artifact_format":"parquet",
+					"row_id_column":"row_id",
+					"source_index_column":"source_index",
+					"sentence_index_column":"sentence_index",
+					"sentence_text_column":"sentence_text",
+					"char_start_column":"char_start",
+					"char_end_column":"char_end",
+					"summary":{"document_count":2,"sentence_count":4,"splitter_backend":"kss"},
+					"sample_documents":[{"source_index":0,"sentence_count":2,"sentences":[{"sentence_index":0,"sentence_text":"결제 오류입니다"}]}]
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := PythonAIClient{
+		BaseURL:      server.URL,
+		HTTPClient:   server.Client(),
+		ArtifactRoot: artifactRoot,
+	}
+
+	result, err := client.Run(context.Background(), domain.ExecutionSummary{
+		ExecutionID: "exec-sentences",
+		ProjectID:   "project-1",
+		Plan: domain.SkillPlan{
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "sentence_split", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text"}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sentenceArtifact := result.Artifacts["step:step-1:sentence_split"]
+	if !strings.Contains(sentenceArtifact, `"artifact_ref":"`) {
+		t.Fatalf("expected artifact_ref in stored sentence_split artifact: %s", sentenceArtifact)
+	}
+	if !strings.Contains(sentenceArtifact, `"sample_documents"`) {
+		t.Fatalf("expected sample_documents preview in stored sentence_split artifact: %s", sentenceArtifact)
 	}
 }

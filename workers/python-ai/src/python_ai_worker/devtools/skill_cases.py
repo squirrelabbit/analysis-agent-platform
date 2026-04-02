@@ -296,6 +296,54 @@ def _keyword_frequency_case(ctx: SkillCaseContext) -> dict[str, Any]:
     )
 
 
+def _noun_frequency_case(ctx: SkillCaseContext) -> dict[str, Any]:
+    csv_path = ctx.write_csv("issues.csv", ["occurred_at", "channel", "text"], _issue_rows())
+    filtered = ctx.run(
+        "document_filter",
+        {
+            "dataset_name": str(csv_path),
+            "text_column": "text",
+            "query": "결제 오류",
+            "sample_n": 3,
+        },
+    )
+    return ctx.run(
+        "noun_frequency",
+        {
+            "dataset_name": str(csv_path),
+            "text_column": "text",
+            "top_n": 5,
+            "sample_n": 2,
+            "prior_artifacts": _prior(("step:filter", filtered)),
+        },
+    )
+
+
+def _sentence_split_case(ctx: SkillCaseContext) -> dict[str, Any]:
+    csv_path = ctx.write_csv("issues_sentences.csv", ["text"], [
+        {"text": "결제 오류가 반복 발생했습니다. 환불 문의도 늘었습니다."},
+        {"text": "로그인이 자주 실패합니다! 인증 오류가 함께 보입니다."},
+    ])
+    filtered = ctx.run(
+        "document_filter",
+        {
+            "dataset_name": str(csv_path),
+            "text_column": "text",
+            "query": "오류",
+            "sample_n": 5,
+        },
+    )
+    return ctx.run(
+        "sentence_split",
+        {
+            "dataset_name": str(csv_path),
+            "text_column": "text",
+            "sample_n": 2,
+            "prior_artifacts": _prior(("step:filter", filtered)),
+        },
+    )
+
+
 def _time_bucket_count_case(ctx: SkillCaseContext) -> dict[str, Any]:
     csv_path = ctx.write_csv("issues.csv", ["occurred_at", "channel", "text"], _issue_rows())
     filtered = ctx.run(
@@ -859,6 +907,8 @@ SKILL_CASES: dict[str, SkillCase] = {
     "document_filter": SkillCase("document_filter", "lexical narrowing over issue rows", _document_filter_case),
     "deduplicate_documents": SkillCase("deduplicate_documents", "collapse duplicate or near-duplicate rows", _deduplicate_documents_case),
     "keyword_frequency": SkillCase("keyword_frequency", "count top terms from filtered rows", _keyword_frequency_case),
+    "noun_frequency": SkillCase("noun_frequency", "count noun-focused top terms from filtered rows", _noun_frequency_case),
+    "sentence_split": SkillCase("sentence_split", "split filtered rows into sentence-level spans", _sentence_split_case),
     "time_bucket_count": SkillCase("time_bucket_count", "bucket filtered rows by time", _time_bucket_count_case),
     "meta_group_count": SkillCase("meta_group_count", "group filtered rows by metadata dimension", _meta_group_count_case),
     "document_sample": SkillCase("document_sample", "select representative rows after filtering", _document_sample_case),

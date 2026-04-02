@@ -1,5 +1,5 @@
 {
-  "version": "2026-04-01-v1",
+  "version": "2026-04-02-v1",
   "default_plans": {
     "structured": [
       "structured_kpi_summary"
@@ -39,6 +39,14 @@
       "document_sample",
       "unstructured_issue_summary",
       "issue_evidence_summary"
+    ],
+    "unstructured_noun_frequency": [
+      "document_filter",
+      "noun_frequency"
+    ],
+    "unstructured_sentence_split": [
+      "document_filter",
+      "sentence_split"
     ],
     "unstructured_cluster": [
       "document_filter",
@@ -170,6 +178,43 @@
       "default_inputs": {
         "text_column": "text",
         "top_n": 10
+      }
+    },
+    {
+      "name": "noun_frequency",
+      "description": "Count noun-focused keywords from filtered unstructured rows.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/noun_frequency",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "default_inputs": {
+        "text_column": "text",
+        "top_n": 10,
+        "sample_n": 3,
+        "min_token_length": 2,
+        "allowed_pos_prefixes": [
+          "N"
+        ]
+      }
+    },
+    {
+      "name": "sentence_split",
+      "description": "Split filtered text rows into sentence-level spans.",
+      "engine": "python-ai",
+      "kind": "plan",
+      "category": "unstructured_support",
+      "plan_enabled": true,
+      "task_path": "/tasks/sentence_split",
+      "dataset_source": "prepared",
+      "requires_prepare": true,
+      "default_inputs": {
+        "text_column": "text",
+        "sample_n": 3,
+        "language": "ko",
+        "preview_sentences_per_row": 3
       }
     },
     {

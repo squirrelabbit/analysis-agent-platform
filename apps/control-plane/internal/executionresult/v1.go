@@ -328,6 +328,22 @@ func executionArtifactSummary(artifact map[string]any) string {
 		count := usageIntValue(summary["filtered_row_count"])
 		inputCount := usageIntValue(summary["input_row_count"])
 		return fmt.Sprintf("%d개 행을 선택했습니다. 전체 입력은 %d개였습니다.", count, inputCount)
+	case "noun_frequency":
+		topTerms := executionArtifactMapSlice(artifact["top_nouns"], 2)
+		terms := make([]string, 0, len(topTerms))
+		for _, item := range topTerms {
+			term := strings.TrimSpace(artifactStringValue(item["term"]))
+			if term != "" {
+				terms = append(terms, term)
+			}
+		}
+		if len(terms) > 0 {
+			return fmt.Sprintf("상위 명사는 %s 입니다.", strings.Join(terms, ", "))
+		}
+	case "sentence_split":
+		documentCount := usageIntValue(summary["document_count"])
+		sentenceCount := usageIntValue(summary["sentence_count"])
+		return fmt.Sprintf("%d개 문서를 %d개 문장으로 분리했습니다.", documentCount, sentenceCount)
 	case "deduplicate_documents":
 		canonicalCount := usageIntValue(summary["canonical_row_count"])
 		duplicateCount := usageIntValue(summary["duplicate_row_count"])
@@ -403,6 +419,20 @@ func deriveExecutionFindings(artifact map[string]any) []string {
 	case "structured_kpi_summary":
 		rowCount := usageIntValue(summary["row_count"])
 		findings = append(findings, fmt.Sprintf("집계 대상은 %d행입니다.", rowCount))
+	case "noun_frequency":
+		for _, item := range executionArtifactMapSlice(artifact["top_nouns"], 3) {
+			term := strings.TrimSpace(artifactStringValue(item["term"]))
+			count := usageIntValue(item["term_frequency"])
+			if term != "" && count > 0 {
+				findings = append(findings, fmt.Sprintf("%s 명사가 %d회 등장했습니다.", term, count))
+			}
+		}
+	case "sentence_split":
+		sentenceCount := usageIntValue(summary["sentence_count"])
+		documentCount := usageIntValue(summary["document_count"])
+		if sentenceCount > 0 {
+			findings = append(findings, fmt.Sprintf("%d개 문서를 %d개 문장으로 분리했습니다.", documentCount, sentenceCount))
+		}
 	}
 	return uniqueNonEmptyStrings(findings)
 }

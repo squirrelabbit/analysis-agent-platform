@@ -29,6 +29,7 @@
 - `dataset_prepare`에는 `regex_rule_names` 확장 포인트가 있고, 현재 기본 규칙은 `media_placeholder`, `html_artifact`, `url_cleanup`, `zero_width_cleanup` 4종이다.
 - prepare regex, garbage, taxonomy 규칙은 현재 기본 상수 위에 `PYTHON_AI_RULE_CONFIG_PATH` JSON 파일, `PYTHON_AI_RULE_CONFIG_JSON` inline JSON, request payload override가 차례로 덮이는 layered config를 지원한다.
 - 비정형 support skill에 `garbage_filter`가 추가돼 광고/협찬/링크 유도/placeholder/noise-only row를 downstream 분석 전에 제거할 수 있다.
+- 비정형 support skill에 `noun_frequency`, `sentence_split`이 추가돼 한국어 명사 중심 집계와 문장 단위 span/citation 준비를 직접 실행할 수 있다. 가능하면 `kiwipiepy`, `kss`를 사용하고, 없으면 regex fallback으로 내려간다.
 - `garbage_filter`는 execution 안에서 실행되면 row 단위 결과를 `rows.parquet` sidecar로 저장하고, execution artifact JSON에는 summary와 `artifact_ref`만 남긴다.
 - `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding`은 아직 JSONL sidecar를 유지한다.
 - `sentiment_label` 기본 출력은 이제 `row_id`, `source_row_index`, 감성 컬럼 중심의 sidecar이고, `issue_sentiment_summary`는 `prepared_dataset_name`을 함께 받아 텍스트를 조인한다.
@@ -110,6 +111,8 @@ Support skill:
 - `document_filter`
 - `deduplicate_documents`
 - `keyword_frequency`
+- `noun_frequency`
+- `sentence_split`
 - `time_bucket_count`
 - `meta_group_count`
 - `document_sample`

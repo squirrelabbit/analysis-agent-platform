@@ -78,13 +78,14 @@
 
 ### `noun_frequency`
 
-- 분류: 후보 unstructured support skill
+- 분류: 구현된 unstructured support skill
 - 위치: `keyword_frequency` 옆
 - 목적: 한국어 VOC/SNS 문서에서 명사 중심 top term을 안정적으로 뽑는다.
-- 현재 필요성:
-  - `keyword_frequency`는 regex token frequency라 한국어 복합 명사 품질이 제한된다.
-  - 분석팀 자산도 Kiwi 기반 명사 추출을 많이 사용한다.
-- 예상 입력:
+- 현재 구현:
+  - filtered row를 읽고 `top_nouns(term_frequency, document_frequency)`를 만든다.
+  - `kiwipiepy`가 있으면 품사 태깅을 쓰고, 없으면 regex token fallback으로 내려간다.
+  - preview row에는 `noun_tokens`를 함께 남긴다.
+- 입력:
   - prepared dataset
   - `text_column`
   - `top_n`
@@ -93,18 +94,17 @@
   - `user_dictionary_path`
   - `min_token_length`
   - `allowed_pos_prefixes` 기본값 `["N"]`
-- 예상 처리:
-  - Kiwi 같은 형태소 분석기로 품사 태깅
+- 처리:
+  - 가능하면 Kiwi 형태소 분석기로 품사 태깅
   - 명사만 선택
   - 최소 길이와 불용어 필터 적용
   - 필요하면 사용자 사전 로드
   - 문서 빈도와 전체 토큰 빈도를 함께 집계
-- 예상 출력:
+- 출력:
   - `top_nouns`
   - `document_frequency`
   - `term_frequency`
   - `sample_rows`
-  - 필요 시 `row_noun_tokens`
 - 장점:
   - 한국어 이슈명, 기능명, 기관명 추출 품질 개선
   - `keyword_frequency` 대비 의미 있는 명사 집계 강화
@@ -117,37 +117,43 @@
   - 재사용 가능성: 높음
   - 자동화 가능 여부: YES
 - 현재 상태:
-  - 공식 runtime bundle 미포함
-  - 설계 후보
+  - 공식 runtime bundle 포함
+  - worker task와 planner sequence 연결 완료
 
 ## backlog
 
 ### `sentence_split`
 
-- 분류: backlog utility 또는 prepare 옵션 후보
+- 분류: 구현된 support utility skill
 - 목적:
   - 문장 단위 citation
   - sentence-level sentiment
   - 긴 문서에서 evidence ranking 정밀도 향상
-- 현재 보류 이유:
-  - 이미 chunk 기반 retrieval이 있어 즉시 필수는 아니다.
-  - 지금 단계에서는 sentence split보다 retrieval/cluster 품질이 우선순위가 높다.
-- 나중에 구현한다면:
-  - 입력: prepared dataset, `text_column`, 언어 옵션
-  - 출력: `sentences.parquet` 또는 문장 배열 sidecar
-  - 후보 기술: `kss` 또는 다른 문장 분리기
+- 현재 구현:
+  - filtered row를 문장 단위 span으로 나누고 `sample_documents` preview를 남긴다.
+  - `kss`가 있으면 한국어 문장 분리기를 우선 사용하고, 없으면 regex fallback으로 내려간다.
+  - `artifact_output_path`가 있으면 문장 row를 `rows.parquet` sidecar로 저장한다.
+- 입력:
+  - prepared dataset
+  - `text_column`
+  - `language`
+  - `preview_sentences_per_row`
+- 출력:
+  - `summary`
+  - `sample_documents`
+  - 필요 시 `rows.parquet`
 - 판단:
-  - 규칙 명확성: 중간
+  - 규칙 명확성: 중간 이상
   - 재사용 가능성: 중간 이상
-  - 자동화 가능 여부: YES, 다만 언어/예외 규칙 검증 필요
+  - 자동화 가능 여부: YES
 
 ## 현재 추천 우선순위
 
 1. `garbage_filter` 규칙 사전 고도화
-2. `noun_frequency` 후보를 support skill로 구체화
-3. `sentence_split`은 문장 단위 citation 요구가 생길 때 착수
+2. `noun_frequency` 사용자 사전/stopword 운영 기준 정리
+3. `sentence_split` 결과를 sentence-level citation 소비 경로와 연결
 
 ## 확인 필요
 
-- `noun_frequency` 구현 시 Kiwi를 기본 의존성으로 둘지, 선택 플러그인으로 둘지는 아직 결정하지 않았다.
-- `sentence_split` 결과를 `prepare` 안에 넣을지, 별도 task로 둘지는 아직 결정하지 않았다.
+- `noun_frequency`에서 사용자 사전을 프로젝트 단위 설정으로 둘지, request payload override 중심으로 둘지는 아직 결정하지 않았다.
+- `sentence_split` 결과를 `issue_evidence_summary`나 후속 sentence-level sentiment에 바로 연결할지는 아직 결정하지 않았다.

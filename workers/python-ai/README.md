@@ -14,6 +14,8 @@
   - `document_filter`
   - `deduplicate_documents`
   - `keyword_frequency`
+  - `noun_frequency`
+  - `sentence_split`
   - `time_bucket_count`
   - `meta_group_count`
   - `document_sample`
@@ -78,6 +80,8 @@
 - `POST /tasks/garbage_filter`
 - `POST /tasks/deduplicate_documents`
 - `POST /tasks/keyword_frequency`
+- `POST /tasks/noun_frequency`
+- `POST /tasks/sentence_split`
 - `POST /tasks/time_bucket_count`
 - `POST /tasks/meta_group_count`
 - `POST /tasks/document_sample`
@@ -173,6 +177,8 @@
 - `garbage_filter`는 `artifact_output_path`를 받으면 `row_id`, `source_index`, `filter_status`, `matched_rules`를 담은 `rows.parquet` sidecar를 쓴다. control plane execution 경로에서는 이 sidecar ref만 DB artifact에 남기고, step chaining에는 full artifact를 계속 사용한다.
 - `document_filter`는 `artifact_output_path`를 받으면 matched row의 `row_id`, `source_index`, `rank`, `score`를 담은 `matches.parquet` sidecar를 쓴다.
 - `deduplicate_documents`는 `artifact_output_path`를 받으면 row별 canonical mapping을 담은 `rows.parquet` sidecar를 쓴다.
+- `noun_frequency`는 현재 filtered row에서 명사 중심 top term을 집계한다. `kiwipiepy`가 있으면 품사 태깅을 사용하고, 없으면 regex token fallback으로 내려간다. `top_nouns`에는 `term_frequency`, `document_frequency`를 함께 남긴다.
+- `sentence_split`은 현재 filtered row를 문장 단위 span으로 나눈다. `kss`가 있으면 한국어 문장 분리기를 우선 쓰고, 없으면 regex fallback으로 내려간다. `artifact_output_path`를 받으면 `row_id`, `source_index`, `sentence_index`, `sentence_text`, `char_start`, `char_end`를 담은 `rows.parquet` sidecar를 쓴다.
 - `issue_evidence_summary`는 `issue_trend_summary`, `issue_breakdown_summary`, `issue_period_compare`, `issue_cluster_summary`, `issue_taxonomy_summary`, `issue_sentiment_summary` 같은 prior artifact를 `analysis_context`로 반영한다.
 - `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 우선 사용한다. generic overlap 회귀 fixture가 unit test에 추가됐고, `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` token fallback을 사용한다.
 - 테스트에는 `dense-only`와 `dense-hybrid`를 같은 generic overlap fixture에서 비교하는 helper 케이스가 있고, 현재 기준으로 `dense-only`는 1개 군집으로 붕괴되고 `dense-hybrid`는 `3개 군집`을 유지한다.
@@ -184,13 +190,14 @@
 - `embedding_cluster`는 dense vector가 있으면 dense cosine similarity에 token-overlap guardrail을 곱한 `dense-hybrid` greedy clustering을 사용하고, dense가 없으면 token vector cosine similarity로 fallback한다.
 - `cluster_label_candidates`는 cluster top term으로 label 후보를 만든다.
 - helper 단위 테스트는 `workers/python-ai/tests/test_runtime_helpers.py`에서 payload/artifact/planner helper를 직접 검증한다.
-- 한국어 형태소 기반 `noun_frequency`는 아직 runtime task가 아니고 후보 설계로만 관리한다.
-- `sentence_split`도 현재는 backlog이며 chunk 기반 retrieval을 먼저 사용한다.
-
 ## rule-based planner 패턴
 
 - 일반 요약:
   - `document_filter -> keyword_frequency -> document_sample -> unstructured_issue_summary -> issue_evidence_summary`
+- 명사 키워드:
+  - `document_filter -> noun_frequency`
+- 문장 분리:
+  - `document_filter -> sentence_split`
 - 광고/가비지 정제:
   - `garbage_filter -> document_filter -> document_sample -> issue_evidence_summary`
 - 추세:

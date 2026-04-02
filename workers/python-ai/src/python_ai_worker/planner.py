@@ -29,6 +29,10 @@ def _run_rule_based_planner(payload: dict[str, Any]) -> dict[str, Any]:
 
     if data_type in {"mixed", "both"}:
         sequence_name = "mixed_default"
+    elif data_type == "unstructured" and rt._looks_sentence_split_goal(goal):
+        sequence_name = "unstructured_sentence_split"
+    elif data_type == "unstructured" and rt._looks_noun_frequency_goal(goal):
+        sequence_name = "unstructured_noun_frequency"
     elif data_type == "unstructured" and rt._looks_cluster_goal(goal):
         sequence_name = "unstructured_cluster"
     elif data_type == "unstructured" and rt._looks_taxonomy_goal(goal):

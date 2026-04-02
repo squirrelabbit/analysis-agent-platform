@@ -44,6 +44,8 @@
 | `garbage_filter` | 광고/가비지 제거 | `workers/python-ai/src/python_ai_worker/skills/support.py` | prepared row를 읽은 뒤 `ad_marker`, `promotion_link`, `platform_placeholder`, `empty_or_noise` 규칙으로 광고/협찬/링크 유도/placeholder/noise-only row를 제거한다. worker 직접 호출 시에는 inline artifact를 반환하고, execution 안에서 실행되면 row 단위 결과를 `rows.parquet` sidecar로 저장한 뒤 execution artifact JSON에는 summary, `artifact_ref`, `artifact_format`, column metadata만 남긴다. | 규칙 사전 확장, 채널별 정책 분리, regex/operator 조합 확장, borderline row review 경로를 추가할 수 있다. |
 | `deduplicate_documents` | 중복 문서 제거 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 정규화 텍스트 exact match와 token-set Jaccard similarity로 대표 문서와 중복 문서를 묶는다. worker 직접 호출 시에는 inline artifact를 반환하고, execution 안에서 실행되면 row별 canonical mapping을 `rows.parquet` sidecar로 저장한 뒤 execution artifact JSON에는 summary, `artifact_ref`, preview `duplicate_records`만 남긴다. | MinHash/LSH, dense embedding 기반 near-duplicate 탐지, source-aware dedup, threshold tuning을 추가할 수 있다. |
 | `keyword_frequency` | 키워드 빈도 집계 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 선택된 문서의 regex token frequency를 집계한다. 현재는 형태소 분석기 대신 공통 tokenization helper를 사용한다. | n-gram, TF-IDF, keyphrase extraction, stopword 자동 보정, domain lexicon weighting, 한국어 형태소 기반 `noun_frequency` 후보를 추가할 수 있다. |
+| `noun_frequency` | 명사 빈도 집계 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 선택된 문서에서 명사 중심 top term을 집계한다. `kiwipiepy`가 있으면 품사 태깅을 사용하고, 없으면 regex token fallback으로 내려간다. 결과는 `top_nouns(term_frequency, document_frequency)`와 preview row를 남긴다. | 사용자 사전 운영, stopword 정책 분리, 명사구/복합명사 결합, domain lexicon weighting을 추가할 수 있다. |
+| `sentence_split` | 문장 분리 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 선택된 문서를 문장 단위 span으로 나눈다. `kss`가 있으면 한국어 문장 분리기를 우선 쓰고, 없으면 regex fallback을 사용한다. execution 안에서 실행되면 `row_id`, `source_index`, `sentence_index`, `sentence_text`, `char_start`, `char_end`를 담은 `rows.parquet` sidecar를 남긴다. | sentence-level sentiment, sentence citation ranking, 문장 단위 dedup, long-form evidence scoring을 추가할 수 있다. |
 | `time_bucket_count` | 시계열 버킷 집계 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 날짜 컬럼을 day/week/month bucket으로 묶고 bucket별 문서 수와 top term을 만든다. | anomaly detection, moving average, change point 탐지, seasonality 비교를 붙일 수 있다. |
 | `meta_group_count` | 메타데이터 그룹 집계 | `workers/python-ai/src/python_ai_worker/skills/support.py` | 메타데이터 차원값별 건수와 top term을 집계한다. | significance test, drill-down, 다중 dimension breakdown, low-volume suppression을 추가할 수 있다. |
 | `document_sample` | 대표 문서 샘플링 | `workers/python-ai/src/python_ai_worker/skills/support.py` | query overlap ranking 또는 source order로 대표 문서를 뽑는다. | MMR/diversity sampling, cluster-aware sampling, recency weighting, confidence-based sampling을 추가할 수 있다. |
@@ -72,12 +74,12 @@
 | --- | --- | --- | --- | --- |
 | `planner` | 분석 계획 생성기 | `workers/python-ai/src/python_ai_worker/planner.py`, `config/skill_bundle.json` | 기본은 goal keyword 기반 rule-based intent routing이며, 설정 시 Anthropic structured JSON planner를 우선 사용한다. skill bundle 메타데이터를 참조해 step을 구성한다. | dependency-aware planning, cost-aware planning, validation loop, planner evaluation set, user intent memory를 추가할 수 있다. |
 
-## 후보와 backlog
+## 전처리 확장 메모
 
-| 항목 | 분류 | 현재 상태 | 설계 방향 |
+| 항목 | 분류 | 현재 상태 | 운영 포인트 |
 | --- | --- | --- | --- |
-| `noun_frequency` | 후보 support skill | 미구현 | `keyword_frequency` 옆에 두는 한국어 명사 빈도 집계 경로다. Kiwi 같은 형태소 분석기, 사용자 사전, 불용어, 최소 길이 규칙을 적용해 명사 중심 top term을 산출하는 방향이 자연스럽다. |
-| `sentence_split` | backlog | 미구현 | 현재 chunk 기반 retrieval이 있어 즉시 필수는 아니다. 다만 문장 단위 citation, sentence sentiment, long-form evidence ranking이 필요해지면 별도 utility 또는 prepare 옵션으로 검토할 수 있다. |
+| `noun_frequency` | support skill | 구현 완료 | Kiwi backend가 있으면 품사 태깅을 우선 쓰고, 없으면 regex fallback을 사용한다. 사용자 사전과 stopword 정책은 후속 운영 기준이 필요하다. |
+| `sentence_split` | support skill | 구현 완료 | KSS backend가 있으면 한국어 분리를 우선 쓰고, 없으면 regex fallback을 사용한다. 실제 sentence-level citation 소비 경로는 후속 연동 과제다. |
 
 ## 현재 해석 포인트
 

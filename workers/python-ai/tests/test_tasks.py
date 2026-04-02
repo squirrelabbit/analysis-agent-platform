@@ -31,9 +31,11 @@ from python_ai_worker.tasks import (
     run_issue_trend_summary,
     run_keyword_frequency,
     run_meta_group_count,
+    run_noun_frequency,
     run_planner,
     run_semantic_search,
     run_sentiment_label,
+    run_sentence_split,
     run_time_bucket_count,
 )
 
@@ -120,6 +122,48 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(
             [step["skill_name"] for step in result["plan"]["steps"]],
             ["document_filter", "time_bucket_count", "document_sample", "issue_trend_summary", "issue_evidence_summary"],
+        )
+
+    def test_rule_based_planner_builds_noun_frequency_sequence(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PYTHON_AI_LLM_PROVIDER": "anthropic",
+            },
+            clear=False,
+        ):
+            result = run_planner(
+                {
+                    "dataset_name": "issues.csv",
+                    "data_type": "unstructured",
+                    "goal": "결제 오류 관련 명사 키워드를 추출해줘",
+                }
+            )
+
+        self.assertEqual(
+            [step["skill_name"] for step in result["plan"]["steps"]],
+            ["document_filter", "noun_frequency"],
+        )
+
+    def test_rule_based_planner_builds_sentence_split_sequence(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PYTHON_AI_LLM_PROVIDER": "anthropic",
+            },
+            clear=False,
+        ):
+            result = run_planner(
+                {
+                    "dataset_name": "issues.csv",
+                    "data_type": "unstructured",
+                    "goal": "문장 단위로 나눠서 보여줘",
+                }
+            )
+
+        self.assertEqual(
+            [step["skill_name"] for step in result["plan"]["steps"]],
+            ["document_filter", "sentence_split"],
         )
 
     def test_rule_based_planner_builds_issue_period_compare(self) -> None:
@@ -327,6 +371,72 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(rows[0]["filter_status"], "removed")
         self.assertIn("ad_marker", rows[0]["matched_rules"])
         self.assertEqual(rows[1]["filter_status"], "retained")
+
+    def test_noun_frequency_counts_nouns_from_filtered_rows(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "nouns.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"text": "결제 승인 오류가 늘었습니다"})
+            writer.writerow({"text": "배송 문의가 계속 들어옵니다"})
+
+        filter_result = run_document_filter(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "query": "결제 오류",
+                "sample_n": 3,
+            }
+        )
+        result = run_noun_frequency(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "top_n": 5,
+                "sample_n": 2,
+                "prior_artifacts": {
+                    "step:filter": filter_result["artifact"],
+                },
+            }
+        )
+
+        self.assertEqual(result["artifact"]["skill_name"], "noun_frequency")
+        self.assertEqual(result["artifact"]["summary"]["document_count"], 2)
+        self.assertIn(result["artifact"]["summary"]["analyzer_backend"], {"kiwi", "regex_fallback"})
+        self.assertEqual(result["artifact"]["top_nouns"][0]["term"], "결제")
+        self.assertGreaterEqual(int(result["artifact"]["top_nouns"][0]["document_frequency"]), 1)
+
+    def test_sentence_split_writes_sidecar_parquet_when_output_path_is_provided(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "sentences.csv"
+        output_path = temp_dir / "sentence_split.rows.parquet"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["row_id", "text"])
+            writer.writeheader()
+            writer.writerow({"row_id": "row-0", "text": "결제 오류가 반복 발생했습니다. 환불 문의도 늘었습니다."})
+            writer.writerow({"row_id": "row-1", "text": "로그인이 자주 실패합니다! 인증 오류가 함께 보입니다."})
+
+        result = run_sentence_split(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "artifact_output_path": str(output_path),
+                "sample_n": 2,
+                "preview_sentences_per_row": 2,
+            }
+        )
+
+        self.assertEqual(result["artifact"]["skill_name"], "sentence_split")
+        self.assertEqual(result["artifact"]["artifact_storage_mode"], "sidecar_ref")
+        self.assertEqual(result["artifact"]["artifact_ref"], str(output_path))
+        self.assertIn(result["artifact"]["summary"]["splitter_backend"], {"kss", "regex"})
+        rows = self._read_parquet_rows(output_path)
+        self.assertGreaterEqual(len(rows), 4)
+        self.assertEqual(rows[0]["row_id"], "row-0")
+        self.assertEqual(rows[0]["sentence_index"], 0)
+        self.assertTrue(str(rows[0]["sentence_text"]).startswith("결제 오류"))
 
     def test_document_filter_writes_sidecar_parquet_when_output_path_is_provided(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
