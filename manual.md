@@ -430,6 +430,7 @@ curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID/result" | python3 -m jso
 `contract.usage_summary`는 현재 usage가 남은 artifact를 기준으로 집계한다. 가격 env를 넣지 않았으면 `estimated_cost_usd`는 비어 있거나 0으로 남을 수 있다.
 `contract.step_hooks`는 현재 기본 runtime hook가 남긴 step 전/후 record다. 각 record에는 `phase`, `step_id`, `skill_name`, `payload.input_keys` 또는 `payload.artifact_bytes`, `payload.usage` 같은 값이 들어갈 수 있다.
 `result_v1`는 현재 사용자용 응답 레이어다. `answer`는 대표 artifact를 기준으로 사람이 읽기 좋은 요약/근거/후속질문을 정리하고, `step_results`는 각 skill step의 상태/요약/ref를 묶어준다. 실행이 `waiting`이면 `result_v1.waiting.waiting_for`, `result_v1.waiting.reason`을 먼저 보면 된다.
+execution이 `completed` 상태가 되면 control plane은 현재 `result_v1 snapshot`을 execution metadata에 저장한다. 이후 `/executions/{id}/result`는 이 저장된 snapshot을 우선 사용하므로, 나중에 리스트 선택이나 보고서 초안 생성에서 같은 answer를 재사용하기 쉽다.
 
 
 ### 7-10. waiting 상태면 resume

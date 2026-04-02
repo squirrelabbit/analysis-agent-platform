@@ -440,6 +440,55 @@ func TestBuildExecutionResultIncludesWaitingState(t *testing.T) {
 	}
 }
 
+func TestBuildExecutionResultUsesStoredSnapshotWhenPresent(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-snapshot",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-1",
+		Status:      "completed",
+		Artifacts: map[string]string{
+			"step:step-1:issue_evidence_summary": `{"skill_name":"issue_evidence_summary","summary":"ephemeral"}`,
+		},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-snapshot",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "issue_evidence_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		ResultV1Snapshot: &domain.ExecutionResultV1{
+			SchemaVersion:    "execution-result-v1",
+			Status:           "completed",
+			PrimarySkillName: stringPtr("issue_evidence_summary"),
+			Answer: &domain.ExecutionResultAnswer{
+				Summary: "stored snapshot summary",
+			},
+			StepResults: []domain.ExecutionStepResultV1{
+				{StepID: "step-1", SkillName: "issue_evidence_summary", Status: "completed"},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	result, err := service.BuildExecutionResult(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution result error: %v", err)
+	}
+
+	if result.ResultV1.Answer == nil || result.ResultV1.Answer.Summary != "stored snapshot summary" {
+		t.Fatalf("expected stored snapshot to be returned: %+v", result.ResultV1)
+	}
+}
+
 func TestSubmitAnalysisEnrichesIssueSentimentSummaryInputs(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, fakePlanner{

@@ -501,14 +501,18 @@ func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
 	if err != nil {
 		return err
 	}
+	resultV1SnapshotJSON, err := marshalJSON(execution.ResultV1Snapshot)
+	if err != nil {
+		return err
+	}
 
 	_, err = s.db.Exec(
 		`INSERT INTO executions (
 		     execution_id, project_id, plan_id, status, ended_at, embedding_model_version,
 		     required_hashes, artifacts, dataset_version_id, code_version, params_hash,
-		     skill_bundle_version, events, created_at
+		     skill_bundle_version, events, result_v1_snapshot, created_at
 		 ) VALUES (
-		     $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13::jsonb, NOW()
+		     $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13::jsonb, $14::jsonb, NOW()
 		 )
 		 ON CONFLICT (execution_id) DO UPDATE
 		 SET status = EXCLUDED.status,
@@ -520,7 +524,8 @@ func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
 		     code_version = EXCLUDED.code_version,
 		     params_hash = EXCLUDED.params_hash,
 		     skill_bundle_version = EXCLUDED.skill_bundle_version,
-		     events = EXCLUDED.events`,
+		     events = EXCLUDED.events,
+		     result_v1_snapshot = EXCLUDED.result_v1_snapshot`,
 		execution.ExecutionID,
 		execution.ProjectID,
 		execution.Plan.PlanID,
@@ -534,6 +539,7 @@ func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
 		nullableString(execution.ParamsHash),
 		nullableString(execution.SkillBundleVersion),
 		eventsJSON,
+		resultV1SnapshotJSON,
 	)
 	return err
 }
@@ -542,7 +548,8 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 	row := s.db.QueryRow(
 		`SELECT e.execution_id::text, e.project_id::text, p.request_id::text, p.plan,
 		        e.status, e.ended_at, e.required_hashes, e.embedding_model_version, e.artifacts,
-		        e.dataset_version_id, e.code_version, e.params_hash, e.skill_bundle_version, e.events
+		        e.dataset_version_id, e.code_version, e.params_hash, e.skill_bundle_version, e.events,
+		        e.result_v1_snapshot
 		 FROM executions e
 		 JOIN skill_plans p ON p.plan_id = e.plan_id
 		 WHERE e.project_id = $1::uuid AND e.execution_id = $2::uuid`,
@@ -560,6 +567,7 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 	var paramsHash sql.NullString
 	var skillBundleVersion sql.NullString
 	var eventsRaw []byte
+	var resultV1SnapshotRaw []byte
 	if err := row.Scan(
 		&execution.ExecutionID,
 		&execution.ProjectID,
@@ -575,6 +583,7 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 		&paramsHash,
 		&skillBundleVersion,
 		&eventsRaw,
+		&resultV1SnapshotRaw,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ExecutionSummary{}, ErrNotFound
@@ -592,6 +601,9 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 		return domain.ExecutionSummary{}, err
 	}
 	if err := unmarshalJSON(eventsRaw, &execution.Events, []domain.ExecutionEvent{}); err != nil {
+		return domain.ExecutionSummary{}, err
+	}
+	if err := unmarshalJSON(resultV1SnapshotRaw, &execution.ResultV1Snapshot, (*domain.ExecutionResultV1)(nil)); err != nil {
 		return domain.ExecutionSummary{}, err
 	}
 	if embeddingModel.Valid {
@@ -772,9 +784,11 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			code_version TEXT,
 			params_hash TEXT,
 			skill_bundle_version TEXT,
+			result_v1_snapshot JSONB,
 			events JSONB,
 			created_at TIMESTAMPTZ NOT NULL
 		)`,
+		`ALTER TABLE executions ADD COLUMN IF NOT EXISTS result_v1_snapshot JSONB`,
 		`DO $$
 		BEGIN
 			IF to_regtype('vector') IS NOT NULL THEN

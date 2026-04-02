@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/executionresult"
 	"analysis-support-platform/control-plane/internal/registry"
 	"analysis-support-platform/control-plane/internal/skills"
 	"analysis-support-platform/control-plane/internal/store"
@@ -392,6 +393,8 @@ func (a AnalysisActivities) MarkExecutionCompleted(ctx context.Context, input Co
 	if len(input.Result.StepHooks) > 0 {
 		execution.Events[len(execution.Events)-1].Payload["step_hooks"] = input.Result.StepHooks
 	}
+	snapshot := executionresult.BuildV1(execution)
+	execution.ResultV1Snapshot = &snapshot
 
 	if err := repo.SaveExecution(execution); err != nil {
 		return ExecutionLifecycleResult{}, err

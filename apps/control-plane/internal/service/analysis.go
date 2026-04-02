@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/executionresult"
 	"analysis-support-platform/control-plane/internal/id"
 	"analysis-support-platform/control-plane/internal/planner"
 	"analysis-support-platform/control-plane/internal/registry"
@@ -267,33 +268,10 @@ func (s *AnalysisService) BuildExecutionResult(projectID, executionID string) (d
 }
 
 func buildExecutionResultV1(execution domain.ExecutionSummary, contract map[string]any) domain.ExecutionResultV1 {
-	decodedArtifacts := decodeExecutionArtifacts(execution.Artifacts)
-	primaryArtifactKey, primaryArtifact := selectPrimaryExecutionArtifact(decodedArtifacts, execution.Plan)
-
-	result := domain.ExecutionResultV1{
-		SchemaVersion: "execution-result-v1",
-		Status:        execution.Status,
-		StepResults:   buildExecutionStepResultsV1(execution, decodedArtifacts),
+	if execution.ResultV1Snapshot != nil {
+		return *execution.ResultV1Snapshot
 	}
-	if usageSummary, ok := contract["usage_summary"].(map[string]any); ok && len(usageSummary) > 0 {
-		result.UsageSummary = usageSummary
-	}
-	if primaryArtifactKey != "" {
-		result.PrimaryArtifactKey = stringPointer(primaryArtifactKey)
-	}
-	if primarySkillName := strings.TrimSpace(artifactStringValue(primaryArtifact["skill_name"])); primarySkillName != "" {
-		result.PrimarySkillName = stringPointer(primarySkillName)
-	}
-	if answer := buildExecutionAnswerV1(primaryArtifact, decodedArtifacts); answer != nil {
-		result.Answer = answer
-	}
-	if waiting := latestWaitingState(execution.Events); waiting != nil {
-		result.Waiting = waiting
-	}
-	if warnings := collectExecutionWarnings(execution.Events, decodedArtifacts); len(warnings) > 0 {
-		result.Warnings = warnings
-	}
-	return result
+	return executionresult.BuildV1(execution)
 }
 
 func latestCompletedStepHooks(events []domain.ExecutionEvent) any {

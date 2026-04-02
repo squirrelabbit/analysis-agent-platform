@@ -166,20 +166,21 @@ type ExecutionEvent struct {
 }
 
 type ExecutionSummary struct {
-	ExecutionID        string            `json:"execution_id"`
-	ProjectID          string            `json:"project_id"`
-	RequestID          string            `json:"request_id"`
-	Plan               SkillPlan         `json:"plan"`
-	Status             string            `json:"status"`
-	EndedAt            *time.Time        `json:"ended_at,omitempty"`
-	RequiredHashes     []string          `json:"required_hashes"`
-	EmbeddingModel     *string           `json:"embedding_model_version,omitempty"`
-	Artifacts          map[string]string `json:"artifacts"`
-	DatasetVersionID   *string           `json:"dataset_version_id,omitempty"`
-	CodeVersion        *string           `json:"code_version,omitempty"`
-	ParamsHash         *string           `json:"params_hash,omitempty"`
-	SkillBundleVersion *string           `json:"skill_bundle_version,omitempty"`
-	Events             []ExecutionEvent  `json:"events"`
+	ExecutionID        string             `json:"execution_id"`
+	ProjectID          string             `json:"project_id"`
+	RequestID          string             `json:"request_id"`
+	Plan               SkillPlan          `json:"plan"`
+	Status             string             `json:"status"`
+	EndedAt            *time.Time         `json:"ended_at,omitempty"`
+	RequiredHashes     []string           `json:"required_hashes"`
+	EmbeddingModel     *string            `json:"embedding_model_version,omitempty"`
+	Artifacts          map[string]string  `json:"artifacts"`
+	DatasetVersionID   *string            `json:"dataset_version_id,omitempty"`
+	CodeVersion        *string            `json:"code_version,omitempty"`
+	ParamsHash         *string            `json:"params_hash,omitempty"`
+	SkillBundleVersion *string            `json:"skill_bundle_version,omitempty"`
+	Events             []ExecutionEvent   `json:"events"`
+	ResultV1Snapshot   *ExecutionResultV1 `json:"-"`
 }
 
 type PlanExecuteResponse struct {

@@ -143,6 +143,12 @@ func TestAnalysisExecutionWorkflowCompletesAndPersistsExecution(t *testing.T) {
 	if hooks, ok := execution.Events[1].Payload["step_hooks"].([]skills.StepHookRecord); !ok || len(hooks) != 2 {
 		t.Fatalf("unexpected step hooks payload: %+v", execution.Events[1].Payload)
 	}
+	if execution.ResultV1Snapshot == nil {
+		t.Fatalf("expected result v1 snapshot to be persisted: %+v", execution)
+	}
+	if execution.ResultV1Snapshot.SchemaVersion != "execution-result-v1" {
+		t.Fatalf("unexpected result v1 snapshot: %+v", execution.ResultV1Snapshot)
+	}
 }
 
 type stubRuntimeRegistrar struct {
