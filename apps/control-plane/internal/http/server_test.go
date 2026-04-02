@@ -98,6 +98,13 @@ func TestControlPlaneFlow(t *testing.T) {
 	if result["execution_id"] != executionID {
 		t.Fatalf("unexpected execution_id in result: %v", result["execution_id"])
 	}
+	resultV1, ok := result["result_v1"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result_v1 payload: %+v", result)
+	}
+	if resultV1["schema_version"] != "execution-result-v1" {
+		t.Fatalf("unexpected result_v1 schema version: %+v", resultV1)
+	}
 
 	rerun := map[string]any{}
 	readJSONResponse(

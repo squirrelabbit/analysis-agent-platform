@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
 	"analysis-support-platform/control-plane/internal/planner"
@@ -364,6 +365,78 @@ func TestBuildExecutionResultIncludesUsageSummary(t *testing.T) {
 	}
 	if operation, ok := usage["operation"].(string); !ok || operation != "mixed" {
 		t.Fatalf("unexpected operation: %+v", usage)
+	}
+	if result.ResultV1.SchemaVersion != "execution-result-v1" {
+		t.Fatalf("unexpected result v1 schema version: %+v", result.ResultV1)
+	}
+	if result.ResultV1.Answer == nil {
+		t.Fatalf("expected result v1 answer: %+v", result.ResultV1)
+	}
+	if result.ResultV1.PrimarySkillName == nil || *result.ResultV1.PrimarySkillName != "evidence_pack" {
+		t.Fatalf("unexpected primary skill: %+v", result.ResultV1)
+	}
+	if result.ResultV1.UsageSummary["total_tokens"] != 210 {
+		t.Fatalf("unexpected result v1 usage summary: %+v", result.ResultV1.UsageSummary)
+	}
+}
+
+func TestBuildExecutionResultIncludesWaitingState(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-waiting",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-1",
+		Status:      "waiting",
+		Artifacts:   map[string]string{},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-waiting",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "semantic_search", DatasetName: "issues.csv", Inputs: map[string]any{}},
+				{StepID: "step-2", SkillName: "issue_evidence_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		Events: []domain.ExecutionEvent{
+			{
+				ExecutionID: "exec-waiting",
+				TS:          now,
+				Level:       "info",
+				EventType:   "WORKFLOW_WAITING",
+				Message:     "execution is waiting for dependency",
+				Payload: map[string]any{
+					"waiting_for": "embeddings",
+					"reason":      "embedding index is not ready",
+				},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	result, err := service.BuildExecutionResult(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution result error: %v", err)
+	}
+
+	if result.ResultV1.Waiting == nil {
+		t.Fatalf("expected waiting state: %+v", result.ResultV1)
+	}
+	if result.ResultV1.Waiting.WaitingFor != "embeddings" {
+		t.Fatalf("unexpected waiting_for: %+v", result.ResultV1.Waiting)
+	}
+	if len(result.ResultV1.StepResults) != 2 {
+		t.Fatalf("unexpected step results: %+v", result.ResultV1.StepResults)
+	}
+	if result.ResultV1.StepResults[0].Status != "pending" {
+		t.Fatalf("unexpected pending step status: %+v", result.ResultV1.StepResults)
 	}
 }
 

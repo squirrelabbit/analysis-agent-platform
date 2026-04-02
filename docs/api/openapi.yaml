@@ -1077,7 +1077,101 @@ components:
           $ref: "#/components/schemas/StringMap"
         contract:
           $ref: "#/components/schemas/AnyMap"
-      required: [execution_id, artifacts, contract]
+        result_v1:
+          $ref: "#/components/schemas/ExecutionResultV1"
+      required: [execution_id, artifacts, contract, result_v1]
+    ExecutionResultV1:
+      type: object
+      properties:
+        schema_version:
+          type: string
+        status:
+          type: string
+        primary_artifact_key:
+          type:
+            - string
+            - "null"
+        primary_skill_name:
+          type:
+            - string
+            - "null"
+        answer:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionResultAnswer"
+            - type: "null"
+        step_results:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutionStepResultV1"
+        usage_summary:
+          $ref: "#/components/schemas/AnyMap"
+        warnings:
+          type: array
+          items:
+            type: string
+        waiting:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionWaitingState"
+            - type: "null"
+      required: [schema_version, status, step_results]
+    ExecutionResultAnswer:
+      type: object
+      properties:
+        summary:
+          type: string
+        key_findings:
+          type: array
+          items:
+            type: string
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnyMap"
+        follow_up_questions:
+          type: array
+          items:
+            type: string
+        selection_source:
+          type: string
+        citation_mode:
+          type: string
+      required: [summary]
+    ExecutionStepResultV1:
+      type: object
+      properties:
+        step_id:
+          type: string
+        skill_name:
+          type: string
+        status:
+          type: string
+        artifact_key:
+          type:
+            - string
+            - "null"
+        summary:
+          type: string
+        usage:
+          $ref: "#/components/schemas/AnyMap"
+        artifact_ref:
+          type:
+            - string
+            - "null"
+        warnings:
+          type: array
+          items:
+            type: string
+        selection_mode:
+          type: string
+      required: [step_id, skill_name, status]
+    ExecutionWaitingState:
+      type: object
+      properties:
+        waiting_for:
+          type: string
+        reason:
+          type: string
+      required: [waiting_for]
     ExecutionDiffStep:
       type: object
       properties:

@@ -207,6 +207,45 @@ type ExecutionResultResponse struct {
 	ExecutionID string            `json:"execution_id"`
 	Artifacts   map[string]string `json:"artifacts"`
 	Contract    map[string]any    `json:"contract"`
+	ResultV1    ExecutionResultV1 `json:"result_v1"`
+}
+
+type ExecutionResultV1 struct {
+	SchemaVersion      string                  `json:"schema_version"`
+	Status             string                  `json:"status"`
+	PrimaryArtifactKey *string                 `json:"primary_artifact_key,omitempty"`
+	PrimarySkillName   *string                 `json:"primary_skill_name,omitempty"`
+	Answer             *ExecutionResultAnswer  `json:"answer,omitempty"`
+	StepResults        []ExecutionStepResultV1 `json:"step_results,omitempty"`
+	UsageSummary       map[string]any          `json:"usage_summary,omitempty"`
+	Warnings           []string                `json:"warnings,omitempty"`
+	Waiting            *ExecutionWaitingState  `json:"waiting,omitempty"`
+}
+
+type ExecutionResultAnswer struct {
+	Summary           string           `json:"summary"`
+	KeyFindings       []string         `json:"key_findings,omitempty"`
+	Evidence          []map[string]any `json:"evidence,omitempty"`
+	FollowUpQuestions []string         `json:"follow_up_questions,omitempty"`
+	SelectionSource   string           `json:"selection_source,omitempty"`
+	CitationMode      string           `json:"citation_mode,omitempty"`
+}
+
+type ExecutionStepResultV1 struct {
+	StepID        string         `json:"step_id"`
+	SkillName     string         `json:"skill_name"`
+	Status        string         `json:"status"`
+	ArtifactKey   *string        `json:"artifact_key,omitempty"`
+	Summary       string         `json:"summary,omitempty"`
+	Usage         map[string]any `json:"usage,omitempty"`
+	ArtifactRef   *string        `json:"artifact_ref,omitempty"`
+	Warnings      []string       `json:"warnings,omitempty"`
+	SelectionMode string         `json:"selection_mode,omitempty"`
+}
+
+type ExecutionWaitingState struct {
+	WaitingFor string `json:"waiting_for"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 type ExecutionDiffStep struct {
