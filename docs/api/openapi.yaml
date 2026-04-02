@@ -148,6 +148,35 @@ paths:
                 $ref: "#/components/schemas/Scenario"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/scenarios/{scenario_id}/plans:
+    post:
+      tags: [Projects]
+      summary: Create analysis request and plan from registered scenario
+      operationId: createScenarioPlan
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: scenario_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScenarioPlanCreateRequest"
+      responses:
+        "201":
+          description: Analysis request and plan created from scenario
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisPlanResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets:
     post:
       tags: [Datasets]
@@ -763,6 +792,22 @@ components:
           items:
             $ref: "#/components/schemas/Scenario"
       required: [items]
+    ScenarioPlanCreateRequest:
+      type: object
+      properties:
+        dataset_version_id:
+          type: string
+        goal:
+          type:
+            - string
+            - "null"
+        constraints:
+          type: array
+          items:
+            type: string
+        context:
+          $ref: "#/components/schemas/AnyMap"
+      required: [dataset_version_id]
     Dataset:
       type: object
       properties:

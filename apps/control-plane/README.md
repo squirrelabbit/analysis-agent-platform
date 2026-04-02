@@ -23,6 +23,7 @@
 - `POST /projects/{project_id}/scenarios`
 - `GET /projects/{project_id}/scenarios`
 - `GET /projects/{project_id}/scenarios/{scenario_id}`
+- `POST /projects/{project_id}/scenarios/{scenario_id}/plans`
 - `POST /projects/{project_id}/datasets`
 - `GET /projects/{project_id}/datasets/{dataset_id}`
 - `POST /projects/{project_id}/datasets/{dataset_id}/uploads`
@@ -84,7 +85,8 @@
 - `WORKFLOW_ENGINE=temporal`이면 Go control plane이 Temporal workflow를 시작한다.
 - `cmd/temporal-worker`는 execution lifecycle activity와 DuckDB/Python worker runtime을 함께 등록한다.
 - execution 목록 API는 `result_v1_snapshot` 기준 preview를 만들고, 보고서 초안 API는 선택한 execution snapshot을 `report-draft-v1`로 저장한다.
-- 시나리오 API는 현재 sheet 형태의 분석 시나리오를 project 단위로 저장하는 등록 기반이며, 실행 연동은 다음 단계다.
+- 시나리오 API는 현재 sheet 형태의 분석 시나리오를 project 단위로 저장하고, 저장된 step을 runtime skill plan으로 바꿔 `analysis_request + plan`을 생성할 수 있다.
+- 현재 자동 plan 생성은 `runtime_skill_name`이 지정된 step 또는 control plane에 등록된 `function_name -> skill_name` 매핑만 지원한다. 직접 매핑되지 않는 step은 `runtime_skill_name`을 명시해야 한다.
 - 관련 설정:
   - `TEMPORAL_ADDRESS`
   - `TEMPORAL_NAMESPACE`

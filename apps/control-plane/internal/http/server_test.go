@@ -319,6 +319,100 @@ func TestScenarioEndpoints(t *testing.T) {
 	}
 }
 
+func TestScenarioPlanEndpoint(t *testing.T) {
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"scenario-plan-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/scenarios",
+		`{
+		  "scenario_id":"S1",
+		  "user_query":"이번 벚꽃 축제 반응 어때?",
+		  "query_type":"여론 요약",
+		  "interpretation":"전체 여론 및 분위기 파악",
+		  "analysis_scope":"축제 기간",
+		  "steps":[
+		    {
+		      "step":1,
+		      "function_name":"가비지 필터링",
+		      "result_description":"분석 대상 정제"
+		    },
+		    {
+		      "step":2,
+		      "function_name":"빈도 기반 키워드 추출",
+		      "parameter_text":"top_n=10",
+		      "result_description":"주요 키워드"
+		    }
+		  ]
+		}`,
+		http.StatusCreated,
+		&map[string]any{},
+	)
+
+	dataset := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets",
+		`{"name":"festival","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&dataset,
+	)
+	datasetID := dataset["dataset_id"].(string)
+
+	version := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"festival.csv","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&version,
+	)
+	versionID := version["dataset_version_id"].(string)
+
+	response := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/scenarios/S1/plans",
+		`{"dataset_version_id":"`+versionID+`"}`,
+		http.StatusCreated,
+		&response,
+	)
+
+	request := response["request"].(map[string]any)
+	plan := response["plan"].(map[string]any)
+	steps := plan["plan"].(map[string]any)["steps"].([]any)
+	if len(steps) != 2 {
+		t.Fatalf("unexpected scenario plan steps: %+v", steps)
+	}
+	if steps[0].(map[string]any)["skill_name"] != "garbage_filter" {
+		t.Fatalf("unexpected first skill: %+v", steps[0])
+	}
+	if steps[1].(map[string]any)["skill_name"] != "keyword_frequency" {
+		t.Fatalf("unexpected second skill: %+v", steps[1])
+	}
+	scenarioContext := request["context"].(map[string]any)["scenario"].(map[string]any)
+	if scenarioContext["scenario_id"] != "S1" {
+		t.Fatalf("unexpected scenario context: %+v", scenarioContext)
+	}
+}
+
 func TestResponsesRenderTimestampsInKST(t *testing.T) {
 	server := NewServer(config.Config{
 		BindAddr:       ":0",

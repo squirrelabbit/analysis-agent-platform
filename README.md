@@ -31,9 +31,9 @@
 - prepare regex, garbage, taxonomy 규칙은 현재 기본 상수 위에 `PYTHON_AI_RULE_CONFIG_PATH` JSON 파일, `PYTHON_AI_RULE_CONFIG_JSON` inline JSON, request payload override가 차례로 덮이는 layered config를 지원한다.
 - 비정형 support skill에 `garbage_filter`가 추가돼 광고/협찬/링크 유도/placeholder/noise-only row를 downstream 분석 전에 제거할 수 있다.
 - 비정형 support skill에 `noun_frequency`, `sentence_split`이 추가돼 한국어 명사 중심 집계와 문장 단위 span/citation 준비를 직접 실행할 수 있다. 가능하면 `kiwipiepy`, `kss`를 사용하고, 없으면 regex fallback으로 내려간다.
-- control plane에는 현재 `scenario` 등록 기반이 추가돼 `scenario_id`, `user_query`, `query_type`, `interpretation`, `analysis_scope`, `steps[]`를 project 단위로 저장하고 목록/상세 조회할 수 있다.
+- control plane에는 현재 `scenario` 등록 기반이 추가돼 `scenario_id`, `user_query`, `query_type`, `interpretation`, `analysis_scope`, `steps[]`를 project 단위로 저장하고, 저장된 시나리오에서 `analysis_request + plan`을 자동 생성할 수 있다.
 - `garbage_filter`는 execution 안에서 실행되면 row 단위 결과를 `rows.parquet` sidecar로 저장하고, execution artifact JSON에는 summary와 `artifact_ref`만 남긴다.
-- `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding`은 아직 JSONL sidecar를 유지한다.
+- `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding` 운영 기본 출력은 `embeddings.index.parquet + pgvector`다.
 - `sentiment_label` 기본 출력은 이제 `row_id`, `source_row_index`, 감성 컬럼 중심의 sidecar이고, `issue_sentiment_summary`는 `prepared_dataset_name`을 함께 받아 텍스트를 조인한다.
 - `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 운영 기본 산출물은 `embeddings.index.parquet`와 `pgvector` 적재이며, `embeddings.jsonl`은 `debug_export_jsonl=true`로 명시했을 때만 debug/export용으로 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1` projection fallback으로 내려간다.
 - `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 model로 query vector를 다시 만든다. 분석 plan과 worker 입력도 이제 `embedding_index_ref + chunk_ref`를 우선 사용하고, `embedding_uri`는 명시적 fallback일 때만 사용한다. 검색 결과는 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 반환하고, `issue_evidence_summary`는 이를 evidence artifact까지 유지한다.
@@ -91,7 +91,7 @@
 - 현재 기본 포맷은 `prepare/sentiment/chunk=Parquet`, `embedding=JSONL`이며, 장기 전환안은 `docs/architecture/unstructured_storage_transition.md`를 기준으로 본다.
 - `GET /projects/{project_id}/executions`는 현재 저장된 snapshot 기준 실행 목록 preview를 반환한다.
 - `POST /projects/{project_id}/report_drafts`, `GET /projects/{project_id}/report_drafts/{draft_id}`는 현재 보고서 초안 저장/조회 API다.
-- `POST /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios/{scenario_id}`는 현재 시나리오 등록 기반 API다.
+- `POST /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios/{scenario_id}`, `POST /projects/{project_id}/scenarios/{scenario_id}/plans`는 현재 시나리오 등록/plan 생성 API다.
 - 검증 자산
   - Go unit test / build
   - Python unit test

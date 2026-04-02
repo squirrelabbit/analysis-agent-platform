@@ -47,6 +47,13 @@ type ScenarioListResponse struct {
 	Items []Scenario `json:"items"`
 }
 
+type ScenarioPlanCreateRequest struct {
+	DatasetVersionID string         `json:"dataset_version_id"`
+	Goal             *string        `json:"goal,omitempty"`
+	Constraints      []string       `json:"constraints,omitempty"`
+	Context          map[string]any `json:"context,omitempty"`
+}
+
 type Dataset struct {
 	DatasetID   string    `json:"dataset_id"`
 	ProjectID   string    `json:"project_id"`

@@ -161,8 +161,8 @@ docker compose -f compose.dev.yml exec -T python-ai-worker \
 
 아래 예시는 `festival.csv`를 직접 업로드하고 `prepare -> sentiment -> embedding -> analysis -> execution result`까지 따라가는 절차다.
 
-시나리오 등록 기반은 별도 endpoint로 수동 확인할 수 있다.
-아래 명령은 `7-1`까지 실행해 `PROJECT_ID`가 준비된 상태를 전제로 한다.
+시나리오 등록과 시나리오 기반 plan 생성은 별도 endpoint로 수동 확인할 수 있다.
+아래 시나리오 등록 명령은 `PROJECT_ID`가 준비된 상태를 전제로 한다. `scenario -> plan` 생성은 `VERSION_ID`가 필요하므로 `7-1` 이후에 실행한다.
 
 ### 7-0. 시나리오 등록 / 목록 / 상세 조회
 
@@ -211,6 +211,11 @@ curl -sS "$API/projects/$PROJECT_ID/scenarios/S1" | python3 -m json.tool
 - `steps[].parameters`
 - `steps[].result_description`
 
+주의:
+
+- 자동 plan 생성은 `runtime_skill_name`이 있거나 현재 control plane이 지원하는 `function_name -> runtime skill` 매핑이 있는 step만 처리한다.
+- 직접 매핑되지 않는 step은 시나리오 등록 시 `runtime_skill_name`을 명시해야 한다.
+
 ### 7-1. 프로젝트 생성, dataset 생성, 업로드
 
 ```bash
@@ -255,6 +260,24 @@ VERSION_ID=$(
 - `prepare_status`
 - `sentiment_status`
 - `embedding_status`
+
+### 7-1-b. 시나리오 기반 plan 생성
+
+```bash
+curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios/S1/plans" \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"dataset_version_id\":\"$VERSION_ID\"
+  }" \
+| python3 -m json.tool
+```
+
+결과 확인:
+
+- `request.goal`
+- `request.context.scenario`
+- `plan.plan.steps[].skill_name`
+- `plan.plan.steps[].inputs`
 
 
 ### 7-2. prepare 실행
@@ -614,6 +637,7 @@ docker compose -f compose.dev.yml logs postgres
 | 프로젝트 생성 | 완료 | `POST /projects` 가능 |
 | 시나리오 등록 | 완료 | `POST /projects/{project_id}/scenarios` |
 | 시나리오 목록 / 상세 조회 | 완료 | `GET /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios/{scenario_id}` |
+| 시나리오 기반 plan 생성 | 완료 | `POST /projects/{project_id}/scenarios/{scenario_id}/plans` |
 | dataset 생성 | 완료 | `POST /projects/{project_id}/datasets` 가능 |
 | 파일 업로드 | 완료 | upload와 dataset version 생성 가능 |
 | dataset version 저장 | 완료 | `dataset_versions`에 상태, 모델, URI 저장 |
