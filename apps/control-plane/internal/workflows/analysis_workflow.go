@@ -19,6 +19,7 @@ import (
 
 type Starter interface {
 	StartAnalysisWorkflow(input StartAnalysisInput) (string, error)
+	StartDatasetBuildWorkflow(input StartDatasetBuildInput) (string, error)
 	EngineName() string
 }
 
@@ -28,6 +29,14 @@ type StartAnalysisInput struct {
 	RequestID        string
 	PlanID           string
 	DatasetVersionID *string
+}
+
+type StartDatasetBuildInput struct {
+	JobID            string
+	ProjectID        string
+	DatasetID        string
+	DatasetVersionID string
+	BuildType        string
 }
 
 func NewStarter(cfg config.Config) (Starter, error) {
@@ -51,6 +60,10 @@ func (NoopStarter) StartAnalysisWorkflow(input StartAnalysisInput) (string, erro
 	return buildWorkflowID(input.ExecutionID), nil
 }
 
+func (NoopStarter) StartDatasetBuildWorkflow(input StartDatasetBuildInput) (string, error) {
+	return buildDatasetBuildWorkflowID(input.JobID), nil
+}
+
 func (NoopStarter) EngineName() string {
 	return "noop"
 }
@@ -65,13 +78,44 @@ type TemporalStarter struct {
 }
 
 func (s TemporalStarter) StartAnalysisWorkflow(input StartAnalysisInput) (string, error) {
+	workflowName := s.WorkflowName
+	if workflowName == "" {
+		workflowName = AnalysisExecutionWorkflowName
+	}
+	return s.startWorkflow(
+		buildWorkflowID(input.ExecutionID),
+		workflowName,
+		AnalysisWorkflowInput{
+			ExecutionID:      input.ExecutionID,
+			ProjectID:        input.ProjectID,
+			RequestID:        input.RequestID,
+			PlanID:           input.PlanID,
+			DatasetVersionID: input.DatasetVersionID,
+			RequestedAt:      time.Now().UTC(),
+		},
+	)
+}
+
+func (s TemporalStarter) StartDatasetBuildWorkflow(input StartDatasetBuildInput) (string, error) {
+	return s.startWorkflow(
+		buildDatasetBuildWorkflowID(input.JobID),
+		DatasetBuildWorkflowName,
+		DatasetBuildWorkflowInput{
+			JobID:            input.JobID,
+			ProjectID:        input.ProjectID,
+			DatasetID:        input.DatasetID,
+			DatasetVersionID: input.DatasetVersionID,
+			BuildType:        input.BuildType,
+			RequestedAt:      time.Now().UTC(),
+		},
+	)
+}
+
+func (s TemporalStarter) startWorkflow(workflowID string, workflowName string, payload any) (string, error) {
 	if s.ClientFactory == nil {
 		s.ClientFactory = func(ctx context.Context, options client.Options) (TemporalClient, error) {
 			return client.DialContext(ctx, options)
 		}
-	}
-	if s.WorkflowName == "" {
-		s.WorkflowName = AnalysisExecutionWorkflowName
 	}
 	if s.DialTimeout <= 0 {
 		s.DialTimeout = 5 * time.Second
@@ -89,7 +133,6 @@ func (s TemporalStarter) StartAnalysisWorkflow(input StartAnalysisInput) (string
 	}
 	defer c.Close()
 
-	workflowID := buildWorkflowID(input.ExecutionID)
 	run, err := c.ExecuteWorkflow(
 		ctx,
 		client.StartWorkflowOptions{
@@ -98,15 +141,8 @@ func (s TemporalStarter) StartAnalysisWorkflow(input StartAnalysisInput) (string
 			WorkflowIDReusePolicy:                    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 			WorkflowExecutionErrorWhenAlreadyStarted: true,
 		},
-		s.WorkflowName,
-		AnalysisWorkflowInput{
-			ExecutionID:      input.ExecutionID,
-			ProjectID:        input.ProjectID,
-			RequestID:        input.RequestID,
-			PlanID:           input.PlanID,
-			DatasetVersionID: input.DatasetVersionID,
-			RequestedAt:      time.Now().UTC(),
-		},
+		workflowName,
+		payload,
 	)
 	if err != nil {
 		return "", err
@@ -138,4 +174,8 @@ type TemporalClientFactory func(ctx context.Context, options client.Options) (Te
 
 func buildWorkflowID(executionID string) string {
 	return fmt.Sprintf("analysis-execution-%s", executionID)
+}
+
+func buildDatasetBuildWorkflowID(jobID string) string {
+	return fmt.Sprintf("dataset-build-%s", jobID)
 }

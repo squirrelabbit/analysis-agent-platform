@@ -21,6 +21,7 @@ import (
 	"analysis-support-platform/control-plane/internal/domain"
 	"analysis-support-platform/control-plane/internal/id"
 	"analysis-support-platform/control-plane/internal/store"
+	"analysis-support-platform/control-plane/internal/workflows"
 
 	_ "github.com/marcboeker/go-duckdb"
 )
@@ -35,6 +36,7 @@ type DatasetService struct {
 	artifactRoot        string
 	datasetProfilesPath string
 	profileRegistry     *datasetProfileRegistry
+	buildJobStarter     workflows.Starter
 	httpClient          *http.Client
 }
 
@@ -61,6 +63,10 @@ func (s *DatasetService) SetDatasetProfilesPath(path string) error {
 	s.datasetProfilesPath = strings.TrimSpace(path)
 	s.profileRegistry = registry
 	return nil
+}
+
+func (s *DatasetService) SetBuildJobStarter(starter workflows.Starter) {
+	s.buildJobStarter = starter
 }
 
 func (s *DatasetService) CreateDataset(projectID string, input domain.DatasetCreateRequest) (domain.Dataset, error) {

@@ -9,6 +9,7 @@ import (
 	"analysis-support-platform/control-plane/internal/domain"
 	"analysis-support-platform/control-plane/internal/id"
 	"analysis-support-platform/control-plane/internal/store"
+	"analysis-support-platform/control-plane/internal/workflows"
 )
 
 const (
@@ -42,10 +43,12 @@ func (s *DatasetService) CreatePrepareJob(projectID, datasetID, datasetVersionID
 	if err := s.store.SaveDatasetBuildJob(job); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
-	go s.runDatasetBuildJob(job, func() error {
+	if err := s.dispatchDatasetBuildJob(job, func() error {
 		_, err := s.BuildPrepare(projectID, datasetID, datasetVersionID, input)
 		return err
-	})
+	}); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
 	return job, nil
 }
 
@@ -74,10 +77,12 @@ func (s *DatasetService) CreateSentimentJob(projectID, datasetID, datasetVersion
 	if err := s.store.SaveDatasetBuildJob(job); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
-	go s.runDatasetBuildJob(job, func() error {
+	if err := s.dispatchDatasetBuildJob(job, func() error {
 		_, err := s.BuildSentiment(projectID, datasetID, datasetVersionID, input)
 		return err
-	})
+	}); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
 	return job, nil
 }
 
@@ -106,10 +111,12 @@ func (s *DatasetService) CreateEmbeddingJob(projectID, datasetID, datasetVersion
 	if err := s.store.SaveDatasetBuildJob(job); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
-	go s.runDatasetBuildJob(job, func() error {
+	if err := s.dispatchDatasetBuildJob(job, func() error {
 		_, err := s.BuildEmbeddings(projectID, datasetID, datasetVersionID, input)
 		return err
-	})
+	}); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
 	return job, nil
 }
 
@@ -179,6 +186,32 @@ func (s *DatasetService) runDatasetBuildJob(job domain.DatasetBuildJob, runner f
 	}()
 
 	runErr = runner()
+}
+
+func (s *DatasetService) dispatchDatasetBuildJob(job domain.DatasetBuildJob, fallbackRunner func() error) error {
+	if s.buildJobStarter != nil && s.buildJobStarter.EngineName() == "temporal" {
+		_, err := s.buildJobStarter.StartDatasetBuildWorkflow(workflows.StartDatasetBuildInput{
+			JobID:            job.JobID,
+			ProjectID:        job.ProjectID,
+			DatasetID:        job.DatasetID,
+			DatasetVersionID: job.DatasetVersionID,
+			BuildType:        job.BuildType,
+		})
+		if err == nil {
+			return nil
+		}
+		completedAt := time.Now().UTC()
+		job.Status = "failed"
+		job.CompletedAt = &completedAt
+		message := fmt.Sprintf("failed to start dataset build workflow: %v", err)
+		job.ErrorMessage = &message
+		if saveErr := s.store.SaveDatasetBuildJob(job); saveErr != nil {
+			return saveErr
+		}
+		return err
+	}
+	go s.runDatasetBuildJob(job, fallbackRunner)
+	return nil
 }
 
 func requestToMap(payload any) map[string]any {

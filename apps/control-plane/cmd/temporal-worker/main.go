@@ -5,6 +5,7 @@ import (
 
 	"analysis-support-platform/control-plane/internal/config"
 	"analysis-support-platform/control-plane/internal/displaytime"
+	"analysis-support-platform/control-plane/internal/service"
 	"analysis-support-platform/control-plane/internal/skills"
 	"analysis-support-platform/control-plane/internal/store"
 	"analysis-support-platform/control-plane/internal/workflows"
@@ -20,6 +21,17 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	starter, err := workflows.NewStarter(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	datasetService := service.NewDatasetService(repository, cfg.PythonAIWorkerURL, cfg.UploadRoot, cfg.ArtifactRoot)
+	if err := datasetService.SetDatasetProfilesPath(cfg.DatasetProfilesPath); err != nil {
+		log.Fatal(err)
+	}
+	datasetService.SetBuildJobStarter(starter)
+	analysisService := service.NewAnalysisService(repository, starter, nil)
+	analysisService.SetDependencyBuilder(datasetService)
 
 	temporalClient, err := client.Dial(client.Options{
 		HostPort:  cfg.TemporalAddress,
@@ -41,6 +53,12 @@ func main() {
 			},
 		},
 		Now: workflows.NewAnalysisActivities().Now,
+	})
+	workflows.RegisterDatasetBuildRuntime(w, workflows.DatasetBuildActivities{
+		Repo:    repository,
+		Builder: datasetService,
+		Resumer: analysisService,
+		Now:     workflows.NewAnalysisActivities().Now,
 	})
 
 	log.Printf(

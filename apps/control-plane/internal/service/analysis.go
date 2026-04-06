@@ -258,35 +258,52 @@ func (s *AnalysisService) ensureExecutionDependencies(projectID string, plan dom
 		return err
 	}
 
-	needsPrepare := planRequiresPrepare(plan.Plan)
-	needsSentiment := planRequiresSentiment(plan.Plan)
-	needsEmbedding := planRequiresEmbedding(plan.Plan)
+	_, err = s.ensureExecutionDependenciesForVersion(projectID, version, plan.Plan)
+	return err
+}
+
+func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string, version domain.DatasetVersion, plan domain.SkillPlan) (domain.DatasetVersion, error) {
+	if s.dependencyBuilder == nil {
+		return version, nil
+	}
+
+	versionID := strings.TrimSpace(version.DatasetVersionID)
+	needsPrepare := planRequiresPrepare(plan)
+	needsSentiment := planRequiresSentiment(plan)
+	needsEmbedding := planRequiresEmbedding(plan)
 
 	if needsPrepare && requiresPrepare(version) && !datasetPrepareReady(version) {
 		if _, err := s.dependencyBuilder.BuildPrepare(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}); err != nil {
-			return err
+			return domain.DatasetVersion{}, err
 		}
-		version, err = s.store.GetDatasetVersion(projectID, versionID)
+		latest, err := s.store.GetDatasetVersion(projectID, versionID)
 		if err != nil {
-			return err
+			return domain.DatasetVersion{}, err
 		}
+		version = latest
 	}
 	if needsSentiment && !datasetSentimentReady(version) {
 		if _, err := s.dependencyBuilder.BuildSentiment(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}); err != nil {
-			return err
+			return domain.DatasetVersion{}, err
 		}
-		version, err = s.store.GetDatasetVersion(projectID, versionID)
+		latest, err := s.store.GetDatasetVersion(projectID, versionID)
 		if err != nil {
-			return err
+			return domain.DatasetVersion{}, err
 		}
+		version = latest
 	}
 	if needsEmbedding && !datasetEmbeddingReady(version) {
 		if _, err := s.dependencyBuilder.BuildEmbeddings(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}); err != nil {
-			return err
+			return domain.DatasetVersion{}, err
 		}
+		latest, err := s.store.GetDatasetVersion(projectID, versionID)
+		if err != nil {
+			return domain.DatasetVersion{}, err
+		}
+		version = latest
 	}
 
-	return nil
+	return version, nil
 }
 
 func (s *AnalysisService) SubmitAndExecute(projectID string, input domain.AnalysisSubmitRequest) (domain.AnalysisExecuteResponse, error) {
@@ -1027,8 +1044,6 @@ func (s *AnalysisService) ResumeExecution(projectID, executionID string, input d
 	if execution.Status != "waiting" {
 		return domain.ExecutionSummary{}, ErrInvalidArgument{Message: "only waiting executions can be resumed"}
 	}
-
-	now := time.Now().UTC()
 	reason := "external dependency is ready"
 	if input.Reason != nil && strings.TrimSpace(*input.Reason) != "" {
 		reason = strings.TrimSpace(*input.Reason)
@@ -1037,39 +1052,52 @@ func (s *AnalysisService) ResumeExecution(projectID, executionID string, input d
 	if input.TriggeredBy != nil && strings.TrimSpace(*input.TriggeredBy) != "" {
 		triggeredBy = strings.TrimSpace(*input.TriggeredBy)
 	}
+	return s.resumeExecutionInternal(execution, reason, triggeredBy)
+}
 
-	execution.Status = "queued"
-	execution.EndedAt = nil
-	execution.Events = append(execution.Events, domain.ExecutionEvent{
-		ExecutionID: execution.ExecutionID,
-		TS:          now,
-		Level:       "info",
-		EventType:   "RESUME_ENQUEUED",
-		Message:     "waiting execution resumed",
-		Payload: map[string]any{
-			"reason":       reason,
-			"triggered_by": triggeredBy,
-		},
-	})
-
-	workflowID, err := s.starter.StartAnalysisWorkflow(workflows.StartAnalysisInput{
-		ExecutionID:      execution.ExecutionID,
-		ProjectID:        execution.ProjectID,
-		RequestID:        execution.RequestID,
-		PlanID:           execution.Plan.PlanID,
-		DatasetVersionID: execution.DatasetVersionID,
-	})
+func (s *AnalysisService) ResumeWaitingExecutionsForDatasetVersion(projectID, datasetVersionID, reason, triggeredBy string) error {
+	versionID := strings.TrimSpace(datasetVersionID)
+	if versionID == "" {
+		return nil
+	}
+	executions, err := s.store.ListExecutions(projectID)
 	if err != nil {
-		return domain.ExecutionSummary{}, err
+		return err
 	}
-	lastEvent := &execution.Events[len(execution.Events)-1]
-	lastEvent.Payload["workflow_id"] = workflowID
-	lastEvent.Payload["workflow_engine"] = s.starter.EngineName()
-
-	if err := s.store.SaveExecution(execution); err != nil {
-		return domain.ExecutionSummary{}, err
+	for _, item := range executions {
+		if item.Status != "waiting" || item.DatasetVersionID == nil || strings.TrimSpace(*item.DatasetVersionID) != versionID {
+			continue
+		}
+		execution, err := s.GetExecution(projectID, item.ExecutionID)
+		if err != nil {
+			return err
+		}
+		if execution.Status != "waiting" {
+			continue
+		}
+		version, err := s.store.GetDatasetVersion(projectID, versionID)
+		if err != nil {
+			if err == store.ErrNotFound {
+				return ErrNotFound{Resource: "dataset version"}
+			}
+			return err
+		}
+		version, err = s.ensureExecutionDependenciesForVersion(projectID, version, execution.Plan)
+		if err != nil {
+			return err
+		}
+		latest, err := s.store.GetDatasetVersion(projectID, versionID)
+		if err == nil {
+			version = latest
+		}
+		if !planDependenciesReady(execution.Plan, version) {
+			continue
+		}
+		if _, err := s.resumeExecutionInternal(execution, reason, triggeredBy); err != nil {
+			return err
+		}
 	}
-	return execution, nil
+	return nil
 }
 
 func (s *AnalysisService) RerunExecution(projectID, executionID string, input domain.ExecutionRerunRequest) (domain.ExecutionRerunResponse, error) {
@@ -1313,6 +1341,55 @@ func datasetEmbeddingReady(version domain.DatasetVersion) bool {
 		return true
 	}
 	return false
+}
+
+func planDependenciesReady(plan domain.SkillPlan, version domain.DatasetVersion) bool {
+	if planRequiresPrepare(plan) && requiresPrepare(version) && !datasetPrepareReady(version) {
+		return false
+	}
+	if planRequiresSentiment(plan) && !datasetSentimentReady(version) {
+		return false
+	}
+	if planRequiresEmbedding(plan) && !datasetEmbeddingReady(version) {
+		return false
+	}
+	return true
+}
+
+func (s *AnalysisService) resumeExecutionInternal(execution domain.ExecutionSummary, reason, triggeredBy string) (domain.ExecutionSummary, error) {
+	now := time.Now().UTC()
+	execution.Status = "queued"
+	execution.EndedAt = nil
+	execution.Events = append(execution.Events, domain.ExecutionEvent{
+		ExecutionID: execution.ExecutionID,
+		TS:          now,
+		Level:       "info",
+		EventType:   "RESUME_ENQUEUED",
+		Message:     "waiting execution resumed",
+		Payload: map[string]any{
+			"reason":       reason,
+			"triggered_by": triggeredBy,
+		},
+	})
+
+	workflowID, err := s.starter.StartAnalysisWorkflow(workflows.StartAnalysisInput{
+		ExecutionID:      execution.ExecutionID,
+		ProjectID:        execution.ProjectID,
+		RequestID:        execution.RequestID,
+		PlanID:           execution.Plan.PlanID,
+		DatasetVersionID: execution.DatasetVersionID,
+	})
+	if err != nil {
+		return domain.ExecutionSummary{}, err
+	}
+	lastEvent := &execution.Events[len(execution.Events)-1]
+	lastEvent.Payload["workflow_id"] = workflowID
+	lastEvent.Payload["workflow_engine"] = s.starter.EngineName()
+
+	if err := s.store.SaveExecution(execution); err != nil {
+		return domain.ExecutionSummary{}, err
+	}
+	return execution, nil
 }
 
 func computePlanHash(plan domain.SkillPlan) string {

@@ -118,11 +118,12 @@
 - 기본 profile registry는 현재 [dataset_profiles.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/dataset_profiles.json) 에 있고, `DATASET_PROFILES_PATH`로 바꿀 수 있다.
 - dataset version 생성 시 `profile`을 안 주면 registry의 data type 기본 profile을 resolve해 저장한다.
 - version 생성 시 worker URL이 설정돼 있으면 `prepare`를 먼저 자동 시도한다.
-- `prepare_jobs`, `sentiment_jobs`, `embedding_jobs`는 현재 control plane 내부 goroutine runner로 실행되고, `GET /dataset_build_jobs/{job_id}` 또는 version 단위 `GET /build_jobs`로 상태를 확인할 수 있다.
+- `prepare_jobs`, `sentiment_jobs`, `embedding_jobs`는 현재 Temporal workflow로 실행되고, `GET /dataset_build_jobs/{job_id}` 또는 version 단위 `GET /build_jobs`로 상태를 확인할 수 있다.
 - execution 시작 전에는 plan step을 보고 `requires_prepare`, `requires_sentiment`, `requires_embedding`를 계산한 뒤 필요한 build를 먼저 자동 시도한다.
 - 그래도 준비되지 못한 경우에만 workflow가 `waiting`으로 전이된다.
-- 준비가 끝나면 `resume`으로 workflow를 다시 enqueue할 수 있다.
-- 확인 필요: dataset build async job은 아직 Temporal durable workflow와 통합되지 않았다.
+- build job이 완료되면 같은 dataset version을 기다리던 execution은 dependency를 다시 계산한 뒤 자동으로 `resume`된다.
+- 수동 `resume`은 자동 orchestration으로 해결하지 못한 외부 의존성 예외를 처리할 때만 사용하면 된다.
+- 확인 필요: dataset build workflow retry/backoff와 long-running build timeout 기준은 아직 운영 정책으로 고정하지 않았다.
 
 ## 검증 메모
 

@@ -77,6 +77,48 @@ func TestTemporalStarterStartsWorkflowWithExpectedOptions(t *testing.T) {
 	}
 }
 
+func TestTemporalStarterStartsDatasetBuildWorkflowWithExpectedOptions(t *testing.T) {
+	fakeClient := &stubTemporalClient{}
+	starter := TemporalStarter{
+		Address:   "temporal.example:7233",
+		Namespace: "analysis",
+		TaskQueue: "analysis-support",
+		ClientFactory: func(ctx context.Context, options client.Options) (TemporalClient, error) {
+			return fakeClient, nil
+		},
+	}
+
+	workflowID, err := starter.StartDatasetBuildWorkflow(StartDatasetBuildInput{
+		JobID:            "job-123",
+		ProjectID:        "project-1",
+		DatasetID:        "dataset-1",
+		DatasetVersionID: "version-1",
+		BuildType:        "prepare",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if workflowID != "dataset-build-job-123" {
+		t.Fatalf("unexpected workflow id: %s", workflowID)
+	}
+	if fakeClient.workflowName != DatasetBuildWorkflowName {
+		t.Fatalf("unexpected workflow name: %v", fakeClient.workflowName)
+	}
+	if fakeClient.startOptions.ID != "dataset-build-job-123" {
+		t.Fatalf("unexpected start workflow id: %s", fakeClient.startOptions.ID)
+	}
+	if len(fakeClient.args) != 1 {
+		t.Fatalf("unexpected arg count: %d", len(fakeClient.args))
+	}
+	input, ok := fakeClient.args[0].(DatasetBuildWorkflowInput)
+	if !ok {
+		t.Fatalf("unexpected workflow input type: %T", fakeClient.args[0])
+	}
+	if input.JobID != "job-123" || input.DatasetVersionID != "version-1" || input.BuildType != "prepare" {
+		t.Fatalf("unexpected workflow input: %+v", input)
+	}
+}
+
 type stubTemporalClient struct {
 	startOptions client.StartWorkflowOptions
 	workflowName interface{}

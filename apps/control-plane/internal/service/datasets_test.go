@@ -15,6 +15,7 @@ import (
 
 	"analysis-support-platform/control-plane/internal/domain"
 	"analysis-support-platform/control-plane/internal/store"
+	"analysis-support-platform/control-plane/internal/workflows"
 
 	_ "github.com/marcboeker/go-duckdb"
 )
@@ -23,6 +24,23 @@ type embeddingIndexCaptureStore struct {
 	*store.MemoryStore
 	datasetVersionID string
 	records          []domain.EmbeddingIndexChunk
+}
+
+type fakeDatasetBuildStarter struct {
+	startCalls []workflows.StartDatasetBuildInput
+}
+
+func (s *fakeDatasetBuildStarter) StartAnalysisWorkflow(input workflows.StartAnalysisInput) (string, error) {
+	return "analysis-execution-" + input.ExecutionID, nil
+}
+
+func (s *fakeDatasetBuildStarter) StartDatasetBuildWorkflow(input workflows.StartDatasetBuildInput) (string, error) {
+	s.startCalls = append(s.startCalls, input)
+	return "dataset-build-" + input.JobID, nil
+}
+
+func (s *fakeDatasetBuildStarter) EngineName() string {
+	return "temporal"
 }
 
 func (s *embeddingIndexCaptureStore) ReplaceEmbeddingChunkIndex(datasetVersionID string, records []domain.EmbeddingIndexChunk) error {
@@ -388,6 +406,59 @@ func TestCreatePrepareJobCompletesAndStoresStatus(t *testing.T) {
 	version = waitForDatasetVersionPrepareReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
 	if version.PrepareURI == nil || *version.PrepareURI == "" {
 		t.Fatalf("expected prepared uri after job completion: %+v", version)
+	}
+}
+
+func TestCreatePrepareJobStartsTemporalWorkflowWhenStarterConfigured(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+	starter := &fakeDatasetBuildStarter{}
+	service.SetBuildJobStarter(starter)
+
+	project := domain.Project{ProjectID: "project-1", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-1",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata:         map[string]any{},
+		PrepareStatus:    "queued",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	job, err := service.CreatePrepareJob(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "test")
+	if err != nil {
+		t.Fatalf("unexpected create prepare job error: %v", err)
+	}
+	if len(starter.startCalls) != 1 {
+		t.Fatalf("expected temporal workflow start call, got %+v", starter.startCalls)
+	}
+	if starter.startCalls[0].JobID != job.JobID || starter.startCalls[0].BuildType != "prepare" {
+		t.Fatalf("unexpected start input: %+v", starter.startCalls[0])
+	}
+	stored, err := service.GetDatasetBuildJob(project.ProjectID, job.JobID)
+	if err != nil {
+		t.Fatalf("unexpected get build job error: %v", err)
+	}
+	if stored.Status != "queued" {
+		t.Fatalf("expected queued build job before workflow pickup, got %+v", stored)
 	}
 }
 

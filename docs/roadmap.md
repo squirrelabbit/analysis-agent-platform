@@ -24,23 +24,19 @@
 
 현재 상태:
 - version 생성 시 `prepare eager`는 현재 async build job enqueue로 반영됐다.
-- execution 시작 시 `sentiment/embedding lazy` dependency 계산과 자동 build 1차 구현도 반영됐다.
-- dataset build job API와 상태 조회 API도 추가됐다.
-- 다만 execution dependency 경로는 아직 동기 build 호출을 사용하고, `waiting`을 완전히 예외로 밀어낸 상태는 아니다.
+- execution 시작 시 `sentiment/embedding lazy` dependency 계산과 자동 build가 동작한다.
+- dataset build job API와 상태 조회 API가 있고, 실행은 Temporal workflow가 담당한다.
+- build 완료 후 같은 dataset version을 기다리던 execution은 dependency를 다시 계산한 뒤 자동 resume을 시도한다.
 
 목표:
 - 사용자가 `scenario execute`나 analysis execute를 눌렀을 때 `prepare/sentiment/embedding` 준비 상태를 몰라도 되게 만든다.
 - 위 정책대로 `prepare=eager`, `sentiment/embedding=lazy`를 실제 실행 흐름으로 고정한다.
 
-할 일:
-1. upload 직후 `prepare`를 자동 시작하는 경로를 유지하고, 실패/재시도 정책을 보강한다.
-2. `scenario execute`와 일반 execution에서 필요한 dependency 계산 로직을 유지하고, 예외 로그를 더 명확히 남긴다.
-   - `requires_prepare`
-   - `requires_sentiment`
-   - `requires_embedding`
-3. `prepare`가 이미 없으면 자동 build를 시작하고, `sentiment`, `embedding`은 실제 필요할 때만 자동 build를 시작하는 현재 경로를 async job abstraction과 연결한다.
-4. build 완료 후 본 execution을 이어서 진행하는 흐름을 더 안정화한다.
-5. `waiting`은 예외 상황으로만 남긴다.
+남은 일:
+1. upload 직후 `prepare` 자동 시작 경로의 실패/재시도 정책을 보강한다.
+2. `scenario execute`와 일반 execution의 dependency 로그와 event surface를 더 명확히 남긴다.
+3. build 완료 후 auto resume이 반복 enqueue나 중복 build를 만들지 않는지 e2e smoke를 추가한다.
+4. `waiting`을 자동 orchestration으로 해결하지 못한 외부 예외만 남기도록 정리한다.
 
 결과물:
 - 자동 dependency build 경로
@@ -50,23 +46,22 @@
 - 사용자가 수동 `resume`을 덜 해도 되는 흐름
 
 주의:
-- dataset build async job은 현재 control plane 내부 goroutine runner를 사용한다.
-- 확인 필요: durable queue/worker 통합은 다음 단계에서 Temporal 또는 별도 worker로 옮길지 결정해야 한다.
+- 확인 필요: dataset build workflow retry/backoff와 timeout, history 보존 기준은 아직 운영 정책으로 정하지 않았다.
 
-## Step 2. dataset build를 비동기 job으로 분리
+## Step 2. dataset build runtime hardening
 
 목표:
-- `prepare/sentiment/embedding`이 API 응답 시간과 강하게 묶이지 않게 만든다.
+- Temporal build workflow를 운영형으로 다듬는다.
 
 할 일:
-1. 현재 추가된 dataset build job 모델을 durable runner와 연결한다.
-2. `prepare/sentiment/embedding` dependency 경로도 sync 호출 대신 job enqueue + 후속 resume로 전환한다.
-3. 중복 실행 방지와 재시도 정책을 보강한다.
-4. build 실패 시 error surface와 운영 매뉴얼을 정리한다.
+1. 중복 실행 방지와 재시도 정책을 보강한다.
+2. build 실패 시 error surface와 운영 매뉴얼을 정리한다.
+3. workflow timeout, backoff, cancellation 정책을 확정한다.
+4. 필요하면 별도 build task queue 분리를 검토한다.
 
 결과물:
-- dataset build job 모델
-- 상태 조회/재시도 정책
+- 운영형 build workflow 정책
+- 상태 조회/재시도 기준
 - API timeout/backpressure 리스크 완화
 
 ## Step 3. 성능 최적화 1차

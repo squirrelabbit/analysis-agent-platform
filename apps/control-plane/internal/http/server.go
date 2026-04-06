@@ -54,6 +54,7 @@ func NewServer(cfg config.Config) *Server {
 	if err := server.datasetService.SetDatasetProfilesPath(cfg.DatasetProfilesPath); err != nil {
 		panic(err)
 	}
+	server.datasetService.SetBuildJobStarter(starter)
 	if strings.TrimSpace(cfg.PythonAIWorkerURL) != "" {
 		server.analysisService.SetDependencyBuilder(server.datasetService)
 	}

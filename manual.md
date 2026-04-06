@@ -442,7 +442,7 @@ curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID/result" | python3 -m jso
 - `waiting_for = sentiment_labels`
 - `waiting_for = embeddings`
 
-이 경우에만 `7-2`, `7-3`, `7-4`로 필요한 build를 끝낸 뒤 아래 resume를 실행하면 된다.
+이 경우에만 `7-2`, `7-3`, `7-4`로 필요한 build를 직접 확인하거나 예외 복구를 하고, 자동 resume이 실패했을 때만 아래 수동 resume를 실행하면 된다.
 
 ```bash
 curl -sS -X POST "$API/projects/$PROJECT_ID/executions/$EXEC_ID/resume" \
@@ -515,8 +515,9 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSI
 
 주의:
 
-- 현재 async build job은 control plane 내부 goroutine runner로 실행된다.
-- 확인 필요: control plane 재시작 시 in-flight build job 지속성은 Temporal workflow 수준으로 보장되지 않는다.
+- 현재 async build job은 Temporal workflow로 실행된다.
+- build 완료 후 같은 dataset version을 기다리던 execution은 dependency를 다시 계산한 뒤 자동 resume을 시도한다.
+- 확인 필요: build workflow retry/backoff와 timeout 기준은 아직 운영 정책으로 고정하지 않았다.
 
 
 ### 7-2. prepare 실행
@@ -835,7 +836,7 @@ curl -sS "$API/projects/$PROJECT_ID/report_drafts/$DRAFT_ID" | python3 -m json.t
 
 ### 7-13. waiting 상태면 resume
 
-`status = "waiting"`이면 자동 orchestration으로 해결하지 못한 예외 상황이다. 필요한 dependency를 먼저 준비한 뒤 다시 resume하면 된다.
+`status = "waiting"`이면 자동 orchestration으로 해결하지 못한 예외 상황이다. 필요한 dependency를 먼저 준비한 뒤 자동 resume이 되지 않았을 때만 수동 resume하면 된다.
 
 ```bash
 curl -sS -X POST "$API/projects/$PROJECT_ID/executions/$EXEC_ID/resume" \

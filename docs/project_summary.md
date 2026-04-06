@@ -12,7 +12,7 @@
 - 시나리오 표가 row 단위로 정리돼 있으면 `scenario_id` 기준으로 묶어 여러 시나리오를 한 번에 등록할 수 있다.
 - 저장소에는 축제 대표 질문 `S1~S5`를 현재 strict skill 조합으로 옮긴 import fixture와 매핑 문서가 포함돼 있다.
 - 원본 dataset을 upload한 뒤 `prepare` async job을 기본으로 enqueue하고, 필요할 때 `sentiment`, `embedding`을 추가 build한다.
-- 분석 요청을 제출하면 planner가 최소 skill plan을 만들고, control plane이 필요한 dataset dependency를 먼저 자동 build한 뒤 Temporal workflow가 실행과 예외적 `waiting / resume`를 오케스트레이션한다.
+- 분석 요청을 제출하면 planner가 최소 skill plan을 만들고, control plane이 필요한 dataset dependency를 먼저 자동 build한 뒤 Temporal workflow가 실행과 예외적 `waiting / resume`를 오케스트레이션한다. dataset build가 끝나면 같은 dataset version을 기다리던 execution은 자동으로 다시 enqueue된다.
 - dataset version의 기본 recipe는 현재 [dataset_profiles.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/dataset_profiles.json) registry로 관리하고, version 생성 시 data type 기준 기본 profile을 resolve해 저장한다.
 - prompt version 이름은 현재 [config/prompts](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts) 아래 Markdown template 파일명과 1:1로 대응된다.
 - 실행 결과는 artifact와 execution metadata로 남고, 같은 execution context 기준으로 `rerun / diff` 할 수 있다.
@@ -68,7 +68,7 @@
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension을 켜고 `embedding_index_chunks` table까지 만든다.
 - 비정형 dataset build는 현재 `prepare/sentiment/chunk Parquet` 단계와 sentiment join, chunk citation 경로까지 반영됐고, vector index 전환안은 `docs/architecture/unstructured_storage_transition.md`에 분리해 정리했다.
 - GitHub Actions CI는 Python worker 테스트와 Go 테스트/빌드를 현재 구조 기준으로 실행한다.
-- 확인 필요: dataset build async job은 아직 control plane 내부 goroutine runner를 사용하므로, process restart에 대한 durable 보장은 Temporal workflow와 다르다.
+- 확인 필요: dataset build workflow retry/backoff 정책, long-running build timeout, workflow history 보존 기준은 아직 운영 정책으로 확정하지 않았다.
 
 ## 5. 문서 구분
 
