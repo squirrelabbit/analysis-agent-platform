@@ -51,6 +51,12 @@ func NewServer(cfg config.Config) *Server {
 		datasetService:  service.NewDatasetService(repository, cfg.PythonAIWorkerURL, cfg.UploadRoot, cfg.ArtifactRoot),
 		analysisService: service.NewAnalysisService(repository, starter, planGenerator),
 	}
+	if err := server.datasetService.SetDatasetProfilesPath(cfg.DatasetProfilesPath); err != nil {
+		panic(err)
+	}
+	if strings.TrimSpace(cfg.PythonAIWorkerURL) != "" {
+		server.analysisService.SetDependencyBuilder(server.datasetService)
+	}
 	server.routes()
 	return server
 }
@@ -86,8 +92,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions", s.handleCreateDatasetVersion)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}", s.handleGetDatasetVersion)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare", s.handleBuildPrepare)
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs", s.handleCreatePrepareJob)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment", s.handleBuildSentiment)
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_jobs", s.handleCreateSentimentJob)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embeddings", s.handleBuildEmbeddings)
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embedding_jobs", s.handleCreateEmbeddingJob)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/build_jobs", s.handleListDatasetBuildJobs)
+	s.mux.HandleFunc("GET /projects/{project_id}/dataset_build_jobs/{job_id}", s.handleGetDatasetBuildJob)
 	s.mux.HandleFunc("POST /projects/{project_id}/analysis_requests", s.handleSubmitAnalysis)
 	s.mux.HandleFunc("GET /projects/{project_id}/analysis_requests/{request_id}", s.handleGetRequest)
 	s.mux.HandleFunc("GET /projects/{project_id}/plans/{plan_id}", s.handleGetPlan)
@@ -349,6 +360,26 @@ func (s *Server) handleBuildPrepare(w stdhttp.ResponseWriter, r *stdhttp.Request
 	writeJSON(w, stdhttp.StatusAccepted, response)
 }
 
+func (s *Server) handleCreatePrepareJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetPrepareRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreatePrepareJob(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		payload,
+		"api",
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusAccepted, response)
+}
+
 func datasetVersionCreateRequestFromMultipart(form *multipart.Form) (domain.DatasetVersionCreateRequest, error) {
 	var payload domain.DatasetVersionCreateRequest
 	if form == nil {
@@ -425,6 +456,26 @@ func (s *Server) handleBuildEmbeddings(w stdhttp.ResponseWriter, r *stdhttp.Requ
 	writeJSON(w, stdhttp.StatusAccepted, response)
 }
 
+func (s *Server) handleCreateEmbeddingJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetEmbeddingBuildRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreateEmbeddingJob(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		payload,
+		"api",
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusAccepted, response)
+}
+
 func (s *Server) handleBuildSentiment(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	var payload domain.DatasetSentimentBuildRequest
 	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
@@ -442,6 +493,51 @@ func (s *Server) handleBuildSentiment(w stdhttp.ResponseWriter, r *stdhttp.Reque
 		return
 	}
 	writeJSON(w, stdhttp.StatusAccepted, response)
+}
+
+func (s *Server) handleCreateSentimentJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetSentimentBuildRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreateSentimentJob(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		payload,
+		"api",
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusAccepted, response)
+}
+
+func (s *Server) handleListDatasetBuildJobs(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.ListDatasetBuildJobs(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleGetDatasetBuildJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.GetDatasetBuildJob(
+		r.PathValue("project_id"),
+		r.PathValue("job_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
 }
 
 func (s *Server) handleSubmitAnalysis(w stdhttp.ResponseWriter, r *stdhttp.Request) {

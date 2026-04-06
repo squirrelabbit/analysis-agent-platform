@@ -32,8 +32,13 @@
 - `POST /projects/{project_id}/datasets/{dataset_id}/versions`
 - `GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}`
 - `POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare`
+- `POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs`
 - `POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment`
+- `POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_jobs`
 - `POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embeddings`
+- `POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embedding_jobs`
+- `GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/build_jobs`
+- `GET /projects/{project_id}/dataset_build_jobs/{job_id}`
 - `POST /projects/{project_id}/analysis_requests`
 - `GET /projects/{project_id}/analysis_requests/{request_id}`
 - `GET /projects/{project_id}/plans/{plan_id}`
@@ -91,12 +96,14 @@
 - 시나리오 표가 row 형태로 준비돼 있으면 `POST /projects/{project_id}/scenarios/import`로 여러 시나리오를 한 번에 등록할 수 있다. 같은 `scenario_id`는 하나의 시나리오로 묶고, header 값이 충돌하면 에러를 돌린다.
 - 현재 자동 plan 생성은 `strict`만 지원한다. 즉 저장된 step을 그대로 실행 plan으로 바꾸고, `runtime_skill_name`이 지정된 step 또는 control plane에 등록된 `function_name -> skill_name` 매핑만 허용한다.
 - `POST /projects/{project_id}/scenarios/{scenario_id}/execute`는 현재 strict 시나리오에서 `analysis_request + plan`을 만든 뒤 곧바로 execution enqueue까지 묶어서 처리한다.
+- dataset version이 unstructured 계열이면 현재 version 생성 직후 `prepare` async job을 자동 enqueue하고, `POST /plans/{plan_id}/execute` 또는 `POST /scenarios/{scenario_id}/execute`는 필요한 step이 요구하는 `sentiment`, `embedding` dependency를 먼저 계산해 자동 build를 시도한다.
 - 직접 매핑되지 않는 step은 `runtime_skill_name`을 명시해야 하고, `guided`나 guardrail 기반 planner 확장은 backlog다.
 - 관련 설정:
   - `TEMPORAL_ADDRESS`
   - `TEMPORAL_NAMESPACE`
   - `TEMPORAL_TASK_QUEUE`
   - `DUCKDB_PATH`
+  - `DATASET_PROFILES_PATH`
   - `PYTHON_AI_WORKER_URL`
   - `PLANNER_BACKEND`
   - `SKILL_BUNDLE_PATH`
@@ -107,10 +114,15 @@
 
 ## readiness / waiting 규칙
 
-- 비정형 execution step은 bundle의 `requires_prepare` 기준으로 prepared dataset이 없으면 `waiting`으로 전이된다.
-- bundle의 `requires_sentiment=true` skill은 sentiment artifact가 없으면 `waiting`으로 전이된다.
-- bundle의 `requires_embedding=true` skill은 embedding artifact가 없으면 `waiting`으로 전이된다.
+- 현재 기본 정책은 `prepare=eager`, `sentiment/embedding=lazy`다.
+- 기본 profile registry는 현재 [dataset_profiles.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/dataset_profiles.json) 에 있고, `DATASET_PROFILES_PATH`로 바꿀 수 있다.
+- dataset version 생성 시 `profile`을 안 주면 registry의 data type 기본 profile을 resolve해 저장한다.
+- version 생성 시 worker URL이 설정돼 있으면 `prepare`를 먼저 자동 시도한다.
+- `prepare_jobs`, `sentiment_jobs`, `embedding_jobs`는 현재 control plane 내부 goroutine runner로 실행되고, `GET /dataset_build_jobs/{job_id}` 또는 version 단위 `GET /build_jobs`로 상태를 확인할 수 있다.
+- execution 시작 전에는 plan step을 보고 `requires_prepare`, `requires_sentiment`, `requires_embedding`를 계산한 뒤 필요한 build를 먼저 자동 시도한다.
+- 그래도 준비되지 못한 경우에만 workflow가 `waiting`으로 전이된다.
 - 준비가 끝나면 `resume`으로 workflow를 다시 enqueue할 수 있다.
+- 확인 필요: dataset build async job은 아직 Temporal durable workflow와 통합되지 않았다.
 
 ## 검증 메모
 

@@ -112,6 +112,42 @@ func metadataUsageInt(t *testing.T, metadata map[string]any, key string, usageKe
 	return value
 }
 
+func waitForDatasetBuildJobStatus(t *testing.T, service *DatasetService, projectID, jobID, expected string) domain.DatasetBuildJob {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		job, err := service.GetDatasetBuildJob(projectID, jobID)
+		if err == nil && job.Status == expected {
+			return job
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	job, err := service.GetDatasetBuildJob(projectID, jobID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset build job error: %v", err)
+	}
+	t.Fatalf("expected dataset build job %s status %s, got %s", jobID, expected, job.Status)
+	return domain.DatasetBuildJob{}
+}
+
+func waitForDatasetVersionPrepareReady(t *testing.T, service *DatasetService, projectID, datasetID, versionID string) domain.DatasetVersion {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		version, err := service.GetDatasetVersion(projectID, datasetID, versionID)
+		if err == nil && version.PrepareStatus == "ready" {
+			return version
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	version, err := service.GetDatasetVersion(projectID, datasetID, versionID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset version error: %v", err)
+	}
+	t.Fatalf("expected dataset version prepare ready, got %s", version.PrepareStatus)
+	return domain.DatasetVersion{}
+}
+
 func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	repository := store.NewMemoryStore()
 	uploadRoot := t.TempDir()
@@ -224,6 +260,137 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	}
 }
 
+func TestCreateDatasetVersionEnqueuesEagerPrepareJobWhenWorkerConfigured(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-1", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-1",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"artifact": map[string]any{
+				"prepare_uri":          "/tmp/issues.prepared.parquet",
+				"prepared_ref":         "/tmp/issues.prepared.parquet",
+				"prepare_format":       "parquet",
+				"prepared_text_column": "normalized_text",
+				"summary": map[string]any{
+					"output_row_count": 3,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI: "/tmp/issues.csv",
+		DataType:   datasetStringPtr("unstructured"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected create dataset version error: %v", err)
+	}
+
+	jobs, err := service.ListDatasetBuildJobs(project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+	if err != nil {
+		t.Fatalf("unexpected list dataset build jobs error: %v", err)
+	}
+	if len(jobs.Items) != 1 {
+		t.Fatalf("expected one eager prepare job, got %+v", jobs.Items)
+	}
+	job := waitForDatasetBuildJobStatus(t, service, project.ProjectID, jobs.Items[0].JobID, "completed")
+	if job.BuildType != "prepare" {
+		t.Fatalf("unexpected build type: %+v", job)
+	}
+	version = waitForDatasetVersionPrepareReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+	if callCount != 1 {
+		t.Fatalf("expected eager prepare worker call once, got %d", callCount)
+	}
+	if version.PrepareURI == nil || *version.PrepareURI != "/tmp/issues.prepared.parquet" {
+		t.Fatalf("unexpected prepare uri: %+v", version.PrepareURI)
+	}
+}
+
+func TestCreatePrepareJobCompletesAndStoresStatus(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-1", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-1",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata:         map[string]any{},
+		PrepareStatus:    "queued",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"artifact": map[string]any{
+				"prepare_uri":          "/tmp/issues.prepared.parquet",
+				"prepared_ref":         "/tmp/issues.prepared.parquet",
+				"prepare_format":       "parquet",
+				"prepared_text_column": "normalized_text",
+			},
+		})
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	job, err := service.CreatePrepareJob(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "test")
+	if err != nil {
+		t.Fatalf("unexpected create prepare job error: %v", err)
+	}
+	if job.Status != "queued" {
+		t.Fatalf("unexpected initial job status: %+v", job)
+	}
+
+	job = waitForDatasetBuildJobStatus(t, service, project.ProjectID, job.JobID, "completed")
+	if job.StartedAt == nil || job.CompletedAt == nil {
+		t.Fatalf("expected started/completed timestamps: %+v", job)
+	}
+	if job.TriggeredBy != "test" {
+		t.Fatalf("unexpected triggered_by: %+v", job)
+	}
+	version = waitForDatasetVersionPrepareReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+	if version.PrepareURI == nil || *version.PrepareURI == "" {
+		t.Fatalf("expected prepared uri after job completion: %+v", version)
+	}
+}
+
 func TestCreateDatasetVersionStoresNormalizedProfile(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
@@ -276,6 +443,137 @@ func TestCreateDatasetVersionStoresNormalizedProfile(t *testing.T) {
 	}
 	if got := metadataString(version.Metadata, "profile_id", ""); got != "festival-default" {
 		t.Fatalf("unexpected metadata profile_id: %s", got)
+	}
+}
+
+func TestCreateDatasetVersionResolvesDefaultProfileFromRegistry(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	registryPath := filepath.Join(t.TempDir(), "dataset_profiles.json")
+	if err := os.WriteFile(registryPath, []byte(`{
+  "defaults": {
+    "unstructured": "default-unstructured-v1"
+  },
+  "profiles": {
+    "default-unstructured-v1": {
+      "profile_id": "default-unstructured-v1",
+      "prepare_prompt_version": "dataset-prepare-anthropic-batch-v1",
+      "sentiment_prompt_version": "sentiment-anthropic-v1",
+      "regex_rule_names": ["media_placeholder", "url_cleanup"],
+      "garbage_rule_names": ["ad_marker", "empty_or_noise"],
+      "embedding_model": "intfloat/multilingual-e5-small"
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("unexpected registry write error: %v", err)
+	}
+	if err := service.SetDatasetProfilesPath(registryPath); err != nil {
+		t.Fatalf("unexpected registry load error: %v", err)
+	}
+
+	project := domain.Project{ProjectID: "project-1", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-1",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI: "/tmp/issues.csv",
+		DataType:   datasetStringPtr("unstructured"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected create dataset version error: %v", err)
+	}
+
+	if version.Profile == nil {
+		t.Fatalf("expected default profile to be resolved")
+	}
+	if version.Profile.ProfileID != "default-unstructured-v1" {
+		t.Fatalf("unexpected profile id: %+v", version.Profile)
+	}
+	if version.Profile.EmbeddingModel == nil || *version.Profile.EmbeddingModel != "intfloat/multilingual-e5-small" {
+		t.Fatalf("unexpected embedding model: %+v", version.Profile)
+	}
+	if got := metadataString(version.Metadata, "profile_id", ""); got != "default-unstructured-v1" {
+		t.Fatalf("unexpected metadata profile_id: %s", got)
+	}
+}
+
+func TestCreateDatasetVersionMergesRegistryProfileWithExplicitOverride(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	registryPath := filepath.Join(t.TempDir(), "dataset_profiles.json")
+	if err := os.WriteFile(registryPath, []byte(`{
+  "defaults": {
+    "unstructured": "default-unstructured-v1"
+  },
+  "profiles": {
+    "festival-default": {
+      "profile_id": "festival-default",
+      "prepare_prompt_version": "dataset-prepare-anthropic-batch-v1",
+      "sentiment_prompt_version": "sentiment-anthropic-v1",
+      "regex_rule_names": ["media_placeholder", "url_cleanup"],
+      "garbage_rule_names": ["ad_marker", "empty_or_noise"],
+      "embedding_model": "intfloat/multilingual-e5-small"
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("unexpected registry write error: %v", err)
+	}
+	if err := service.SetDatasetProfilesPath(registryPath); err != nil {
+		t.Fatalf("unexpected registry load error: %v", err)
+	}
+
+	project := domain.Project{ProjectID: "project-1", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-1",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI: "/tmp/issues.csv",
+		DataType:   datasetStringPtr("unstructured"),
+		Profile: &domain.DatasetProfile{
+			ProfileID:        "festival-default",
+			EmbeddingModel:   datasetStringPtr("text-embedding-3-small"),
+			GarbageRuleNames: []string{"platform_placeholder"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected create dataset version error: %v", err)
+	}
+
+	if version.Profile == nil {
+		t.Fatalf("expected merged profile")
+	}
+	if version.Profile.PreparePromptVersion == nil || *version.Profile.PreparePromptVersion != "dataset-prepare-anthropic-batch-v1" {
+		t.Fatalf("unexpected merged prepare prompt: %+v", version.Profile)
+	}
+	if version.Profile.EmbeddingModel == nil || *version.Profile.EmbeddingModel != "text-embedding-3-small" {
+		t.Fatalf("unexpected merged embedding model: %+v", version.Profile)
+	}
+	if len(version.Profile.GarbageRuleNames) != 1 || version.Profile.GarbageRuleNames[0] != "platform_placeholder" {
+		t.Fatalf("unexpected merged garbage rules: %+v", version.Profile.GarbageRuleNames)
 	}
 }
 

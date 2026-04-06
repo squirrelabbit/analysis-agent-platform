@@ -1,0 +1,27 @@
+{
+  "defaults": {
+    "unstructured": "default-unstructured-v1",
+    "mixed": "default-unstructured-v1",
+    "both": "default-unstructured-v1"
+  },
+  "profiles": {
+    "default-unstructured-v1": {
+      "profile_id": "default-unstructured-v1",
+      "prepare_prompt_version": "dataset-prepare-anthropic-v1",
+      "sentiment_prompt_version": "sentiment-anthropic-v1",
+      "regex_rule_names": [
+        "media_placeholder",
+        "html_artifact",
+        "url_cleanup",
+        "zero_width_cleanup"
+      ],
+      "garbage_rule_names": [
+        "ad_marker",
+        "promotion_link",
+        "platform_placeholder",
+        "empty_or_noise"
+      ],
+      "embedding_model": "intfloat/multilingual-e5-small"
+    }
+  }
+}

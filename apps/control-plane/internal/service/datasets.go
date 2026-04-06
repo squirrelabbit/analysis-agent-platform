@@ -29,11 +29,13 @@ const DefaultEmbeddingModel = "intfloat/multilingual-e5-small"
 const tokenProjectionVectorDim = 64
 
 type DatasetService struct {
-	store             store.Repository
-	pythonAIWorkerURL string
-	uploadRoot        string
-	artifactRoot      string
-	httpClient        *http.Client
+	store               store.Repository
+	pythonAIWorkerURL   string
+	uploadRoot          string
+	artifactRoot        string
+	datasetProfilesPath string
+	profileRegistry     *datasetProfileRegistry
+	httpClient          *http.Client
 }
 
 type workerTaskResponse struct {
@@ -49,6 +51,16 @@ func NewDatasetService(repository store.Repository, pythonAIWorkerURL string, up
 		artifactRoot:      strings.TrimSpace(artifactRoot),
 		httpClient:        &http.Client{Timeout: 60 * time.Second},
 	}
+}
+
+func (s *DatasetService) SetDatasetProfilesPath(path string) error {
+	registry, err := loadDatasetProfileRegistry(path)
+	if err != nil {
+		return err
+	}
+	s.datasetProfilesPath = strings.TrimSpace(path)
+	s.profileRegistry = registry
+	return nil
 }
 
 func (s *DatasetService) CreateDataset(projectID string, input domain.DatasetCreateRequest) (domain.Dataset, error) {
@@ -105,7 +117,7 @@ func (s *DatasetService) CreateDatasetVersion(projectID, datasetID string, input
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
-	return version, nil
+	return s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version), nil
 }
 
 func (s *DatasetService) UploadDatasetVersion(projectID, datasetID string, input domain.DatasetVersionCreateRequest, originalName string, contentType string, reader io.Reader) (domain.DatasetVersion, error) {
@@ -138,7 +150,7 @@ func (s *DatasetService) UploadDatasetVersion(projectID, datasetID string, input
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
-	return version, nil
+	return s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version), nil
 }
 
 func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset domain.Dataset, storageURI string, input domain.DatasetVersionCreateRequest) domain.DatasetVersion {
@@ -147,7 +159,7 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
-	profile := normalizeDatasetProfile(input.Profile)
+	profile := s.resolveDatasetProfile(dataType, input.Profile)
 	if profile != nil && strings.TrimSpace(profile.ProfileID) != "" {
 		metadata["profile_id"] = profile.ProfileID
 	}
@@ -207,6 +219,26 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 	}
 	if sentimentRequired {
 		version.Metadata["sentiment_required"] = true
+	}
+	return version
+}
+
+func (s *DatasetService) resolveDatasetProfile(dataType string, explicit *domain.DatasetProfile) *domain.DatasetProfile {
+	return s.profileRegistry.resolve(dataType, explicit)
+}
+
+func (s *DatasetService) maybeRunEagerPrepare(projectID, datasetID string, version domain.DatasetVersion) domain.DatasetVersion {
+	if strings.TrimSpace(s.pythonAIWorkerURL) == "" {
+		return version
+	}
+	if !requiresPrepare(version) || isPrepareReady(version) {
+		return version
+	}
+	if _, err := s.CreatePrepareJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "dataset_version_create"); err == nil {
+		latest, getErr := s.GetDatasetVersion(projectID, datasetID, version.DatasetVersionID)
+		if getErr == nil {
+			return latest
+		}
 	}
 	return version
 }

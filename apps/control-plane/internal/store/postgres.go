@@ -405,6 +405,146 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 	return version, nil
 }
 
+func (s *PostgresStore) SaveDatasetBuildJob(job domain.DatasetBuildJob) error {
+	requestJSON, err := marshalJSON(defaultMetadataMap(job.Request))
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(
+		`INSERT INTO dataset_build_jobs (
+			job_id, project_id, dataset_id, dataset_version_id, build_type, status,
+			request, triggered_by, created_at, started_at, completed_at, error_message
+		) VALUES (
+			$1::uuid, $2::uuid, $3::uuid, $4, $5, $6,
+			$7::jsonb, $8, $9, $10, $11, $12
+		)
+		ON CONFLICT (job_id) DO UPDATE
+		SET dataset_id = EXCLUDED.dataset_id,
+		    dataset_version_id = EXCLUDED.dataset_version_id,
+		    build_type = EXCLUDED.build_type,
+		    status = EXCLUDED.status,
+		    request = EXCLUDED.request,
+		    triggered_by = EXCLUDED.triggered_by,
+		    started_at = EXCLUDED.started_at,
+		    completed_at = EXCLUDED.completed_at,
+		    error_message = EXCLUDED.error_message`,
+		job.JobID,
+		job.ProjectID,
+		job.DatasetID,
+		job.DatasetVersionID,
+		job.BuildType,
+		job.Status,
+		requestJSON,
+		nullIfEmpty(job.TriggeredBy),
+		job.CreatedAt,
+		nullableTime(job.StartedAt),
+		nullableTime(job.CompletedAt),
+		nullableString(job.ErrorMessage),
+	)
+	return err
+}
+
+func (s *PostgresStore) GetDatasetBuildJob(projectID, jobID string) (domain.DatasetBuildJob, error) {
+	row := s.db.QueryRow(
+		`SELECT job_id::text, project_id::text, dataset_id::text, dataset_version_id, build_type, status,
+		        request, triggered_by, created_at, started_at, completed_at, error_message
+		 FROM dataset_build_jobs
+		 WHERE project_id = $1::uuid AND job_id = $2::uuid`,
+		projectID,
+		jobID,
+	)
+	var job domain.DatasetBuildJob
+	var requestRaw []byte
+	var triggeredBy sql.NullString
+	var errorMessage sql.NullString
+	if err := row.Scan(
+		&job.JobID,
+		&job.ProjectID,
+		&job.DatasetID,
+		&job.DatasetVersionID,
+		&job.BuildType,
+		&job.Status,
+		&requestRaw,
+		&triggeredBy,
+		&job.CreatedAt,
+		&job.StartedAt,
+		&job.CompletedAt,
+		&errorMessage,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.DatasetBuildJob{}, ErrNotFound
+		}
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := unmarshalJSON(requestRaw, &job.Request, map[string]any{}); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if triggeredBy.Valid {
+		job.TriggeredBy = triggeredBy.String
+	}
+	if errorMessage.Valid {
+		job.ErrorMessage = &errorMessage.String
+	}
+	return job, nil
+}
+
+func (s *PostgresStore) ListDatasetBuildJobs(projectID, datasetVersionID string) ([]domain.DatasetBuildJob, error) {
+	baseQuery := `SELECT job_id::text, project_id::text, dataset_id::text, dataset_version_id, build_type, status,
+	                     request, triggered_by, created_at, started_at, completed_at, error_message
+	              FROM dataset_build_jobs
+	              WHERE project_id = $1::uuid`
+	args := []any{projectID}
+	if strings.TrimSpace(datasetVersionID) != "" {
+		baseQuery += ` AND dataset_version_id = $2`
+		args = append(args, datasetVersionID)
+	}
+	baseQuery += ` ORDER BY created_at DESC, job_id DESC`
+
+	rows, err := s.db.Query(baseQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.DatasetBuildJob, 0)
+	for rows.Next() {
+		var job domain.DatasetBuildJob
+		var requestRaw []byte
+		var triggeredBy sql.NullString
+		var errorMessage sql.NullString
+		if err := rows.Scan(
+			&job.JobID,
+			&job.ProjectID,
+			&job.DatasetID,
+			&job.DatasetVersionID,
+			&job.BuildType,
+			&job.Status,
+			&requestRaw,
+			&triggeredBy,
+			&job.CreatedAt,
+			&job.StartedAt,
+			&job.CompletedAt,
+			&errorMessage,
+		); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(requestRaw, &job.Request, map[string]any{}); err != nil {
+			return nil, err
+		}
+		if triggeredBy.Valid {
+			job.TriggeredBy = triggeredBy.String
+		}
+		if errorMessage.Valid {
+			job.ErrorMessage = &errorMessage.String
+		}
+		items = append(items, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (s *PostgresStore) SaveRequest(request domain.AnalysisRequest) error {
 	contextJSON, err := marshalJSON(request.Context)
 	if err != nil {
@@ -996,6 +1136,21 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_uri TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_labeled_at TIMESTAMPTZ`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_prompt_version TEXT`,
+		`CREATE TABLE IF NOT EXISTS dataset_build_jobs (
+			job_id UUID PRIMARY KEY,
+			project_id UUID NOT NULL REFERENCES projects(project_id),
+			dataset_id UUID NOT NULL REFERENCES datasets(dataset_id),
+			dataset_version_id TEXT NOT NULL,
+			build_type TEXT NOT NULL,
+			status TEXT NOT NULL,
+			request JSONB NOT NULL DEFAULT '{}'::jsonb,
+			triggered_by TEXT,
+			error_message TEXT,
+			created_at TIMESTAMPTZ NOT NULL,
+			started_at TIMESTAMPTZ,
+			completed_at TIMESTAMPTZ
+		)`,
+		`CREATE INDEX IF NOT EXISTS dataset_build_jobs_project_version_idx ON dataset_build_jobs(project_id, dataset_version_id, created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS analysis_requests (
 			request_id UUID PRIMARY KEY,
 			project_id UUID NOT NULL REFERENCES projects(project_id),
@@ -1089,6 +1244,9 @@ func (s *PostgresStore) promoteTimestampColumnsToTimestamptz(ctx context.Context
 		{tableName: "dataset_versions", columnName: "sentiment_labeled_at"},
 		{tableName: "dataset_versions", columnName: "created_at"},
 		{tableName: "dataset_versions", columnName: "ready_at"},
+		{tableName: "dataset_build_jobs", columnName: "created_at"},
+		{tableName: "dataset_build_jobs", columnName: "started_at"},
+		{tableName: "dataset_build_jobs", columnName: "completed_at"},
 		{tableName: "analysis_requests", columnName: "created_at"},
 		{tableName: "skill_plans", columnName: "created_at"},
 		{tableName: "executions", columnName: "ended_at"},

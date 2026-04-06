@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from python_ai_worker.anthropic_client import AnthropicJSONResponse
@@ -80,6 +82,20 @@ class PromptRegistryTests(unittest.TestCase):
 
         self.assertEqual(version, "sentiment-anthropic-v2")
         self.assertIn("Prefer neutral over negative", prompt)
+
+    def test_render_prepare_prompt_uses_markdown_template_directory_override(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        (temp_dir / "custom-prepare-v1.md").write_text(
+            "## Task\n\nCustom prepare prompt\n\n{{raw_text}}\n",
+            encoding="utf-8",
+        )
+
+        with patch.dict("os.environ", {"PYTHON_AI_PROMPTS_DIR": str(temp_dir)}, clear=False):
+            version, prompt = render_prepare_prompt("커스텀 테스트", version="custom-prepare-v1")
+
+        self.assertEqual(version, "custom-prepare-v1")
+        self.assertIn("Custom prepare prompt", prompt)
+        self.assertIn("커스텀 테스트", prompt)
 
     def test_prepare_row_with_llm_uses_configured_prompt_version(self) -> None:
         client = _RecordingClient(

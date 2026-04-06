@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"analysis-support-platform/control-plane/internal/config"
 )
@@ -680,6 +681,85 @@ func TestUploadDatasetCreatesStoredVersion(t *testing.T) {
 	}
 }
 
+func TestDatasetBuildJobEndpoints(t *testing.T) {
+	artifactRoot := t.TempDir()
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"artifact": map[string]any{
+				"prepare_uri":          filepath.Join(artifactRoot, "prepared.parquet"),
+				"prepared_ref":         filepath.Join(artifactRoot, "prepared.parquet"),
+				"prepare_format":       "parquet",
+				"prepared_text_column": "normalized_text",
+			},
+		})
+	}))
+	defer worker.Close()
+
+	server := NewServer(config.Config{
+		BindAddr:          ":0",
+		StoreBackend:      "memory",
+		WorkflowEngine:    "noop",
+		PythonAIWorkerURL: worker.URL,
+		ArtifactRoot:      artifactRoot,
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"build-job-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	dataset := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects/"+projectID+"/datasets", `{"name":"issues","data_type":"unstructured"}`, http.StatusCreated, &dataset)
+	datasetID := dataset["dataset_id"].(string)
+
+	version := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"issues.csv","data_type":"unstructured","prepare_required":false}`,
+		http.StatusCreated,
+		&version,
+	)
+	versionID := version["dataset_version_id"].(string)
+
+	job := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/prepare_jobs",
+		`{}`,
+		http.StatusAccepted,
+		&job,
+	)
+	jobID := job["job_id"].(string)
+	if job["build_type"] != "prepare" {
+		t.Fatalf("unexpected build job payload: %+v", job)
+	}
+
+	job = waitForBuildJobStatusHTTP(t, handler, projectID, jobID, "completed")
+	if job["completed_at"] == nil {
+		t.Fatalf("expected completed_at in build job: %+v", job)
+	}
+
+	listResponse := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/build_jobs",
+		"",
+		http.StatusOK,
+		&listResponse,
+	)
+	items := listResponse["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("unexpected build job list: %+v", listResponse)
+	}
+}
+
 func TestOpenAPIDocumentAndSwaggerUI(t *testing.T) {
 	openapiDir := t.TempDir()
 	openapiPath := filepath.Join(openapiDir, "openapi.yaml")
@@ -755,4 +835,37 @@ func readJSONResponse(
 	if err := json.Unmarshal(recorder.Body.Bytes(), dest); err != nil {
 		t.Fatalf("failed to decode response for %s %s: %v", method, path, err)
 	}
+}
+
+func waitForBuildJobStatusHTTP(t *testing.T, handler http.Handler, projectID, jobID, expectedStatus string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		var job map[string]any
+		readJSONResponse(
+			t,
+			handler,
+			http.MethodGet,
+			"/projects/"+projectID+"/dataset_build_jobs/"+jobID,
+			"",
+			http.StatusOK,
+			&job,
+		)
+		if job["status"] == expectedStatus {
+			return job
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	var job map[string]any
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/dataset_build_jobs/"+jobID,
+		"",
+		http.StatusOK,
+		&job,
+	)
+	t.Fatalf("expected build job %s status %s, got %+v", jobID, expectedStatus, job)
+	return nil
 }

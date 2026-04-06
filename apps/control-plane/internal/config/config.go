@@ -7,20 +7,21 @@ import (
 )
 
 type Config struct {
-	BindAddr          string
-	StoreBackend      string
-	DatabaseURL       string
-	OpenAPIPath       string
-	DataRoot          string
-	UploadRoot        string
-	ArtifactRoot      string
-	DuckDBPath        string
-	PythonAIWorkerURL string
-	PlannerBackend    string
-	WorkflowEngine    string
-	TemporalAddress   string
-	TemporalNamespace string
-	TemporalTaskQueue string
+	BindAddr            string
+	StoreBackend        string
+	DatabaseURL         string
+	OpenAPIPath         string
+	DatasetProfilesPath string
+	DataRoot            string
+	UploadRoot          string
+	ArtifactRoot        string
+	DuckDBPath          string
+	PythonAIWorkerURL   string
+	PlannerBackend      string
+	WorkflowEngine      string
+	TemporalAddress     string
+	TemporalNamespace   string
+	TemporalTaskQueue   string
 }
 
 func Load() Config {
@@ -34,6 +35,7 @@ func Load() Config {
 	}
 	workspaceRoot := detectWorkspaceRoot()
 	openAPIPath := resolvePath(os.Getenv("OPENAPI_PATH"), filepath.Join(workspaceRoot, "docs", "api", "openapi.yaml"), workspaceRoot)
+	datasetProfilesPath := resolvePath(os.Getenv("DATASET_PROFILES_PATH"), filepath.Join(workspaceRoot, "config", "dataset_profiles.json"), workspaceRoot)
 	dataRoot := resolvePath(os.Getenv("DATA_ROOT"), filepath.Join(workspaceRoot, "data"), workspaceRoot)
 	uploadRoot := resolvePath(os.Getenv("UPLOAD_ROOT"), filepath.Join(dataRoot, "uploads"), workspaceRoot)
 	artifactRoot := resolvePath(os.Getenv("ARTIFACT_ROOT"), filepath.Join(dataRoot, "artifacts"), workspaceRoot)
@@ -67,20 +69,21 @@ func Load() Config {
 		temporalTaskQueue = "analysis-support"
 	}
 	return Config{
-		BindAddr:          addr,
-		StoreBackend:      storeBackend,
-		DatabaseURL:       os.Getenv("DATABASE_URL"),
-		OpenAPIPath:       openAPIPath,
-		DataRoot:          dataRoot,
-		UploadRoot:        uploadRoot,
-		ArtifactRoot:      artifactRoot,
-		DuckDBPath:        duckDBPath,
-		PythonAIWorkerURL: pythonAIWorkerURL,
-		PlannerBackend:    plannerBackend,
-		WorkflowEngine:    workflowEngine,
-		TemporalAddress:   temporalAddress,
-		TemporalNamespace: temporalNamespace,
-		TemporalTaskQueue: temporalTaskQueue,
+		BindAddr:            addr,
+		StoreBackend:        storeBackend,
+		DatabaseURL:         os.Getenv("DATABASE_URL"),
+		OpenAPIPath:         openAPIPath,
+		DatasetProfilesPath: datasetProfilesPath,
+		DataRoot:            dataRoot,
+		UploadRoot:          uploadRoot,
+		ArtifactRoot:        artifactRoot,
+		DuckDBPath:          duckDBPath,
+		PythonAIWorkerURL:   pythonAIWorkerURL,
+		PlannerBackend:      plannerBackend,
+		WorkflowEngine:      workflowEngine,
+		TemporalAddress:     temporalAddress,
+		TemporalNamespace:   temporalNamespace,
+		TemporalTaskQueue:   temporalTaskQueue,
 	}
 }
 

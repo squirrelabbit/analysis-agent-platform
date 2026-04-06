@@ -11,8 +11,10 @@
 - project 단위로 재사용 가능한 분석 시나리오를 `strict` 모드로 등록하고, 저장된 시나리오에서 분석 요청과 plan을 생성하거나 바로 execution까지 enqueue할 수 있다.
 - 시나리오 표가 row 단위로 정리돼 있으면 `scenario_id` 기준으로 묶어 여러 시나리오를 한 번에 등록할 수 있다.
 - 저장소에는 축제 대표 질문 `S1~S5`를 현재 strict skill 조합으로 옮긴 import fixture와 매핑 문서가 포함돼 있다.
-- 원본 dataset을 upload한 뒤 필요하면 `prepare`, `sentiment`, `embedding` 산출물을 만든다.
-- 분석 요청을 제출하면 planner가 최소 skill plan을 만들고, Temporal workflow가 실행과 `waiting / resume`를 오케스트레이션한다.
+- 원본 dataset을 upload한 뒤 `prepare` async job을 기본으로 enqueue하고, 필요할 때 `sentiment`, `embedding`을 추가 build한다.
+- 분석 요청을 제출하면 planner가 최소 skill plan을 만들고, control plane이 필요한 dataset dependency를 먼저 자동 build한 뒤 Temporal workflow가 실행과 예외적 `waiting / resume`를 오케스트레이션한다.
+- dataset version의 기본 recipe는 현재 [dataset_profiles.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/dataset_profiles.json) registry로 관리하고, version 생성 시 data type 기준 기본 profile을 resolve해 저장한다.
+- prompt version 이름은 현재 [config/prompts](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts) 아래 Markdown template 파일명과 1:1로 대응된다.
 - 실행 결과는 artifact와 execution metadata로 남고, 같은 execution context 기준으로 `rerun / diff` 할 수 있다.
 - 완료된 execution은 `result_v1 snapshot`으로도 저장되고, 실행 목록 preview와 report draft 초안 생성에서 같은 snapshot을 재사용한다.
 
@@ -32,13 +34,14 @@
 ## 4. 현재 상태
 
 - dataset build task `dataset_prepare`, `sentiment_label`, `embedding`이 연결돼 있다.
+- dataset build에는 현재 별도 async job 모델과 조회 API가 있고, `prepare` eager 경로는 이 job을 자동 enqueue한다.
 - 비정형 support/core skill은 taxonomy, dedup, clustering 계열까지 현재 실행 경로에 포함된다.
 - 비정형 support skill에는 현재 `noun_frequency`, `sentence_split`도 포함돼 한국어 명사 집계와 문장 단위 span 분리가 직접 가능하다.
 - `dataset_prepare`는 Anthropic prepare가 켜지면 batch 정제를 사용하고, `issue_evidence_summary`는 prior artifact를 `analysis_context`로 재사용한다.
 - planner/evidence/prepare/sentiment/embedding artifact는 현재 `usage` metadata를 남기고, 가격 env가 설정되면 `estimated_cost_usd`를 함께 계산한다.
 - prepare regex, garbage, taxonomy 규칙은 현재 기본 상수 위에 `PYTHON_AI_RULE_CONFIG_PATH`, `PYTHON_AI_RULE_CONFIG_JSON`, request payload override를 순서대로 덮는 layered config를 지원한다.
 - `noun_frequency`는 가능하면 Kiwi 형태소 분석기를 쓰고, `sentence_split`는 가능하면 KSS를 사용한다. 두 skill 모두 의존성이 없으면 regex fallback으로 내려간다.
-- dataset build artifact는 현재 `prepare/sentiment/chunk=Parquet`, `embedding=JSONL sidecar + index source parquet` 구성이며 `row_id`, `prepared_ref`, `sentiment_ref`, `embedding_ref`, `embedding_index_source_ref` 같은 metadata를 함께 남긴다.
+- dataset build artifact는 현재 `prepare/sentiment/chunk=Parquet`, `embedding=index parquet + pgvector` 구성을 기본으로 쓰고, `embeddings.jsonl`은 `debug_export_jsonl=true`일 때만 debug/export fallback으로 남긴다. `row_id`, `prepared_ref`, `sentiment_ref`, `embedding_ref`, `embedding_index_source_ref` 같은 metadata를 함께 남긴다.
 - dataset version metadata에는 현재 `prepare_usage`, `sentiment_usage`, `embedding_usage`가 저장되고, execution result contract에는 실행 artifact 기준 `usage_summary`가 집계된다.
 - execution runtime은 현재 기본 `pre/post step hook`를 사용해 step별 입력 키, artifact 크기, usage preview를 `step_hooks`로 남기고, 완료 이벤트와 execution result contract에 함께 노출한다.
 - execution result API는 기존 `artifacts + contract`를 유지하면서, 현재 `result_v1`에 사용자용 `answer`, `step_results`, `warnings`, `waiting`, `usage_summary`를 함께 내려준다.
@@ -47,6 +50,7 @@
 - `POST /projects/{project_id}/report_drafts`, `GET /projects/{project_id}/report_drafts/{draft_id}`는 선택한 execution snapshot을 묶어 `report-draft-v1` 문서를 저장/조회한다.
 - `POST /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios/{scenario_id}`, `POST /projects/{project_id}/scenarios/{scenario_id}/plans`, `POST /projects/{project_id}/scenarios/{scenario_id}/execute`는 현재 `planning_mode=strict` 기준의 시나리오를 저장하고 `analysis_request + plan` 생성 또는 one-shot 실행을 처리하는 경로다.
 - `POST /projects/{project_id}/scenarios/import`는 row 기반 시나리오 표를 `scenario_id` 기준으로 묶어 등록하는 bulk import 경로다.
+- `POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs`, `sentiment_jobs`, `embedding_jobs`는 dataset build를 비동기 job으로 시작하는 경로이고, `GET /projects/{project_id}/dataset_build_jobs/{job_id}` 또는 version 단위 `GET /build_jobs`로 상태를 조회한다.
 - 확인 필요: `guided` planner나 mandatory/optional/allowed skill 가드레일은 아직 backlog다.
 - `sentiment.parquet`는 현재 `row_id`, `source_row_index`, 감성 컬럼 중심 sidecar이고, `issue_sentiment_summary`는 prepared dataset ref를 받아 텍스트를 조인한다.
 - `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 운영 기본 산출물은 `embeddings.index.parquet` index source와 `pgvector` 적재이고, `embeddings.jsonl`은 `debug_export_jsonl=true`일 때만 debug/export로 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1`로 fallback한다.
@@ -54,7 +58,7 @@
 - `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query vector를 다시 만든다. 분석 plan과 worker input도 `embedding_index_ref + chunk_ref`를 우선 사용하고, `embedding_uri`는 명시적 fallback일 때만 읽는다. 반환 artifact에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.
 - `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 사용한다. generic overlap fixture가 unit test에 추가됐고, `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` token-overlap fallback으로 내려간다.
 - `issue_evidence_summary`와 `evidence_pack`은 `semantic_search`가 있을 때 chunk citation을 그대로 보존한다. evidence LLM 입력이 커지면 `analysis_context`와 selected document text를 budget 기준으로 compaction하고 artifact에 `prompt_compaction` metadata를 남긴다.
-- `dataset_prepare`, `sentiment_label`은 기본 Haiku model을 사용하고 prompt version을 registry로 관리한다.
+- `dataset_prepare`, `sentiment_label`은 기본 Haiku model을 사용하고 prompt version을 Markdown template registry로 관리한다.
 - plan skill 메타데이터는 공용 `skill bundle`인 `config/skill_bundle.json`으로 중앙화됐다.
 - Python worker 내부는 `task_router`, `planner`, `runtime`, `skills/support`, `skills/core` 중심으로 분리됐다.
 - 로컬 임베딩 품질 비교용으로 고정 fixture 기반 `evaluate_embedding_model` CLI와 unit test 자산이 추가됐다.
@@ -64,6 +68,7 @@
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension을 켜고 `embedding_index_chunks` table까지 만든다.
 - 비정형 dataset build는 현재 `prepare/sentiment/chunk Parquet` 단계와 sentiment join, chunk citation 경로까지 반영됐고, vector index 전환안은 `docs/architecture/unstructured_storage_transition.md`에 분리해 정리했다.
 - GitHub Actions CI는 Python worker 테스트와 Go 테스트/빌드를 현재 구조 기준으로 실행한다.
+- 확인 필요: dataset build async job은 아직 control plane 내부 goroutine runner를 사용하므로, process restart에 대한 durable 보장은 Temporal workflow와 다르다.
 
 ## 5. 문서 구분
 

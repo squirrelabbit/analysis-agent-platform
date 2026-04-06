@@ -3,11 +3,13 @@ flowchart LR
     Control["Go Control Plane\napps/control-plane"]
     API["Project / Dataset / Analysis API"]
     Build["Dataset Build API\nprepare / sentiment / embedding"]
+    Profiles["Dataset Profile Registry\nconfig/dataset_profiles.json"]
     Temporal["Temporal Workflow\nexecute / waiting / resume / rerun / diff"]
     Registry["Skill Bundle / Registry\nconfig/skill_bundle.json"]
     PG["Postgres\nmetadata + execution records"]
     Duck["DuckDB\nstructured skill runtime"]
     Py["Python AI Worker\nplanner + task router + runtime helper + support/core skills"]
+    Prompts["Prompt Templates\nconfig/prompts/*.md"]
     Artifact["Artifact Paths\ndata/uploads + data/artifacts"]
     OpenAI["OpenAI Embeddings API\n선택 dense embedding 경로"]
 
@@ -17,12 +19,15 @@ flowchart LR
     API --> Temporal
     API --> Registry
     API --> Build
+    API --> Profiles
     Build --> Py
     Build --> Artifact
+    Build --> Profiles
     Temporal --> Registry
     Temporal --> PG
     Temporal --> Duck
     Temporal --> Py
     Temporal --> Artifact
     Py --> Registry
+    Py --> Prompts
     Py -. optional .-> OpenAI

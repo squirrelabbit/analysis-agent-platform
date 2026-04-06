@@ -20,9 +20,16 @@ import (
 )
 
 type AnalysisService struct {
-	store   store.Repository
-	starter workflows.Starter
-	planner planner.Planner
+	store             store.Repository
+	starter           workflows.Starter
+	planner           planner.Planner
+	dependencyBuilder executionDependencyBuilder
+}
+
+type executionDependencyBuilder interface {
+	BuildPrepare(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest) (domain.DatasetVersion, error)
+	BuildSentiment(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest) (domain.DatasetVersion, error)
+	BuildEmbeddings(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error)
 }
 
 func NewAnalysisService(repository store.Repository, starter workflows.Starter, planGenerator planner.Planner) *AnalysisService {
@@ -31,6 +38,10 @@ func NewAnalysisService(repository store.Repository, starter workflows.Starter, 
 		starter: starter,
 		planner: planGenerator,
 	}
+}
+
+func (s *AnalysisService) SetDependencyBuilder(builder executionDependencyBuilder) {
+	s.dependencyBuilder = builder
 }
 
 func (s *AnalysisService) SubmitAnalysis(projectID string, input domain.AnalysisSubmitRequest) (domain.AnalysisPlanResponse, error) {
@@ -165,6 +176,9 @@ func (s *AnalysisService) ExecutePlan(projectID, planID string) (domain.PlanExec
 		}
 		return domain.PlanExecuteResponse{}, err
 	}
+	if err := s.ensureExecutionDependencies(projectID, plan); err != nil {
+		return domain.PlanExecuteResponse{}, err
+	}
 
 	executionID := id.New()
 	jobID := id.New()
@@ -228,6 +242,51 @@ func (s *AnalysisService) ExecutePlan(projectID, planID string) (domain.PlanExec
 		Execution: execution,
 		JobID:     &jobID,
 	}, nil
+}
+
+func (s *AnalysisService) ensureExecutionDependencies(projectID string, plan domain.PlanRecord) error {
+	if s.dependencyBuilder == nil || plan.DatasetVersionID == nil || strings.TrimSpace(*plan.DatasetVersionID) == "" {
+		return nil
+	}
+
+	versionID := strings.TrimSpace(*plan.DatasetVersionID)
+	version, err := s.store.GetDatasetVersion(projectID, versionID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return ErrNotFound{Resource: "dataset version"}
+		}
+		return err
+	}
+
+	needsPrepare := planRequiresPrepare(plan.Plan)
+	needsSentiment := planRequiresSentiment(plan.Plan)
+	needsEmbedding := planRequiresEmbedding(plan.Plan)
+
+	if needsPrepare && requiresPrepare(version) && !datasetPrepareReady(version) {
+		if _, err := s.dependencyBuilder.BuildPrepare(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}); err != nil {
+			return err
+		}
+		version, err = s.store.GetDatasetVersion(projectID, versionID)
+		if err != nil {
+			return err
+		}
+	}
+	if needsSentiment && !datasetSentimentReady(version) {
+		if _, err := s.dependencyBuilder.BuildSentiment(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}); err != nil {
+			return err
+		}
+		version, err = s.store.GetDatasetVersion(projectID, versionID)
+		if err != nil {
+			return err
+		}
+	}
+	if needsEmbedding && !datasetEmbeddingReady(version) {
+		if _, err := s.dependencyBuilder.BuildEmbeddings(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *AnalysisService) SubmitAndExecute(projectID string, input domain.AnalysisSubmitRequest) (domain.AnalysisExecuteResponse, error) {
@@ -1200,6 +1259,60 @@ func normalizePlan(plan domain.SkillPlan, datasetName string, version domain.Dat
 		enrichInputsForSkill(&plan.Steps[index], version, goal)
 	}
 	return plan
+}
+
+func planRequiresPrepare(plan domain.SkillPlan) bool {
+	for _, step := range plan.Steps {
+		definition, ok := registry.Skill(step.SkillName)
+		if ok && definition.RequiresPrepare {
+			return true
+		}
+	}
+	return false
+}
+
+func planRequiresSentiment(plan domain.SkillPlan) bool {
+	for _, step := range plan.Steps {
+		definition, ok := registry.Skill(step.SkillName)
+		if ok && definition.RequiresSentiment {
+			return true
+		}
+	}
+	return false
+}
+
+func planRequiresEmbedding(plan domain.SkillPlan) bool {
+	for _, step := range plan.Steps {
+		definition, ok := registry.Skill(step.SkillName)
+		if ok && definition.RequiresEmbedding {
+			return true
+		}
+	}
+	return false
+}
+
+func datasetPrepareReady(version domain.DatasetVersion) bool {
+	return version.PrepareStatus == "ready" && version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != ""
+}
+
+func datasetSentimentReady(version domain.DatasetVersion) bool {
+	return version.SentimentStatus == "ready" && version.SentimentURI != nil && strings.TrimSpace(*version.SentimentURI) != ""
+}
+
+func datasetEmbeddingReady(version domain.DatasetVersion) bool {
+	if version.EmbeddingStatus != "ready" {
+		return false
+	}
+	if version.EmbeddingURI != nil && strings.TrimSpace(*version.EmbeddingURI) != "" {
+		return true
+	}
+	if strings.TrimSpace(metadataString(version.Metadata, "embedding_index_source_ref", "")) != "" {
+		return true
+	}
+	if strings.TrimSpace(metadataString(version.Metadata, "embedding_index_ref", "")) != "" {
+		return true
+	}
+	return false
 }
 
 func computePlanHash(plan domain.SkillPlan) string {

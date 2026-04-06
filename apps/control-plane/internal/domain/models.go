@@ -166,6 +166,25 @@ type DatasetSentimentBuildRequest struct {
 	Force      *bool   `json:"force,omitempty"`
 }
 
+type DatasetBuildJob struct {
+	JobID            string         `json:"job_id"`
+	ProjectID        string         `json:"project_id"`
+	DatasetID        string         `json:"dataset_id"`
+	DatasetVersionID string         `json:"dataset_version_id"`
+	BuildType        string         `json:"build_type"`
+	Status           string         `json:"status"`
+	Request          map[string]any `json:"request,omitempty"`
+	TriggeredBy      string         `json:"triggered_by,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+	StartedAt        *time.Time     `json:"started_at,omitempty"`
+	CompletedAt      *time.Time     `json:"completed_at,omitempty"`
+	ErrorMessage     *string        `json:"error_message,omitempty"`
+}
+
+type DatasetBuildJobListResponse struct {
+	Items []DatasetBuildJob `json:"items"`
+}
+
 type EmbeddingIndexChunk struct {
 	ChunkID          string         `json:"chunk_id"`
 	DatasetVersionID string         `json:"dataset_version_id"`

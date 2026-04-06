@@ -186,6 +186,11 @@ EXEC_ID=
 DRAFT_ID=
 ```
 
+기본 profile registry는 현재 [dataset_profiles.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/dataset_profiles.json) 이다.
+`profile`을 아예 보내지 않으면 data type 기준 기본 profile이 자동으로 resolve되어 dataset version에 저장된다.
+즉 `PROFILE_JSON`은 기본값을 덮고 싶을 때만 넣으면 된다.
+`prepare_prompt_version`, `sentiment_prompt_version` 값은 현재 [config/prompts](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts) 아래 Markdown template 파일명을 그대로 쓴다. 예를 들어 `dataset-prepare-anthropic-v2`는 [dataset-prepare-anthropic-v2.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts/dataset-prepare-anthropic-v2.md)를 뜻한다.
+
 ### 7-0-a. 시나리오 등록 / 일괄 등록 / 목록 / 상세 조회
 
 ```bash
@@ -357,6 +362,7 @@ VERSION_ID=$(
 - `profile.embedding_model`
 
 `dataset version`을 JSON으로 직접 생성할 때도 같은 `profile` object를 넣을 수 있다.
+`profile`을 생략하면 기본 registry profile이 자동으로 들어간다.
 
 ```bash
 curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions" \
@@ -423,13 +429,20 @@ curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID" | python3 -m json.tool
 curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID/result" | python3 -m json.tool
 ```
 
-`S1`처럼 `garbage_filter`, `issue_sentiment_summary`가 들어간 시나리오는 dataset 준비 상태에 따라 바로 `waiting`이 날 수 있다.
-이 경우 보통 아래 둘 중 하나다.
+현재 기본 정책은 아래다.
+
+- `prepare`: upload/version 생성 직후 async job 자동 enqueue
+- `sentiment`: 실행 step이 필요할 때만 자동 build
+- `embedding`: 실행 step이 필요할 때만 자동 build
+
+즉 `S1`처럼 `garbage_filter`, `issue_sentiment_summary`가 들어간 시나리오는 보통 별도 수동 build 없이 바로 진행된다.
+그래도 아래처럼 `waiting`이 보이면 예외 상황으로 보면 된다.
 
 - `waiting_for = dataset_prepare`
-- `waiting_for = sentiment_label`
+- `waiting_for = sentiment_labels`
+- `waiting_for = embeddings`
 
-이때는 `7-2`, `7-3`으로 필요한 build를 끝낸 뒤 아래 resume를 실행하면 된다.
+이 경우에만 `7-2`, `7-3`, `7-4`로 필요한 build를 끝낸 뒤 아래 resume를 실행하면 된다.
 
 ```bash
 curl -sS -X POST "$API/projects/$PROJECT_ID/executions/$EXEC_ID/resume" \
@@ -453,8 +466,62 @@ curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID/result" | python3 -m jso
 - `result_v1.profile.sentiment_prompt_version`
 - `result_v1.profile.embedding_model`
 
+### 7-1-d. dataset build job 상태 조회
+
+`prepare`는 현재 eager 정책이지만 sync 응답이 아니라 async job으로 시작된다. 직접 상태를 확인하려면 version 단위 build job 목록이나 개별 job 조회를 사용한다.
+
+```bash
+curl -sS "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID/build_jobs" \
+| python3 -m json.tool
+```
+
+결과 확인:
+
+- `items[].job_id`
+- `items[].build_type`
+- `items[].status`
+- `items[].created_at`
+- `items[].started_at`
+- `items[].completed_at`
+- `items[].error_message`
+
+개별 job을 보려면:
+
+```bash
+BUILD_JOB_ID=
+
+curl -sS "$API/projects/$PROJECT_ID/dataset_build_jobs/$BUILD_JOB_ID" \
+| python3 -m json.tool
+```
+
+비동기 build를 직접 시작할 수도 있다.
+
+```bash
+curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID/prepare_jobs" \
+  -H 'Content-Type: application/json' \
+  -d '{"text_column":"text"}' \
+| python3 -m json.tool
+
+curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID/sentiment_jobs" \
+  -H 'Content-Type: application/json' \
+  -d '{"text_column":"normalized_text"}' \
+| python3 -m json.tool
+
+curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID/embedding_jobs" \
+  -H 'Content-Type: application/json' \
+  -d '{"embedding_model":"intfloat/multilingual-e5-small"}' \
+| python3 -m json.tool
+```
+
+주의:
+
+- 현재 async build job은 control plane 내부 goroutine runner로 실행된다.
+- 확인 필요: control plane 재시작 시 in-flight build job 지속성은 Temporal workflow 수준으로 보장되지 않는다.
+
 
 ### 7-2. prepare 실행
+
+보통은 upload/version 생성 시 async job으로 자동 시작되므로, 이 단계는 재실행이나 예외 복구가 필요할 때만 직접 사용하면 된다.
 
 ```bash
 curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID/prepare" \
@@ -520,6 +587,8 @@ curl -sS -X POST "http://127.0.0.1:18090/tasks/garbage_filter" \
 
 ### 7-3. sentiment 실행
 
+기본 정책은 `lazy`라서 감성 step이 필요한 실행이 자동으로 먼저 build를 시도한다. 이 단계는 수동 재실행이나 예외 복구가 필요할 때 사용한다. 비동기 추적이 필요하면 `sentiment_jobs`를 먼저 쓰고, 즉시 완료가 필요하면 아래 sync endpoint를 쓴다.
+
 ```bash
 curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID/sentiment" \
   -H 'Content-Type: application/json' \
@@ -537,6 +606,8 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSI
 
 
 ### 7-4. embedding 실행
+
+기본 정책은 `lazy`라서 embedding step이 필요한 실행이 자동으로 먼저 build를 시도한다. 이 단계는 수동 재실행이나 예외 복구가 필요할 때 사용한다. 비동기 추적이 필요하면 `embedding_jobs`를 먼저 쓰고, 즉시 완료가 필요하면 아래 sync endpoint를 쓴다.
 
 ```bash
 curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID/embeddings" \
@@ -764,7 +835,7 @@ curl -sS "$API/projects/$PROJECT_ID/report_drafts/$DRAFT_ID" | python3 -m json.t
 
 ### 7-13. waiting 상태면 resume
 
-`status = "waiting"`이면 필요한 dependency를 먼저 준비한 뒤 다시 resume하면 된다.
+`status = "waiting"`이면 자동 orchestration으로 해결하지 못한 예외 상황이다. 필요한 dependency를 먼저 준비한 뒤 다시 resume하면 된다.
 
 ```bash
 curl -sS -X POST "$API/projects/$PROJECT_ID/executions/$EXEC_ID/resume" \
@@ -830,8 +901,10 @@ docker compose -f compose.dev.yml logs postgres
 | sentiment 결과 Parquet 저장 | 완료 | `sentiment.parquet` 경로 |
 | chunk Parquet 생성 | 완료 | embedding 전에 chunk dataset 생성 |
 | pgvector 적재 | 완료 | embedding 후 index 적재 |
-| upload 후 자동 prepare 실행 | 미구현 | 상태만 `queued` 가능, 실제 auto trigger는 없음 |
-| upload 후 prepare -> sentiment -> embedding 자동 연쇄 | 미구현 | 지금은 전부 수동 호출 |
+| dataset build async job 생성 / 조회 | 완료 | `POST .../prepare_jobs`, `POST .../sentiment_jobs`, `POST .../embedding_jobs`, `GET .../build_jobs`, `GET /dataset_build_jobs/{job_id}` |
+| upload 후 자동 prepare 실행 | 완료 | eager 정책으로 async prepare job 자동 enqueue |
+| execution 전 sentiment / embedding 자동 build | 부분완료 | dependency가 필요하면 sync build를 먼저 시도 |
+| upload 후 prepare -> sentiment -> embedding 자동 연쇄 | 미구현 | sentiment, embedding warm-up 연쇄는 아직 없음 |
 | 질문 제출 | 완료 | `POST /analysis_requests` |
 | LLM 플래너 경로 | 완료 | dev compose에서는 `PLANNER_BACKEND=python-ai` |
 | plan 저장 / 조회 | 완료 | `skill_plans`와 조회 API 구현 |

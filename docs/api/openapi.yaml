@@ -372,6 +372,32 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs:
+    post:
+      tags: [Datasets]
+      summary: Enqueue async prepare build job
+      operationId: createPrepareJob
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetPrepareRequest"
+      responses:
+        "202":
+          description: Prepare build job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetBuildJob"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment:
     post:
       tags: [Datasets]
@@ -394,6 +420,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_jobs:
+    post:
+      tags: [Datasets]
+      summary: Enqueue async sentiment build job
+      operationId: createSentimentJob
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetSentimentBuildRequest"
+      responses:
+        "202":
+          description: Sentiment build job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetBuildJob"
         "400":
           $ref: "#/components/responses/ErrorResponse"
         "404":
@@ -422,6 +474,71 @@ paths:
                 $ref: "#/components/schemas/DatasetVersion"
         "400":
           $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embedding_jobs:
+    post:
+      tags: [Datasets]
+      summary: Enqueue async embedding build job
+      operationId: createEmbeddingJob
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetEmbeddingBuildRequest"
+      responses:
+        "202":
+          description: Embedding build job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetBuildJob"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/build_jobs:
+    get:
+      tags: [Datasets]
+      summary: List dataset build jobs for a dataset version
+      operationId: listDatasetBuildJobs
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Dataset build jobs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetBuildJobListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/dataset_build_jobs/{job_id}:
+    get:
+      tags: [Datasets]
+      summary: Get dataset build job
+      operationId: getDatasetBuildJob
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Dataset build job detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetBuildJob"
         "404":
           $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/analysis_requests:
@@ -1204,6 +1321,59 @@ components:
           type:
             - boolean
             - "null"
+    DatasetBuildJob:
+      type: object
+      properties:
+        job_id:
+          type: string
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        build_type:
+          type: string
+          enum: [prepare, sentiment, embedding]
+        status:
+          type: string
+        request:
+          $ref: "#/components/schemas/AnyMap"
+        triggered_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        completed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        error_message:
+          type:
+            - string
+            - "null"
+      required:
+        - job_id
+        - project_id
+        - dataset_id
+        - dataset_version_id
+        - build_type
+        - status
+        - created_at
+    DatasetBuildJobListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetBuildJob"
+      required: [items]
     SkillPlanStep:
       type: object
       properties:

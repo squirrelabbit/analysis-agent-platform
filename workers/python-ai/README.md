@@ -43,7 +43,7 @@
 - `src/python_ai_worker/planner.py`
   - planner entrypoint와 rule-based planner
 - `src/python_ai_worker/prompt_registry.py`
-  - prepare/sentiment prompt version registry
+  - prepare/sentiment prompt version -> Markdown template resolver
 - `src/python_ai_worker/openai_client.py`
   - OpenAI Embeddings API client
 - `src/python_ai_worker/runtime/`
@@ -124,6 +124,7 @@
   - `ANTHROPIC_PREPARE_PROMPT_VERSION`
   - `ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION`
   - `ANTHROPIC_SENTIMENT_PROMPT_VERSION`
+  - `PYTHON_AI_PROMPTS_DIR`
   - `ANTHROPIC_API_URL`
   - `ANTHROPIC_VERSION`
   - `ANTHROPIC_MAX_TOKENS`
@@ -152,7 +153,7 @@
 
 - `planner`와 `issue_evidence_summary`는 Claude Sonnet을 우선 시도하고 실패 시 deterministic fallback으로 내려간다.
 - `dataset_prepare`와 `sentiment_label`은 기본 `ANTHROPIC_PREPARE_MODEL=claude-3-5-haiku-latest`를 사용하고 실패 시 deterministic fallback으로 내려간다.
-- prepare/sentiment prompt는 `prompt_registry.py`에서 버전별로 관리하고, 기본 선택은 `ANTHROPIC_PREPARE_PROMPT_VERSION`, `ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION`, `ANTHROPIC_SENTIMENT_PROMPT_VERSION`으로 바꿀 수 있다.
+- prepare/sentiment prompt는 현재 [config/prompts](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts) 아래 Markdown template 파일로 관리하고, `prompt_registry.py`는 버전 이름을 파일명으로 resolve한다. 기본 선택은 `ANTHROPIC_PREPARE_PROMPT_VERSION`, `ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION`, `ANTHROPIC_SENTIMENT_PROMPT_VERSION`으로 바꿀 수 있고, 필요하면 `PYTHON_AI_PROMPTS_DIR`로 template 디렉터리를 통째로 바꿀 수 있다.
 - planner/evidence/prepare/sentiment artifact는 현재 `usage` metadata를 함께 남긴다. provider/model/request_count/token 수를 포함하고, 가격 env가 설정되면 `estimated_cost_usd`를 추가한다.
 - `dataset_prepare`는 Anthropic prepare 경로가 켜져 있으면 기본 `prepare_batch_size=8` 기준 batch 정제를 사용한다.
 - `dataset_prepare` 기본 출력은 `prepared.parquet`이며, 각 row에 `row_id`를 부여하고 `prepared_ref`, `prepare_format=parquet`, `row_id_column`을 함께 남긴다. 명시적으로 `.jsonl` output path를 주면 호환용 JSONL도 계속 생성할 수 있다.

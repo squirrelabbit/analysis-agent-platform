@@ -20,6 +20,9 @@ type Repository interface {
 	GetDataset(projectID, datasetID string) (domain.Dataset, error)
 	SaveDatasetVersion(version domain.DatasetVersion) error
 	GetDatasetVersion(projectID, datasetVersionID string) (domain.DatasetVersion, error)
+	SaveDatasetBuildJob(job domain.DatasetBuildJob) error
+	GetDatasetBuildJob(projectID, jobID string) (domain.DatasetBuildJob, error)
+	ListDatasetBuildJobs(projectID, datasetVersionID string) ([]domain.DatasetBuildJob, error)
 	SaveRequest(request domain.AnalysisRequest) error
 	GetRequest(projectID, requestID string) (domain.AnalysisRequest, error)
 	SavePlan(plan domain.PlanRecord) error

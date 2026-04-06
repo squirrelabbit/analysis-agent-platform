@@ -11,6 +11,62 @@ import (
 	"analysis-support-platform/control-plane/internal/workflows"
 )
 
+type fakeExecutionDependencyBuilder struct {
+	repo  store.Repository
+	calls []string
+}
+
+func (b *fakeExecutionDependencyBuilder) BuildPrepare(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest) (domain.DatasetVersion, error) {
+	b.calls = append(b.calls, "prepare")
+	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	uri := "prepared.parquet"
+	version.PrepareStatus = "ready"
+	version.PrepareURI = &uri
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.Metadata["prepared_text_column"] = "normalized_text"
+	if err := b.repo.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	return version, nil
+}
+
+func (b *fakeExecutionDependencyBuilder) BuildSentiment(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest) (domain.DatasetVersion, error) {
+	b.calls = append(b.calls, "sentiment")
+	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	uri := "sentiment.parquet"
+	version.SentimentStatus = "ready"
+	version.SentimentURI = &uri
+	if err := b.repo.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	return version, nil
+}
+
+func (b *fakeExecutionDependencyBuilder) BuildEmbeddings(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error) {
+	b.calls = append(b.calls, "embedding")
+	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	version.EmbeddingStatus = "ready"
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.Metadata["embedding_index_source_ref"] = "embeddings.index.parquet"
+	if err := b.repo.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	return version, nil
+}
+
 func TestSubmitAnalysisUsesPlannerWhenConfigured(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, fakePlanner{
@@ -159,6 +215,77 @@ func TestResumeExecutionTransitionsWaitingToQueued(t *testing.T) {
 	}
 	if resumed.Events[0].Payload["workflow_id"] == "" {
 		t.Fatalf("expected workflow_id in payload: %+v", resumed.Events[0].Payload)
+	}
+}
+
+func TestExecutePlanAutoBuildsRequiredDependencies(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+	builder := &fakeExecutionDependencyBuilder{repo: repository}
+	service.SetDependencyBuilder(builder)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		Metadata:         map[string]any{},
+		PrepareStatus:    "queued",
+		SentimentStatus:  "queued",
+		EmbeddingStatus:  "queued",
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+	plan := domain.PlanRecord{
+		PlanID:           "plan-1",
+		RequestID:        "request-1",
+		ProjectID:        project.ProjectID,
+		DatasetName:      "issues.csv",
+		DatasetVersionID: stringPtr(version.DatasetVersionID),
+		Plan: domain.SkillPlan{
+			PlanID: "plan-1",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "garbage_filter", DatasetName: "issues.csv", Inputs: map[string]any{}},
+				{StepID: "step-2", SkillName: "issue_sentiment_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+				{StepID: "step-3", SkillName: "semantic_search", DatasetName: "issues.csv", Inputs: map[string]any{"query": "결제 오류"}},
+			},
+		},
+	}
+	if err := repository.SavePlan(plan); err != nil {
+		t.Fatalf("unexpected save plan error: %v", err)
+	}
+
+	response, err := service.ExecutePlan(project.ProjectID, plan.PlanID)
+	if err != nil {
+		t.Fatalf("unexpected execute plan error: %v", err)
+	}
+
+	if len(builder.calls) != 3 {
+		t.Fatalf("unexpected dependency calls: %+v", builder.calls)
+	}
+	if builder.calls[0] != "prepare" || builder.calls[1] != "sentiment" || builder.calls[2] != "embedding" {
+		t.Fatalf("unexpected dependency order: %+v", builder.calls)
+	}
+	if response.Execution.Status != "queued" {
+		t.Fatalf("unexpected execution status: %s", response.Execution.Status)
+	}
+
+	updatedVersion, err := repository.GetDatasetVersion(project.ProjectID, version.DatasetVersionID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset version error: %v", err)
+	}
+	if updatedVersion.PrepareStatus != "ready" || updatedVersion.SentimentStatus != "ready" || updatedVersion.EmbeddingStatus != "ready" {
+		t.Fatalf("unexpected updated version: %+v", updatedVersion)
 	}
 }
 

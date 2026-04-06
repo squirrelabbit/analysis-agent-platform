@@ -14,6 +14,7 @@ type MemoryStore struct {
 	scenarios  map[string]domain.Scenario
 	datasets   map[string]domain.Dataset
 	versions   map[string]domain.DatasetVersion
+	buildJobs  map[string]domain.DatasetBuildJob
 	requests   map[string]domain.AnalysisRequest
 	plans      map[string]domain.PlanRecord
 	executions map[string]domain.ExecutionSummary
@@ -26,6 +27,7 @@ func NewMemoryStore() *MemoryStore {
 		scenarios:  make(map[string]domain.Scenario),
 		datasets:   make(map[string]domain.Dataset),
 		versions:   make(map[string]domain.DatasetVersion),
+		buildJobs:  make(map[string]domain.DatasetBuildJob),
 		requests:   make(map[string]domain.AnalysisRequest),
 		plans:      make(map[string]domain.PlanRecord),
 		executions: make(map[string]domain.ExecutionSummary),
@@ -122,6 +124,52 @@ func (s *MemoryStore) GetDatasetVersion(projectID, datasetVersionID string) (dom
 		return domain.DatasetVersion{}, ErrNotFound
 	}
 	return version, nil
+}
+
+func (s *MemoryStore) SaveDatasetBuildJob(job domain.DatasetBuildJob) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.buildJobs[job.JobID]; ok && job.CreatedAt.IsZero() {
+		job.CreatedAt = existing.CreatedAt
+	}
+	if job.CreatedAt.IsZero() {
+		job.CreatedAt = time.Now().UTC()
+	}
+	s.buildJobs[job.JobID] = job
+	return nil
+}
+
+func (s *MemoryStore) GetDatasetBuildJob(projectID, jobID string) (domain.DatasetBuildJob, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	job, ok := s.buildJobs[jobID]
+	if !ok || job.ProjectID != projectID {
+		return domain.DatasetBuildJob{}, ErrNotFound
+	}
+	return job, nil
+}
+
+func (s *MemoryStore) ListDatasetBuildJobs(projectID, datasetVersionID string) ([]domain.DatasetBuildJob, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := make([]domain.DatasetBuildJob, 0)
+	for _, job := range s.buildJobs {
+		if job.ProjectID != projectID {
+			continue
+		}
+		if datasetVersionID != "" && job.DatasetVersionID != datasetVersionID {
+			continue
+		}
+		items = append(items, job)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].JobID > items[j].JobID
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	return items, nil
 }
 
 func (s *MemoryStore) SaveRequest(request domain.AnalysisRequest) error {
