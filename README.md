@@ -33,6 +33,7 @@
 - 비정형 support skill에 `noun_frequency`, `sentence_split`이 추가돼 한국어 명사 중심 집계와 문장 단위 span/citation 준비를 직접 실행할 수 있다. 가능하면 `kiwipiepy`, `kss`를 사용하고, 없으면 regex fallback으로 내려간다.
 - control plane에는 현재 `scenario` 등록 기반이 추가돼 `scenario_id`, `planning_mode=strict`, `user_query`, `query_type`, `interpretation`, `analysis_scope`, `steps[]`를 project 단위로 저장하고, 저장된 시나리오에서 `analysis_request + plan`을 자동 생성하거나 바로 execution까지 enqueue할 수 있다.
 - 시나리오 표가 row 단위로 정리돼 있으면 `scenarios/import` API로 `scenario_id` 기준 일괄 등록할 수 있다.
+- dataset version에는 현재 `profile`을 붙일 수 있고, `prepare_prompt_version`, `sentiment_prompt_version`, `regex_rule_names`, `garbage_rule_names`, `embedding_model`을 데이터셋별 기본 recipe로 저장한다.
 - 저장소에는 축제 질문 기준 strict 시나리오 import fixture [festival_scenarios.import.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/testdata/festival_scenarios.import.json) 와 매핑 설명 [scenario_templates.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/skill/scenario_templates.md) 가 포함돼 있다.
 - `garbage_filter`는 execution 안에서 실행되면 row 단위 결과를 `rows.parquet` sidecar로 저장하고, execution artifact JSON에는 summary와 `artifact_ref`만 남긴다.
 - `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding` 운영 기본 출력은 `embeddings.index.parquet + pgvector`다.
@@ -43,18 +44,19 @@
 - dataset build artifact는 현재 `row_id/ref/format` 메타데이터를 함께 남겨 다음 단계의 chunk/vector index 전환 기반을 잡아 두었다.
 - control plane은 `embedding` build가 끝나면 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection으로 바꾼 뒤 `embedding_index_chunks`에 적재한다. index source를 찾지 못할 때만 `embeddings.jsonl` legacy fallback을 사용한다.
 - dataset version metadata에는 현재 `prepare_usage`, `sentiment_usage`, `embedding_usage`가 함께 저장되고, execution result contract에는 실행 artifact 기준 `usage_summary`가 집계된다.
+- execution은 현재 dataset version의 `profile`을 `profile_snapshot`으로 복사하고, `result_v1.profile`에도 함께 노출한다.
 - execution runner는 현재 기본 `pre/post step hook`를 사용해 각 step의 입력 키, artifact 크기, usage preview를 `step_hooks`로 남기고, 완료 이벤트와 execution result contract에서 확인할 수 있다.
 - execution result API는 기존 `artifacts + contract`를 유지하면서, 현재 `result_v1`에 사용자용 `answer`, `step_results`, `warnings`, `waiting`, `usage_summary`를 함께 내려준다.
 - execution이 완료되면 control plane은 현재 `result_v1 snapshot`을 execution metadata에 함께 저장하고, `/executions/{id}/result`는 저장된 snapshot을 우선 사용한다.
 - execution 목록 API는 현재 `result_v1 snapshot` 기준 preview를 내려주고, `primary_skill_name`, `answer_preview`, `warning_count`, `waiting`을 함께 보여준다.
 - report draft API는 현재 선택한 execution들의 `result_v1 snapshot`을 묶어 `report-draft-v1` 초안을 저장하고, 이후 같은 draft를 다시 조회할 수 있다.
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension, `embedding_index_chunks` table을 포함한다.
-- `dataset_prepare`와 `sentiment_label`은 기본 Haiku model을 쓰고, prompt version은 registry와 환경 변수로 선택할 수 있다.
+- `dataset_prepare`와 `sentiment_label`은 기본 Haiku model을 쓰고, prompt version은 registry/env 기본값 위에 dataset version `profile` override를 적용할 수 있다.
 - 비정형 deterministic skill은 Python worker 안에서 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`, `issue_taxonomy_summary`까지 확장돼 있다.
 - Python AI worker는 현재 `task_router + planner + runtime helper + support/core skill module` 구조로 분리돼 있다.
 - Python skill-case devtool은 `python_ai_worker.devtools` 패키지와 `run_skill_case --validate` CLI로 정식 검증 경로를 가진다.
 - 로컬 임베딩 모델 평가는 고정 fixture 기반 `evaluate_embedding_model` CLI와 unit test 자산으로 별도 검증할 수 있다.
-- 비정형 dataset build는 현재 `prepare/sentiment=Parquet`, `chunk=Parquet`, `embedding=JSONL sidecar` 단계이며, 다음 저장 구조 전환 설계는 `docs/architecture/unstructured_storage_transition.md`에 따로 정리했다.
+- 비정형 dataset build는 현재 `prepare/sentiment/chunk=Parquet`, `embedding=index parquet + pgvector`를 기본으로 쓰고, `embeddings.jsonl`은 debug/export fallback으로만 남긴다.
 - 레거시 Python `src/` 디렉터리는 현재 저장소에 없다.
 - `workers/rust-skills/`는 아직 실사용 hot path가 연결되지 않은 선택 최적화 경로다.
 
@@ -90,7 +92,7 @@
 - prepare/sentiment/embedding 산출물은 `ARTIFACT_ROOT`
 - 일부 대용량 support skill 결과는 `ARTIFACT_ROOT/projects/<project_id>/executions/<execution_id>/steps/` 아래 sidecar로 저장하고, Postgres execution artifact에는 summary와 ref만 남긴다. 현재는 `garbage_filter`, `document_filter`, `deduplicate_documents`가 이 정책을 사용한다.
 - LLM/embedding 계열 artifact에는 `usage`가 포함될 수 있고, control plane은 이를 dataset metadata와 execution result contract로 다시 집계한다.
-- 현재 기본 포맷은 `prepare/sentiment/chunk=Parquet`, `embedding=JSONL`이며, 장기 전환안은 `docs/architecture/unstructured_storage_transition.md`를 기준으로 본다.
+- 현재 기본 포맷은 `prepare/sentiment/chunk=Parquet`, `embedding=index parquet + pgvector`이며, 장기 전환안은 `docs/architecture/unstructured_storage_transition.md`를 기준으로 본다.
 - `GET /projects/{project_id}/executions`는 현재 저장된 snapshot 기준 실행 목록 preview를 반환한다.
 - `POST /projects/{project_id}/report_drafts`, `GET /projects/{project_id}/report_drafts/{draft_id}`는 현재 보고서 초안 저장/조회 API다.
 - `POST /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios/{scenario_id}`, `POST /projects/{project_id}/scenarios/{scenario_id}/plans`, `POST /projects/{project_id}/scenarios/{scenario_id}/execute`는 현재 시나리오 등록/plan 생성/one-shot 실행 API다.
@@ -198,7 +200,7 @@ Support skill:
   - `POST /projects/{project_id}/datasets/{dataset_id}/uploads`
   - `multipart/form-data`
   - 필수 필드: `file`
-  - 선택 필드: `data_type`, `metadata`, `prepare_required`, `sentiment_required`, `embedding_required`
+  - 선택 필드: `data_type`, `metadata`, `profile`, `prepare_required`, `sentiment_required`, `embedding_required`
 - 로컬 저장 기본값:
   - `DATA_ROOT=<repo>/data`
   - `UPLOAD_ROOT=<repo>/data/uploads`

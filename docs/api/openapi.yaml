@@ -954,6 +954,27 @@ components:
             - string
             - "null"
       required: [name]
+    DatasetProfile:
+      type: object
+      properties:
+        profile_id:
+          type: string
+        prepare_prompt_version:
+          type:
+            - string
+            - "null"
+        sentiment_prompt_version:
+          type:
+            - string
+            - "null"
+        regex_rule_names:
+          $ref: "#/components/schemas/StringList"
+        garbage_rule_names:
+          $ref: "#/components/schemas/StringList"
+        embedding_model:
+          type:
+            - string
+            - "null"
     DatasetVersion:
       type: object
       description: |
@@ -979,6 +1000,10 @@ components:
             - "null"
         metadata:
           $ref: "#/components/schemas/AnyMap"
+        profile:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetProfile"
+            - type: "null"
         prepare_status:
           type: string
         prepare_model:
@@ -1062,6 +1087,10 @@ components:
             - "null"
         metadata:
           $ref: "#/components/schemas/AnyMap"
+        profile:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetProfile"
+            - type: "null"
         prepare_required:
           type:
             - boolean
@@ -1383,6 +1412,10 @@ components:
           type:
             - string
             - "null"
+        profile_snapshot:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetProfile"
+            - type: "null"
         events:
           type: array
           items:
@@ -1521,6 +1554,10 @@ components:
             $ref: "#/components/schemas/ExecutionStepResultV1"
         usage_summary:
           $ref: "#/components/schemas/AnyMap"
+        profile:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetProfile"
+            - type: "null"
         warnings:
           type: array
           items:

@@ -249,15 +249,19 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 	if err != nil {
 		return err
 	}
+	profileJSON, err := marshalJSON(version.Profile)
+	if err != nil {
+		return err
+	}
 
 	_, err = s.db.Exec(
 		`INSERT INTO dataset_versions (
 		     dataset_version_id, dataset_id, project_id, storage_uri, data_type, record_count,
-		     metadata, prepare_status, prepare_model, prepare_prompt_version, prepare_uri, prepared_at,
+		     metadata, profile, prepare_status, prepare_model, prepare_prompt_version, prepare_uri, prepared_at,
 		     sentiment_status, sentiment_model, sentiment_uri, sentiment_labeled_at, sentiment_prompt_version,
 		     embedding_status, embedding_model, embedding_uri, created_at, ready_at
 		 ) VALUES (
-		     $1, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+		     $1, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
 		 )
 		 ON CONFLICT (dataset_version_id) DO UPDATE
 		 SET dataset_id = EXCLUDED.dataset_id,
@@ -266,6 +270,7 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 		     data_type = EXCLUDED.data_type,
 		     record_count = EXCLUDED.record_count,
 		     metadata = EXCLUDED.metadata,
+		     profile = EXCLUDED.profile,
 		     prepare_status = EXCLUDED.prepare_status,
 		     prepare_model = EXCLUDED.prepare_model,
 		     prepare_prompt_version = EXCLUDED.prepare_prompt_version,
@@ -288,6 +293,7 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 		version.DataType,
 		version.RecordCount,
 		metadataJSON,
+		profileJSON,
 		version.PrepareStatus,
 		nullableString(version.PrepareModel),
 		nullableString(version.PreparePromptVer),
@@ -310,7 +316,7 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (domain.DatasetVersion, error) {
 	row := s.db.QueryRow(
 		`SELECT dataset_version_id, dataset_id::text, project_id::text, storage_uri, data_type,
-		        record_count, metadata, prepare_status, prepare_model, prepare_prompt_version,
+		        record_count, metadata, profile, prepare_status, prepare_model, prepare_prompt_version,
 		        prepare_uri, prepared_at, sentiment_status, sentiment_model, sentiment_uri,
 		        sentiment_labeled_at, sentiment_prompt_version, embedding_status, embedding_model,
 		        embedding_uri, created_at, ready_at
@@ -323,6 +329,7 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 	var version domain.DatasetVersion
 	var recordCount sql.NullInt64
 	var metadataRaw []byte
+	var profileRaw []byte
 	var prepareModel sql.NullString
 	var preparePromptVersion sql.NullString
 	var prepareURI sql.NullString
@@ -339,6 +346,7 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 		&version.DataType,
 		&recordCount,
 		&metadataRaw,
+		&profileRaw,
 		&version.PrepareStatus,
 		&prepareModel,
 		&preparePromptVersion,
@@ -361,6 +369,9 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 		return domain.DatasetVersion{}, err
 	}
 	if err := unmarshalJSON(metadataRaw, &version.Metadata, map[string]any{}); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	if err := unmarshalJSON(profileRaw, &version.Profile, (*domain.DatasetProfile)(nil)); err != nil {
 		return domain.DatasetVersion{}, err
 	}
 	if recordCount.Valid {
@@ -612,14 +623,18 @@ func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
 	if err != nil {
 		return err
 	}
+	profileSnapshotJSON, err := marshalJSON(execution.ProfileSnapshot)
+	if err != nil {
+		return err
+	}
 
 	_, err = s.db.Exec(
 		`INSERT INTO executions (
 		     execution_id, project_id, plan_id, status, ended_at, embedding_model_version,
 		     required_hashes, artifacts, dataset_version_id, code_version, params_hash,
-		     skill_bundle_version, events, result_v1_snapshot, created_at
+		     skill_bundle_version, events, result_v1_snapshot, profile_snapshot, created_at
 		 ) VALUES (
-		     $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15
+		     $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16
 		 )
 		 ON CONFLICT (execution_id) DO UPDATE
 		 SET status = EXCLUDED.status,
@@ -632,7 +647,8 @@ func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
 		     params_hash = EXCLUDED.params_hash,
 		     skill_bundle_version = EXCLUDED.skill_bundle_version,
 		     events = EXCLUDED.events,
-		     result_v1_snapshot = EXCLUDED.result_v1_snapshot`,
+		     result_v1_snapshot = EXCLUDED.result_v1_snapshot,
+		     profile_snapshot = EXCLUDED.profile_snapshot`,
 		execution.ExecutionID,
 		execution.ProjectID,
 		execution.Plan.PlanID,
@@ -647,6 +663,7 @@ func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
 		nullableString(execution.SkillBundleVersion),
 		eventsJSON,
 		resultV1SnapshotJSON,
+		profileSnapshotJSON,
 		execution.CreatedAt,
 	)
 	return err
@@ -658,7 +675,7 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 		        e.status, e.ended_at, e.required_hashes, e.embedding_model_version, e.artifacts,
 		        e.dataset_version_id, e.code_version, e.params_hash, e.skill_bundle_version, e.events,
 		        e.created_at,
-		        e.result_v1_snapshot
+		        e.result_v1_snapshot, e.profile_snapshot
 		 FROM executions e
 		 JOIN skill_plans p ON p.plan_id = e.plan_id
 		 WHERE e.project_id = $1::uuid AND e.execution_id = $2::uuid`,
@@ -677,6 +694,7 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 	var skillBundleVersion sql.NullString
 	var eventsRaw []byte
 	var resultV1SnapshotRaw []byte
+	var profileSnapshotRaw []byte
 	if err := row.Scan(
 		&execution.ExecutionID,
 		&execution.ProjectID,
@@ -694,6 +712,7 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 		&eventsRaw,
 		&execution.CreatedAt,
 		&resultV1SnapshotRaw,
+		&profileSnapshotRaw,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ExecutionSummary{}, ErrNotFound
@@ -714,6 +733,9 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 		return domain.ExecutionSummary{}, err
 	}
 	if err := unmarshalJSON(resultV1SnapshotRaw, &execution.ResultV1Snapshot, (*domain.ExecutionResultV1)(nil)); err != nil {
+		return domain.ExecutionSummary{}, err
+	}
+	if err := unmarshalJSON(profileSnapshotRaw, &execution.ProfileSnapshot, (*domain.DatasetProfile)(nil)); err != nil {
 		return domain.ExecutionSummary{}, err
 	}
 	if embeddingModel.Valid {
@@ -946,6 +968,7 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			data_type TEXT NOT NULL,
 			record_count BIGINT,
 			metadata JSONB NOT NULL,
+			profile JSONB,
 			prepare_status TEXT NOT NULL DEFAULT 'not_requested',
 			prepare_model TEXT,
 			prepare_prompt_version TEXT,
@@ -962,6 +985,7 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			created_at TIMESTAMPTZ NOT NULL,
 			ready_at TIMESTAMPTZ
 		)`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS profile JSONB`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_status TEXT NOT NULL DEFAULT 'not_requested'`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_model TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_prompt_version TEXT`,
@@ -1013,10 +1037,12 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			params_hash TEXT,
 			skill_bundle_version TEXT,
 			result_v1_snapshot JSONB,
+			profile_snapshot JSONB,
 			events JSONB,
 			created_at TIMESTAMPTZ NOT NULL
 		)`,
 		`ALTER TABLE executions ADD COLUMN IF NOT EXISTS result_v1_snapshot JSONB`,
+		`ALTER TABLE executions ADD COLUMN IF NOT EXISTS profile_snapshot JSONB`,
 		`CREATE TABLE IF NOT EXISTS report_drafts (
 			draft_id UUID PRIMARY KEY,
 			project_id UUID NOT NULL REFERENCES projects(project_id),

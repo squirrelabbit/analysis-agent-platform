@@ -229,6 +229,7 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
     model = str(payload.get("model") or "").strip()
     prepare_batch_size = max(1, int(payload.get("prepare_batch_size") or DEFAULT_PREPARE_BATCH_SIZE))
     regex_rule_names = _normalize_prepare_regex_rule_names(payload.get("regex_rule_names"))
+    prepare_prompt_version = str(payload.get("prepare_prompt_version") or "").strip()
     return {
         "dataset_version_id": str(payload.get("dataset_version_id") or "").strip(),
         "dataset_name": dataset_name,
@@ -237,6 +238,7 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "model": model,
         "prepare_batch_size": prepare_batch_size,
         "regex_rule_names": regex_rule_names,
+        "prepare_prompt_version": prepare_prompt_version,
     }
 
 
@@ -282,12 +284,14 @@ def _normalize_sentiment_build_payload(payload: dict[str, Any]) -> dict[str, Any
         raise ValueError("output_path is required")
     text_column = str(payload.get("text_column") or "normalized_text").strip()
     model = str(payload.get("model") or "").strip()
+    sentiment_prompt_version = str(payload.get("sentiment_prompt_version") or "").strip()
     return {
         "dataset_version_id": str(payload.get("dataset_version_id") or "").strip(),
         "dataset_name": dataset_name,
         "text_column": text_column,
         "output_path": output_path,
         "model": model,
+        "sentiment_prompt_version": sentiment_prompt_version,
     }
 
 

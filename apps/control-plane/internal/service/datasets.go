@@ -147,6 +147,10 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
+	profile := normalizeDatasetProfile(input.Profile)
+	if profile != nil && strings.TrimSpace(profile.ProfileID) != "" {
+		metadata["profile_id"] = profile.ProfileID
+	}
 
 	prepareRequired := defaultPrepareRequired(dataType, input.PrepareRequired)
 	prepareStatus := "not_applicable"
@@ -180,6 +184,7 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 		DataType:         dataType,
 		RecordCount:      input.RecordCount,
 		Metadata:         metadata,
+		Profile:          profile,
 		PrepareStatus:    prepareStatus,
 		PrepareModel:     input.PrepareModel,
 		SentimentStatus:  sentimentStatus,
@@ -266,6 +271,14 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 		"dataset_name":       version.StorageURI,
 		"text_column":        textColumn,
 		"output_path":        outputPath,
+	}
+	if version.Profile != nil {
+		if len(version.Profile.RegexRuleNames) > 0 {
+			payload["regex_rule_names"] = append([]string(nil), version.Profile.RegexRuleNames...)
+		}
+		if version.Profile.PreparePromptVersion != nil && strings.TrimSpace(*version.Profile.PreparePromptVersion) != "" {
+			payload["prepare_prompt_version"] = strings.TrimSpace(*version.Profile.PreparePromptVersion)
+		}
 	}
 	if version.PrepareModel != nil && strings.TrimSpace(*version.PrepareModel) != "" {
 		payload["model"] = strings.TrimSpace(*version.PrepareModel)
@@ -398,8 +411,13 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 		}
 	}
 	if version.EmbeddingModel == nil {
-		model := DefaultEmbeddingModel
-		version.EmbeddingModel = &model
+		if version.Profile != nil && version.Profile.EmbeddingModel != nil && strings.TrimSpace(*version.Profile.EmbeddingModel) != "" {
+			model := strings.TrimSpace(*version.Profile.EmbeddingModel)
+			version.EmbeddingModel = &model
+		} else {
+			model := DefaultEmbeddingModel
+			version.EmbeddingModel = &model
+		}
 	}
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
@@ -585,6 +603,9 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 		"dataset_name":       datasetName,
 		"text_column":        textColumn,
 		"output_path":        outputPath,
+	}
+	if version.Profile != nil && version.Profile.SentimentPromptVersion != nil && strings.TrimSpace(*version.Profile.SentimentPromptVersion) != "" {
+		payload["sentiment_prompt_version"] = strings.TrimSpace(*version.Profile.SentimentPromptVersion)
 	}
 	if version.SentimentModel != nil && strings.TrimSpace(*version.SentimentModel) != "" {
 		payload["model"] = strings.TrimSpace(*version.SentimentModel)
@@ -815,6 +836,87 @@ func derivePrepareURI(version domain.DatasetVersion) string {
 		return strings.TrimSpace(*version.PrepareURI)
 	}
 	return strings.TrimSpace(version.StorageURI) + ".prepared.parquet"
+}
+
+func normalizeDatasetProfile(profile *domain.DatasetProfile) *domain.DatasetProfile {
+	if profile == nil {
+		return nil
+	}
+	normalized := &domain.DatasetProfile{
+		ProfileID:              strings.TrimSpace(profile.ProfileID),
+		PreparePromptVersion:   trimStringPointer(profile.PreparePromptVersion),
+		SentimentPromptVersion: trimStringPointer(profile.SentimentPromptVersion),
+		RegexRuleNames:         normalizeStringList(profile.RegexRuleNames),
+		GarbageRuleNames:       normalizeStringList(profile.GarbageRuleNames),
+		EmbeddingModel:         trimStringPointer(profile.EmbeddingModel),
+	}
+	if normalized.ProfileID == "" &&
+		normalized.PreparePromptVersion == nil &&
+		normalized.SentimentPromptVersion == nil &&
+		len(normalized.RegexRuleNames) == 0 &&
+		len(normalized.GarbageRuleNames) == 0 &&
+		normalized.EmbeddingModel == nil {
+		return nil
+	}
+	return normalized
+}
+
+func cloneDatasetProfile(profile *domain.DatasetProfile) *domain.DatasetProfile {
+	if profile == nil {
+		return nil
+	}
+	cloned := &domain.DatasetProfile{
+		ProfileID:        profile.ProfileID,
+		RegexRuleNames:   append([]string(nil), profile.RegexRuleNames...),
+		GarbageRuleNames: append([]string(nil), profile.GarbageRuleNames...),
+	}
+	if profile.PreparePromptVersion != nil {
+		value := strings.TrimSpace(*profile.PreparePromptVersion)
+		cloned.PreparePromptVersion = &value
+	}
+	if profile.SentimentPromptVersion != nil {
+		value := strings.TrimSpace(*profile.SentimentPromptVersion)
+		cloned.SentimentPromptVersion = &value
+	}
+	if profile.EmbeddingModel != nil {
+		value := strings.TrimSpace(*profile.EmbeddingModel)
+		cloned.EmbeddingModel = &value
+	}
+	return cloned
+}
+
+func normalizeStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func trimStringPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 func datasetSourceForUnstructured(version domain.DatasetVersion) string {

@@ -165,7 +165,28 @@ docker compose -f compose.dev.yml exec -T python-ai-worker \
 아래 시나리오 등록 명령은 `PROJECT_ID`가 준비된 상태를 전제로 한다. `scenario -> plan` 생성과 `scenario -> execute`는 `VERSION_ID`가 필요하므로 `7-1` 이후에 실행한다.
 저장소에는 현재 축제 질문 기준 strict 시나리오 fixture가 [festival_scenarios.import.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/testdata/festival_scenarios.import.json) 로 들어 있다.
 
-### 7-0. 시나리오 등록 / 일괄 등록 / 목록 / 상세 조회
+### 7-0. 공통 변수 준비
+
+기존 프로젝트를 재사용해 일부 단계만 다시 실행할 때는 아래 변수부터 맞춰 두면 편하다.
+
+```bash
+cd /Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform
+
+API=http://127.0.0.1:18080
+FILE=/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/data/festival.csv
+PROFILE_JSON='{"profile_id":"festival-default","prepare_prompt_version":"dataset-prepare-anthropic-batch-v1","sentiment_prompt_version":"sentiment-anthropic-v1","regex_rule_names":["media_placeholder","html_artifact","url_cleanup","zero_width_cleanup"],"garbage_rule_names":["ad_marker","promotion_link","platform_placeholder","empty_or_noise"],"embedding_model":"intfloat/multilingual-e5-small"}'
+
+# 기존 리소스를 재사용할 때만 직접 넣는다.
+# 새로 만들면 7-1, 7-1-c, 7-7 단계에서 자동으로 채워진다.
+PROJECT_ID=
+DATASET_ID=
+VERSION_ID=
+PLAN_ID=
+EXEC_ID=
+DRAFT_ID=
+```
+
+### 7-0-a. 시나리오 등록 / 일괄 등록 / 목록 / 상세 조회
 
 ```bash
 curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios" \
@@ -311,7 +332,8 @@ VERSION_JSON=$(
   curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/uploads" \
     -F "file=@$FILE" \
     -F 'data_type=unstructured' \
-    -F 'metadata={"text_column":"text"}'
+    -F 'metadata={"text_column":"text"}' \
+    -F "profile=$PROFILE_JSON"
 )
 
 echo "$VERSION_JSON" | python3 -m json.tool
@@ -329,6 +351,24 @@ VERSION_ID=$(
 - `prepare_status`
 - `sentiment_status`
 - `embedding_status`
+- `profile.profile_id`
+- `profile.prepare_prompt_version`
+- `profile.sentiment_prompt_version`
+- `profile.embedding_model`
+
+`dataset version`을 JSON으로 직접 생성할 때도 같은 `profile` object를 넣을 수 있다.
+
+```bash
+curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions" \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"storage_uri\":\"$FILE\",
+    \"data_type\":\"unstructured\",
+    \"metadata\":{\"text_column\":\"text\"},
+    \"profile\":$PROFILE_JSON
+  }" \
+| python3 -m json.tool
+```
 
 ### 7-1-b. 시나리오 기반 plan 생성
 
@@ -351,12 +391,20 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios/S1/plans" \
 ### 7-1-c. 시나리오 기반 one-shot 실행
 
 ```bash
-curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios/S1/execute" \
-  -H 'Content-Type: application/json' \
-  -d "{
-    \"dataset_version_id\":\"$VERSION_ID\"
-  }" \
-| python3 -m json.tool
+EXEC_JSON=$(
+  curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios/S1/execute" \
+    -H 'Content-Type: application/json' \
+    -d "{
+      \"dataset_version_id\":\"$VERSION_ID\"
+    }"
+)
+
+echo "$EXEC_JSON" | python3 -m json.tool
+
+EXEC_ID=$(
+  printf '%s' "$EXEC_JSON" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["execution"]["execution_id"])'
+)
 ```
 
 결과 확인:
@@ -366,6 +414,44 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/scenarios/S1/execute" \
 - `execution.execution_id`
 - `execution.status`
 - `job_id`
+- `EXEC_ID`
+
+시나리오 실행 직후 현재 상태를 바로 보려면:
+
+```bash
+curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID" | python3 -m json.tool
+curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID/result" | python3 -m json.tool
+```
+
+`S1`처럼 `garbage_filter`, `issue_sentiment_summary`가 들어간 시나리오는 dataset 준비 상태에 따라 바로 `waiting`이 날 수 있다.
+이 경우 보통 아래 둘 중 하나다.
+
+- `waiting_for = dataset_prepare`
+- `waiting_for = sentiment_label`
+
+이때는 `7-2`, `7-3`으로 필요한 build를 끝낸 뒤 아래 resume를 실행하면 된다.
+
+```bash
+curl -sS -X POST "$API/projects/$PROJECT_ID/executions/$EXEC_ID/resume" \
+  -H 'Content-Type: application/json' \
+  -d '{"reason":"scenario dependencies are ready","triggered_by":"manual"}' \
+| python3 -m json.tool
+```
+
+resume 후 다시 상태와 결과를 본다.
+
+```bash
+curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID" | python3 -m json.tool
+curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID/result" | python3 -m json.tool
+```
+
+결과 확인:
+
+- `execution.profile_snapshot.profile_id`
+- `result_v1.profile.profile_id`
+- `result_v1.profile.prepare_prompt_version`
+- `result_v1.profile.sentiment_prompt_version`
+- `result_v1.profile.embedding_model`
 
 
 ### 7-2. prepare 실행
@@ -537,6 +623,8 @@ curl -sS "$API/projects/$PROJECT_ID/plans/$PLAN_ID" | python3 -m json.tool
 
 ### 7-7. plan 실행
 
+시나리오 one-shot 실행인 `7-1-c`를 이미 사용했다면 이 단계는 건너뛰고 `7-8`부터 보면 된다.
+
 ```bash
 EXEC_JSON=$(
   curl -sS -X POST "$API/projects/$PROJECT_ID/plans/$PLAN_ID/execute"
@@ -684,6 +772,8 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/executions/$EXEC_ID/resume" \
   -d '{"reason":"dependency is ready","triggered_by":"manual"}' \
 | python3 -m json.tool
 ```
+
+시나리오 one-shot 실행인 `7-1-c`에서 만든 `EXEC_ID`도 같은 endpoint로 resume한다.
 
 
 ## 8. 결과 파일 위치

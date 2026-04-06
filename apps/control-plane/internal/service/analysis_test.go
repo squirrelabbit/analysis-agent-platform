@@ -322,6 +322,75 @@ func TestSubmitAnalysisEnrichesSemanticSearchChunkInputs(t *testing.T) {
 	}
 }
 
+func TestSubmitAnalysisEnrichesGarbageFilterFromDatasetProfile(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, fakePlanner{
+		result: planner.PlanGenerationResult{
+			Plan: domain.SkillPlan{
+				Steps: []domain.SkillPlanStep{
+					{
+						SkillName:   "garbage_filter",
+						DatasetName: "dataset_from_version",
+						Inputs:      map[string]any{},
+					},
+				},
+			},
+			PlannerType: "python-ai",
+		},
+	})
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		Metadata:         map[string]any{},
+		Profile: &domain.DatasetProfile{
+			ProfileID:        "festival-default",
+			GarbageRuleNames: []string{"ad_marker", "platform_placeholder"},
+		},
+		PrepareStatus:   "ready",
+		PrepareURI:      stringPtr("issues.prepared.parquet"),
+		EmbeddingStatus: "not_requested",
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	dataType := "unstructured"
+	datasetVersionID := version.DatasetVersionID
+	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
+		DatasetVersionID: &datasetVersionID,
+		DataType:         &dataType,
+		Goal:             "광고 문서를 제거해줘",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	step := response.Plan.Plan.Steps[0]
+	rules, ok := step.Inputs["garbage_rule_names"].([]string)
+	if ok {
+		if len(rules) != 2 || rules[0] != "ad_marker" || rules[1] != "platform_placeholder" {
+			t.Fatalf("unexpected garbage rule names: %+v", rules)
+		}
+		return
+	}
+	rulesAny, ok := step.Inputs["garbage_rule_names"].([]any)
+	if !ok || len(rulesAny) != 2 {
+		t.Fatalf("unexpected garbage rule payload: %+v", step.Inputs)
+	}
+}
+
 func TestBuildExecutionResultIncludesUsageSummary(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
@@ -494,6 +563,79 @@ func TestBuildExecutionResultUsesStoredSnapshotWhenPresent(t *testing.T) {
 
 	if result.ResultV1.Answer == nil || result.ResultV1.Answer.Summary != "stored snapshot summary" {
 		t.Fatalf("expected stored snapshot to be returned: %+v", result.ResultV1)
+	}
+}
+
+func TestExecutePlanCopiesDatasetProfileSnapshot(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		Metadata:         map[string]any{},
+		Profile: &domain.DatasetProfile{
+			ProfileID:              "festival-default",
+			PreparePromptVersion:   stringPtr("dataset-prepare-anthropic-batch-v2"),
+			SentimentPromptVersion: stringPtr("sentiment-anthropic-v2"),
+			GarbageRuleNames:       []string{"ad_marker"},
+		},
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+	request := domain.AnalysisRequest{
+		RequestID:        "request-1",
+		ProjectID:        project.ProjectID,
+		DatasetName:      stringPtr("issues.csv"),
+		DatasetVersionID: stringPtr(version.DatasetVersionID),
+		Goal:             "요약해줘",
+		Constraints:      []string{},
+		Context:          map[string]any{},
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := repository.SaveRequest(request); err != nil {
+		t.Fatalf("unexpected save request error: %v", err)
+	}
+	planRecord := domain.PlanRecord{
+		PlanID:           "plan-1",
+		RequestID:        request.RequestID,
+		ProjectID:        project.ProjectID,
+		DatasetName:      "issues.csv",
+		DatasetVersionID: stringPtr(version.DatasetVersionID),
+		Plan: domain.SkillPlan{
+			PlanID: "plan-1",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "keyword_frequency", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		Status:    "draft",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SavePlan(planRecord); err != nil {
+		t.Fatalf("unexpected save plan error: %v", err)
+	}
+
+	executed, err := service.ExecutePlan(project.ProjectID, planRecord.PlanID)
+	if err != nil {
+		t.Fatalf("unexpected execute plan error: %v", err)
+	}
+	if executed.Execution.ProfileSnapshot == nil {
+		t.Fatalf("expected profile snapshot on execution")
+	}
+	if executed.Execution.ProfileSnapshot.ProfileID != "festival-default" {
+		t.Fatalf("unexpected execution profile snapshot: %+v", executed.Execution.ProfileSnapshot)
 	}
 }
 

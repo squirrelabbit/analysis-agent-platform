@@ -11,6 +11,7 @@
 | 문서 | 역할 |
 | --- | --- |
 | `docs/project_summary.md` | 제품 정의와 현재 실행 흐름의 짧은 스냅샷 |
+| `docs/roadmap.md` | 앞으로 해야 할 작업을 단계별로 정리한 실행 로드맵 |
 | `docs/devlog/README.md` | daily 고민/챌린지 로그 안내와 작성 규칙 |
 | `docs/architecture/target_stack.md` | 목표 아키텍처와 실행 흐름 |
 | `docs/architecture/dev_postgres_reset.md` | `pgvector` 전환 뒤 개발용 Postgres volume 재초기화 절차와 helper script 안내 |

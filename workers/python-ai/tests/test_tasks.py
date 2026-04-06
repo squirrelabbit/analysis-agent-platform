@@ -79,6 +79,13 @@ class TaskTests(unittest.TestCase):
                 },
             )
 
+    class _DummyEnabledClient:
+        def __init__(self) -> None:
+            self._config = type("Config", (), {"model": "claude-test"})()
+
+        def is_enabled(self) -> bool:
+            return True
+
     def test_rule_based_planner_without_key(self) -> None:
         with patch.dict(
             "os.environ",
@@ -778,6 +785,39 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(prepared_rows[0]["row_id"], "version-2:row:0")
         self.assertEqual(prepared_rows[1]["prepare_disposition"], "review")
 
+    def test_dataset_prepare_uses_prompt_version_override(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_raw.csv"
+        prepared_path = temp_dir / "issues_raw.prepared.parquet"
+        self._write_csv_rows(csv_path, ["결제 오류가 반복 발생했습니다"])
+
+        dummy_client = self._DummyPrepareClient(
+            [
+                {
+                    "disposition": "keep",
+                    "normalized_text": "결제 오류가 반복 발생했습니다.",
+                    "reason": "normalized",
+                    "quality_flags": ["normalized"],
+                }
+            ]
+        )
+
+        with patch("python_ai_worker.skills.dataset_build.rt._anthropic_prepare_client", return_value=dummy_client):
+            result = run_dataset_prepare(
+                {
+                    "dataset_version_id": "version-prepare-profile",
+                    "dataset_name": str(csv_path),
+                    "text_column": "text",
+                    "output_path": str(prepared_path),
+                    "prepare_batch_size": 1,
+                    "prepare_prompt_version": "dataset-prepare-anthropic-v2",
+                }
+            )
+
+        self.assertEqual(result["artifact"]["prepare_prompt_version"], "dataset-prepare-anthropic-v2")
+        prepared_rows = self._read_parquet_rows(prepared_path)
+        self.assertEqual(prepared_rows[0]["prepare_prompt_version"], "dataset-prepare-anthropic-v2")
+
     def test_sentiment_label_fallback(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         prepared_path = temp_dir / "issues.prepared.parquet"
@@ -808,12 +848,53 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["usage"]["provider"], "deterministic-fallback")
         self.assertEqual(result["artifact"]["usage"]["request_count"], 2)
         self.assertEqual(result["artifact"]["usage"]["cost_estimation_status"], "free_fallback")
+
+    def test_sentiment_label_uses_prompt_version_override(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        prepared_path = temp_dir / "issues.prepared.parquet"
+        sentiment_path = temp_dir / "issues.sentiment.parquet"
+        table = pa.Table.from_pylist([{"normalized_text": "결제 오류가 반복 발생했습니다", "channel": "app"}])
+        pq.write_table(table, prepared_path)
+
+        with patch(
+            "python_ai_worker.skills.dataset_build.rt._anthropic_prepare_client",
+            return_value=self._DummyEnabledClient(),
+        ), patch(
+            "python_ai_worker.skills.dataset_build.rt._label_sentiment",
+            return_value={
+                "label": "negative",
+                "confidence": 0.82,
+                "reason": "negative markers detected",
+                "prompt_version": "sentiment-anthropic-v2",
+                "usage": {
+                    "provider": "anthropic",
+                    "model": "claude-test",
+                    "operation": "sentiment_label",
+                    "request_count": 1,
+                    "input_tokens": 12,
+                    "output_tokens": 4,
+                    "total_tokens": 16,
+                },
+            },
+        ) as label_mock:
+            result = run_sentiment_label(
+                {
+                    "dataset_version_id": "version-sentiment-profile",
+                    "dataset_name": str(prepared_path),
+                    "text_column": "normalized_text",
+                    "output_path": str(sentiment_path),
+                    "sentiment_prompt_version": "sentiment-anthropic-v2",
+                }
+            )
+
+        _, kwargs = label_mock.call_args
+        self.assertEqual(kwargs["prompt_version_override"], "sentiment-anthropic-v2")
+        self.assertEqual(result["artifact"]["sentiment_prompt_version"], "sentiment-anthropic-v2")
         self.assertTrue(sentiment_path.exists())
         labeled_rows = self._read_parquet_rows(sentiment_path)
-        self.assertEqual(labeled_rows[0]["row_id"], "version-1:row:0")
+        self.assertEqual(labeled_rows[0]["row_id"], "version-sentiment-profile:row:0")
         self.assertEqual(labeled_rows[0]["source_row_index"], 0)
         self.assertEqual(labeled_rows[0]["sentiment_label"], "negative")
-        self.assertEqual(labeled_rows[1]["sentiment_label"], "positive")
         self.assertNotIn("normalized_text", labeled_rows[0])
 
     def test_issue_sentiment_summary(self) -> None:

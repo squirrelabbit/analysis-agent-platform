@@ -96,42 +96,53 @@ type DatasetCreateRequest struct {
 	DataType    *string `json:"data_type,omitempty"`
 }
 
+type DatasetProfile struct {
+	ProfileID              string   `json:"profile_id"`
+	PreparePromptVersion   *string  `json:"prepare_prompt_version,omitempty"`
+	SentimentPromptVersion *string  `json:"sentiment_prompt_version,omitempty"`
+	RegexRuleNames         []string `json:"regex_rule_names,omitempty"`
+	GarbageRuleNames       []string `json:"garbage_rule_names,omitempty"`
+	EmbeddingModel         *string  `json:"embedding_model,omitempty"`
+}
+
 type DatasetVersion struct {
-	DatasetVersionID   string         `json:"dataset_version_id"`
-	DatasetID          string         `json:"dataset_id"`
-	ProjectID          string         `json:"project_id"`
-	StorageURI         string         `json:"storage_uri"`
-	DataType           string         `json:"data_type"`
-	RecordCount        *int           `json:"record_count,omitempty"`
-	Metadata           map[string]any `json:"metadata"`
-	PrepareStatus      string         `json:"prepare_status"`
-	PrepareModel       *string        `json:"prepare_model,omitempty"`
-	PreparePromptVer   *string        `json:"prepare_prompt_version,omitempty"`
-	PrepareURI         *string        `json:"prepare_uri,omitempty"`
-	PreparedAt         *time.Time     `json:"prepared_at,omitempty"`
-	SentimentStatus    string         `json:"sentiment_status"`
-	SentimentModel     *string        `json:"sentiment_model,omitempty"`
-	SentimentURI       *string        `json:"sentiment_uri,omitempty"`
-	SentimentLabeledAt *time.Time     `json:"sentiment_labeled_at,omitempty"`
-	SentimentPromptVer *string        `json:"sentiment_prompt_version,omitempty"`
-	EmbeddingStatus    string         `json:"embedding_status"`
-	EmbeddingModel     *string        `json:"embedding_model,omitempty"`
-	EmbeddingURI       *string        `json:"embedding_uri,omitempty"`
-	CreatedAt          time.Time      `json:"created_at"`
-	ReadyAt            *time.Time     `json:"ready_at,omitempty"`
+	DatasetVersionID   string          `json:"dataset_version_id"`
+	DatasetID          string          `json:"dataset_id"`
+	ProjectID          string          `json:"project_id"`
+	StorageURI         string          `json:"storage_uri"`
+	DataType           string          `json:"data_type"`
+	RecordCount        *int            `json:"record_count,omitempty"`
+	Metadata           map[string]any  `json:"metadata"`
+	Profile            *DatasetProfile `json:"profile,omitempty"`
+	PrepareStatus      string          `json:"prepare_status"`
+	PrepareModel       *string         `json:"prepare_model,omitempty"`
+	PreparePromptVer   *string         `json:"prepare_prompt_version,omitempty"`
+	PrepareURI         *string         `json:"prepare_uri,omitempty"`
+	PreparedAt         *time.Time      `json:"prepared_at,omitempty"`
+	SentimentStatus    string          `json:"sentiment_status"`
+	SentimentModel     *string         `json:"sentiment_model,omitempty"`
+	SentimentURI       *string         `json:"sentiment_uri,omitempty"`
+	SentimentLabeledAt *time.Time      `json:"sentiment_labeled_at,omitempty"`
+	SentimentPromptVer *string         `json:"sentiment_prompt_version,omitempty"`
+	EmbeddingStatus    string          `json:"embedding_status"`
+	EmbeddingModel     *string         `json:"embedding_model,omitempty"`
+	EmbeddingURI       *string         `json:"embedding_uri,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
+	ReadyAt            *time.Time      `json:"ready_at,omitempty"`
 }
 
 type DatasetVersionCreateRequest struct {
-	StorageURI        string         `json:"storage_uri"`
-	DataType          *string        `json:"data_type,omitempty"`
-	RecordCount       *int           `json:"record_count,omitempty"`
-	Metadata          map[string]any `json:"metadata,omitempty"`
-	PrepareRequired   *bool          `json:"prepare_required,omitempty"`
-	PrepareModel      *string        `json:"prepare_model,omitempty"`
-	SentimentRequired *bool          `json:"sentiment_required,omitempty"`
-	SentimentModel    *string        `json:"sentiment_model,omitempty"`
-	EmbeddingRequired *bool          `json:"embedding_required,omitempty"`
-	EmbeddingModel    *string        `json:"embedding_model,omitempty"`
+	StorageURI        string          `json:"storage_uri"`
+	DataType          *string         `json:"data_type,omitempty"`
+	RecordCount       *int            `json:"record_count,omitempty"`
+	Metadata          map[string]any  `json:"metadata,omitempty"`
+	Profile           *DatasetProfile `json:"profile,omitempty"`
+	PrepareRequired   *bool           `json:"prepare_required,omitempty"`
+	PrepareModel      *string         `json:"prepare_model,omitempty"`
+	SentimentRequired *bool           `json:"sentiment_required,omitempty"`
+	SentimentModel    *string         `json:"sentiment_model,omitempty"`
+	EmbeddingRequired *bool           `json:"embedding_required,omitempty"`
+	EmbeddingModel    *string         `json:"embedding_model,omitempty"`
 }
 
 type DatasetPrepareRequest struct {
@@ -255,6 +266,7 @@ type ExecutionSummary struct {
 	CodeVersion        *string            `json:"code_version,omitempty"`
 	ParamsHash         *string            `json:"params_hash,omitempty"`
 	SkillBundleVersion *string            `json:"skill_bundle_version,omitempty"`
+	ProfileSnapshot    *DatasetProfile    `json:"profile_snapshot,omitempty"`
 	Events             []ExecutionEvent   `json:"events"`
 	ResultV1Snapshot   *ExecutionResultV1 `json:"-"`
 }
@@ -349,6 +361,7 @@ type ExecutionResultV1 struct {
 	Answer             *ExecutionResultAnswer  `json:"answer,omitempty"`
 	StepResults        []ExecutionStepResultV1 `json:"step_results,omitempty"`
 	UsageSummary       map[string]any          `json:"usage_summary,omitempty"`
+	Profile            *DatasetProfile         `json:"profile,omitempty"`
 	Warnings           []string                `json:"warnings,omitempty"`
 	Waiting            *ExecutionWaitingState  `json:"waiting,omitempty"`
 }

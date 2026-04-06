@@ -168,6 +168,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                     client=client,
                     model=normalized["model"],
                     batch_size=normalized["prepare_batch_size"],
+                    prompt_version_override=normalized["prepare_prompt_version"],
                 )
                 usage_records.append(batch_usage)
                 kept_count, review_count, dropped_count = _write_prepared_rows(
@@ -189,6 +190,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 client=client,
                 model=normalized["model"],
                 batch_size=normalized["prepare_batch_size"],
+                prompt_version_override=normalized["prepare_prompt_version"],
             )
             usage_records.append(batch_usage)
             kept_count, review_count, dropped_count = _write_prepared_rows(
@@ -228,7 +230,9 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     prompt_version = "dataset-prepare-fallback-v1"
     prepare_strategy = "deterministic-fallback"
     if client and client.is_enabled():
-        prompt_version = "dataset-prepare-anthropic-batch-v1" if normalized["prepare_batch_size"] > 1 else "dataset-prepare-anthropic-v1"
+        prompt_version = normalized["prepare_prompt_version"] or (
+            "dataset-prepare-anthropic-batch-v1" if normalized["prepare_batch_size"] > 1 else "dataset-prepare-anthropic-v1"
+        )
         prepare_strategy = "anthropic-batch" if normalized["prepare_batch_size"] > 1 else "anthropic-row"
     usage = rt._merge_usage_records(usage_records)
 
@@ -470,7 +474,11 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
             if not text:
                 skipped_rows += 1
                 continue
-            labeled = rt._label_sentiment(text, client=client)
+            labeled = rt._label_sentiment(
+                text,
+                client=client,
+                prompt_version_override=normalized["sentiment_prompt_version"],
+            )
             usage_records.append(labeled.get("usage") or {})
             source_index = _stable_source_index(row, index)
             labeled_row = {
@@ -500,7 +508,7 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     prompt_version = "sentiment-fallback-v1"
     if client and client.is_enabled():
         sentiment_model = client._config.model
-        prompt_version = "sentiment-anthropic-v1"
+        prompt_version = normalized["sentiment_prompt_version"] or "sentiment-anthropic-v1"
     usage = rt._merge_usage_records(usage_records)
 
     notes = [

@@ -224,6 +224,139 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	}
 }
 
+func TestCreateDatasetVersionStoresNormalizedProfile(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-1", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-1",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI: "/tmp/issues.csv",
+		DataType:   datasetStringPtr("unstructured"),
+		Profile: &domain.DatasetProfile{
+			ProfileID:              "  festival-default  ",
+			PreparePromptVersion:   datasetStringPtr("  dataset-prepare-anthropic-batch-v2 "),
+			SentimentPromptVersion: datasetStringPtr(" sentiment-anthropic-v2 "),
+			RegexRuleNames:         []string{"media_placeholder", "url_cleanup", "media_placeholder", " "},
+			GarbageRuleNames:       []string{"ad_marker", "platform_placeholder", "ad_marker"},
+			EmbeddingModel:         datasetStringPtr(" intfloat/multilingual-e5-small "),
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected create dataset version error: %v", err)
+	}
+
+	if version.Profile == nil {
+		t.Fatalf("expected dataset profile to be stored")
+	}
+	if version.Profile.ProfileID != "festival-default" {
+		t.Fatalf("unexpected profile id: %+v", version.Profile)
+	}
+	if version.Profile.PreparePromptVersion == nil || *version.Profile.PreparePromptVersion != "dataset-prepare-anthropic-batch-v2" {
+		t.Fatalf("unexpected prepare prompt version: %+v", version.Profile)
+	}
+	if len(version.Profile.RegexRuleNames) != 2 {
+		t.Fatalf("unexpected regex rule names: %+v", version.Profile.RegexRuleNames)
+	}
+	if len(version.Profile.GarbageRuleNames) != 2 {
+		t.Fatalf("unexpected garbage rule names: %+v", version.Profile.GarbageRuleNames)
+	}
+	if got := metadataString(version.Metadata, "profile_id", ""); got != "festival-default" {
+		t.Fatalf("unexpected metadata profile_id: %s", got)
+	}
+}
+
+func TestBuildPrepareUsesProfileDefaults(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-1", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-1",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-profile",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata:         map[string]any{},
+		Profile: &domain.DatasetProfile{
+			ProfileID:            "festival-default",
+			PreparePromptVersion: datasetStringPtr("dataset-prepare-anthropic-batch-v2"),
+			RegexRuleNames:       []string{"media_placeholder", "url_cleanup"},
+		},
+		PrepareStatus: "queued",
+		CreatedAt:     time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	var requestedPromptVersion string
+	var requestedRegexRules []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("unexpected decode error: %v", err)
+		}
+		requestedPromptVersion = payload["prepare_prompt_version"].(string)
+		requestedRegexRules = payload["regex_rule_names"].([]any)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"artifact": map[string]any{
+				"prepare_uri":            "/tmp/issues.prepared.parquet",
+				"prepared_ref":           "/tmp/issues.prepared.parquet",
+				"prepare_format":         "parquet",
+				"prepare_prompt_version": "dataset-prepare-anthropic-batch-v2",
+				"prepared_text_column":   "normalized_text",
+				"summary": map[string]any{
+					"output_row_count": 1,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	result, err := service.BuildPrepare(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{})
+	if err != nil {
+		t.Fatalf("unexpected build prepare error: %v", err)
+	}
+
+	if requestedPromptVersion != "dataset-prepare-anthropic-batch-v2" {
+		t.Fatalf("unexpected requested prompt version: %s", requestedPromptVersion)
+	}
+	if len(requestedRegexRules) != 2 {
+		t.Fatalf("unexpected regex rule payload: %+v", requestedRegexRules)
+	}
+	if result.PreparePromptVer == nil || *result.PreparePromptVer != "dataset-prepare-anthropic-batch-v2" {
+		t.Fatalf("unexpected stored prepare prompt version: %+v", result.PreparePromptVer)
+	}
+}
+
 func TestBuildEmbeddingsUsesPreparedDatasetWhenReady(t *testing.T) {
 	repository := &embeddingIndexCaptureStore{MemoryStore: store.NewMemoryStore()}
 	uploadRoot := t.TempDir()
@@ -595,6 +728,103 @@ func TestBuildEmbeddingsAllowsModelOverride(t *testing.T) {
 	}
 }
 
+func TestBuildEmbeddingsUsesProfileModelByDefault(t *testing.T) {
+	repository := &embeddingIndexCaptureStore{MemoryStore: store.NewMemoryStore()}
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-1", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-1",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-profile-embedding",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"prepared_text_column": "normalized_text",
+		},
+		Profile: &domain.DatasetProfile{
+			ProfileID:      "festival-default",
+			EmbeddingModel: datasetStringPtr("intfloat/multilingual-e5-small"),
+		},
+		PrepareStatus:   "ready",
+		PrepareURI:      datasetStringPtr("/tmp/issues.prepared.parquet"),
+		EmbeddingStatus: "queued",
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	var requestedEmbeddingModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("unexpected decode error: %v", err)
+		}
+		requestedEmbeddingModel = payload["embedding_model"].(string)
+		indexOutputPath := payload["index_output_path"].(string)
+		writeEmbeddingIndexParquet(t, indexOutputPath, []map[string]any{
+			{
+				"source_index":       0,
+				"row_id":             "version-profile-embedding:row:0",
+				"chunk_id":           "version-profile-embedding:row:0:chunk:0",
+				"chunk_index":        0,
+				"char_start":         0,
+				"char_end":           16,
+				"embedding_json":     `[0.1,0.2,0.3]`,
+				"embedding_dim":      3,
+				"embedding_provider": "fastembed",
+				"token_counts_json":  `{"결제":1}`,
+			},
+		})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"artifact": map[string]any{
+				"embedding_index_source_ref":    indexOutputPath,
+				"embedding_index_source_format": "parquet",
+				"chunk_ref":                     "/tmp/issues.prepared.parquet.chunks.parquet",
+				"chunk_format":                  "parquet",
+				"embedding_model":               "intfloat/multilingual-e5-small",
+				"embedding_provider":            "fastembed",
+				"embedding_vector_dim":          3,
+				"usage": map[string]any{
+					"provider":               "fastembed",
+					"model":                  "intfloat/multilingual-e5-small",
+					"operation":              "embedding",
+					"vector_count":           1,
+					"cost_estimation_status": "free_fallback",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	result, err := service.BuildEmbeddings(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{})
+	if err != nil {
+		t.Fatalf("unexpected build embeddings error: %v", err)
+	}
+	if requestedEmbeddingModel != "intfloat/multilingual-e5-small" {
+		t.Fatalf("unexpected requested embedding model: %s", requestedEmbeddingModel)
+	}
+	if result.EmbeddingModel == nil || *result.EmbeddingModel != "intfloat/multilingual-e5-small" {
+		t.Fatalf("unexpected stored embedding model: %+v", result.EmbeddingModel)
+	}
+}
+
 func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 	repository := store.NewMemoryStore()
 	uploadRoot := t.TempDir()
@@ -718,6 +948,81 @@ func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 	}
 	if got := metadataString(result.Metadata, "sentiment_format", ""); got != "parquet" {
 		t.Fatalf("unexpected sentiment format: %s", got)
+	}
+}
+
+func TestBuildSentimentUsesProfilePromptVersion(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-1", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-1",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-profile-sentiment",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"prepared_text_column": "normalized_text",
+		},
+		Profile: &domain.DatasetProfile{
+			ProfileID:              "festival-default",
+			SentimentPromptVersion: datasetStringPtr("sentiment-anthropic-v2"),
+		},
+		PrepareStatus:   "ready",
+		PrepareURI:      datasetStringPtr("/tmp/issues.prepared.parquet"),
+		SentimentStatus: "queued",
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	var requestedPromptVersion string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("unexpected decode error: %v", err)
+		}
+		requestedPromptVersion = payload["sentiment_prompt_version"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"artifact": map[string]any{
+				"sentiment_uri":            "/tmp/issues.prepared.parquet.sentiment.parquet",
+				"sentiment_ref":            "/tmp/issues.prepared.parquet.sentiment.parquet",
+				"sentiment_format":         "parquet",
+				"sentiment_prompt_version": "sentiment-anthropic-v2",
+				"summary": map[string]any{
+					"labeled_row_count": 1,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	result, err := service.BuildSentiment(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{})
+	if err != nil {
+		t.Fatalf("unexpected build sentiment error: %v", err)
+	}
+	if requestedPromptVersion != "sentiment-anthropic-v2" {
+		t.Fatalf("unexpected requested prompt version: %s", requestedPromptVersion)
+	}
+	if result.SentimentPromptVer == nil || *result.SentimentPromptVer != "sentiment-anthropic-v2" {
+		t.Fatalf("unexpected stored sentiment prompt version: %+v", result.SentimentPromptVer)
 	}
 }
 

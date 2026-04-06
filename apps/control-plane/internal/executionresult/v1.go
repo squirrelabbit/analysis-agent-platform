@@ -17,6 +17,7 @@ func BuildV1(execution domain.ExecutionSummary) domain.ExecutionResultV1 {
 		SchemaVersion: "execution-result-v1",
 		Status:        execution.Status,
 		StepResults:   buildExecutionStepResultsV1(execution, decodedArtifacts),
+		Profile:       execution.ProfileSnapshot,
 	}
 	if usageSummary := buildArtifactUsageSummary(execution.Artifacts); len(usageSummary) > 0 {
 		result.UsageSummary = usageSummary

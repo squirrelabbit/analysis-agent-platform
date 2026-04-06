@@ -169,6 +169,17 @@ func (s *AnalysisService) ExecutePlan(projectID, planID string) (domain.PlanExec
 	executionID := id.New()
 	jobID := id.New()
 	now := time.Now().UTC()
+	var profileSnapshot *domain.DatasetProfile
+	if plan.DatasetVersionID != nil && strings.TrimSpace(*plan.DatasetVersionID) != "" {
+		version, err := s.store.GetDatasetVersion(projectID, strings.TrimSpace(*plan.DatasetVersionID))
+		if err != nil {
+			if err == store.ErrNotFound {
+				return domain.PlanExecuteResponse{}, ErrNotFound{Resource: "dataset version"}
+			}
+			return domain.PlanExecuteResponse{}, err
+		}
+		profileSnapshot = cloneDatasetProfile(version.Profile)
+	}
 	execution := domain.ExecutionSummary{
 		ExecutionID:        executionID,
 		ProjectID:          projectID,
@@ -181,6 +192,7 @@ func (s *AnalysisService) ExecutePlan(projectID, planID string) (domain.PlanExec
 		DatasetVersionID:   plan.DatasetVersionID,
 		ParamsHash:         plan.PlanHash,
 		SkillBundleVersion: stringPointer(registry.BundleVersion()),
+		ProfileSnapshot:    profileSnapshot,
 		Events: []domain.ExecutionEvent{
 			{
 				ExecutionID: executionID,
@@ -356,7 +368,11 @@ func (s *AnalysisService) GetReportDraft(projectID, draftID string) (domain.Repo
 
 func buildExecutionResultV1(execution domain.ExecutionSummary, contract map[string]any) domain.ExecutionResultV1 {
 	if execution.ResultV1Snapshot != nil {
-		return *execution.ResultV1Snapshot
+		result := *execution.ResultV1Snapshot
+		if result.Profile == nil && execution.ProfileSnapshot != nil {
+			result.Profile = cloneDatasetProfile(execution.ProfileSnapshot)
+		}
+		return result
 	}
 	return executionresult.BuildV1(execution)
 }
@@ -1024,6 +1040,7 @@ func (s *AnalysisService) RerunExecution(projectID, executionID string, input do
 		CodeVersion:        execution.CodeVersion,
 		ParamsHash:         execution.ParamsHash,
 		SkillBundleVersion: execution.SkillBundleVersion,
+		ProfileSnapshot:    cloneDatasetProfile(execution.ProfileSnapshot),
 		Events: []domain.ExecutionEvent{
 			{
 				ExecutionID: newExecutionID,
@@ -1234,6 +1251,7 @@ func enrichInputsForSkill(step *domain.SkillPlanStep, version domain.DatasetVers
 	if step.Inputs == nil {
 		step.Inputs = map[string]any{}
 	}
+	explicitGarbageRules := inputPresent(step.Inputs, "garbage_rule_names")
 	definition, ok := registry.Skill(step.SkillName)
 	if !ok {
 		return
@@ -1254,6 +1272,9 @@ func enrichInputsForSkill(step *domain.SkillPlanStep, version domain.DatasetVers
 	}
 	if definition.GoalInput != "" && !inputPresent(step.Inputs, definition.GoalInput) && strings.TrimSpace(goal) != "" {
 		step.Inputs[definition.GoalInput] = strings.TrimSpace(goal)
+	}
+	if step.SkillName == "garbage_filter" && !explicitGarbageRules && version.Profile != nil && len(version.Profile.GarbageRuleNames) > 0 {
+		step.Inputs["garbage_rule_names"] = append([]string(nil), version.Profile.GarbageRuleNames...)
 	}
 	if definition.RequiresEmbedding && !inputPresent(step.Inputs, "embedding_uri") && !inputPresent(step.Inputs, "embedding_index_ref") {
 		step.Inputs["embedding_uri"] = deriveEmbeddingURI(version)

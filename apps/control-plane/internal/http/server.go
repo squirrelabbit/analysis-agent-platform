@@ -372,6 +372,13 @@ func datasetVersionCreateRequestFromMultipart(form *multipart.Form) (domain.Data
 		}
 		payload.Metadata = metadata
 	}
+	if value := firstFormValue(form, "profile"); value != "" {
+		var profile domain.DatasetProfile
+		if err := json.Unmarshal([]byte(value), &profile); err != nil {
+			return payload, errors.New("profile must be a JSON object")
+		}
+		payload.Profile = &profile
+	}
 	if value, ok, err := optionalBoolFormValue(form, "prepare_required"); err != nil {
 		return payload, err
 	} else if ok {

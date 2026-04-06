@@ -566,10 +566,11 @@ def _prepare_row(
     *,
     client: AnthropicClient | None,
     model: str,
+    prompt_version_override: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if client and client.is_enabled():
         try:
-            return _prepare_row_with_llm(client, raw_text)
+            return _prepare_row_with_llm(client, raw_text, prompt_version_override=prompt_version_override)
         except Exception as exc:
             fallback = _prepare_row_fallback(raw_text)
             fallback["quality_flags"] = list(fallback["quality_flags"]) + [f"llm_fallback:{exc}"]
@@ -603,6 +604,7 @@ def _prepare_rows(
     client: AnthropicClient | None,
     model: str,
     batch_size: int = 1,
+    prompt_version_override: str = "",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if not raw_texts:
         return [], {}
@@ -613,7 +615,11 @@ def _prepare_rows(
         for start in range(0, len(raw_texts), normalized_batch_size):
             batch = raw_texts[start : start + normalized_batch_size]
             try:
-                batch_rows, batch_usage = _prepare_rows_with_llm(client, batch)
+                batch_rows, batch_usage = _prepare_rows_with_llm(
+                    client,
+                    batch,
+                    prompt_version_override=prompt_version_override,
+                )
                 prepared_rows.extend(batch_rows)
                 usage_records.append(batch_usage)
             except Exception as exc:
@@ -624,15 +630,28 @@ def _prepare_rows(
         return prepared_rows, _merge_usage_records(usage_records)
     prepared_rows: list[dict[str, Any]] = []
     for raw_text in raw_texts:
-        prepared, usage = _prepare_row(raw_text, client=client, model=model)
+        prepared, usage = _prepare_row(
+            raw_text,
+            client=client,
+            model=model,
+            prompt_version_override=prompt_version_override,
+        )
         prepared_rows.append(prepared)
         usage_records.append(usage)
     return prepared_rows, _merge_usage_records(usage_records)
 
 
-def _prepare_row_with_llm(client: AnthropicClient, raw_text: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _prepare_row_with_llm(
+    client: AnthropicClient,
+    raw_text: str,
+    *,
+    prompt_version_override: str = "",
+) -> tuple[dict[str, Any], dict[str, Any]]:
     config = load_config()
-    prompt_version, prompt = render_prepare_prompt(raw_text, version=config.anthropic_prepare_prompt_version)
+    prompt_version, prompt = render_prepare_prompt(
+        raw_text,
+        version=prompt_version_override or config.anthropic_prepare_prompt_version,
+    )
     response = client.create_json_response(prompt=prompt, schema=_prepare_schema(), max_tokens=600)
     return (
         _normalize_prepare_response(response.body, raw_text, prompt_version=prompt_version),
@@ -644,9 +663,17 @@ def _prepare_row_with_llm(client: AnthropicClient, raw_text: str) -> tuple[dict[
     )
 
 
-def _prepare_rows_with_llm(client: AnthropicClient, raw_texts: list[str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _prepare_rows_with_llm(
+    client: AnthropicClient,
+    raw_texts: list[str],
+    *,
+    prompt_version_override: str = "",
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     config = load_config()
-    prompt_version, prompt = render_prepare_batch_prompt(raw_texts, version=config.anthropic_prepare_batch_prompt_version)
+    prompt_version, prompt = render_prepare_batch_prompt(
+        raw_texts,
+        version=prompt_version_override or config.anthropic_prepare_batch_prompt_version,
+    )
     response = client.create_json_response(prompt=prompt, schema=_prepare_batch_schema(), max_tokens=max(800, 280 * len(raw_texts)))
     prepared_rows = response.body.get("rows")
     if not isinstance(prepared_rows, list) or len(prepared_rows) != len(raw_texts):
@@ -709,10 +736,10 @@ def _prepare_row_fallback(raw_text: str) -> dict[str, Any]:
     }
 
 
-def _label_sentiment(text: str, *, client: AnthropicClient | None) -> dict[str, Any]:
+def _label_sentiment(text: str, *, client: AnthropicClient | None, prompt_version_override: str = "") -> dict[str, Any]:
     if client and client.is_enabled():
         try:
-            return _label_sentiment_with_llm(client, text)
+            return _label_sentiment_with_llm(client, text, prompt_version_override=prompt_version_override)
         except Exception as exc:
             fallback = _label_sentiment_fallback(text)
             fallback["reason"] = f"{fallback['reason']} (llm_fallback: {exc})"
@@ -720,9 +747,17 @@ def _label_sentiment(text: str, *, client: AnthropicClient | None) -> dict[str, 
     return _label_sentiment_fallback(text)
 
 
-def _label_sentiment_with_llm(client: AnthropicClient, text: str) -> dict[str, Any]:
+def _label_sentiment_with_llm(
+    client: AnthropicClient,
+    text: str,
+    *,
+    prompt_version_override: str = "",
+) -> dict[str, Any]:
     config = load_config()
-    prompt_version, prompt = render_sentiment_prompt(text, version=config.anthropic_sentiment_prompt_version)
+    prompt_version, prompt = render_sentiment_prompt(
+        text,
+        version=prompt_version_override or config.anthropic_sentiment_prompt_version,
+    )
     response = client.create_json_response(prompt=prompt, schema=_sentiment_schema(), max_tokens=400)
     label = str(response.body.get("label") or "unknown").strip().lower()
     if label not in SENTIMENT_LABELS:
