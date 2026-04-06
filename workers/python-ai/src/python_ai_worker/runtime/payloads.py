@@ -39,9 +39,12 @@ def _normalize_text_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
     top_n = max(1, int(inputs.get("top_n") or payload.get("top_n") or 10))
     sample_n = max(1, int(inputs.get("sample_n") or payload.get("sample_n") or 3))
     query = str(inputs.get("query") or payload.get("query") or payload.get("goal") or "").strip()
+    match_mode = str(inputs.get("match_mode") or payload.get("match_mode") or "any").strip().lower()
 
     if not dataset_name:
         raise ValueError("dataset_name is required")
+    if match_mode not in {"any", "all"}:
+        raise ValueError("match_mode must be one of any, all")
 
     return {
         "step": step,
@@ -50,6 +53,7 @@ def _normalize_text_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "top_n": top_n,
         "sample_n": sample_n,
         "query": query,
+        "match_mode": match_mode,
         "artifact_output_path": str(
             inputs.get("artifact_output_path") or payload.get("artifact_output_path") or ""
         ).strip(),

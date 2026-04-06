@@ -415,6 +415,31 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["top_nouns"][0]["term"], "결제")
         self.assertGreaterEqual(int(result["artifact"]["top_nouns"][0]["document_frequency"]), 1)
 
+    def test_document_filter_match_mode_all_requires_all_query_tokens(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "filter_all.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "벚꽃 축제 일정이 공개됐습니다"})
+            writer.writerow({"text": "축제 일정이 공개됐습니다"})
+            writer.writerow({"text": "벚꽃 개화 소식이 올라왔습니다"})
+
+        result = run_document_filter(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "query": "벚꽃 축제",
+                "match_mode": "all",
+                "sample_n": 3,
+            }
+        )
+
+        self.assertEqual(result["artifact"]["match_mode"], "all")
+        self.assertEqual(result["artifact"]["summary"]["selection_mode"], "lexical_overlap_all")
+        self.assertEqual(result["artifact"]["summary"]["filtered_row_count"], 1)
+        self.assertEqual(result["artifact"]["matched_indices"], [0])
+
     def test_sentence_split_writes_sidecar_parquet_when_output_path_is_provided(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "sentences.csv"

@@ -17,9 +17,11 @@
 | 시나리오 | 사용자 질의 | 현재 strict step | runtime skill | 비고 |
 | --- | --- | --- | --- | --- |
 | `S1` | 이번 벚꽃 축제 반응 어때? | 가비지 필터링 | `garbage_filter` | 원본과 동일 |
-| `S1` | 이번 벚꽃 축제 반응 어때? | 감성 비율 집계 | `issue_sentiment_summary` | 원본과 동일 |
-| `S1` | 이번 벚꽃 축제 반응 어때? | 빈도 기반 키워드 추출 | `keyword_frequency` | 원본과 동일 |
-| `S1` | 이번 벚꽃 축제 반응 어때? | 전체 담론 요약 | `issue_evidence_summary` | 원본과 동일 |
+| `S1` | 이번 벚꽃 축제 반응 어때? | 질의 문서 필터링 | `document_filter` | `query=벚꽃 축제`, `match_mode=all`로 대표 토큰을 모두 포함한 문서만 추린다 |
+| `S1` | 이번 벚꽃 축제 반응 어때? | 감성 비율 집계 | `issue_sentiment_summary` | `document_filter` 결과 subset 기준 |
+| `S1` | 이번 벚꽃 축제 반응 어때? | 빈도 기반 키워드 추출 | `keyword_frequency` | `document_filter` 결과 subset 기준 |
+| `S1` | 이번 벚꽃 축제 반응 어때? | 대표 문서 샘플링 | `document_sample` | `query=벚꽃 축제` 기준 대표 근거 문서를 추린다 |
+| `S1` | 이번 벚꽃 축제 반응 어때? | 전체 담론 요약 | `issue_evidence_summary` | `document_sample` prior artifact를 근거 선택 source로 사용 |
 | `S2` | 축제 반응 흐름 어떻게 변했어? | 가비지 필터링 | `garbage_filter` | 원본과 동일 |
 | `S2` | 축제 반응 흐름 어떻게 변했어? | 기간별 문서량 추이 | `time_bucket_count` | `bucket=day` |
 | `S2` | 축제 반응 흐름 어떻게 변했어? | 기간별 담론 요약 | `issue_trend_summary` | 현재 runtime의 핵심 trend 요약 step |
@@ -38,6 +40,9 @@
 
 ## 원본 대비 차이
 
+- `S1`은 broad festival corpus에서 `축제` token만 맞는 문서가 과다 유입되는 문제가 있었다.
+  - 현재 strict 구성은 `document_filter(query=벚꽃 축제, match_mode=all)`을 추가해 대표 토큰을 모두 포함한 문서만 먼저 추린다.
+  - `issue_evidence_summary` 앞에 `document_sample`을 넣어, filter된 문서 subset이 실제 evidence 선택까지 이어지게 했다.
 - `S2`의 `기간별 감성 비교`, `감성 비율 변화량`은 현재 runtime에 전용 skill이 없다.
   - 현재 strict 구성은 `time_bucket_count + issue_trend_summary + issue_evidence_summary`로 흐름 요약에 집중한다.
 - `S3`의 `전/중/후` 비교는 현재 date range 기반 explicit segmentation이 없다.

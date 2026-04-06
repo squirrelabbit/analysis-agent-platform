@@ -20,6 +20,23 @@
       "interpretation": "전체 여론 및 분위기 파악",
       "analysis_scope": "축제 기간",
       "step": 2,
+      "function_name": "질의 문서 필터링",
+      "runtime_skill_name": "document_filter",
+      "parameter_text": "query=벚꽃 축제, match_mode=all",
+      "parameters": {
+        "query": "벚꽃 축제",
+        "match_mode": "all"
+      },
+      "result_description": "벚꽃 축제 관련 문서만 우선 추림"
+    },
+    {
+      "scenario_id": "S1",
+      "planning_mode": "strict",
+      "user_query": "이번 벚꽃 축제 반응 어때?",
+      "query_type": "여론 요약",
+      "interpretation": "전체 여론 및 분위기 파악",
+      "analysis_scope": "축제 기간",
+      "step": 3,
       "function_name": "감성 비율 집계",
       "runtime_skill_name": "issue_sentiment_summary",
       "result_description": "긍/부정 비율"
@@ -31,7 +48,7 @@
       "query_type": "여론 요약",
       "interpretation": "전체 여론 및 분위기 파악",
       "analysis_scope": "축제 기간",
-      "step": 3,
+      "step": 4,
       "function_name": "빈도 기반 키워드 추출",
       "runtime_skill_name": "keyword_frequency",
       "parameter_text": "top_n=10",
@@ -47,7 +64,24 @@
       "query_type": "여론 요약",
       "interpretation": "전체 여론 및 분위기 파악",
       "analysis_scope": "축제 기간",
-      "step": 4,
+      "step": 5,
+      "function_name": "대표 문서 샘플링",
+      "runtime_skill_name": "document_sample",
+      "parameter_text": "query=벚꽃 축제, sample_n=3",
+      "parameters": {
+        "query": "벚꽃 축제",
+        "sample_n": 3
+      },
+      "result_description": "벚꽃 축제 관련 대표 문서 근거"
+    },
+    {
+      "scenario_id": "S1",
+      "planning_mode": "strict",
+      "user_query": "이번 벚꽃 축제 반응 어때?",
+      "query_type": "여론 요약",
+      "interpretation": "전체 여론 및 분위기 파악",
+      "analysis_scope": "축제 기간",
+      "step": 6,
       "function_name": "전체 담론 요약",
       "runtime_skill_name": "issue_evidence_summary",
       "result_description": "종합 의견 요약"

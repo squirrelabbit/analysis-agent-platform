@@ -1584,7 +1584,7 @@ func resolvedTextColumnForSkill(inputs map[string]any, version domain.DatasetVer
 		return defaultTextColumn
 	}
 	text := strings.TrimSpace(fmt.Sprintf("%v", value))
-	if text == "" || text == rawTextColumn {
+	if text == "" || text == rawTextColumn || (text == "text" && rawTextColumn != "text") {
 		return defaultTextColumn
 	}
 	return text
