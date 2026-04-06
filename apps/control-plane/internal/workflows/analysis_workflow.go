@@ -10,6 +10,7 @@ import (
 	"analysis-support-platform/control-plane/internal/config"
 
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 )
 
@@ -157,6 +158,10 @@ func (s TemporalStarter) startWorkflow(workflowID string, taskQueue string, work
 		payload,
 	)
 	if err != nil {
+		var alreadyStarted *serviceerror.WorkflowExecutionAlreadyStarted
+		if errors.As(err, &alreadyStarted) {
+			return workflowID, nil
+		}
 		return "", err
 	}
 	return run.GetID(), nil

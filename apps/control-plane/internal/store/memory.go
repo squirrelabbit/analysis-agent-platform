@@ -56,6 +56,23 @@ func (s *MemoryStore) GetProject(projectID string) (domain.Project, error) {
 	return project, nil
 }
 
+func (s *MemoryStore) ListProjects() ([]domain.Project, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := make([]domain.Project, 0, len(s.projects))
+	for _, project := range s.projects {
+		items = append(items, project)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ProjectID < items[j].ProjectID
+		}
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+	return items, nil
+}
+
 func (s *MemoryStore) SaveScenario(scenario domain.Scenario) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

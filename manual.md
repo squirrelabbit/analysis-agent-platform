@@ -33,6 +33,13 @@ docker compose -f compose.dev.yml ps
 
 위 5개가 `Up`이면 된다.
 
+재기동 복구:
+
+- control plane은 현재 기동 시 startup reconciliation을 수행한다.
+- 남아 있던 `queued/running` dataset build job은 다시 dispatch된다.
+- 남아 있던 `queued/running` execution은 다시 enqueue된다.
+- `waiting` execution은 dataset dependency를 다시 계산해 resume 가능 여부를 재평가한다.
+
 참고:
 
 - Swagger UI: [http://127.0.0.1:18080/swagger](http://127.0.0.1:18080/swagger)

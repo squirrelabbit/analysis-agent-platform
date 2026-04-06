@@ -130,6 +130,7 @@
 - activity timeout/retry 기본값은 현재 `prepare=20분/4회`, `sentiment=45분/4회`, `embedding=60분/3회`, `backoff=10초 x2 최대 5분`이다.
 - worker HTTP timeout은 현재 `prepare=10분`, `sentiment=30분`, `embedding=45분`으로 분리돼 있다.
 - worker 동시성 기본값은 현재 `analysis activity=8`, `build activity=4`, `prepare slot=3`, `sentiment slot=2`, `embedding slot=1`이다.
+- control plane 기동 시 현재 startup reconciliation을 한 번 수행한다. 남아 있던 `queued/running` build job은 다시 dispatch하고, `queued/running` execution은 다시 enqueue하며, `waiting` execution은 dependency를 다시 계산해 resume 가능 여부를 재평가한다.
 - execution 시작 전에는 plan step을 보고 `requires_prepare`, `requires_sentiment`, `requires_embedding`를 계산한 뒤 필요한 build를 먼저 자동 시도한다.
 - 그래도 준비되지 못한 경우에만 workflow가 `waiting`으로 전이된다.
 - build job이 완료되면 같은 dataset version을 기다리던 execution은 dependency를 다시 계산한 뒤 자동으로 `resume`된다.

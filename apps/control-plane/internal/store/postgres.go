@@ -90,6 +90,35 @@ func (s *PostgresStore) GetProject(projectID string) (domain.Project, error) {
 	return project, nil
 }
 
+func (s *PostgresStore) ListProjects() ([]domain.Project, error) {
+	rows, err := s.db.Query(
+		`SELECT project_id::text, name, description, created_at
+		 FROM projects
+		 ORDER BY created_at ASC, project_id ASC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.Project, 0)
+	for rows.Next() {
+		var project domain.Project
+		var description sql.NullString
+		if err := rows.Scan(&project.ProjectID, &project.Name, &description, &project.CreatedAt); err != nil {
+			return nil, err
+		}
+		if description.Valid {
+			project.Description = &description.String
+		}
+		items = append(items, project)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (s *PostgresStore) SaveScenario(scenario domain.Scenario) error {
 	stepsJSON, err := marshalJSON(scenario.Steps)
 	if err != nil {

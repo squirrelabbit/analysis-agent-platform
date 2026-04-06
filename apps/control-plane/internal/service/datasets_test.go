@@ -27,10 +27,12 @@ type embeddingIndexCaptureStore struct {
 }
 
 type fakeDatasetBuildStarter struct {
-	startCalls []workflows.StartDatasetBuildInput
+	startCalls         []workflows.StartDatasetBuildInput
+	analysisStartCalls []workflows.StartAnalysisInput
 }
 
 func (s *fakeDatasetBuildStarter) StartAnalysisWorkflow(input workflows.StartAnalysisInput) (string, error) {
+	s.analysisStartCalls = append(s.analysisStartCalls, input)
 	return "analysis-execution-" + input.ExecutionID, nil
 }
 
