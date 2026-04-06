@@ -1984,6 +1984,47 @@ class TaskTests(unittest.TestCase):
         self.assertTrue(chunk_path.exists())
         self.assertTrue(embedding_index_path.exists())
 
+    def test_embedding_writes_schemaful_empty_parquet_outputs(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_empty.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": ""})
+            writer.writerow({"text": "   "})
+
+        result = run_embedding(
+            {
+                "dataset_version_id": "version-empty",
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+            }
+        )
+
+        chunk_path = Path(str(result["artifact"]["chunk_ref"]))
+        embedding_index_path = Path(str(result["artifact"]["embedding_index_source_ref"]))
+        chunk_table = pq.read_table(chunk_path)
+        embedding_index_table = pq.read_table(embedding_index_path)
+
+        self.assertEqual(chunk_table.num_rows, 0)
+        self.assertEqual(embedding_index_table.num_rows, 0)
+        self.assertEqual(chunk_table.column_names, ["source_row_index", "row_id", "chunk_id", "chunk_index", "chunk_text", "char_start", "char_end"])
+        self.assertEqual(
+            embedding_index_table.column_names,
+            [
+                "source_index",
+                "row_id",
+                "chunk_id",
+                "chunk_index",
+                "char_start",
+                "char_end",
+                "embedding_json",
+                "embedding_dim",
+                "embedding_provider",
+                "token_counts_json",
+            ],
+        )
+
     def test_semantic_search_prefers_pgvector_when_available(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues.csv"
@@ -2056,6 +2097,42 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["summary"]["retrieval_backend"], "pgvector")
         self.assertEqual(result["artifact"]["matches"][0]["text"], "결제 오류가 반복 발생했습니다")
         self.assertEqual(result["artifact"]["matches"][0]["chunk_id"], "version-1:row:0:chunk:0")
+        self.assertIn("semantic search executed with pgvector index", result["notes"])
+
+    def test_semantic_search_returns_empty_pgvector_matches_without_sidecar_fallback(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+
+        with (
+            patch(
+                "python_ai_worker.skills.support._lookup_pgvector_index_metadata",
+                return_value={"embedding_model": "token-overlap-v1", "vector_dim": 64},
+            ),
+            patch(
+                "python_ai_worker.skills.support._query_pgvector_rows",
+                return_value=[],
+            ),
+        ):
+            result = run_semantic_search(
+                {
+                    "dataset_name": str(csv_path),
+                    "dataset_version_id": "version-empty-pgvector",
+                    "query": "결제 오류 관련 문서를 찾아줘",
+                    "sample_n": 2,
+                    "embedding_index_ref": "pgvector://embedding_index_chunks?dataset_version_id=version-empty-pgvector",
+                    "chunk_format": "parquet",
+                }
+            )
+
+        self.assertEqual(result["artifact"]["retrieval_backend"], "pgvector")
+        self.assertEqual(result["artifact"]["summary"]["candidate_count"], 0)
+        self.assertEqual(result["artifact"]["summary"]["match_count"], 0)
+        self.assertEqual(result["artifact"]["matches"], [])
+        self.assertEqual(result["artifact"]["embedding_uri"], "")
         self.assertIn("semantic search executed with pgvector index", result["notes"])
 
     def test_embedding_adds_dense_vectors_when_available(self) -> None:

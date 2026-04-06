@@ -94,8 +94,12 @@ services:
     command: ["/usr/local/bin/temporal-worker"]
     environment:
       TZ: Asia/Seoul
+      WORKFLOW_ENGINE: temporal
       STORE_BACKEND: postgres
       DATABASE_URL: postgresql://platform:platform@postgres:5432/analysis_support
+      DATA_ROOT: /workspace/data
+      UPLOAD_ROOT: /workspace/data/uploads
+      ARTIFACT_ROOT: /workspace/data/artifacts
       DUCKDB_PATH: /workspace/data/analysis_support.duckdb
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default

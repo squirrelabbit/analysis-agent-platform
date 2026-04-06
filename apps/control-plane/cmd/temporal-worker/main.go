@@ -21,9 +21,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	starter, err := workflows.NewStarter(cfg)
-	if err != nil {
-		log.Fatal(err)
+	starter := workflows.TemporalStarter{
+		Address:               cfg.TemporalAddress,
+		Namespace:             cfg.TemporalNamespace,
+		TaskQueue:             cfg.TemporalTaskQueue,
+		DatasetBuildTaskQueue: cfg.TemporalBuildTaskQueue,
 	}
 	datasetService := service.NewDatasetService(repository, cfg.PythonAIWorkerURL, cfg.UploadRoot, cfg.ArtifactRoot)
 	if err := datasetService.SetDatasetProfilesPath(cfg.DatasetProfilesPath); err != nil {

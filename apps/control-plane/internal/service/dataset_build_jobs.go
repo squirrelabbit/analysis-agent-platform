@@ -40,6 +40,10 @@ func (s *DatasetService) CreatePrepareJob(projectID, datasetID, datasetVersionID
 		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
 		CreatedAt:        time.Now().UTC(),
 	}
+	version.PrepareStatus = "queued"
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
 	if err := s.store.SaveDatasetBuildJob(job); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
@@ -74,6 +78,10 @@ func (s *DatasetService) CreateSentimentJob(projectID, datasetID, datasetVersion
 		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
 		CreatedAt:        time.Now().UTC(),
 	}
+	version.SentimentStatus = "queued"
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
 	if err := s.store.SaveDatasetBuildJob(job); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
@@ -107,6 +115,10 @@ func (s *DatasetService) CreateEmbeddingJob(projectID, datasetID, datasetVersion
 		Request:          requestToMap(input),
 		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
 		CreatedAt:        time.Now().UTC(),
+	}
+	version.EmbeddingStatus = "queued"
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
 	}
 	if err := s.store.SaveDatasetBuildJob(job); err != nil {
 		return domain.DatasetBuildJob{}, err

@@ -27,9 +27,9 @@ type AnalysisService struct {
 }
 
 type executionDependencyBuilder interface {
-	BuildPrepare(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest) (domain.DatasetVersion, error)
-	BuildSentiment(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest) (domain.DatasetVersion, error)
-	BuildEmbeddings(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error)
+	CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy string) (domain.DatasetBuildJob, error)
+	CreateSentimentJob(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
+	CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
 }
 
 func NewAnalysisService(repository store.Repository, starter workflows.Starter, planGenerator planner.Planner) *AnalysisService {
@@ -193,6 +193,7 @@ func (s *AnalysisService) ExecutePlan(projectID, planID string) (domain.PlanExec
 			return domain.PlanExecuteResponse{}, err
 		}
 		profileSnapshot = cloneDatasetProfile(version.Profile)
+		plan.Plan = refreshPlanWithDatasetVersion(plan.Plan, version)
 	}
 	execution := domain.ExecutionSummary{
 		ExecutionID:        executionID,
@@ -258,11 +259,11 @@ func (s *AnalysisService) ensureExecutionDependencies(projectID string, plan dom
 		return err
 	}
 
-	_, err = s.ensureExecutionDependenciesForVersion(projectID, version, plan.Plan)
+	_, err = s.ensureExecutionDependenciesForVersion(projectID, version, plan.Plan, "analysis_execute")
 	return err
 }
 
-func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string, version domain.DatasetVersion, plan domain.SkillPlan) (domain.DatasetVersion, error) {
+func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string, version domain.DatasetVersion, plan domain.SkillPlan, triggeredBy string) (domain.DatasetVersion, error) {
 	if s.dependencyBuilder == nil {
 		return version, nil
 	}
@@ -273,34 +274,34 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 	needsEmbedding := planRequiresEmbedding(plan)
 
 	if needsPrepare && requiresPrepare(version) && !datasetPrepareReady(version) {
-		if _, err := s.dependencyBuilder.BuildPrepare(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}); err != nil {
+		if _, err := s.dependencyBuilder.CreatePrepareJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, triggeredBy); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
 		if err != nil {
 			return domain.DatasetVersion{}, err
 		}
-		version = latest
+		return latest, nil
 	}
 	if needsSentiment && !datasetSentimentReady(version) {
-		if _, err := s.dependencyBuilder.BuildSentiment(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}); err != nil {
+		if _, err := s.dependencyBuilder.CreateSentimentJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}, triggeredBy); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
 		if err != nil {
 			return domain.DatasetVersion{}, err
 		}
-		version = latest
+		return latest, nil
 	}
 	if needsEmbedding && !datasetEmbeddingReady(version) {
-		if _, err := s.dependencyBuilder.BuildEmbeddings(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}); err != nil {
+		if _, err := s.dependencyBuilder.CreateEmbeddingJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}, triggeredBy); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
 		if err != nil {
 			return domain.DatasetVersion{}, err
 		}
-		version = latest
+		return latest, nil
 	}
 
 	return version, nil
@@ -1083,7 +1084,7 @@ func (s *AnalysisService) ResumeWaitingExecutionsForDatasetVersion(projectID, da
 			}
 			return resumedCount, err
 		}
-		version, err = s.ensureExecutionDependenciesForVersion(projectID, version, execution.Plan)
+		version, err = s.ensureExecutionDependenciesForVersion(projectID, version, execution.Plan, triggeredBy)
 		if err != nil {
 			return resumedCount, err
 		}
@@ -1359,6 +1360,15 @@ func planDependenciesReady(plan domain.SkillPlan, version domain.DatasetVersion)
 }
 
 func (s *AnalysisService) resumeExecutionInternal(execution domain.ExecutionSummary, reason, triggeredBy string) (domain.ExecutionSummary, error) {
+	if execution.DatasetVersionID != nil && strings.TrimSpace(*execution.DatasetVersionID) != "" {
+		version, err := s.store.GetDatasetVersion(execution.ProjectID, strings.TrimSpace(*execution.DatasetVersionID))
+		if err != nil && err != store.ErrNotFound {
+			return domain.ExecutionSummary{}, err
+		}
+		if err == nil {
+			execution.Plan = refreshPlanWithDatasetVersion(execution.Plan, version)
+		}
+	}
 	now := time.Now().UTC()
 	execution.Status = "queued"
 	execution.EndedAt = nil
@@ -1392,6 +1402,47 @@ func (s *AnalysisService) resumeExecutionInternal(execution domain.ExecutionSumm
 		return domain.ExecutionSummary{}, err
 	}
 	return execution, nil
+}
+
+func refreshPlanWithDatasetVersion(plan domain.SkillPlan, version domain.DatasetVersion) domain.SkillPlan {
+	fallback := strings.TrimSpace(version.StorageURI)
+	for index := range plan.Steps {
+		definition, ok := registry.Skill(plan.Steps[index].SkillName)
+		if !ok {
+			continue
+		}
+		switch definition.DatasetSource {
+		case "prepared", "sentiment":
+			plan.Steps[index].DatasetName = resolvedDatasetNameForSkill(plan.Steps[index].SkillName, fallback, version)
+		}
+		if plan.Steps[index].Inputs == nil {
+			plan.Steps[index].Inputs = map[string]any{}
+		}
+		for key, metadataKey := range definition.MetadataDefaults {
+			current := plan.Steps[index].Inputs[key]
+			plan.Steps[index].Inputs[key] = metadataValue(version.Metadata, metadataKey, current)
+		}
+		if _, hasTextColumn := definition.DefaultInputs["text_column"]; hasTextColumn {
+			plan.Steps[index].Inputs["text_column"] = resolvedTextColumnForSkill(plan.Steps[index].Inputs, version)
+		}
+		if definition.RequiresEmbedding {
+			if value := strings.TrimSpace(metadataString(version.Metadata, "embedding_index_ref", "")); value != "" {
+				plan.Steps[index].Inputs["embedding_index_ref"] = value
+			}
+			if value := strings.TrimSpace(metadataString(version.Metadata, "chunk_ref", "")); value != "" {
+				plan.Steps[index].Inputs["chunk_ref"] = value
+			}
+			if value := strings.TrimSpace(metadataString(version.Metadata, "chunk_format", "")); value != "" {
+				plan.Steps[index].Inputs["chunk_format"] = value
+			}
+			if version.EmbeddingURI != nil && strings.TrimSpace(*version.EmbeddingURI) != "" {
+				plan.Steps[index].Inputs["embedding_uri"] = strings.TrimSpace(*version.EmbeddingURI)
+			} else {
+				delete(plan.Steps[index].Inputs, "embedding_uri")
+			}
+		}
+	}
+	return plan
 }
 
 func computePlanHash(plan domain.SkillPlan) string {
@@ -1469,7 +1520,18 @@ func enrichInputsForSkill(step *domain.SkillPlanStep, version domain.DatasetVers
 		step.Inputs["garbage_rule_names"] = append([]string(nil), version.Profile.GarbageRuleNames...)
 	}
 	if definition.RequiresEmbedding && !inputPresent(step.Inputs, "embedding_uri") && !inputPresent(step.Inputs, "embedding_index_ref") {
-		step.Inputs["embedding_uri"] = deriveEmbeddingURI(version)
+		if value := strings.TrimSpace(metadataString(version.Metadata, "embedding_index_ref", "")); value != "" {
+			step.Inputs["embedding_index_ref"] = value
+		}
+		if value := strings.TrimSpace(metadataString(version.Metadata, "chunk_ref", "")); value != "" {
+			step.Inputs["chunk_ref"] = value
+		}
+		if value := strings.TrimSpace(metadataString(version.Metadata, "chunk_format", "")); value != "" {
+			step.Inputs["chunk_format"] = value
+		}
+		if !inputPresent(step.Inputs, "embedding_index_ref") {
+			step.Inputs["embedding_uri"] = deriveEmbeddingURI(version)
+		}
 	}
 }
 
