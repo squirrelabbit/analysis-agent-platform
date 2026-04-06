@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"mime/multipart"
 	stdhttp "net/http"
 	"os"
@@ -64,6 +65,25 @@ func NewServer(cfg config.Config) *Server {
 
 func (s *Server) Handler() stdhttp.Handler {
 	return s.mux
+}
+
+func (s *Server) RunStartupReconciliation() error {
+	buildJobsRequeued, err := s.datasetService.ReconcileStartupBuildJobs()
+	if err != nil {
+		return err
+	}
+	summary, err := s.analysisService.ReconcileStartupExecutions()
+	if err != nil {
+		return err
+	}
+	summary.BuildJobsRequeued = buildJobsRequeued
+	log.Printf(
+		"startup reconciliation completed: build_jobs_requeued=%d executions_reenqueued=%d waiting_executions_resumed=%d",
+		summary.BuildJobsRequeued,
+		summary.ExecutionsReenqueued,
+		summary.WaitingExecutionsResumed,
+	)
+	return nil
 }
 
 func (s *Server) routes() {

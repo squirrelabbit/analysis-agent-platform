@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 )
 
@@ -123,11 +124,37 @@ func TestTemporalStarterStartsDatasetBuildWorkflowWithExpectedOptions(t *testing
 	}
 }
 
+func TestTemporalStarterTreatsAlreadyStartedAsSuccess(t *testing.T) {
+	fakeClient := &stubTemporalClient{
+		executeErr: &serviceerror.WorkflowExecutionAlreadyStarted{
+			Message: "already started",
+			RunId:   "run-123",
+		},
+	}
+	starter := TemporalStarter{
+		Address:   "temporal.example:7233",
+		Namespace: "analysis",
+		TaskQueue: "analysis-support",
+		ClientFactory: func(ctx context.Context, options client.Options) (TemporalClient, error) {
+			return fakeClient, nil
+		},
+	}
+
+	workflowID, err := starter.StartAnalysisWorkflow(StartAnalysisInput{ExecutionID: "exec-789"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if workflowID != "analysis-execution-exec-789" {
+		t.Fatalf("unexpected workflow id: %s", workflowID)
+	}
+}
+
 type stubTemporalClient struct {
 	startOptions client.StartWorkflowOptions
 	workflowName interface{}
 	args         []interface{}
 	closed       bool
+	executeErr   error
 }
 
 func (s *stubTemporalClient) ExecuteWorkflow(
@@ -139,6 +166,9 @@ func (s *stubTemporalClient) ExecuteWorkflow(
 	s.startOptions = options
 	s.workflowName = workflow
 	s.args = args
+	if s.executeErr != nil {
+		return nil, s.executeErr
+	}
 	return stubWorkflowRun{id: options.ID}, nil
 }
 

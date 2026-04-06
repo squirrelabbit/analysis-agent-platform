@@ -13,6 +13,9 @@ func main() {
 	displaytime.UseKSTAsLocal()
 	cfg := config.Load()
 	server := apphttp.NewServer(cfg)
+	if err := server.RunStartupReconciliation(); err != nil {
+		log.Printf("startup reconciliation failed: %v", err)
+	}
 
 	log.Printf("control-plane listening on %s", cfg.BindAddr)
 	if err := http.ListenAndServe(cfg.BindAddr, server.Handler()); err != nil {

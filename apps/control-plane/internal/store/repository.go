@@ -13,6 +13,7 @@ var ErrNotImplemented = errors.New("not implemented")
 type Repository interface {
 	SaveProject(project domain.Project) error
 	GetProject(projectID string) (domain.Project, error)
+	ListProjects() ([]domain.Project, error)
 	SaveScenario(scenario domain.Scenario) error
 	GetScenario(projectID, scenarioID string) (domain.Scenario, error)
 	ListScenarios(projectID string) ([]domain.Scenario, error)
