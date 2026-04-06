@@ -29,6 +29,7 @@
 - build 완료 후 같은 dataset version을 기다리던 execution은 dependency를 다시 계산한 뒤 자동 resume을 시도한다.
 - build workflow는 현재 별도 build queue와 build type별 retry/backoff/timeout 정책을 사용한다.
 - build job 메타데이터에는 현재 `workflow_id`, `workflow_run_id`, `attempt`, `last_error_type`, `resumed_execution_count`가 저장된다.
+- auto resume e2e smoke는 현재 `smoke_auto_resume_sentiment.sh`, `smoke_auto_resume_embedding.sh`로 추가돼 있다.
 
 목표:
 - 사용자가 `scenario execute`나 analysis execute를 눌렀을 때 `prepare/sentiment/embedding` 준비 상태를 몰라도 되게 만든다.
@@ -48,7 +49,7 @@
 - 사용자가 수동 `resume`을 덜 해도 되는 흐름
 
 주의:
-- 확인 필요: dataset build workflow history 보존 기준과 build queue concurrency 상한은 아직 운영 정책으로 정하지 않았다.
+- 확인 필요: dataset build workflow history의 장기 보존 기간은 아직 Temporal 서버 기본값을 따르고 있고, 운영 환경별 실제 동시성 상한은 머신 자원 기준으로 추가 튜닝이 필요하다.
 
 ## Step 2. dataset build runtime hardening
 
@@ -56,10 +57,10 @@
 - Temporal build workflow를 운영형으로 다듬는다.
 
 할 일:
-1. build queue concurrency와 worker 자원 상한을 실제 머신 기준으로 고정한다.
+1. build queue concurrency와 worker 자원 상한을 실제 머신 기준으로 추가 튜닝한다.
 2. workflow history 보존 기간과 장애 복구 절차를 정리한다.
 3. build 실패 시 error surface와 운영 매뉴얼을 정리한다.
-4. auto resume e2e smoke를 운영 회귀 테스트에 포함한다.
+4. auto resume e2e smoke를 운영 회귀 테스트에 계속 포함한다.
 
 결과물:
 - 운영형 build workflow 정책

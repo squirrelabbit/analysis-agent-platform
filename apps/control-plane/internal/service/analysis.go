@@ -672,7 +672,10 @@ func buildExecutionStepResultsV1(execution domain.ExecutionSummary, decoded map[
 	return results
 }
 
-func latestWaitingState(events []domain.ExecutionEvent) *domain.ExecutionWaitingState {
+func latestWaitingState(status string, events []domain.ExecutionEvent) *domain.ExecutionWaitingState {
+	if strings.TrimSpace(status) != "waiting" {
+		return nil
+	}
 	for index := len(events) - 1; index >= 0; index-- {
 		event := events[index]
 		if event.EventType != "WORKFLOW_WAITING" {
@@ -691,7 +694,7 @@ func latestWaitingState(events []domain.ExecutionEvent) *domain.ExecutionWaiting
 	return nil
 }
 
-func collectExecutionWarnings(events []domain.ExecutionEvent, decoded map[string]map[string]any) []string {
+func collectExecutionWarnings(status string, events []domain.ExecutionEvent, decoded map[string]map[string]any) []string {
 	warnings := make([]string, 0)
 	for _, event := range events {
 		switch event.EventType {
@@ -704,6 +707,9 @@ func collectExecutionWarnings(events []domain.ExecutionEvent, decoded map[string
 				warnings = append(warnings, errText)
 			}
 		case "WORKFLOW_WAITING":
+			if strings.TrimSpace(status) != "waiting" {
+				continue
+			}
 			waitingFor := strings.TrimSpace(artifactStringValue(event.Payload["waiting_for"]))
 			reason := strings.TrimSpace(artifactStringValue(event.Payload["reason"]))
 			if waitingFor != "" || reason != "" {

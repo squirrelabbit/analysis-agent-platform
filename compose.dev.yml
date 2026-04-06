@@ -72,6 +72,7 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
       TEMPORAL_TASK_QUEUE: analysis-support
+      TEMPORAL_BUILD_TASK_QUEUE: analysis-support-build
       PYTHON_AI_WORKER_URL: http://python-ai-worker:8090
       PLANNER_BACKEND: python-ai
     ports:
@@ -104,6 +105,12 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: default
       TEMPORAL_TASK_QUEUE: analysis-support
+      TEMPORAL_BUILD_TASK_QUEUE: analysis-support-build
+      TEMPORAL_ANALYSIS_MAX_CONCURRENT_ACTIVITIES: 8
+      TEMPORAL_BUILD_MAX_CONCURRENT_ACTIVITIES: 4
+      DATASET_BUILD_PREPARE_MAX_CONCURRENT: 3
+      DATASET_BUILD_SENTIMENT_MAX_CONCURRENT: 2
+      DATASET_BUILD_EMBEDDING_MAX_CONCURRENT: 1
       PYTHON_AI_WORKER_URL: http://python-ai-worker:8090
     depends_on:
       postgres:

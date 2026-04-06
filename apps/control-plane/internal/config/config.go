@@ -3,26 +3,32 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
 type Config struct {
-	BindAddr               string
-	StoreBackend           string
-	DatabaseURL            string
-	OpenAPIPath            string
-	DatasetProfilesPath    string
-	DataRoot               string
-	UploadRoot             string
-	ArtifactRoot           string
-	DuckDBPath             string
-	PythonAIWorkerURL      string
-	PlannerBackend         string
-	WorkflowEngine         string
-	TemporalAddress        string
-	TemporalNamespace      string
-	TemporalTaskQueue      string
-	TemporalBuildTaskQueue string
+	BindAddr                                string
+	StoreBackend                            string
+	DatabaseURL                             string
+	OpenAPIPath                             string
+	DatasetProfilesPath                     string
+	DataRoot                                string
+	UploadRoot                              string
+	ArtifactRoot                            string
+	DuckDBPath                              string
+	PythonAIWorkerURL                       string
+	PlannerBackend                          string
+	WorkflowEngine                          string
+	TemporalAddress                         string
+	TemporalNamespace                       string
+	TemporalTaskQueue                       string
+	TemporalBuildTaskQueue                  string
+	TemporalAnalysisMaxConcurrentActivities int
+	TemporalBuildMaxConcurrentActivities    int
+	DatasetBuildPrepareMaxConcurrent        int
+	DatasetBuildSentimentMaxConcurrent      int
+	DatasetBuildEmbeddingMaxConcurrent      int
 }
 
 func Load() Config {
@@ -73,23 +79,33 @@ func Load() Config {
 	if temporalBuildTaskQueue == "" {
 		temporalBuildTaskQueue = temporalTaskQueue + "-build"
 	}
+	analysisMaxConcurrentActivities := envPositiveInt("TEMPORAL_ANALYSIS_MAX_CONCURRENT_ACTIVITIES", 8)
+	buildMaxConcurrentActivities := envPositiveInt("TEMPORAL_BUILD_MAX_CONCURRENT_ACTIVITIES", 4)
+	prepareMaxConcurrent := envPositiveInt("DATASET_BUILD_PREPARE_MAX_CONCURRENT", 3)
+	sentimentMaxConcurrent := envPositiveInt("DATASET_BUILD_SENTIMENT_MAX_CONCURRENT", 2)
+	embeddingMaxConcurrent := envPositiveInt("DATASET_BUILD_EMBEDDING_MAX_CONCURRENT", 1)
 	return Config{
-		BindAddr:               addr,
-		StoreBackend:           storeBackend,
-		DatabaseURL:            os.Getenv("DATABASE_URL"),
-		OpenAPIPath:            openAPIPath,
-		DatasetProfilesPath:    datasetProfilesPath,
-		DataRoot:               dataRoot,
-		UploadRoot:             uploadRoot,
-		ArtifactRoot:           artifactRoot,
-		DuckDBPath:             duckDBPath,
-		PythonAIWorkerURL:      pythonAIWorkerURL,
-		PlannerBackend:         plannerBackend,
-		WorkflowEngine:         workflowEngine,
-		TemporalAddress:        temporalAddress,
-		TemporalNamespace:      temporalNamespace,
-		TemporalTaskQueue:      temporalTaskQueue,
-		TemporalBuildTaskQueue: temporalBuildTaskQueue,
+		BindAddr:                                addr,
+		StoreBackend:                            storeBackend,
+		DatabaseURL:                             os.Getenv("DATABASE_URL"),
+		OpenAPIPath:                             openAPIPath,
+		DatasetProfilesPath:                     datasetProfilesPath,
+		DataRoot:                                dataRoot,
+		UploadRoot:                              uploadRoot,
+		ArtifactRoot:                            artifactRoot,
+		DuckDBPath:                              duckDBPath,
+		PythonAIWorkerURL:                       pythonAIWorkerURL,
+		PlannerBackend:                          plannerBackend,
+		WorkflowEngine:                          workflowEngine,
+		TemporalAddress:                         temporalAddress,
+		TemporalNamespace:                       temporalNamespace,
+		TemporalTaskQueue:                       temporalTaskQueue,
+		TemporalBuildTaskQueue:                  temporalBuildTaskQueue,
+		TemporalAnalysisMaxConcurrentActivities: analysisMaxConcurrentActivities,
+		TemporalBuildMaxConcurrentActivities:    buildMaxConcurrentActivities,
+		DatasetBuildPrepareMaxConcurrent:        prepareMaxConcurrent,
+		DatasetBuildSentimentMaxConcurrent:      sentimentMaxConcurrent,
+		DatasetBuildEmbeddingMaxConcurrent:      embeddingMaxConcurrent,
 	}
 }
 
@@ -128,4 +144,16 @@ func resolvePath(value string, fallback string, workspaceRoot string) string {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+func envPositiveInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }

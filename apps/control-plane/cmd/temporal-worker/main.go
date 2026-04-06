@@ -63,19 +63,35 @@ func main() {
 			Builder: datasetService,
 			Resumer: analysisService,
 			Now:     workflows.NewAnalysisActivities().Now,
+			Concurrency: workflows.DatasetBuildConcurrencyLimits{
+				Prepare:   cfg.DatasetBuildPrepareMaxConcurrent,
+				Sentiment: cfg.DatasetBuildSentimentMaxConcurrent,
+				Embedding: cfg.DatasetBuildEmbeddingMaxConcurrent,
+			},
 		})
 	}
 
 	if cfg.TemporalTaskQueue == cfg.TemporalBuildTaskQueue {
-		w := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})
+		maxConcurrentActivities := cfg.TemporalAnalysisMaxConcurrentActivities
+		if cfg.TemporalBuildMaxConcurrentActivities > maxConcurrentActivities {
+			maxConcurrentActivities = cfg.TemporalBuildMaxConcurrentActivities
+		}
+		w := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{
+			MaxConcurrentActivityExecutionSize: maxConcurrentActivities,
+		})
 		registerAnalysisWorker(w)
 		registerBuildWorker(w)
 		log.Printf(
-			"temporal worker listening on %s namespace=%s analysis_queue=%s build_queue=%s duckdb=%s python_ai=%s",
+			"temporal worker listening on %s namespace=%s analysis_queue=%s build_queue=%s analysis_max=%d build_max=%d prepare_max=%d sentiment_max=%d embedding_max=%d duckdb=%s python_ai=%s",
 			cfg.TemporalAddress,
 			cfg.TemporalNamespace,
 			cfg.TemporalTaskQueue,
 			cfg.TemporalBuildTaskQueue,
+			cfg.TemporalAnalysisMaxConcurrentActivities,
+			cfg.TemporalBuildMaxConcurrentActivities,
+			cfg.DatasetBuildPrepareMaxConcurrent,
+			cfg.DatasetBuildSentimentMaxConcurrent,
+			cfg.DatasetBuildEmbeddingMaxConcurrent,
 			cfg.DuckDBPath,
 			cfg.PythonAIWorkerURL,
 		)
@@ -85,8 +101,12 @@ func main() {
 		return
 	}
 
-	analysisWorker := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})
-	buildWorker := worker.New(temporalClient, cfg.TemporalBuildTaskQueue, worker.Options{})
+	analysisWorker := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{
+		MaxConcurrentActivityExecutionSize: cfg.TemporalAnalysisMaxConcurrentActivities,
+	})
+	buildWorker := worker.New(temporalClient, cfg.TemporalBuildTaskQueue, worker.Options{
+		MaxConcurrentActivityExecutionSize: cfg.TemporalBuildMaxConcurrentActivities,
+	})
 	registerAnalysisWorker(analysisWorker)
 	registerBuildWorker(buildWorker)
 
@@ -99,11 +119,16 @@ func main() {
 	}
 
 	log.Printf(
-		"temporal worker listening on %s namespace=%s analysis_queue=%s build_queue=%s duckdb=%s python_ai=%s",
+		"temporal worker listening on %s namespace=%s analysis_queue=%s build_queue=%s analysis_max=%d build_max=%d prepare_max=%d sentiment_max=%d embedding_max=%d duckdb=%s python_ai=%s",
 		cfg.TemporalAddress,
 		cfg.TemporalNamespace,
 		cfg.TemporalTaskQueue,
 		cfg.TemporalBuildTaskQueue,
+		cfg.TemporalAnalysisMaxConcurrentActivities,
+		cfg.TemporalBuildMaxConcurrentActivities,
+		cfg.DatasetBuildPrepareMaxConcurrent,
+		cfg.DatasetBuildSentimentMaxConcurrent,
+		cfg.DatasetBuildEmbeddingMaxConcurrent,
 		cfg.DuckDBPath,
 		cfg.PythonAIWorkerURL,
 	)

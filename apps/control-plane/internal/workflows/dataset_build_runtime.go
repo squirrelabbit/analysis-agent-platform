@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
@@ -52,10 +53,14 @@ type WaitingExecutionResumer interface {
 }
 
 type DatasetBuildActivities struct {
-	Repo    store.Repository
-	Builder DatasetBuildRunner
-	Resumer WaitingExecutionResumer
-	Now     func() time.Time
+	Repo        store.Repository
+	Builder     DatasetBuildRunner
+	Resumer     WaitingExecutionResumer
+	Now         func() time.Time
+	Concurrency DatasetBuildConcurrencyLimits
+
+	limiterOnce sync.Once
+	limiter     *datasetBuildLimiter
 }
 
 type DatasetBuildFailureInput struct {
@@ -64,29 +69,36 @@ type DatasetBuildFailureInput struct {
 	ErrorType     string                    `json:"error_type,omitempty"`
 }
 
+type DatasetBuildConcurrencyLimits struct {
+	Prepare   int `json:"prepare"`
+	Sentiment int `json:"sentiment"`
+	Embedding int `json:"embedding"`
+}
+
 func RegisterDatasetBuildRuntime(registrar RuntimeRegistrar, activities DatasetBuildActivities) {
+	handler := &activities
 	registrar.RegisterWorkflowWithOptions(
 		DatasetBuildWorkflow,
 		workflow.RegisterOptions{Name: DatasetBuildWorkflowName},
 	)
 	registrar.RegisterActivityWithOptions(
-		activities.MarkDatasetBuildJobRunning,
+		handler.MarkDatasetBuildJobRunning,
 		activity.RegisterOptions{Name: MarkDatasetBuildJobRunningActivityName},
 	)
 	registrar.RegisterActivityWithOptions(
-		activities.ExecuteDatasetBuildJob,
+		handler.ExecuteDatasetBuildJob,
 		activity.RegisterOptions{Name: ExecuteDatasetBuildJobActivityName},
 	)
 	registrar.RegisterActivityWithOptions(
-		activities.MarkDatasetBuildJobCompleted,
+		handler.MarkDatasetBuildJobCompleted,
 		activity.RegisterOptions{Name: MarkDatasetBuildJobCompletedActivityName},
 	)
 	registrar.RegisterActivityWithOptions(
-		activities.MarkDatasetBuildJobFailed,
+		handler.MarkDatasetBuildJobFailed,
 		activity.RegisterOptions{Name: MarkDatasetBuildJobFailedActivityName},
 	)
 	registrar.RegisterActivityWithOptions(
-		activities.ResumeWaitingExecutionsForDatasetVersion,
+		handler.ResumeWaitingExecutionsForDatasetVersion,
 		activity.RegisterOptions{Name: ResumeWaitingExecutionsActivityName},
 	)
 }
@@ -137,7 +149,7 @@ func DatasetBuildWorkflow(ctx workflow.Context, input DatasetBuildWorkflowInput)
 	return completed, nil
 }
 
-func (a DatasetBuildActivities) MarkDatasetBuildJobRunning(ctx context.Context, input DatasetBuildWorkflowInput) (DatasetBuildLifecycleResult, error) {
+func (a *DatasetBuildActivities) MarkDatasetBuildJobRunning(ctx context.Context, input DatasetBuildWorkflowInput) (DatasetBuildLifecycleResult, error) {
 	repo, err := a.requireRepo()
 	if err != nil {
 		return DatasetBuildLifecycleResult{}, err
@@ -171,7 +183,7 @@ func (a DatasetBuildActivities) MarkDatasetBuildJobRunning(ctx context.Context, 
 	}, nil
 }
 
-func (a DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, input DatasetBuildWorkflowInput) error {
+func (a *DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, input DatasetBuildWorkflowInput) error {
 	repo, err := a.requireRepo()
 	if err != nil {
 		return err
@@ -188,6 +200,12 @@ func (a DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, inpu
 	if err := repo.SaveDatasetBuildJob(job); err != nil {
 		return err
 	}
+
+	release, err := a.acquireBuildSlot(ctx, job.BuildType)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	switch job.BuildType {
 	case "prepare":
@@ -220,7 +238,7 @@ func (a DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, inpu
 	}
 }
 
-func (a DatasetBuildActivities) MarkDatasetBuildJobCompleted(ctx context.Context, input DatasetBuildWorkflowInput) (DatasetBuildLifecycleResult, error) {
+func (a *DatasetBuildActivities) MarkDatasetBuildJobCompleted(ctx context.Context, input DatasetBuildWorkflowInput) (DatasetBuildLifecycleResult, error) {
 	repo, err := a.requireRepo()
 	if err != nil {
 		return DatasetBuildLifecycleResult{}, err
@@ -247,7 +265,7 @@ func (a DatasetBuildActivities) MarkDatasetBuildJobCompleted(ctx context.Context
 	}, nil
 }
 
-func (a DatasetBuildActivities) MarkDatasetBuildJobFailed(ctx context.Context, payload DatasetBuildFailureInput) (DatasetBuildLifecycleResult, error) {
+func (a *DatasetBuildActivities) MarkDatasetBuildJobFailed(ctx context.Context, payload DatasetBuildFailureInput) (DatasetBuildLifecycleResult, error) {
 	repo, err := a.requireRepo()
 	if err != nil {
 		return DatasetBuildLifecycleResult{}, err
@@ -281,7 +299,7 @@ func (a DatasetBuildActivities) MarkDatasetBuildJobFailed(ctx context.Context, p
 	}, nil
 }
 
-func (a DatasetBuildActivities) ResumeWaitingExecutionsForDatasetVersion(ctx context.Context, input DatasetBuildWorkflowInput) (DatasetBuildLifecycleResult, error) {
+func (a *DatasetBuildActivities) ResumeWaitingExecutionsForDatasetVersion(ctx context.Context, input DatasetBuildWorkflowInput) (DatasetBuildLifecycleResult, error) {
 	if a.Resumer == nil {
 		return DatasetBuildLifecycleResult{
 			JobID:     input.JobID,
@@ -407,14 +425,14 @@ func datasetBuildErrorType(err error) string {
 	return "activity_error"
 }
 
-func (a DatasetBuildActivities) requireRepo() (store.Repository, error) {
+func (a *DatasetBuildActivities) requireRepo() (store.Repository, error) {
 	if a.Repo == nil {
 		return nil, fmt.Errorf("dataset build activities repository is not configured")
 	}
 	return a.Repo, nil
 }
 
-func (a DatasetBuildActivities) now() time.Time {
+func (a *DatasetBuildActivities) now() time.Time {
 	if a.Now != nil {
 		return a.Now().UTC()
 	}
@@ -442,4 +460,65 @@ func stringsValue(value any) string {
 		return text
 	}
 	return fmt.Sprint(value)
+}
+
+func (a *DatasetBuildActivities) acquireBuildSlot(ctx context.Context, buildType string) (func(), error) {
+	limiter := a.getLimiter()
+	return limiter.acquire(ctx, buildType)
+}
+
+func (a *DatasetBuildActivities) getLimiter() *datasetBuildLimiter {
+	a.limiterOnce.Do(func() {
+		a.limiter = newDatasetBuildLimiter(a.Concurrency)
+	})
+	return a.limiter
+}
+
+type datasetBuildLimiter struct {
+	prepare   chan struct{}
+	sentiment chan struct{}
+	embedding chan struct{}
+}
+
+func newDatasetBuildLimiter(limits DatasetBuildConcurrencyLimits) *datasetBuildLimiter {
+	return &datasetBuildLimiter{
+		prepare:   makeSemaphore(limits.Prepare),
+		sentiment: makeSemaphore(limits.Sentiment),
+		embedding: makeSemaphore(limits.Embedding),
+	}
+}
+
+func (l *datasetBuildLimiter) acquire(ctx context.Context, buildType string) (func(), error) {
+	semaphore := l.semaphore(buildType)
+	if semaphore == nil {
+		return func() {}, nil
+	}
+	select {
+	case semaphore <- struct{}{}:
+		return func() {
+			<-semaphore
+		}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (l *datasetBuildLimiter) semaphore(buildType string) chan struct{} {
+	switch buildType {
+	case "prepare":
+		return l.prepare
+	case "sentiment":
+		return l.sentiment
+	case "embedding":
+		return l.embedding
+	default:
+		return nil
+	}
+}
+
+func makeSemaphore(size int) chan struct{} {
+	if size <= 0 {
+		return nil
+	}
+	return make(chan struct{}, size)
 }
