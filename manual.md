@@ -12,6 +12,7 @@
 
 - control plane: `http://127.0.0.1:18080`
 - python-ai-worker: `http://127.0.0.1:18090`
+- web console dev server: `http://127.0.0.1:4173`
 
 
 ## 1. 개발 스택 실행
@@ -51,6 +52,21 @@ curl -s http://127.0.0.1:18090/capabilities | python3 -m json.tool
 - 두 `/health`가 모두 HTTP 200이어야 한다.
 - `/capabilities`에는 `skill_bundle_version`과 task 목록이 보여야 한다.
 - worker `/health`에는 `rule_config.rule_config_path`, `rule_config.rule_config_inline`가 있으면 layered rule config가 현재 어떤 소스에서 켜졌는지 같이 확인할 수 있다.
+
+
+## 2-1. web console 실행
+
+```bash
+cd /Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/web
+npm install
+npm run dev
+```
+
+결과 확인:
+
+- 기본 주소는 `http://127.0.0.1:4173`
+- `apps/web/.env.example`의 `VITE_API_BASE_URL`을 바꾸면 다른 control plane 주소를 붙일 수 있다.
+- 개발 서버에서는 `/api/*`가 control plane으로 proxy된다.
 
 
 ## 3. 개발용 Postgres warning 확인
@@ -128,6 +144,8 @@ docker compose -f compose.dev.yml exec -T python-ai-worker \
 ./apps/control-plane/dev/smoke_compare.sh
 ./apps/control-plane/dev/smoke_breakdown.sh
 ./apps/control-plane/dev/smoke_taxonomy.sh
+./apps/control-plane/dev/smoke_auto_resume_sentiment.sh
+./apps/control-plane/dev/smoke_auto_resume_embedding.sh
 ```
 
 요약만 보고 싶으면:
@@ -148,6 +166,8 @@ docker compose -f compose.dev.yml exec -T python-ai-worker \
 | 기간 비교 | [smoke_compare.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_compare.sh) | `current_count`, `previous_count`, `count_delta` |
 | breakdown | [smoke_breakdown.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_breakdown.sh) | `top_group`, `breakdown` |
 | taxonomy | [smoke_taxonomy.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_taxonomy.sh) | `dominant_taxonomy`, `dominant_taxonomy_count`, `taxonomy_count` |
+| auto resume 감성 | [smoke_auto_resume_sentiment.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_auto_resume_sentiment.sh) | `result_status`, `waiting_for`, `resume_triggered_by`, `sentiment_job_status` |
+| auto resume 임베딩 | [smoke_auto_resume_embedding.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_auto_resume_embedding.sh) | `retrieval_backend`, `selection_source`, `waiting_for`, `embedding_job_status` |
 
 특히 확인할 기대값:
 
@@ -155,6 +175,13 @@ docker compose -f compose.dev.yml exec -T python-ai-worker \
 - `smoke_cluster.sh`: `cluster_count = 3`
 - `smoke_cluster.sh`: `cluster_similarity_backend = dense-hybrid`
 - `smoke_cluster.sh`: `dominant_cluster_label = 결제 / 오류`
+- `smoke_auto_resume_sentiment.sh`: `waiting_for = sentiment_labels`, `resume_triggered_by = dataset_build_job`
+- `smoke_auto_resume_embedding.sh`: `waiting_for = embeddings`, `resume_triggered_by = dataset_build_job`, `selection_source = semantic_search`
+
+auto resume smoke fixture:
+
+- `smoke_auto_resume_sentiment.sh`: [data/issues_sentiment.csv](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/data/issues_sentiment.csv)
+- `smoke_auto_resume_embedding.sh`: [data/issues.csv](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/data/issues.csv)
 
 
 ## 7. 수동 API 테스트

@@ -736,6 +736,7 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_version_id = _semantic_dataset_version_id(payload, inputs)
     embedding_index_ref = str(inputs.get("embedding_index_ref") or payload.get("embedding_index_ref") or "").strip()
     embedding_uri = str(inputs.get("embedding_uri") or payload.get("embedding_uri") or "").strip()
+    embedding_model = str(inputs.get("embedding_model") or payload.get("embedding_model") or "").strip()
     if not embedding_uri and not embedding_index_ref:
         raise ValueError("embedding_uri or embedding_index_ref is required")
     chunk_ref = str(inputs.get("chunk_ref") or payload.get("chunk_ref") or "").strip()
@@ -751,6 +752,7 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
     matches = _semantic_matches_from_pgvector(
         dataset_version_id=dataset_version_id,
         embedding_index_ref=embedding_index_ref,
+        embedding_model=embedding_model,
         query=normalized["query"],
         query_counts=query_counts,
         sample_n=normalized["sample_n"],
@@ -845,8 +847,10 @@ def _embedding_cluster_records_from_pgvector(
     if not dataset_version_id:
         return None
     rows = _query_pgvector_cluster_rows(dataset_version_id)
-    if not rows:
+    if rows is None:
         return None
+    if not rows:
+        return []
     selected_indices = rt._selected_source_indices(prior_artifacts)
     chunk_lookup = _chunk_rows_by_id(rows, fallback_chunk_ref)
     records: list[dict[str, Any]] = []
@@ -915,6 +919,7 @@ def _semantic_matches_from_pgvector(
     *,
     dataset_version_id: str,
     embedding_index_ref: str,
+    embedding_model: str,
     query: str,
     query_counts: Counter[str],
     sample_n: int,
@@ -926,19 +931,23 @@ def _semantic_matches_from_pgvector(
     if not dataset_version_id or not str(query or "").strip():
         return None
     index_metadata = _lookup_pgvector_index_metadata(dataset_version_id)
-    if not index_metadata:
-        return None
+    resolved_embedding_model = str(index_metadata.get("embedding_model") or embedding_model or "").strip()
+    vector_dim = int(index_metadata.get("vector_dim") or 0)
+    if not resolved_embedding_model:
+        resolved_embedding_model = rt.TOKEN_OVERLAP_EMBEDDING_MODEL
     query_vector = _semantic_query_vector(
         query,
         query_counts,
-        embedding_model=str(index_metadata.get("embedding_model") or "").strip(),
-        vector_dim=int(index_metadata.get("vector_dim") or 0),
+        embedding_model=resolved_embedding_model,
+        vector_dim=vector_dim,
     )
     if not query_vector:
         return None
     rows = _query_pgvector_rows(dataset_version_id, query_vector, sample_n)
-    if not rows:
+    if rows is None:
         return None
+    if not rows:
+        return []
     chunk_lookup = _chunk_rows_by_id(rows, fallback_chunk_ref)
     matches: list[dict[str, Any]] = []
     for row in rows:

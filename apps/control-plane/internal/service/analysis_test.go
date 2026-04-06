@@ -12,59 +12,68 @@ import (
 )
 
 type fakeExecutionDependencyBuilder struct {
-	repo  store.Repository
-	calls []string
+	repo            store.Repository
+	calls           []string
+	prepareStatus   string
+	sentimentStatus string
+	embeddingStatus string
 }
 
-func (b *fakeExecutionDependencyBuilder) BuildPrepare(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest) (domain.DatasetVersion, error) {
+func (b *fakeExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "prepare")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
-		return domain.DatasetVersion{}, err
+		return domain.DatasetBuildJob{}, err
 	}
-	uri := "prepared.parquet"
-	version.PrepareStatus = "ready"
-	version.PrepareURI = &uri
+	version.PrepareStatus = builderStatusOrDefault(b.prepareStatus)
+	if version.PrepareStatus == "ready" {
+		uri := "prepared.parquet"
+		version.PrepareURI = &uri
+	}
 	if version.Metadata == nil {
 		version.Metadata = map[string]any{}
 	}
 	version.Metadata["prepared_text_column"] = "normalized_text"
 	if err := b.repo.SaveDatasetVersion(version); err != nil {
-		return domain.DatasetVersion{}, err
+		return domain.DatasetBuildJob{}, err
 	}
-	return version, nil
+	return domain.DatasetBuildJob{JobID: "job-prepare", BuildType: "prepare", Status: version.PrepareStatus}, nil
 }
 
-func (b *fakeExecutionDependencyBuilder) BuildSentiment(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest) (domain.DatasetVersion, error) {
+func (b *fakeExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "sentiment")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
-		return domain.DatasetVersion{}, err
+		return domain.DatasetBuildJob{}, err
 	}
-	uri := "sentiment.parquet"
-	version.SentimentStatus = "ready"
-	version.SentimentURI = &uri
+	version.SentimentStatus = builderStatusOrDefault(b.sentimentStatus)
+	if version.SentimentStatus == "ready" {
+		uri := "sentiment.parquet"
+		version.SentimentURI = &uri
+	}
 	if err := b.repo.SaveDatasetVersion(version); err != nil {
-		return domain.DatasetVersion{}, err
+		return domain.DatasetBuildJob{}, err
 	}
-	return version, nil
+	return domain.DatasetBuildJob{JobID: "job-sentiment", BuildType: "sentiment", Status: version.SentimentStatus}, nil
 }
 
-func (b *fakeExecutionDependencyBuilder) BuildEmbeddings(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error) {
+func (b *fakeExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "embedding")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
-		return domain.DatasetVersion{}, err
+		return domain.DatasetBuildJob{}, err
 	}
-	version.EmbeddingStatus = "ready"
+	version.EmbeddingStatus = builderStatusOrDefault(b.embeddingStatus)
 	if version.Metadata == nil {
 		version.Metadata = map[string]any{}
 	}
-	version.Metadata["embedding_index_source_ref"] = "embeddings.index.parquet"
-	if err := b.repo.SaveDatasetVersion(version); err != nil {
-		return domain.DatasetVersion{}, err
+	if version.EmbeddingStatus == "ready" {
+		version.Metadata["embedding_index_source_ref"] = "embeddings.index.parquet"
 	}
-	return version, nil
+	if err := b.repo.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	return domain.DatasetBuildJob{JobID: "job-embedding", BuildType: "embedding", Status: version.EmbeddingStatus}, nil
 }
 
 type lazyExecutionDependencyBuilder struct {
@@ -72,43 +81,50 @@ type lazyExecutionDependencyBuilder struct {
 	calls []string
 }
 
-func (b *lazyExecutionDependencyBuilder) BuildPrepare(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest) (domain.DatasetVersion, error) {
+func builderStatusOrDefault(status string) string {
+	if status == "" {
+		return "queued"
+	}
+	return status
+}
+
+func (b *lazyExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "prepare")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
-		return domain.DatasetVersion{}, err
+		return domain.DatasetBuildJob{}, err
 	}
 	version.PrepareStatus = "queued"
 	if err := b.repo.SaveDatasetVersion(version); err != nil {
-		return domain.DatasetVersion{}, err
+		return domain.DatasetBuildJob{}, err
 	}
-	return version, nil
+	return domain.DatasetBuildJob{JobID: "job-prepare", BuildType: "prepare", Status: version.PrepareStatus}, nil
 }
 
-func (b *lazyExecutionDependencyBuilder) BuildSentiment(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest) (domain.DatasetVersion, error) {
+func (b *lazyExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "sentiment")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
-		return domain.DatasetVersion{}, err
+		return domain.DatasetBuildJob{}, err
 	}
 	version.SentimentStatus = "queued"
 	if err := b.repo.SaveDatasetVersion(version); err != nil {
-		return domain.DatasetVersion{}, err
+		return domain.DatasetBuildJob{}, err
 	}
-	return version, nil
+	return domain.DatasetBuildJob{JobID: "job-sentiment", BuildType: "sentiment", Status: version.SentimentStatus}, nil
 }
 
-func (b *lazyExecutionDependencyBuilder) BuildEmbeddings(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error) {
+func (b *lazyExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "embedding")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
-		return domain.DatasetVersion{}, err
+		return domain.DatasetBuildJob{}, err
 	}
 	version.EmbeddingStatus = "queued"
 	if err := b.repo.SaveDatasetVersion(version); err != nil {
-		return domain.DatasetVersion{}, err
+		return domain.DatasetBuildJob{}, err
 	}
-	return version, nil
+	return domain.DatasetBuildJob{JobID: "job-embedding", BuildType: "embedding", Status: version.EmbeddingStatus}, nil
 }
 
 func TestSubmitAnalysisUsesPlannerWhenConfigured(t *testing.T) {
@@ -265,7 +281,12 @@ func TestResumeExecutionTransitionsWaitingToQueued(t *testing.T) {
 func TestExecutePlanAutoBuildsRequiredDependencies(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
-	builder := &fakeExecutionDependencyBuilder{repo: repository}
+	builder := &fakeExecutionDependencyBuilder{
+		repo:            repository,
+		prepareStatus:   "queued",
+		sentimentStatus: "queued",
+		embeddingStatus: "queued",
+	}
 	service.SetDependencyBuilder(builder)
 
 	project := domain.Project{ProjectID: "project-1", Name: "demo"}
@@ -314,10 +335,10 @@ func TestExecutePlanAutoBuildsRequiredDependencies(t *testing.T) {
 		t.Fatalf("unexpected execute plan error: %v", err)
 	}
 
-	if len(builder.calls) != 3 {
+	if len(builder.calls) != 1 {
 		t.Fatalf("unexpected dependency calls: %+v", builder.calls)
 	}
-	if builder.calls[0] != "prepare" || builder.calls[1] != "sentiment" || builder.calls[2] != "embedding" {
+	if builder.calls[0] != "prepare" {
 		t.Fatalf("unexpected dependency order: %+v", builder.calls)
 	}
 	if response.Execution.Status != "queued" {
@@ -328,15 +349,19 @@ func TestExecutePlanAutoBuildsRequiredDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected get dataset version error: %v", err)
 	}
-	if updatedVersion.PrepareStatus != "ready" || updatedVersion.SentimentStatus != "ready" || updatedVersion.EmbeddingStatus != "ready" {
+	if updatedVersion.PrepareStatus != "queued" {
 		t.Fatalf("unexpected updated version: %+v", updatedVersion)
 	}
 }
 
-func TestResumeWaitingExecutionsForDatasetVersionAutoResumesReadyExecution(t *testing.T) {
+func TestResumeWaitingExecutionsForDatasetVersionQueuesNextDependencyWhenStillMissing(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
-	builder := &fakeExecutionDependencyBuilder{repo: repository}
+	builder := &fakeExecutionDependencyBuilder{
+		repo:            repository,
+		prepareStatus:   "ready",
+		sentimentStatus: "queued",
+	}
 	service.SetDependencyBuilder(builder)
 
 	project := domain.Project{ProjectID: "project-1", Name: "demo"}
@@ -350,74 +375,10 @@ func TestResumeWaitingExecutionsForDatasetVersionAutoResumesReadyExecution(t *te
 		StorageURI:       "issues.csv",
 		DataType:         "unstructured",
 		Metadata:         map[string]any{},
-		PrepareStatus:    "queued",
+		PrepareStatus:    "ready",
+		PrepareURI:       stringPtr("prepared.parquet"),
 		SentimentStatus:  "queued",
 		EmbeddingStatus:  "not_requested",
-	}
-	_ = repository.SaveDatasetVersion(version)
-	execution := domain.ExecutionSummary{
-		ExecutionID:      "exec-1",
-		ProjectID:        project.ProjectID,
-		RequestID:        "request-1",
-		Status:           "waiting",
-		DatasetVersionID: stringPtr(version.DatasetVersionID),
-		Artifacts:        map[string]string{},
-		Plan: domain.SkillPlan{
-			PlanID: "plan-1",
-			Steps: []domain.SkillPlanStep{
-				{StepID: "step-1", SkillName: "garbage_filter", DatasetName: "issues.csv", Inputs: map[string]any{}},
-				{StepID: "step-2", SkillName: "issue_sentiment_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
-			},
-		},
-	}
-	_ = repository.SaveExecution(execution)
-
-	resumedCount, err := service.ResumeWaitingExecutionsForDatasetVersion(project.ProjectID, version.DatasetVersionID, "dataset build completed: prepare", "dataset_build_job")
-	if err != nil {
-		t.Fatalf("unexpected auto resume error: %v", err)
-	}
-	if resumedCount != 1 {
-		t.Fatalf("unexpected resumed count: %d", resumedCount)
-	}
-
-	resumed, err := repository.GetExecution(project.ProjectID, execution.ExecutionID)
-	if err != nil {
-		t.Fatalf("unexpected get execution error: %v", err)
-	}
-	if resumed.Status != "queued" {
-		t.Fatalf("expected queued execution, got %s", resumed.Status)
-	}
-	if len(builder.calls) != 2 || builder.calls[0] != "prepare" || builder.calls[1] != "sentiment" {
-		t.Fatalf("unexpected dependency calls: %+v", builder.calls)
-	}
-	lastEvent := resumed.Events[len(resumed.Events)-1]
-	if lastEvent.EventType != "RESUME_ENQUEUED" {
-		t.Fatalf("unexpected last event: %+v", lastEvent)
-	}
-	if lastEvent.Payload["triggered_by"] != "dataset_build_job" {
-		t.Fatalf("unexpected resume payload: %+v", lastEvent.Payload)
-	}
-}
-
-func TestResumeWaitingExecutionsForDatasetVersionKeepsWaitingWhenStillNotReady(t *testing.T) {
-	repository := store.NewMemoryStore()
-	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
-	builder := &lazyExecutionDependencyBuilder{repo: repository}
-	service.SetDependencyBuilder(builder)
-
-	project := domain.Project{ProjectID: "project-1", Name: "demo"}
-	_ = repository.SaveProject(project)
-	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
-	_ = repository.SaveDataset(dataset)
-	version := domain.DatasetVersion{
-		DatasetVersionID: "version-1",
-		DatasetID:        dataset.DatasetID,
-		ProjectID:        project.ProjectID,
-		StorageURI:       "issues.csv",
-		DataType:         "unstructured",
-		Metadata:         map[string]any{},
-		PrepareStatus:    "queued",
-		SentimentStatus:  "queued",
 	}
 	_ = repository.SaveDatasetVersion(version)
 	execution := domain.ExecutionSummary{
@@ -445,15 +406,169 @@ func TestResumeWaitingExecutionsForDatasetVersionKeepsWaitingWhenStillNotReady(t
 		t.Fatalf("unexpected resumed count: %d", resumedCount)
 	}
 
+	resumed, err := repository.GetExecution(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected get execution error: %v", err)
+	}
+	if resumed.Status != "waiting" {
+		t.Fatalf("expected waiting execution, got %s", resumed.Status)
+	}
+	if len(builder.calls) != 1 || builder.calls[0] != "sentiment" {
+		t.Fatalf("unexpected dependency calls: %+v", builder.calls)
+	}
+	if len(resumed.Events) != 0 {
+		t.Fatalf("expected no resume event, got %+v", resumed.Events)
+	}
+	updatedVersion, err := repository.GetDatasetVersion(project.ProjectID, version.DatasetVersionID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset version error: %v", err)
+	}
+	if updatedVersion.SentimentStatus != "queued" {
+		t.Fatalf("expected queued sentiment status, got %+v", updatedVersion)
+	}
+}
+
+func TestResumeWaitingExecutionsForDatasetVersionAutoResumesReadyExecution(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+	builder := &fakeExecutionDependencyBuilder{
+		repo:            repository,
+		prepareStatus:   "ready",
+		sentimentStatus: "ready",
+	}
+	service.SetDependencyBuilder(builder)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	_ = repository.SaveProject(project)
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	_ = repository.SaveDataset(dataset)
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		Metadata:         map[string]any{},
+		PrepareStatus:    "ready",
+		PrepareURI:       stringPtr("prepared.parquet"),
+		SentimentStatus:  "ready",
+		SentimentURI:     stringPtr("sentiment.parquet"),
+	}
+	_ = repository.SaveDatasetVersion(version)
+	execution := domain.ExecutionSummary{
+		ExecutionID:      "exec-1",
+		ProjectID:        project.ProjectID,
+		RequestID:        "request-1",
+		Status:           "waiting",
+		DatasetVersionID: stringPtr(version.DatasetVersionID),
+		Artifacts:        map[string]string{},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-1",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "garbage_filter", DatasetName: "issues.csv", Inputs: map[string]any{}},
+				{StepID: "step-2", SkillName: "issue_sentiment_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+	}
+	_ = repository.SaveExecution(execution)
+
+	resumedCount, err := service.ResumeWaitingExecutionsForDatasetVersion(project.ProjectID, version.DatasetVersionID, "dataset build completed: prepare", "dataset_build_job")
+	if err != nil {
+		t.Fatalf("unexpected auto resume error: %v", err)
+	}
+	if resumedCount != 1 {
+		t.Fatalf("unexpected resumed count: %d", resumedCount)
+	}
+
 	current, err := repository.GetExecution(project.ProjectID, execution.ExecutionID)
 	if err != nil {
 		t.Fatalf("unexpected get execution error: %v", err)
 	}
-	if current.Status != "waiting" {
-		t.Fatalf("expected waiting execution, got %s", current.Status)
+	if current.Status != "queued" {
+		t.Fatalf("expected queued execution, got %s", current.Status)
 	}
-	if len(current.Events) != 0 {
-		t.Fatalf("expected no resume event, got %+v", current.Events)
+	if len(current.Events) != 1 || current.Events[0].EventType != "RESUME_ENQUEUED" {
+		t.Fatalf("unexpected resume event: %+v", current.Events)
+	}
+	if current.Events[0].Payload["triggered_by"] != "dataset_build_job" {
+		t.Fatalf("unexpected resume payload: %+v", current.Events[0].Payload)
+	}
+	if len(builder.calls) != 0 {
+		t.Fatalf("expected no dependency enqueue, got %+v", builder.calls)
+	}
+}
+
+func TestResumeWaitingExecutionsRefreshesPlanDatasetSources(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	_ = repository.SaveProject(project)
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	_ = repository.SaveDataset(dataset)
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"prepared_ref":           "/tmp/issues.prepared.parquet",
+			"prepared_text_column":   "normalized_text",
+			"sentiment_label_column": "sentiment_label",
+			"row_id_column":          "row_id",
+		},
+		PrepareStatus:   "ready",
+		PrepareURI:      stringPtr("/tmp/issues.prepared.parquet"),
+		SentimentStatus: "ready",
+		SentimentURI:    stringPtr("/tmp/sentiment/sentiment.parquet"),
+	}
+	_ = repository.SaveDatasetVersion(version)
+	execution := domain.ExecutionSummary{
+		ExecutionID:      "exec-1",
+		ProjectID:        project.ProjectID,
+		RequestID:        "request-1",
+		Status:           "waiting",
+		DatasetVersionID: stringPtr(version.DatasetVersionID),
+		Artifacts:        map[string]string{},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-1",
+			Steps: []domain.SkillPlanStep{
+				{
+					StepID:      "step-1",
+					SkillName:   "issue_sentiment_summary",
+					DatasetName: "/tmp/issues.prepared.parquet.sentiment.parquet",
+					Inputs: map[string]any{
+						"prepared_dataset_name": "/tmp/issues.prepared.parquet.stale",
+						"text_column":           "text",
+					},
+				},
+			},
+		},
+	}
+	_ = repository.SaveExecution(execution)
+
+	resumedCount, err := service.ResumeWaitingExecutionsForDatasetVersion(project.ProjectID, version.DatasetVersionID, "dataset build completed: sentiment", "dataset_build_job")
+	if err != nil {
+		t.Fatalf("unexpected auto resume error: %v", err)
+	}
+	if resumedCount != 1 {
+		t.Fatalf("unexpected resumed count: %d", resumedCount)
+	}
+
+	current, err := repository.GetExecution(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected get execution error: %v", err)
+	}
+	step := current.Plan.Steps[0]
+	if step.DatasetName != "/tmp/sentiment/sentiment.parquet" {
+		t.Fatalf("unexpected sentiment dataset source: %+v", step)
+	}
+	if got := step.Inputs["prepared_dataset_name"]; got != "/tmp/issues.prepared.parquet" {
+		t.Fatalf("unexpected prepared dataset source: %+v", step.Inputs)
+	}
+	if got := step.Inputs["text_column"]; got != "normalized_text" {
+		t.Fatalf("unexpected text column: %+v", step.Inputs)
 	}
 }
 

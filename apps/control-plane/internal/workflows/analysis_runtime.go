@@ -355,6 +355,13 @@ func (a AnalysisActivities) ExecutePlan(ctx context.Context, input AnalysisWorkf
 	if err != nil {
 		return skills.ExecutionRunResult{}, err
 	}
+	if execution.DatasetVersionID != nil && strings.TrimSpace(*execution.DatasetVersionID) != "" {
+		version, err := repo.GetDatasetVersion(input.ProjectID, strings.TrimSpace(*execution.DatasetVersionID))
+		if err != nil {
+			return skills.ExecutionRunResult{}, err
+		}
+		execution.Plan = refreshWorkflowPlanWithDatasetVersion(execution.Plan, version)
+	}
 
 	return a.Runner.Run(ctx, execution)
 }
@@ -493,4 +500,137 @@ func requiresSentimentReady(plan domain.SkillPlan) bool {
 		}
 	}
 	return false
+}
+
+func refreshWorkflowPlanWithDatasetVersion(plan domain.SkillPlan, version domain.DatasetVersion) domain.SkillPlan {
+	fallback := strings.TrimSpace(version.StorageURI)
+	for index := range plan.Steps {
+		definition, ok := registry.Skill(plan.Steps[index].SkillName)
+		if !ok {
+			continue
+		}
+		switch definition.DatasetSource {
+		case "prepared":
+			plan.Steps[index].DatasetName = workflowPreparedDatasetSource(version, fallback)
+		case "sentiment":
+			plan.Steps[index].DatasetName = workflowSentimentDatasetSource(version)
+		}
+		if plan.Steps[index].Inputs == nil {
+			plan.Steps[index].Inputs = map[string]any{}
+		}
+		for key, metadataKey := range definition.MetadataDefaults {
+			current := plan.Steps[index].Inputs[key]
+			plan.Steps[index].Inputs[key] = workflowMetadataValue(version.Metadata, metadataKey, current)
+		}
+		if _, hasTextColumn := definition.DefaultInputs["text_column"]; hasTextColumn {
+			plan.Steps[index].Inputs["text_column"] = workflowResolvedTextColumn(plan.Steps[index].Inputs, version)
+		}
+		if definition.RequiresEmbedding {
+			if value := workflowMetadataString(version.Metadata, "embedding_index_ref", ""); value != "" {
+				plan.Steps[index].Inputs["embedding_index_ref"] = value
+			}
+			if value := workflowMetadataString(version.Metadata, "chunk_ref", ""); value != "" {
+				plan.Steps[index].Inputs["chunk_ref"] = value
+			}
+			if value := workflowMetadataString(version.Metadata, "chunk_format", ""); value != "" {
+				plan.Steps[index].Inputs["chunk_format"] = value
+			}
+			if version.EmbeddingURI != nil && strings.TrimSpace(*version.EmbeddingURI) != "" {
+				plan.Steps[index].Inputs["embedding_uri"] = strings.TrimSpace(*version.EmbeddingURI)
+			} else {
+				delete(plan.Steps[index].Inputs, "embedding_uri")
+			}
+		}
+	}
+	return plan
+}
+
+func workflowPreparedDatasetSource(version domain.DatasetVersion, fallback string) string {
+	if version.PrepareStatus == "ready" && version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != "" {
+		return strings.TrimSpace(*version.PrepareURI)
+	}
+	return fallback
+}
+
+func workflowSentimentDatasetSource(version domain.DatasetVersion) string {
+	if version.SentimentStatus == "ready" && version.SentimentURI != nil && strings.TrimSpace(*version.SentimentURI) != "" {
+		return strings.TrimSpace(*version.SentimentURI)
+	}
+	return workflowEmbeddingURIValue(workflowPreparedDatasetSource(version, strings.TrimSpace(version.StorageURI)), ".sentiment.parquet")
+}
+
+func workflowResolvedTextColumn(inputs map[string]any, version domain.DatasetVersion) string {
+	defaultTextColumn := workflowMetadataString(version.Metadata, "prepared_text_column", workflowMetadataString(version.Metadata, "text_column", "normalized_text"))
+	if version.PrepareStatus != "ready" {
+		defaultTextColumn = workflowMetadataString(version.Metadata, "text_column", "text")
+	}
+	if inputs == nil {
+		return defaultTextColumn
+	}
+	value, ok := inputs["text_column"]
+	if !ok {
+		return defaultTextColumn
+	}
+	text := strings.TrimSpace(fmt.Sprintf("%v", value))
+	if text == "" {
+		return defaultTextColumn
+	}
+	rawTextColumn := workflowMetadataString(version.Metadata, "raw_text_column", workflowMetadataString(version.Metadata, "text_column", "text"))
+	if version.PrepareStatus == "ready" && text == rawTextColumn {
+		return defaultTextColumn
+	}
+	return text
+}
+
+func workflowEmbeddingURI(version domain.DatasetVersion) string {
+	if version.EmbeddingURI != nil && strings.TrimSpace(*version.EmbeddingURI) != "" {
+		return strings.TrimSpace(*version.EmbeddingURI)
+	}
+	if value := workflowMetadataString(version.Metadata, "embedding_index_source_ref", ""); value != "" {
+		return value
+	}
+	if value := workflowMetadataString(version.Metadata, "embedding_index_ref", ""); value != "" {
+		return value
+	}
+	return workflowEmbeddingURIValue(workflowPreparedDatasetSource(version, strings.TrimSpace(version.StorageURI)), ".embeddings.jsonl")
+}
+
+func workflowEmbeddingURIValue(base string, suffix string) string {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return ""
+	}
+	return base + suffix
+}
+
+func workflowMetadataValue(metadata map[string]any, key string, fallback any) any {
+	if metadata == nil {
+		return fallback
+	}
+	value, ok := metadata[key]
+	if !ok {
+		return fallback
+	}
+	switch typed := value.(type) {
+	case string:
+		if strings.TrimSpace(typed) == "" {
+			return fallback
+		}
+	}
+	return value
+}
+
+func workflowMetadataString(metadata map[string]any, key string, fallback string) string {
+	if metadata == nil {
+		return fallback
+	}
+	value, ok := metadata[key]
+	if !ok {
+		return fallback
+	}
+	text := strings.TrimSpace(fmt.Sprintf("%v", value))
+	if text == "" {
+		return fallback
+	}
+	return text
 }

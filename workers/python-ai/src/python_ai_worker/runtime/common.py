@@ -84,9 +84,19 @@ def _read_parquet_rows(path: Path) -> list[dict[str, Any]]:
     return [dict(row) for row in table.to_pylist()]
 
 
-def _write_parquet_rows(path: Path, rows: list[dict[str, Any]]) -> None:
+def _write_parquet_rows(
+    path: Path,
+    rows: list[dict[str, Any]],
+    *,
+    schema: Any | None = None,
+) -> None:
     arrow, parquet = _require_pyarrow()
-    table = arrow.Table.from_pylist(rows) if rows else arrow.table({})
+    if rows:
+        table = arrow.Table.from_pylist(rows)
+    elif schema is not None:
+        table = arrow.Table.from_pylist([], schema=schema)
+    else:
+        table = arrow.table({})
     parquet.write_table(table, path)
 
 
@@ -751,6 +761,7 @@ __all__ = [
     "_read_csv_rows",
     "_read_jsonl_rows",
     "_read_parquet_rows",
+    "_require_pyarrow",
     "_resolve_compare_periods",
     "_sentence_spans",
     "_token_counter",
