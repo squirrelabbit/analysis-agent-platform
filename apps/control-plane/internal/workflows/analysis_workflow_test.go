@@ -80,9 +80,10 @@ func TestTemporalStarterStartsWorkflowWithExpectedOptions(t *testing.T) {
 func TestTemporalStarterStartsDatasetBuildWorkflowWithExpectedOptions(t *testing.T) {
 	fakeClient := &stubTemporalClient{}
 	starter := TemporalStarter{
-		Address:   "temporal.example:7233",
-		Namespace: "analysis",
-		TaskQueue: "analysis-support",
+		Address:               "temporal.example:7233",
+		Namespace:             "analysis",
+		TaskQueue:             "analysis-support",
+		DatasetBuildTaskQueue: "analysis-support-build",
 		ClientFactory: func(ctx context.Context, options client.Options) (TemporalClient, error) {
 			return fakeClient, nil
 		},
@@ -106,6 +107,9 @@ func TestTemporalStarterStartsDatasetBuildWorkflowWithExpectedOptions(t *testing
 	}
 	if fakeClient.startOptions.ID != "dataset-build-job-123" {
 		t.Fatalf("unexpected start workflow id: %s", fakeClient.startOptions.ID)
+	}
+	if fakeClient.startOptions.TaskQueue != "analysis-support-build" {
+		t.Fatalf("unexpected dataset build task queue: %s", fakeClient.startOptions.TaskQueue)
 	}
 	if len(fakeClient.args) != 1 {
 		t.Fatalf("unexpected arg count: %d", len(fakeClient.args))

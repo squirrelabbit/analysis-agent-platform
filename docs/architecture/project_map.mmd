@@ -4,7 +4,7 @@ flowchart LR
     API["Project / Dataset / Analysis API"]
     Build["Dataset Build API\nprepare / sentiment / embedding"]
     Profiles["Dataset Profile Registry\nconfig/dataset_profiles.json"]
-    Temporal["Temporal Workflow\nexecute / waiting / resume / rerun / diff + dataset build jobs"]
+    Temporal["Temporal Workflow\nanalysis queue + dataset-build queue\nexecute / waiting / resume / rerun / diff + dataset build jobs"]
     Registry["Skill Bundle / Registry\nconfig/skill_bundle.json"]
     PG["Postgres\nmetadata + execution records"]
     Duck["DuckDB\nstructured skill runtime"]

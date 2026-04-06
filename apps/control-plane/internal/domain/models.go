@@ -167,18 +167,23 @@ type DatasetSentimentBuildRequest struct {
 }
 
 type DatasetBuildJob struct {
-	JobID            string         `json:"job_id"`
-	ProjectID        string         `json:"project_id"`
-	DatasetID        string         `json:"dataset_id"`
-	DatasetVersionID string         `json:"dataset_version_id"`
-	BuildType        string         `json:"build_type"`
-	Status           string         `json:"status"`
-	Request          map[string]any `json:"request,omitempty"`
-	TriggeredBy      string         `json:"triggered_by,omitempty"`
-	CreatedAt        time.Time      `json:"created_at"`
-	StartedAt        *time.Time     `json:"started_at,omitempty"`
-	CompletedAt      *time.Time     `json:"completed_at,omitempty"`
-	ErrorMessage     *string        `json:"error_message,omitempty"`
+	JobID                 string         `json:"job_id"`
+	ProjectID             string         `json:"project_id"`
+	DatasetID             string         `json:"dataset_id"`
+	DatasetVersionID      string         `json:"dataset_version_id"`
+	BuildType             string         `json:"build_type"`
+	Status                string         `json:"status"`
+	Request               map[string]any `json:"request,omitempty"`
+	TriggeredBy           string         `json:"triggered_by,omitempty"`
+	WorkflowID            *string        `json:"workflow_id,omitempty"`
+	WorkflowRunID         *string        `json:"workflow_run_id,omitempty"`
+	Attempt               int            `json:"attempt"`
+	LastErrorType         *string        `json:"last_error_type,omitempty"`
+	ResumedExecutionCount int            `json:"resumed_execution_count"`
+	CreatedAt             time.Time      `json:"created_at"`
+	StartedAt             *time.Time     `json:"started_at,omitempty"`
+	CompletedAt           *time.Time     `json:"completed_at,omitempty"`
+	ErrorMessage          *string        `json:"error_message,omitempty"`
 }
 
 type DatasetBuildJobListResponse struct {

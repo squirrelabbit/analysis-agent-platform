@@ -3,13 +3,16 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
 	"analysis-support-platform/control-plane/internal/store"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -45,7 +48,7 @@ type DatasetBuildRunner interface {
 }
 
 type WaitingExecutionResumer interface {
-	ResumeWaitingExecutionsForDatasetVersion(projectID, datasetVersionID, reason, triggeredBy string) error
+	ResumeWaitingExecutionsForDatasetVersion(projectID, datasetVersionID, reason, triggeredBy string) (int, error)
 }
 
 type DatasetBuildActivities struct {
@@ -53,6 +56,12 @@ type DatasetBuildActivities struct {
 	Builder DatasetBuildRunner
 	Resumer WaitingExecutionResumer
 	Now     func() time.Time
+}
+
+type DatasetBuildFailureInput struct {
+	WorkflowInput DatasetBuildWorkflowInput `json:"workflow_input"`
+	ErrorMessage  string                    `json:"error_message"`
+	ErrorType     string                    `json:"error_type,omitempty"`
 }
 
 func RegisterDatasetBuildRuntime(registrar RuntimeRegistrar, activities DatasetBuildActivities) {
@@ -92,34 +101,35 @@ func DatasetBuildWorkflow(ctx workflow.Context, input DatasetBuildWorkflowInput)
 		"build_type", input.BuildType,
 	)
 
-	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-		StartToCloseTimeout: 30 * time.Minute,
-	})
+	lifecycleCtx := workflow.WithActivityOptions(ctx, datasetBuildLifecycleActivityOptions())
+	buildCtx := workflow.WithActivityOptions(ctx, datasetBuildExecuteActivityOptions(input.BuildType))
+	resumeCtx := workflow.WithActivityOptions(ctx, datasetBuildResumeActivityOptions())
 
 	var started DatasetBuildLifecycleResult
-	if err := workflow.ExecuteActivity(ctx, MarkDatasetBuildJobRunningActivityName, input).Get(ctx, &started); err != nil {
+	if err := workflow.ExecuteActivity(lifecycleCtx, MarkDatasetBuildJobRunningActivityName, input).Get(ctx, &started); err != nil {
 		return DatasetBuildLifecycleResult{}, err
 	}
 
-	if err := workflow.ExecuteActivity(ctx, ExecuteDatasetBuildJobActivityName, input).Get(ctx, nil); err != nil {
+	if err := workflow.ExecuteActivity(buildCtx, ExecuteDatasetBuildJobActivityName, input).Get(ctx, nil); err != nil {
 		var failed DatasetBuildLifecycleResult
-		failInput := map[string]any{
-			"workflow_input": input,
-			"error_message":  err.Error(),
+		failInput := DatasetBuildFailureInput{
+			WorkflowInput: input,
+			ErrorMessage:  err.Error(),
+			ErrorType:     datasetBuildErrorType(err),
 		}
-		if markErr := workflow.ExecuteActivity(ctx, MarkDatasetBuildJobFailedActivityName, failInput).Get(ctx, &failed); markErr != nil {
+		if markErr := workflow.ExecuteActivity(lifecycleCtx, MarkDatasetBuildJobFailedActivityName, failInput).Get(ctx, &failed); markErr != nil {
 			return DatasetBuildLifecycleResult{}, fmt.Errorf("execute dataset build job: %w; mark failed: %v", err, markErr)
 		}
 		return failed, err
 	}
 
 	var completed DatasetBuildLifecycleResult
-	if err := workflow.ExecuteActivity(ctx, MarkDatasetBuildJobCompletedActivityName, input).Get(ctx, &completed); err != nil {
+	if err := workflow.ExecuteActivity(lifecycleCtx, MarkDatasetBuildJobCompletedActivityName, input).Get(ctx, &completed); err != nil {
 		return DatasetBuildLifecycleResult{}, err
 	}
 
 	var resumed DatasetBuildLifecycleResult
-	if err := workflow.ExecuteActivity(ctx, ResumeWaitingExecutionsActivityName, input).Get(ctx, &resumed); err != nil {
+	if err := workflow.ExecuteActivity(resumeCtx, ResumeWaitingExecutionsActivityName, input).Get(ctx, &resumed); err != nil {
 		logger.Error("resume waiting executions failed", "job_id", input.JobID, "error", err)
 		return completed, nil
 	}
@@ -141,6 +151,14 @@ func (a DatasetBuildActivities) MarkDatasetBuildJobRunning(ctx context.Context, 
 	job.Status = "running"
 	job.StartedAt = &now
 	job.ErrorMessage = nil
+	job.LastErrorType = nil
+	info := activity.GetInfo(ctx)
+	if workflowID := info.WorkflowExecution.ID; workflowID != "" {
+		job.WorkflowID = &workflowID
+	}
+	if workflowRunID := info.WorkflowExecution.RunID; workflowRunID != "" {
+		job.WorkflowRunID = &workflowRunID
+	}
 	if err := repo.SaveDatasetBuildJob(job); err != nil {
 		return DatasetBuildLifecycleResult{}, err
 	}
@@ -166,31 +184,39 @@ func (a DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, inpu
 	if err != nil {
 		return err
 	}
+	job.Attempt = int(activity.GetInfo(ctx).Attempt)
+	if err := repo.SaveDatasetBuildJob(job); err != nil {
+		return err
+	}
 
 	switch job.BuildType {
 	case "prepare":
 		request, err := decodeBuildRequest[domain.DatasetPrepareRequest](job.Request)
 		if err != nil {
-			return err
+			return temporal.NewNonRetryableApplicationError(err.Error(), "invalid_request", err)
 		}
 		_, err = a.Builder.BuildPrepare(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
-		return err
+		return classifyDatasetBuildError(err)
 	case "sentiment":
 		request, err := decodeBuildRequest[domain.DatasetSentimentBuildRequest](job.Request)
 		if err != nil {
-			return err
+			return temporal.NewNonRetryableApplicationError(err.Error(), "invalid_request", err)
 		}
 		_, err = a.Builder.BuildSentiment(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
-		return err
+		return classifyDatasetBuildError(err)
 	case "embedding":
 		request, err := decodeBuildRequest[domain.DatasetEmbeddingBuildRequest](job.Request)
 		if err != nil {
-			return err
+			return temporal.NewNonRetryableApplicationError(err.Error(), "invalid_request", err)
 		}
 		_, err = a.Builder.BuildEmbeddings(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
-		return err
+		return classifyDatasetBuildError(err)
 	default:
-		return fmt.Errorf("unsupported dataset build type: %s", job.BuildType)
+		return temporal.NewNonRetryableApplicationError(
+			fmt.Sprintf("unsupported dataset build type: %s", job.BuildType),
+			"unsupported_build_type",
+			nil,
+		)
 	}
 }
 
@@ -208,6 +234,7 @@ func (a DatasetBuildActivities) MarkDatasetBuildJobCompleted(ctx context.Context
 	job.Status = "completed"
 	job.CompletedAt = &now
 	job.ErrorMessage = nil
+	job.LastErrorType = nil
 	if err := repo.SaveDatasetBuildJob(job); err != nil {
 		return DatasetBuildLifecycleResult{}, err
 	}
@@ -220,27 +247,27 @@ func (a DatasetBuildActivities) MarkDatasetBuildJobCompleted(ctx context.Context
 	}, nil
 }
 
-func (a DatasetBuildActivities) MarkDatasetBuildJobFailed(ctx context.Context, payload map[string]any) (DatasetBuildLifecycleResult, error) {
+func (a DatasetBuildActivities) MarkDatasetBuildJobFailed(ctx context.Context, payload DatasetBuildFailureInput) (DatasetBuildLifecycleResult, error) {
 	repo, err := a.requireRepo()
 	if err != nil {
 		return DatasetBuildLifecycleResult{}, err
 	}
 
-	input, err := decodeBuildRequest[DatasetBuildWorkflowInput](payload["workflow_input"])
-	if err != nil {
-		return DatasetBuildLifecycleResult{}, err
-	}
+	input := payload.WorkflowInput
 	job, err := repo.GetDatasetBuildJob(input.ProjectID, input.JobID)
 	if err != nil {
 		return DatasetBuildLifecycleResult{}, err
 	}
 
 	now := a.now()
-	message := stringsValue(payload["error_message"])
+	message := stringsValue(payload.ErrorMessage)
 	job.Status = "failed"
 	job.CompletedAt = &now
 	if message != "" {
 		job.ErrorMessage = &message
+	}
+	if errorType := stringsValue(payload.ErrorType); errorType != "" {
+		job.LastErrorType = &errorType
 	}
 	if err := repo.SaveDatasetBuildJob(job); err != nil {
 		return DatasetBuildLifecycleResult{}, err
@@ -265,15 +292,119 @@ func (a DatasetBuildActivities) ResumeWaitingExecutionsForDatasetVersion(ctx con
 	}
 
 	reason := fmt.Sprintf("dataset build job completed: %s", input.BuildType)
-	if err := a.Resumer.ResumeWaitingExecutionsForDatasetVersion(input.ProjectID, input.DatasetVersionID, reason, "dataset_build_job"); err != nil {
+	count, err := a.Resumer.ResumeWaitingExecutionsForDatasetVersion(input.ProjectID, input.DatasetVersionID, reason, "dataset_build_job")
+	if err != nil {
+		return DatasetBuildLifecycleResult{}, err
+	}
+	repo, repoErr := a.requireRepo()
+	if repoErr != nil {
+		return DatasetBuildLifecycleResult{}, repoErr
+	}
+	job, err := repo.GetDatasetBuildJob(input.ProjectID, input.JobID)
+	if err != nil {
+		return DatasetBuildLifecycleResult{}, err
+	}
+	job.ResumedExecutionCount = count
+	if err := repo.SaveDatasetBuildJob(job); err != nil {
 		return DatasetBuildLifecycleResult{}, err
 	}
 	return DatasetBuildLifecycleResult{
-		JobID:     input.JobID,
-		Status:    "completed",
-		Timestamp: a.now(),
-		BuildType: input.BuildType,
+		JobID:      input.JobID,
+		Status:     "completed",
+		Timestamp:  a.now(),
+		BuildType:  input.BuildType,
+		Executions: count,
 	}, nil
+}
+
+func datasetBuildLifecycleActivityOptions() workflow.ActivityOptions {
+	return workflow.ActivityOptions{
+		StartToCloseTimeout: time.Minute,
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval:    2 * time.Second,
+			BackoffCoefficient: 2.0,
+			MaximumInterval:    30 * time.Second,
+			MaximumAttempts:    3,
+		},
+	}
+}
+
+func datasetBuildResumeActivityOptions() workflow.ActivityOptions {
+	return workflow.ActivityOptions{
+		StartToCloseTimeout: 5 * time.Minute,
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval:    5 * time.Second,
+			BackoffCoefficient: 2.0,
+			MaximumInterval:    time.Minute,
+			MaximumAttempts:    3,
+		},
+	}
+}
+
+func datasetBuildExecuteActivityOptions(buildType string) workflow.ActivityOptions {
+	timeout := 20 * time.Minute
+	maxAttempts := int32(4)
+	switch buildType {
+	case "sentiment":
+		timeout = 45 * time.Minute
+	case "embedding":
+		timeout = 60 * time.Minute
+		maxAttempts = 3
+	}
+	return workflow.ActivityOptions{
+		StartToCloseTimeout: timeout,
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval:    10 * time.Second,
+			BackoffCoefficient: 2.0,
+			MaximumInterval:    5 * time.Minute,
+			MaximumAttempts:    maxAttempts,
+			NonRetryableErrorTypes: []string{
+				"invalid_argument",
+				"not_found",
+				"invalid_request",
+				"worker_request",
+				"configuration_error",
+				"unsupported_build_type",
+			},
+		},
+	}
+}
+
+func classifyDatasetBuildError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		return temporal.NewNonRetryableApplicationError(err.Error(), "not_found", err)
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	if strings.Contains(message, "requires unstructured or mixed dataset version") ||
+		strings.Contains(message, "must be ready before") ||
+		strings.Contains(message, "storage_uri is required") ||
+		strings.Contains(message, "file is required") {
+		return temporal.NewNonRetryableApplicationError(err.Error(), "invalid_argument", err)
+	}
+	if strings.Contains(message, "worker task") && strings.Contains(message, "returned 4") {
+		return temporal.NewNonRetryableApplicationError(err.Error(), "worker_request", err)
+	}
+	if strings.TrimSpace(err.Error()) == "python ai worker url is required" {
+		return temporal.NewNonRetryableApplicationError(err.Error(), "configuration_error", err)
+	}
+	return err
+}
+
+func datasetBuildErrorType(err error) string {
+	if err == nil {
+		return ""
+	}
+	var appErr *temporal.ApplicationError
+	if errors.As(err, &appErr) {
+		if stringsValue(appErr.Type()) != "" {
+			return appErr.Type()
+		}
+		return "application_error"
+	}
+	return "activity_error"
 }
 
 func (a DatasetBuildActivities) requireRepo() (store.Repository, error) {

@@ -190,7 +190,7 @@ func (s *DatasetService) runDatasetBuildJob(job domain.DatasetBuildJob, runner f
 
 func (s *DatasetService) dispatchDatasetBuildJob(job domain.DatasetBuildJob, fallbackRunner func() error) error {
 	if s.buildJobStarter != nil && s.buildJobStarter.EngineName() == "temporal" {
-		_, err := s.buildJobStarter.StartDatasetBuildWorkflow(workflows.StartDatasetBuildInput{
+		workflowID, err := s.buildJobStarter.StartDatasetBuildWorkflow(workflows.StartDatasetBuildInput{
 			JobID:            job.JobID,
 			ProjectID:        job.ProjectID,
 			DatasetID:        job.DatasetID,
@@ -198,6 +198,14 @@ func (s *DatasetService) dispatchDatasetBuildJob(job domain.DatasetBuildJob, fal
 			BuildType:        job.BuildType,
 		})
 		if err == nil {
+			if strings.TrimSpace(workflowID) != "" {
+				job.WorkflowID = &workflowID
+			}
+			job.ErrorMessage = nil
+			job.LastErrorType = nil
+			if saveErr := s.store.SaveDatasetBuildJob(job); saveErr != nil {
+				return saveErr
+			}
 			return nil
 		}
 		completedAt := time.Now().UTC()
@@ -205,6 +213,8 @@ func (s *DatasetService) dispatchDatasetBuildJob(job domain.DatasetBuildJob, fal
 		job.CompletedAt = &completedAt
 		message := fmt.Sprintf("failed to start dataset build workflow: %v", err)
 		job.ErrorMessage = &message
+		errorType := "workflow_start_failed"
+		job.LastErrorType = &errorType
 		if saveErr := s.store.SaveDatasetBuildJob(job); saveErr != nil {
 			return saveErr
 		}

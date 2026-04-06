@@ -1341,6 +1341,22 @@ components:
           $ref: "#/components/schemas/AnyMap"
         triggered_by:
           type: string
+        workflow_id:
+          type:
+            - string
+            - "null"
+        workflow_run_id:
+          type:
+            - string
+            - "null"
+        attempt:
+          type: integer
+        last_error_type:
+          type:
+            - string
+            - "null"
+        resumed_execution_count:
+          type: integer
         created_at:
           type: string
           format: date-time
@@ -1365,6 +1381,8 @@ components:
         - dataset_version_id
         - build_type
         - status
+        - attempt
+        - resumed_execution_count
         - created_at
     DatasetBuildJobListResponse:
       type: object

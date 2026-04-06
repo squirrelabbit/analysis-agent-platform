@@ -27,6 +27,8 @@
 - execution 시작 시 `sentiment/embedding lazy` dependency 계산과 자동 build가 동작한다.
 - dataset build job API와 상태 조회 API가 있고, 실행은 Temporal workflow가 담당한다.
 - build 완료 후 같은 dataset version을 기다리던 execution은 dependency를 다시 계산한 뒤 자동 resume을 시도한다.
+- build workflow는 현재 별도 build queue와 build type별 retry/backoff/timeout 정책을 사용한다.
+- build job 메타데이터에는 현재 `workflow_id`, `workflow_run_id`, `attempt`, `last_error_type`, `resumed_execution_count`가 저장된다.
 
 목표:
 - 사용자가 `scenario execute`나 analysis execute를 눌렀을 때 `prepare/sentiment/embedding` 준비 상태를 몰라도 되게 만든다.
@@ -46,7 +48,7 @@
 - 사용자가 수동 `resume`을 덜 해도 되는 흐름
 
 주의:
-- 확인 필요: dataset build workflow retry/backoff와 timeout, history 보존 기준은 아직 운영 정책으로 정하지 않았다.
+- 확인 필요: dataset build workflow history 보존 기준과 build queue concurrency 상한은 아직 운영 정책으로 정하지 않았다.
 
 ## Step 2. dataset build runtime hardening
 
@@ -54,10 +56,10 @@
 - Temporal build workflow를 운영형으로 다듬는다.
 
 할 일:
-1. 중복 실행 방지와 재시도 정책을 보강한다.
-2. build 실패 시 error surface와 운영 매뉴얼을 정리한다.
-3. workflow timeout, backoff, cancellation 정책을 확정한다.
-4. 필요하면 별도 build task queue 분리를 검토한다.
+1. build queue concurrency와 worker 자원 상한을 실제 머신 기준으로 고정한다.
+2. workflow history 보존 기간과 장애 복구 절차를 정리한다.
+3. build 실패 시 error surface와 운영 매뉴얼을 정리한다.
+4. auto resume e2e smoke를 운영 회귀 테스트에 포함한다.
 
 결과물:
 - 운영형 build workflow 정책

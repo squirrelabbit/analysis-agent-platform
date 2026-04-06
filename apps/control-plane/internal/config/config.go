@@ -7,21 +7,22 @@ import (
 )
 
 type Config struct {
-	BindAddr            string
-	StoreBackend        string
-	DatabaseURL         string
-	OpenAPIPath         string
-	DatasetProfilesPath string
-	DataRoot            string
-	UploadRoot          string
-	ArtifactRoot        string
-	DuckDBPath          string
-	PythonAIWorkerURL   string
-	PlannerBackend      string
-	WorkflowEngine      string
-	TemporalAddress     string
-	TemporalNamespace   string
-	TemporalTaskQueue   string
+	BindAddr               string
+	StoreBackend           string
+	DatabaseURL            string
+	OpenAPIPath            string
+	DatasetProfilesPath    string
+	DataRoot               string
+	UploadRoot             string
+	ArtifactRoot           string
+	DuckDBPath             string
+	PythonAIWorkerURL      string
+	PlannerBackend         string
+	WorkflowEngine         string
+	TemporalAddress        string
+	TemporalNamespace      string
+	TemporalTaskQueue      string
+	TemporalBuildTaskQueue string
 }
 
 func Load() Config {
@@ -68,22 +69,27 @@ func Load() Config {
 	if temporalTaskQueue == "" {
 		temporalTaskQueue = "analysis-support"
 	}
+	temporalBuildTaskQueue := os.Getenv("TEMPORAL_BUILD_TASK_QUEUE")
+	if temporalBuildTaskQueue == "" {
+		temporalBuildTaskQueue = temporalTaskQueue + "-build"
+	}
 	return Config{
-		BindAddr:            addr,
-		StoreBackend:        storeBackend,
-		DatabaseURL:         os.Getenv("DATABASE_URL"),
-		OpenAPIPath:         openAPIPath,
-		DatasetProfilesPath: datasetProfilesPath,
-		DataRoot:            dataRoot,
-		UploadRoot:          uploadRoot,
-		ArtifactRoot:        artifactRoot,
-		DuckDBPath:          duckDBPath,
-		PythonAIWorkerURL:   pythonAIWorkerURL,
-		PlannerBackend:      plannerBackend,
-		WorkflowEngine:      workflowEngine,
-		TemporalAddress:     temporalAddress,
-		TemporalNamespace:   temporalNamespace,
-		TemporalTaskQueue:   temporalTaskQueue,
+		BindAddr:               addr,
+		StoreBackend:           storeBackend,
+		DatabaseURL:            os.Getenv("DATABASE_URL"),
+		OpenAPIPath:            openAPIPath,
+		DatasetProfilesPath:    datasetProfilesPath,
+		DataRoot:               dataRoot,
+		UploadRoot:             uploadRoot,
+		ArtifactRoot:           artifactRoot,
+		DuckDBPath:             duckDBPath,
+		PythonAIWorkerURL:      pythonAIWorkerURL,
+		PlannerBackend:         plannerBackend,
+		WorkflowEngine:         workflowEngine,
+		TemporalAddress:        temporalAddress,
+		TemporalNamespace:      temporalNamespace,
+		TemporalTaskQueue:      temporalTaskQueue,
+		TemporalBuildTaskQueue: temporalBuildTaskQueue,
 	}
 }
 

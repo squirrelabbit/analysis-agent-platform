@@ -480,6 +480,11 @@ curl -sS "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID/bu
 - `items[].job_id`
 - `items[].build_type`
 - `items[].status`
+- `items[].workflow_id`
+- `items[].workflow_run_id`
+- `items[].attempt`
+- `items[].last_error_type`
+- `items[].resumed_execution_count`
 - `items[].created_at`
 - `items[].started_at`
 - `items[].completed_at`
@@ -516,8 +521,11 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSI
 주의:
 
 - 현재 async build job은 Temporal workflow로 실행된다.
+- 기본 build queue는 `TEMPORAL_BUILD_TASK_QUEUE`이고, 비우면 `<TEMPORAL_TASK_QUEUE>-build`를 사용한다.
+- 현재 기본 activity 정책은 `prepare=20분/최대 4회`, `sentiment=45분/최대 4회`, `embedding=60분/최대 3회`, `backoff=10초 x2 최대 5분`이다.
+- worker HTTP timeout은 현재 `prepare=10분`, `sentiment=30분`, `embedding=45분`으로 분리돼 있다.
 - build 완료 후 같은 dataset version을 기다리던 execution은 dependency를 다시 계산한 뒤 자동 resume을 시도한다.
-- 확인 필요: build workflow retry/backoff와 timeout 기준은 아직 운영 정책으로 고정하지 않았다.
+- 확인 필요: build workflow history 보존 기간과 build queue concurrency 상한은 아직 운영 정책으로 고정하지 않았다.
 
 
 ### 7-2. prepare 실행

@@ -42,34 +42,70 @@ func main() {
 	}
 	defer temporalClient.Close()
 
-	w := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})
-	workflows.RegisterAnalysisRuntime(w, workflows.AnalysisActivities{
-		Repo: repository,
-		Runner: skills.CompositeRunner{
-			Structured: skills.DuckDBRunner{Path: cfg.DuckDBPath},
-			Unstructured: skills.PythonAIClient{
-				BaseURL:      cfg.PythonAIWorkerURL,
-				ArtifactRoot: cfg.ArtifactRoot,
+	registerAnalysisWorker := func(w worker.Worker) {
+		workflows.RegisterAnalysisRuntime(w, workflows.AnalysisActivities{
+			Repo: repository,
+			Runner: skills.CompositeRunner{
+				Structured: skills.DuckDBRunner{Path: cfg.DuckDBPath},
+				Unstructured: skills.PythonAIClient{
+					BaseURL:      cfg.PythonAIWorkerURL,
+					ArtifactRoot: cfg.ArtifactRoot,
+				},
 			},
-		},
-		Now: workflows.NewAnalysisActivities().Now,
-	})
-	workflows.RegisterDatasetBuildRuntime(w, workflows.DatasetBuildActivities{
-		Repo:    repository,
-		Builder: datasetService,
-		Resumer: analysisService,
-		Now:     workflows.NewAnalysisActivities().Now,
-	})
+			Now: workflows.NewAnalysisActivities().Now,
+		})
+	}
+	registerBuildWorker := func(w worker.Worker) {
+		workflows.RegisterDatasetBuildRuntime(w, workflows.DatasetBuildActivities{
+			Repo:    repository,
+			Builder: datasetService,
+			Resumer: analysisService,
+			Now:     workflows.NewAnalysisActivities().Now,
+		})
+	}
+
+	if cfg.TemporalTaskQueue == cfg.TemporalBuildTaskQueue {
+		w := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})
+		registerAnalysisWorker(w)
+		registerBuildWorker(w)
+		log.Printf(
+			"temporal worker listening on %s namespace=%s analysis_queue=%s build_queue=%s duckdb=%s python_ai=%s",
+			cfg.TemporalAddress,
+			cfg.TemporalNamespace,
+			cfg.TemporalTaskQueue,
+			cfg.TemporalBuildTaskQueue,
+			cfg.DuckDBPath,
+			cfg.PythonAIWorkerURL,
+		)
+		if err := w.Run(worker.InterruptCh()); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
+	analysisWorker := worker.New(temporalClient, cfg.TemporalTaskQueue, worker.Options{})
+	buildWorker := worker.New(temporalClient, cfg.TemporalBuildTaskQueue, worker.Options{})
+	registerAnalysisWorker(analysisWorker)
+	registerBuildWorker(buildWorker)
+
+	if err := analysisWorker.Start(); err != nil {
+		log.Fatal(err)
+	}
+	if err := buildWorker.Start(); err != nil {
+		analysisWorker.Stop()
+		log.Fatal(err)
+	}
 
 	log.Printf(
-		"temporal worker listening on %s namespace=%s task_queue=%s duckdb=%s python_ai=%s",
+		"temporal worker listening on %s namespace=%s analysis_queue=%s build_queue=%s duckdb=%s python_ai=%s",
 		cfg.TemporalAddress,
 		cfg.TemporalNamespace,
 		cfg.TemporalTaskQueue,
+		cfg.TemporalBuildTaskQueue,
 		cfg.DuckDBPath,
 		cfg.PythonAIWorkerURL,
 	)
-	if err := w.Run(worker.InterruptCh()); err != nil {
-		log.Fatal(err)
-	}
+	<-worker.InterruptCh()
+	buildWorker.Stop()
+	analysisWorker.Stop()
 }

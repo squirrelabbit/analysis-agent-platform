@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"analysis-support-platform/control-plane/internal/config"
@@ -45,9 +46,10 @@ func NewStarter(cfg config.Config) (Starter, error) {
 		return NoopStarter{}, nil
 	case "temporal":
 		return TemporalStarter{
-			Address:   cfg.TemporalAddress,
-			Namespace: cfg.TemporalNamespace,
-			TaskQueue: cfg.TemporalTaskQueue,
+			Address:               cfg.TemporalAddress,
+			Namespace:             cfg.TemporalNamespace,
+			TaskQueue:             cfg.TemporalTaskQueue,
+			DatasetBuildTaskQueue: cfg.TemporalBuildTaskQueue,
 		}, nil
 	default:
 		return nil, errors.New("unsupported workflow engine: " + cfg.WorkflowEngine)
@@ -69,12 +71,13 @@ func (NoopStarter) EngineName() string {
 }
 
 type TemporalStarter struct {
-	Address       string
-	Namespace     string
-	TaskQueue     string
-	WorkflowName  string
-	DialTimeout   time.Duration
-	ClientFactory TemporalClientFactory
+	Address               string
+	Namespace             string
+	TaskQueue             string
+	DatasetBuildTaskQueue string
+	WorkflowName          string
+	DialTimeout           time.Duration
+	ClientFactory         TemporalClientFactory
 }
 
 func (s TemporalStarter) StartAnalysisWorkflow(input StartAnalysisInput) (string, error) {
@@ -84,6 +87,7 @@ func (s TemporalStarter) StartAnalysisWorkflow(input StartAnalysisInput) (string
 	}
 	return s.startWorkflow(
 		buildWorkflowID(input.ExecutionID),
+		strings.TrimSpace(s.TaskQueue),
 		workflowName,
 		AnalysisWorkflowInput{
 			ExecutionID:      input.ExecutionID,
@@ -97,8 +101,13 @@ func (s TemporalStarter) StartAnalysisWorkflow(input StartAnalysisInput) (string
 }
 
 func (s TemporalStarter) StartDatasetBuildWorkflow(input StartDatasetBuildInput) (string, error) {
+	taskQueue := strings.TrimSpace(s.DatasetBuildTaskQueue)
+	if taskQueue == "" {
+		taskQueue = strings.TrimSpace(s.TaskQueue)
+	}
 	return s.startWorkflow(
 		buildDatasetBuildWorkflowID(input.JobID),
+		taskQueue,
 		DatasetBuildWorkflowName,
 		DatasetBuildWorkflowInput{
 			JobID:            input.JobID,
@@ -111,7 +120,7 @@ func (s TemporalStarter) StartDatasetBuildWorkflow(input StartDatasetBuildInput)
 	)
 }
 
-func (s TemporalStarter) startWorkflow(workflowID string, workflowName string, payload any) (string, error) {
+func (s TemporalStarter) startWorkflow(workflowID string, taskQueue string, workflowName string, payload any) (string, error) {
 	if s.ClientFactory == nil {
 		s.ClientFactory = func(ctx context.Context, options client.Options) (TemporalClient, error) {
 			return client.DialContext(ctx, options)
@@ -132,12 +141,15 @@ func (s TemporalStarter) startWorkflow(workflowID string, workflowName string, p
 		return "", err
 	}
 	defer c.Close()
+	if strings.TrimSpace(taskQueue) == "" {
+		taskQueue = strings.TrimSpace(s.TaskQueue)
+	}
 
 	run, err := c.ExecuteWorkflow(
 		ctx,
 		client.StartWorkflowOptions{
 			ID:                                       workflowID,
-			TaskQueue:                                s.TaskQueue,
+			TaskQueue:                                taskQueue,
 			WorkflowIDReusePolicy:                    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 			WorkflowExecutionErrorWhenAlreadyStarted: true,
 		},

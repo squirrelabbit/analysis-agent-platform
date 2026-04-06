@@ -413,10 +413,11 @@ func (s *PostgresStore) SaveDatasetBuildJob(job domain.DatasetBuildJob) error {
 	_, err = s.db.Exec(
 		`INSERT INTO dataset_build_jobs (
 			job_id, project_id, dataset_id, dataset_version_id, build_type, status,
-			request, triggered_by, created_at, started_at, completed_at, error_message
+			request, triggered_by, workflow_id, workflow_run_id, attempt, error_message, last_error_type,
+			resumed_execution_count, created_at, started_at, completed_at
 		) VALUES (
 			$1::uuid, $2::uuid, $3::uuid, $4, $5, $6,
-			$7::jsonb, $8, $9, $10, $11, $12
+			$7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 		)
 		ON CONFLICT (job_id) DO UPDATE
 		SET dataset_id = EXCLUDED.dataset_id,
@@ -425,6 +426,11 @@ func (s *PostgresStore) SaveDatasetBuildJob(job domain.DatasetBuildJob) error {
 		    status = EXCLUDED.status,
 		    request = EXCLUDED.request,
 		    triggered_by = EXCLUDED.triggered_by,
+		    workflow_id = EXCLUDED.workflow_id,
+		    workflow_run_id = EXCLUDED.workflow_run_id,
+		    attempt = EXCLUDED.attempt,
+		    last_error_type = EXCLUDED.last_error_type,
+		    resumed_execution_count = EXCLUDED.resumed_execution_count,
 		    started_at = EXCLUDED.started_at,
 		    completed_at = EXCLUDED.completed_at,
 		    error_message = EXCLUDED.error_message`,
@@ -436,10 +442,15 @@ func (s *PostgresStore) SaveDatasetBuildJob(job domain.DatasetBuildJob) error {
 		job.Status,
 		requestJSON,
 		nullIfEmpty(job.TriggeredBy),
+		nullableString(job.WorkflowID),
+		nullableString(job.WorkflowRunID),
+		job.Attempt,
+		nullableString(job.ErrorMessage),
+		nullableString(job.LastErrorType),
+		job.ResumedExecutionCount,
 		job.CreatedAt,
 		nullableTime(job.StartedAt),
 		nullableTime(job.CompletedAt),
-		nullableString(job.ErrorMessage),
 	)
 	return err
 }
@@ -447,7 +458,8 @@ func (s *PostgresStore) SaveDatasetBuildJob(job domain.DatasetBuildJob) error {
 func (s *PostgresStore) GetDatasetBuildJob(projectID, jobID string) (domain.DatasetBuildJob, error) {
 	row := s.db.QueryRow(
 		`SELECT job_id::text, project_id::text, dataset_id::text, dataset_version_id, build_type, status,
-		        request, triggered_by, created_at, started_at, completed_at, error_message
+		        request, triggered_by, workflow_id, workflow_run_id, attempt, error_message, last_error_type,
+		        resumed_execution_count, created_at, started_at, completed_at
 		 FROM dataset_build_jobs
 		 WHERE project_id = $1::uuid AND job_id = $2::uuid`,
 		projectID,
@@ -456,7 +468,10 @@ func (s *PostgresStore) GetDatasetBuildJob(projectID, jobID string) (domain.Data
 	var job domain.DatasetBuildJob
 	var requestRaw []byte
 	var triggeredBy sql.NullString
+	var workflowID sql.NullString
+	var workflowRunID sql.NullString
 	var errorMessage sql.NullString
+	var lastErrorType sql.NullString
 	if err := row.Scan(
 		&job.JobID,
 		&job.ProjectID,
@@ -466,10 +481,15 @@ func (s *PostgresStore) GetDatasetBuildJob(projectID, jobID string) (domain.Data
 		&job.Status,
 		&requestRaw,
 		&triggeredBy,
+		&workflowID,
+		&workflowRunID,
+		&job.Attempt,
+		&errorMessage,
+		&lastErrorType,
+		&job.ResumedExecutionCount,
 		&job.CreatedAt,
 		&job.StartedAt,
 		&job.CompletedAt,
-		&errorMessage,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.DatasetBuildJob{}, ErrNotFound
@@ -482,15 +502,25 @@ func (s *PostgresStore) GetDatasetBuildJob(projectID, jobID string) (domain.Data
 	if triggeredBy.Valid {
 		job.TriggeredBy = triggeredBy.String
 	}
+	if workflowID.Valid {
+		job.WorkflowID = &workflowID.String
+	}
+	if workflowRunID.Valid {
+		job.WorkflowRunID = &workflowRunID.String
+	}
 	if errorMessage.Valid {
 		job.ErrorMessage = &errorMessage.String
+	}
+	if lastErrorType.Valid {
+		job.LastErrorType = &lastErrorType.String
 	}
 	return job, nil
 }
 
 func (s *PostgresStore) ListDatasetBuildJobs(projectID, datasetVersionID string) ([]domain.DatasetBuildJob, error) {
 	baseQuery := `SELECT job_id::text, project_id::text, dataset_id::text, dataset_version_id, build_type, status,
-	                     request, triggered_by, created_at, started_at, completed_at, error_message
+	                     request, triggered_by, workflow_id, workflow_run_id, attempt, error_message, last_error_type,
+	                     resumed_execution_count, created_at, started_at, completed_at
 	              FROM dataset_build_jobs
 	              WHERE project_id = $1::uuid`
 	args := []any{projectID}
@@ -511,7 +541,10 @@ func (s *PostgresStore) ListDatasetBuildJobs(projectID, datasetVersionID string)
 		var job domain.DatasetBuildJob
 		var requestRaw []byte
 		var triggeredBy sql.NullString
+		var workflowID sql.NullString
+		var workflowRunID sql.NullString
 		var errorMessage sql.NullString
+		var lastErrorType sql.NullString
 		if err := rows.Scan(
 			&job.JobID,
 			&job.ProjectID,
@@ -521,10 +554,15 @@ func (s *PostgresStore) ListDatasetBuildJobs(projectID, datasetVersionID string)
 			&job.Status,
 			&requestRaw,
 			&triggeredBy,
+			&workflowID,
+			&workflowRunID,
+			&job.Attempt,
+			&errorMessage,
+			&lastErrorType,
+			&job.ResumedExecutionCount,
 			&job.CreatedAt,
 			&job.StartedAt,
 			&job.CompletedAt,
-			&errorMessage,
 		); err != nil {
 			return nil, err
 		}
@@ -534,8 +572,17 @@ func (s *PostgresStore) ListDatasetBuildJobs(projectID, datasetVersionID string)
 		if triggeredBy.Valid {
 			job.TriggeredBy = triggeredBy.String
 		}
+		if workflowID.Valid {
+			job.WorkflowID = &workflowID.String
+		}
+		if workflowRunID.Valid {
+			job.WorkflowRunID = &workflowRunID.String
+		}
 		if errorMessage.Valid {
 			job.ErrorMessage = &errorMessage.String
+		}
+		if lastErrorType.Valid {
+			job.LastErrorType = &lastErrorType.String
 		}
 		items = append(items, job)
 	}
@@ -1145,11 +1192,21 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			status TEXT NOT NULL,
 			request JSONB NOT NULL DEFAULT '{}'::jsonb,
 			triggered_by TEXT,
+			workflow_id TEXT,
+			workflow_run_id TEXT,
+			attempt INTEGER NOT NULL DEFAULT 0,
 			error_message TEXT,
+			last_error_type TEXT,
+			resumed_execution_count INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMPTZ NOT NULL,
 			started_at TIMESTAMPTZ,
 			completed_at TIMESTAMPTZ
 		)`,
+		`ALTER TABLE dataset_build_jobs ADD COLUMN IF NOT EXISTS workflow_id TEXT`,
+		`ALTER TABLE dataset_build_jobs ADD COLUMN IF NOT EXISTS workflow_run_id TEXT`,
+		`ALTER TABLE dataset_build_jobs ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE dataset_build_jobs ADD COLUMN IF NOT EXISTS last_error_type TEXT`,
+		`ALTER TABLE dataset_build_jobs ADD COLUMN IF NOT EXISTS resumed_execution_count INTEGER NOT NULL DEFAULT 0`,
 		`CREATE INDEX IF NOT EXISTS dataset_build_jobs_project_version_idx ON dataset_build_jobs(project_id, dataset_version_id, created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS analysis_requests (
 			request_id UUID PRIMARY KEY,

@@ -29,6 +29,12 @@ import (
 const DefaultEmbeddingModel = "intfloat/multilingual-e5-small"
 const tokenProjectionVectorDim = 64
 
+const (
+	workerTaskTimeoutPrepare   = 10 * time.Minute
+	workerTaskTimeoutSentiment = 30 * time.Minute
+	workerTaskTimeoutEmbedding = 45 * time.Minute
+)
+
 type DatasetService struct {
 	store               store.Repository
 	pythonAIWorkerURL   string
@@ -51,7 +57,7 @@ func NewDatasetService(repository store.Repository, pythonAIWorkerURL string, up
 		pythonAIWorkerURL: pythonAIWorkerURL,
 		uploadRoot:        strings.TrimSpace(uploadRoot),
 		artifactRoot:      strings.TrimSpace(artifactRoot),
-		httpClient:        &http.Client{Timeout: 60 * time.Second},
+		httpClient:        &http.Client{},
 	}
 }
 
@@ -716,12 +722,14 @@ func (s *DatasetService) runWorkerTask(ctx context.Context, taskPath string, pay
 	if baseURL == "" {
 		return workerTaskResponse{}, errors.New("python ai worker url is required")
 	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, workerTaskTimeout(taskPath))
+	defer cancel()
 
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return workerTaskResponse{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+taskPath, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(timeoutCtx, http.MethodPost, baseURL+taskPath, bytes.NewReader(body))
 	if err != nil {
 		return workerTaskResponse{}, err
 	}
@@ -738,9 +746,34 @@ func (s *DatasetService) runWorkerTask(ctx context.Context, taskPath string, pay
 		return workerTaskResponse{}, err
 	}
 	if resp.StatusCode >= 300 {
-		return workerTaskResponse{}, fmt.Errorf("worker task %s returned %d", taskPath, resp.StatusCode)
+		return workerTaskResponse{}, workerTaskHTTPError{
+			TaskPath:   taskPath,
+			StatusCode: resp.StatusCode,
+		}
 	}
 	return decoded, nil
+}
+
+type workerTaskHTTPError struct {
+	TaskPath   string
+	StatusCode int
+}
+
+func (e workerTaskHTTPError) Error() string {
+	return fmt.Sprintf("worker task %s returned %d", e.TaskPath, e.StatusCode)
+}
+
+func workerTaskTimeout(taskPath string) time.Duration {
+	switch strings.TrimSpace(taskPath) {
+	case "/tasks/dataset_prepare":
+		return workerTaskTimeoutPrepare
+	case "/tasks/sentiment_label":
+		return workerTaskTimeoutSentiment
+	case "/tasks/embedding":
+		return workerTaskTimeoutEmbedding
+	default:
+		return 2 * time.Minute
+	}
 }
 
 func (s *DatasetService) persistUploadedDataset(projectID, datasetID, datasetVersionID, originalName, contentType string, reader io.Reader) (string, map[string]any, error) {

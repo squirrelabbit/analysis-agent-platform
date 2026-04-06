@@ -1055,22 +1055,23 @@ func (s *AnalysisService) ResumeExecution(projectID, executionID string, input d
 	return s.resumeExecutionInternal(execution, reason, triggeredBy)
 }
 
-func (s *AnalysisService) ResumeWaitingExecutionsForDatasetVersion(projectID, datasetVersionID, reason, triggeredBy string) error {
+func (s *AnalysisService) ResumeWaitingExecutionsForDatasetVersion(projectID, datasetVersionID, reason, triggeredBy string) (int, error) {
 	versionID := strings.TrimSpace(datasetVersionID)
 	if versionID == "" {
-		return nil
+		return 0, nil
 	}
 	executions, err := s.store.ListExecutions(projectID)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	resumedCount := 0
 	for _, item := range executions {
 		if item.Status != "waiting" || item.DatasetVersionID == nil || strings.TrimSpace(*item.DatasetVersionID) != versionID {
 			continue
 		}
 		execution, err := s.GetExecution(projectID, item.ExecutionID)
 		if err != nil {
-			return err
+			return resumedCount, err
 		}
 		if execution.Status != "waiting" {
 			continue
@@ -1078,13 +1079,13 @@ func (s *AnalysisService) ResumeWaitingExecutionsForDatasetVersion(projectID, da
 		version, err := s.store.GetDatasetVersion(projectID, versionID)
 		if err != nil {
 			if err == store.ErrNotFound {
-				return ErrNotFound{Resource: "dataset version"}
+				return resumedCount, ErrNotFound{Resource: "dataset version"}
 			}
-			return err
+			return resumedCount, err
 		}
 		version, err = s.ensureExecutionDependenciesForVersion(projectID, version, execution.Plan)
 		if err != nil {
-			return err
+			return resumedCount, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
 		if err == nil {
@@ -1094,10 +1095,11 @@ func (s *AnalysisService) ResumeWaitingExecutionsForDatasetVersion(projectID, da
 			continue
 		}
 		if _, err := s.resumeExecutionInternal(execution, reason, triggeredBy); err != nil {
-			return err
+			return resumedCount, err
 		}
+		resumedCount++
 	}
-	return nil
+	return resumedCount, nil
 }
 
 func (s *AnalysisService) RerunExecution(projectID, executionID string, input domain.ExecutionRerunRequest) (domain.ExecutionRerunResponse, error) {

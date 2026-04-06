@@ -38,6 +38,8 @@
 - prompt version 이름은 현재 [config/prompts](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts) 아래 Markdown template 파일과 1:1로 대응된다. 예를 들어 `dataset-prepare-anthropic-v2`는 [dataset-prepare-anthropic-v2.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts/dataset-prepare-anthropic-v2.md)를 읽는다.
 - dataset version 생성/업로드 시 현재 `prepare`는 기본적으로 async build job을 자동 enqueue하고, execution은 필요한 step에 따라 `sentiment`, `embedding`을 자동으로 먼저 준비한 뒤 진행한다. build가 끝나면 같은 dataset version을 기다리던 execution을 자동으로 다시 enqueue한다. `waiting`은 자동 orchestration으로 흡수하지 못한 예외 상황에 가깝다.
 - dataset build에는 현재 `prepare_jobs`, `sentiment_jobs`, `embedding_jobs` async API와 `dataset_build_jobs` 조회 API가 추가돼 long-running build를 별도 추적할 수 있고, 실행은 Temporal workflow가 담당한다.
+- Temporal build workflow는 현재 별도 build queue를 사용한다. 기본값은 `TEMPORAL_BUILD_TASK_QUEUE=<TEMPORAL_TASK_QUEUE>-build`이고, build job 메타데이터에는 `workflow_id`, `workflow_run_id`, `attempt`, `last_error_type`, `resumed_execution_count`가 남는다.
+- build activity 정책은 현재 `prepare=20분/최대 4회`, `sentiment=45분/최대 4회`, `embedding=60분/최대 3회`이고, backoff는 `10초 -> x2 -> 최대 5분`이다. worker HTTP timeout은 `prepare=10분`, `sentiment=30분`, `embedding=45분`으로 분리했다.
 - 저장소에는 축제 질문 기준 strict 시나리오 import fixture [festival_scenarios.import.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/testdata/festival_scenarios.import.json) 와 매핑 설명 [scenario_templates.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/skill/scenario_templates.md) 가 포함돼 있다.
 - `garbage_filter`는 execution 안에서 실행되면 row 단위 결과를 `rows.parquet` sidecar로 저장하고, execution artifact JSON에는 summary와 `artifact_ref`만 남긴다.
 - `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding` 운영 기본 출력은 `embeddings.index.parquet + pgvector`다.
@@ -49,7 +51,7 @@
 - control plane은 `embedding` build가 끝나면 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection으로 바꾼 뒤 `embedding_index_chunks`에 적재한다. index source를 찾지 못할 때만 `embeddings.jsonl` legacy fallback을 사용한다.
 - dataset version metadata에는 현재 `prepare_usage`, `sentiment_usage`, `embedding_usage`가 함께 저장되고, execution result contract에는 실행 artifact 기준 `usage_summary`가 집계된다.
 - execution은 현재 dataset version의 `profile`을 `profile_snapshot`으로 복사하고, `result_v1.profile`에도 함께 노출한다.
-- 확인 필요: dataset build workflow는 Temporal로 이관됐지만, job retry/backoff 정책과 workflow history 보존 기준은 아직 운영 기준으로 확정하지 않았다.
+- 확인 필요: dataset build workflow history 보존 기간과 build queue concurrency 상한은 아직 운영 기준으로 확정하지 않았다.
 - execution runner는 현재 기본 `pre/post step hook`를 사용해 각 step의 입력 키, artifact 크기, usage preview를 `step_hooks`로 남기고, 완료 이벤트와 execution result contract에서 확인할 수 있다.
 - execution result API는 기존 `artifacts + contract`를 유지하면서, 현재 `result_v1`에 사용자용 `answer`, `step_results`, `warnings`, `waiting`, `usage_summary`를 함께 내려준다.
 - execution이 완료되면 control plane은 현재 `result_v1 snapshot`을 execution metadata에 함께 저장하고, `/executions/{id}/result`는 저장된 snapshot을 우선 사용한다.

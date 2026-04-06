@@ -24,6 +24,7 @@
   - 프로젝트, dataset, analysis request, execution API
 - `Temporal runtime`
   - execution lifecycle와 `waiting / resume`
+  - analysis queue와 dataset build queue 분리
 - `DuckDB`
   - 현재 연결된 structured skill은 `structured_kpi_summary` 1종
 - `Python AI worker`
@@ -51,6 +52,9 @@
 - `POST /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios`, `GET /projects/{project_id}/scenarios/{scenario_id}`, `POST /projects/{project_id}/scenarios/{scenario_id}/plans`, `POST /projects/{project_id}/scenarios/{scenario_id}/execute`는 현재 `planning_mode=strict` 기준의 시나리오를 저장하고 `analysis_request + plan` 생성 또는 one-shot 실행을 처리하는 경로다.
 - `POST /projects/{project_id}/scenarios/import`는 row 기반 시나리오 표를 `scenario_id` 기준으로 묶어 등록하는 bulk import 경로다.
 - `POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs`, `sentiment_jobs`, `embedding_jobs`는 dataset build를 비동기 job으로 시작하는 경로이고, `GET /projects/{project_id}/dataset_build_jobs/{job_id}` 또는 version 단위 `GET /build_jobs`로 상태를 조회한다.
+- dataset build workflow는 현재 기본 `analysis-support-build` queue를 사용하고, build job에는 `workflow_id`, `workflow_run_id`, `attempt`, `last_error_type`, `resumed_execution_count`를 저장한다.
+- Temporal build activity 정책은 현재 `prepare=20분/최대 4회`, `sentiment=45분/최대 4회`, `embedding=60분/최대 3회`, `backoff=10초 x2 최대 5분`이다.
+- control plane의 Python worker HTTP timeout은 현재 `prepare=10분`, `sentiment=30분`, `embedding=45분`으로 분리돼 있다.
 - 확인 필요: `guided` planner나 mandatory/optional/allowed skill 가드레일은 아직 backlog다.
 - `sentiment.parquet`는 현재 `row_id`, `source_row_index`, 감성 컬럼 중심 sidecar이고, `issue_sentiment_summary`는 prepared dataset ref를 받아 텍스트를 조인한다.
 - `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 운영 기본 산출물은 `embeddings.index.parquet` index source와 `pgvector` 적재이고, `embeddings.jsonl`은 `debug_export_jsonl=true`일 때만 debug/export로 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1`로 fallback한다.
@@ -68,7 +72,7 @@
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension을 켜고 `embedding_index_chunks` table까지 만든다.
 - 비정형 dataset build는 현재 `prepare/sentiment/chunk Parquet` 단계와 sentiment join, chunk citation 경로까지 반영됐고, vector index 전환안은 `docs/architecture/unstructured_storage_transition.md`에 분리해 정리했다.
 - GitHub Actions CI는 Python worker 테스트와 Go 테스트/빌드를 현재 구조 기준으로 실행한다.
-- 확인 필요: dataset build workflow retry/backoff 정책, long-running build timeout, workflow history 보존 기준은 아직 운영 정책으로 확정하지 않았다.
+- 확인 필요: dataset build workflow history 보존 기간과 build queue concurrency 상한은 아직 운영 정책으로 확정하지 않았다.
 
 ## 5. 문서 구분
 

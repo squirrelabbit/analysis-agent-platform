@@ -460,6 +460,9 @@ func TestCreatePrepareJobStartsTemporalWorkflowWhenStarterConfigured(t *testing.
 	if stored.Status != "queued" {
 		t.Fatalf("expected queued build job before workflow pickup, got %+v", stored)
 	}
+	if stored.WorkflowID == nil || *stored.WorkflowID != "dataset-build-"+job.JobID {
+		t.Fatalf("expected workflow id on stored build job, got %+v", stored.WorkflowID)
+	}
 }
 
 func TestCreateDatasetVersionStoresNormalizedProfile(t *testing.T) {

@@ -372,8 +372,12 @@ func TestResumeWaitingExecutionsForDatasetVersionAutoResumesReadyExecution(t *te
 	}
 	_ = repository.SaveExecution(execution)
 
-	if err := service.ResumeWaitingExecutionsForDatasetVersion(project.ProjectID, version.DatasetVersionID, "dataset build completed: prepare", "dataset_build_job"); err != nil {
+	resumedCount, err := service.ResumeWaitingExecutionsForDatasetVersion(project.ProjectID, version.DatasetVersionID, "dataset build completed: prepare", "dataset_build_job")
+	if err != nil {
 		t.Fatalf("unexpected auto resume error: %v", err)
+	}
+	if resumedCount != 1 {
+		t.Fatalf("unexpected resumed count: %d", resumedCount)
 	}
 
 	resumed, err := repository.GetExecution(project.ProjectID, execution.ExecutionID)
@@ -433,8 +437,12 @@ func TestResumeWaitingExecutionsForDatasetVersionKeepsWaitingWhenStillNotReady(t
 	}
 	_ = repository.SaveExecution(execution)
 
-	if err := service.ResumeWaitingExecutionsForDatasetVersion(project.ProjectID, version.DatasetVersionID, "dataset build completed: prepare", "dataset_build_job"); err != nil {
+	resumedCount, err := service.ResumeWaitingExecutionsForDatasetVersion(project.ProjectID, version.DatasetVersionID, "dataset build completed: prepare", "dataset_build_job")
+	if err != nil {
 		t.Fatalf("unexpected auto resume error: %v", err)
+	}
+	if resumedCount != 0 {
+		t.Fatalf("unexpected resumed count: %d", resumedCount)
 	}
 
 	current, err := repository.GetExecution(project.ProjectID, execution.ExecutionID)
