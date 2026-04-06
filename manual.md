@@ -551,8 +551,9 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSI
 - 기본 build queue는 `TEMPORAL_BUILD_TASK_QUEUE`이고, 비우면 `<TEMPORAL_TASK_QUEUE>-build`를 사용한다.
 - 현재 기본 activity 정책은 `prepare=20분/최대 4회`, `sentiment=45분/최대 4회`, `embedding=60분/최대 3회`, `backoff=10초 x2 최대 5분`이다.
 - worker HTTP timeout은 현재 `prepare=10분`, `sentiment=30분`, `embedding=45분`으로 분리돼 있다.
+- worker 동시성 기본값은 현재 `analysis activity=8`, `build activity=4`, `prepare slot=3`, `sentiment slot=2`, `embedding slot=1`이다.
 - build 완료 후 같은 dataset version을 기다리던 execution은 dependency를 다시 계산한 뒤 자동 resume을 시도한다.
-- 확인 필요: build workflow history 보존 기간과 build queue concurrency 상한은 아직 운영 정책으로 고정하지 않았다.
+- 확인 필요: build workflow history의 장기 보존 기간은 아직 Temporal 서버 기본값을 따르고 있고, 운영 환경별 실제 동시성 상한은 머신 자원 기준으로 추가 튜닝이 필요하다.
 
 
 ### 7-2. prepare 실행

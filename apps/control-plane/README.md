@@ -102,6 +102,12 @@
   - `TEMPORAL_ADDRESS`
   - `TEMPORAL_NAMESPACE`
   - `TEMPORAL_TASK_QUEUE`
+  - `TEMPORAL_BUILD_TASK_QUEUE`
+  - `TEMPORAL_ANALYSIS_MAX_CONCURRENT_ACTIVITIES`
+  - `TEMPORAL_BUILD_MAX_CONCURRENT_ACTIVITIES`
+  - `DATASET_BUILD_PREPARE_MAX_CONCURRENT`
+  - `DATASET_BUILD_SENTIMENT_MAX_CONCURRENT`
+  - `DATASET_BUILD_EMBEDDING_MAX_CONCURRENT`
   - `DUCKDB_PATH`
   - `DATASET_PROFILES_PATH`
   - `PYTHON_AI_WORKER_URL`
@@ -123,11 +129,12 @@
 - build job에는 현재 `workflow_id`, `workflow_run_id`, `attempt`, `last_error_type`, `resumed_execution_count`가 저장된다.
 - activity timeout/retry 기본값은 현재 `prepare=20분/4회`, `sentiment=45분/4회`, `embedding=60분/3회`, `backoff=10초 x2 최대 5분`이다.
 - worker HTTP timeout은 현재 `prepare=10분`, `sentiment=30분`, `embedding=45분`으로 분리돼 있다.
+- worker 동시성 기본값은 현재 `analysis activity=8`, `build activity=4`, `prepare slot=3`, `sentiment slot=2`, `embedding slot=1`이다.
 - execution 시작 전에는 plan step을 보고 `requires_prepare`, `requires_sentiment`, `requires_embedding`를 계산한 뒤 필요한 build를 먼저 자동 시도한다.
 - 그래도 준비되지 못한 경우에만 workflow가 `waiting`으로 전이된다.
 - build job이 완료되면 같은 dataset version을 기다리던 execution은 dependency를 다시 계산한 뒤 자동으로 `resume`된다.
 - 수동 `resume`은 자동 orchestration으로 해결하지 못한 외부 의존성 예외를 처리할 때만 사용하면 된다.
-- 확인 필요: dataset build workflow history 보존 기간과 build queue concurrency 상한은 아직 운영 정책으로 고정하지 않았다.
+- 확인 필요: dataset build workflow history의 장기 보존 기간은 아직 Temporal 서버 기본값을 따르고 있고, 운영 환경별 실제 동시성 상한은 머신 자원 기준으로 추가 튜닝이 필요하다.
 
 ## 검증 메모
 
