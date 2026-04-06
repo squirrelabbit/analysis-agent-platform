@@ -1,0 +1,41 @@
+:root {
+  font-family: var(--body-font);
+  --body-font:
+    "Avenir Next", "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo",
+    sans-serif;
+  --display-font:
+    "Iowan Old Style", "Palatino Linotype", "Book Antiqua", "Times New Roman",
+    serif;
+  color: #3a2e1b;
+  background:
+    radial-gradient(circle at top left, rgba(255, 201, 102, 0.38), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(141, 167, 127, 0.18), transparent 24%),
+    linear-gradient(180deg, #fdf7ef 0%, #f5efe4 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+code {
+  font-family:
+    "JetBrains Mono", "SFMono-Regular", "Cascadia Code", "Menlo", monospace;
+}
