@@ -146,6 +146,7 @@
       "goal_input": "query",
       "default_inputs": {
         "text_column": "text",
+        "match_mode": "any",
         "sample_n": 5
       }
     },

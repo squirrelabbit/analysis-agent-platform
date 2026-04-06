@@ -1288,6 +1288,24 @@ func TestSubmitAnalysisEnrichesIssueSentimentSummaryInputs(t *testing.T) {
 	}
 }
 
+func TestResolvedTextColumnForSkillTreatsDefaultTextAsPlaceholderWhenRawColumnDiffers(t *testing.T) {
+	version := domain.DatasetVersion{
+		DataType:      "unstructured",
+		PrepareStatus: "ready",
+		PrepareURI:    stringPtr("festival.prepared.parquet"),
+		Metadata: map[string]any{
+			"text_column":          "본문",
+			"raw_text_column":      "본문",
+			"prepared_text_column": "normalized_text",
+		},
+	}
+
+	got := resolvedTextColumnForSkill(map[string]any{"text_column": "text"}, version)
+	if got != "normalized_text" {
+		t.Fatalf("expected normalized_text, got %s", got)
+	}
+}
+
 func stringPtr(value string) *string {
 	return &value
 }

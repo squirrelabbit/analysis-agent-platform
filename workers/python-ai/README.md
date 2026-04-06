@@ -176,6 +176,7 @@
 - `runtime/common.py`는 `.parquet` reader를 지원하므로 `sentiment_label`, `document_filter`, `time_bucket_count` 같은 row 기반 task가 prepared Parquet를 직접 읽을 수 있다.
 - `garbage_filter`는 prepared row를 읽고 `ad_marker`, `promotion_link`, `platform_placeholder`, `empty_or_noise` 규칙으로 광고/협찬/링크 유도/placeholder/noise-only row를 제거한다.
 - `garbage_filter`는 `artifact_output_path`를 받으면 `row_id`, `source_index`, `filter_status`, `matched_rules`를 담은 `rows.parquet` sidecar를 쓴다. control plane execution 경로에서는 이 sidecar ref만 DB artifact에 남기고, step chaining에는 full artifact를 계속 사용한다.
+- `document_filter`는 기본적으로 query token 중 하나라도 맞으면 고르고(`match_mode=any`), `match_mode=all`을 주면 query token을 모두 포함한 문서만 고른다.
 - `document_filter`는 `artifact_output_path`를 받으면 matched row의 `row_id`, `source_index`, `rank`, `score`를 담은 `matches.parquet` sidecar를 쓴다.
 - `deduplicate_documents`는 `artifact_output_path`를 받으면 row별 canonical mapping을 담은 `rows.parquet` sidecar를 쓴다.
 - `noun_frequency`는 현재 filtered row에서 명사 중심 top term을 집계한다. `kiwipiepy`가 있으면 품사 태깅을 사용하고, 없으면 regex token fallback으로 내려간다. `top_nouns`에는 `term_frequency`, `document_frequency`를 함께 남긴다.

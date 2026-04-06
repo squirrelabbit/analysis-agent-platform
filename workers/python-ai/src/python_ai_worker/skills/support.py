@@ -127,7 +127,11 @@ def run_document_filter(payload: dict[str, Any]) -> dict[str, Any]:
             text = item["text"]
             if not text:
                 continue
-            score = sum(1 for token in rt._tokenize(text) if token in query_tokens)
+            text_tokens = rt._tokenize(text)
+            matched_tokens = {token for token in query_tokens if token in text_tokens}
+            if normalized["match_mode"] == "all" and len(matched_tokens) < len(query_tokens):
+                continue
+            score = sum(1 for token in text_tokens if token in query_tokens)
             if score <= 0:
                 continue
             matches.append(
@@ -135,11 +139,12 @@ def run_document_filter(payload: dict[str, Any]) -> dict[str, Any]:
                     "rank": 0,
                     "source_index": int(item["source_index"]),
                     "score": score,
+                    "matched_token_count": len(matched_tokens),
                     "text": text[:240],
                 }
             )
         matches.sort(key=lambda item: (-int(item["score"]), int(item["source_index"])))
-        selection_mode = "lexical_overlap"
+        selection_mode = "lexical_overlap_all" if normalized["match_mode"] == "all" else "lexical_overlap"
     else:
         selection_mode = "all_rows"
 
@@ -191,6 +196,8 @@ def run_document_filter(payload: dict[str, Any]) -> dict[str, Any]:
         f"dataset source: {normalized['dataset_name']}",
         f"selection_mode: {selection_mode}",
     ]
+    if query_tokens:
+        notes.append(f"match_mode: {normalized['match_mode']}")
 
     return {
         "notes": notes,
@@ -199,6 +206,7 @@ def run_document_filter(payload: dict[str, Any]) -> dict[str, Any]:
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
             "query": normalized["query"],
+            "match_mode": normalized["match_mode"],
             "summary": {
                 "input_row_count": len(selected_rows),
                 "filtered_row_count": len(filtered_indices),

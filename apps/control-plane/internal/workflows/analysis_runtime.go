@@ -576,7 +576,7 @@ func workflowResolvedTextColumn(inputs map[string]any, version domain.DatasetVer
 		return defaultTextColumn
 	}
 	rawTextColumn := workflowMetadataString(version.Metadata, "raw_text_column", workflowMetadataString(version.Metadata, "text_column", "text"))
-	if version.PrepareStatus == "ready" && text == rawTextColumn {
+	if version.PrepareStatus == "ready" && (text == rawTextColumn || (text == "text" && rawTextColumn != "text")) {
 		return defaultTextColumn
 	}
 	return text
