@@ -140,7 +140,7 @@ func (s *DatasetService) GetDatasetBuildJob(projectID, jobID string) (domain.Dat
 		}
 		return domain.DatasetBuildJob{}, err
 	}
-	return job, nil
+	return withBuildJobDiagnostics(job), nil
 }
 
 func (s *DatasetService) ListDatasetBuildJobs(projectID, datasetID, datasetVersionID string) (domain.DatasetBuildJobListResponse, error) {
@@ -151,6 +151,9 @@ func (s *DatasetService) ListDatasetBuildJobs(projectID, datasetID, datasetVersi
 	items, err := s.store.ListDatasetBuildJobs(projectID, version.DatasetVersionID)
 	if err != nil {
 		return domain.DatasetBuildJobListResponse{}, err
+	}
+	for index := range items {
+		items[index] = withBuildJobDiagnostics(items[index])
 	}
 	return domain.DatasetBuildJobListResponse{Items: items}, nil
 }
@@ -259,4 +262,28 @@ func normalizeTriggeredBy(value string) string {
 		return "system"
 	}
 	return trimmed
+}
+
+func withBuildJobDiagnostics(job domain.DatasetBuildJob) domain.DatasetBuildJob {
+	retryCount := job.Attempt - 1
+	if retryCount < 0 {
+		retryCount = 0
+	}
+	job.Diagnostics = &domain.BuildJobDiagnostics{
+		RetryCount:            retryCount,
+		LastErrorType:         cloneStringPointer(job.LastErrorType),
+		LastErrorMessage:      cloneStringPointer(job.ErrorMessage),
+		WorkflowID:            cloneStringPointer(job.WorkflowID),
+		WorkflowRunID:         cloneStringPointer(job.WorkflowRunID),
+		ResumedExecutionCount: job.ResumedExecutionCount,
+	}
+	return job
+}
+
+func cloneStringPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	return &trimmed
 }

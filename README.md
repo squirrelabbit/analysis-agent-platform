@@ -37,12 +37,15 @@
 - dataset version에는 현재 `profile`을 붙일 수 있고, `prepare_prompt_version`, `sentiment_prompt_version`, `regex_rule_names`, `garbage_rule_names`, `embedding_model`을 데이터셋별 기본 recipe로 저장한다.
 - 기본 recipe도 하드코딩 대신 [dataset_profiles.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/dataset_profiles.json) registry에서 관리한다. `profile`을 명시하지 않으면 data type 기준 기본 profile이 resolve되어 dataset version에 실제로 저장된다.
 - prompt version 이름은 현재 [config/prompts](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts) 아래 Markdown template 파일과 1:1로 대응된다. 예를 들어 `dataset-prepare-anthropic-v2`는 [dataset-prepare-anthropic-v2.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts/dataset-prepare-anthropic-v2.md)를 읽는다.
+- `GET /dataset_profiles/validate`는 현재 profile registry, prompt template front matter, worker rule catalog를 함께 읽어 prompt/rule 오타와 drift를 사전에 검증한다.
 - dataset version 생성/업로드 시 현재 `prepare`는 기본적으로 async build job을 자동 enqueue하고, execution은 필요한 step에 따라 `sentiment`, `embedding`을 자동으로 먼저 준비한 뒤 진행한다. build가 끝나면 같은 dataset version을 기다리던 execution을 자동으로 다시 enqueue한다. `waiting`은 자동 orchestration으로 흡수하지 못한 예외 상황에 가깝다.
 - dataset build에는 현재 `prepare_jobs`, `sentiment_jobs`, `embedding_jobs` async API와 `dataset_build_jobs` 조회 API가 추가돼 long-running build를 별도 추적할 수 있고, 실행은 Temporal workflow가 담당한다.
 - Temporal build workflow는 현재 별도 build queue를 사용한다. 기본값은 `TEMPORAL_BUILD_TASK_QUEUE=<TEMPORAL_TASK_QUEUE>-build`이고, build job 메타데이터에는 `workflow_id`, `workflow_run_id`, `attempt`, `last_error_type`, `resumed_execution_count`가 남는다.
 - build activity 정책은 현재 `prepare=20분/최대 4회`, `sentiment=45분/최대 4회`, `embedding=60분/최대 3회`이고, backoff는 `10초 -> x2 -> 최대 5분`이다. worker HTTP timeout은 `prepare=10분`, `sentiment=30분`, `embedding=45분`으로 분리했다.
 - build worker 동시성 기본값은 현재 `analysis activity=8`, `build activity=4`, `prepare slot=3`, `sentiment slot=2`, `embedding slot=1`이다. 환경변수는 `TEMPORAL_ANALYSIS_MAX_CONCURRENT_ACTIVITIES`, `TEMPORAL_BUILD_MAX_CONCURRENT_ACTIVITIES`, `DATASET_BUILD_PREPARE_MAX_CONCURRENT`, `DATASET_BUILD_SENTIMENT_MAX_CONCURRENT`, `DATASET_BUILD_EMBEDDING_MAX_CONCURRENT`를 사용한다.
 - control plane은 현재 기동 시 startup reconciliation을 수행한다. 이전 실행에서 남아 있던 `queued/running` dataset build job은 다시 dispatch하고, `queued/running` execution은 다시 enqueue하며, `waiting` execution은 dataset dependency를 다시 계산해 resume 가능 여부를 재평가한다.
+- build job 응답에는 현재 `diagnostics.retry_count`, `diagnostics.last_error_message`, `diagnostics.workflow_id`, `diagnostics.workflow_run_id`, `diagnostics.resumed_execution_count`가 추가로 내려간다.
+- execution/list/result 응답에는 현재 `diagnostics.event_count`, `diagnostics.latest_event_type`, `diagnostics.latest_event_message`, `diagnostics.failure_reason`, `diagnostics.waiting`가 함께 내려간다.
 - 저장소에는 축제 질문 기준 strict 시나리오 import fixture [festival_scenarios.import.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/testdata/festival_scenarios.import.json) 와 매핑 설명 [scenario_templates.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/skill/scenario_templates.md) 가 포함돼 있다.
 - `garbage_filter`는 execution 안에서 실행되면 row 단위 결과를 `rows.parquet` sidecar로 저장하고, execution artifact JSON에는 summary와 `artifact_ref`만 남긴다.
 - `dataset_prepare`, `sentiment_label` 기본 출력은 각각 `prepared.parquet`, `sentiment.parquet`이고, `embedding` 운영 기본 출력은 `embeddings.index.parquet + pgvector`다.
@@ -251,7 +254,7 @@ Support skill:
   - smoke script는 source file을 `/uploads`로 올린 뒤 dataset version을 만들어 host/container 경로 차이를 줄인다.
   - 이번 turn 기준 `smoke_semantic.sh`는 새 compose 이미지에서 다시 실행해 통과했다.
   - 이번 turn의 compose 실행에서 `smoke_semantic.sh`, `smoke_cluster.sh`를 `embedding_model=intfloat/multilingual-e5-small` 기준으로 다시 실행해 `embedding_index_backend=pgvector`, `embedding_index_source_format=parquet`, `embedding_vector_dim=384`, `retrieval_backend=pgvector`, `embedding_source_backend=pgvector`, `cluster_similarity_backend=dense-hybrid`, `dominant_cluster_label=결제 / 오류`를 확인했다.
-  - `smoke_auto_resume_sentiment.sh`는 `festival.csv` 기준으로 `prepare -> sentiment -> auto resume -> completed`를 검증한다.
+  - `smoke_auto_resume_sentiment.sh`는 `issues_sentiment.csv` 기준으로 `prepare -> sentiment -> auto resume -> completed`를 검증한다.
   - `smoke_auto_resume_embedding.sh`는 `issues.csv` 기준으로 `prepare -> embedding -> auto resume -> completed`와 `selection_source=semantic_search`를 검증한다.
   - 별도 컨테이너 검증과 end-to-end smoke 모두에서 `intfloat/multilingual-e5-small` local model download와 `fastembed`, `384차원` dense embedding 생성을 확인했다.
   - Python unit test에는 generic overlap fixture를 추가해 `dense-hybrid`가 `결제/로그인/배송`처럼 공통 표현이 많은 데이터에서도 `3개 군집`으로 분리되는 케이스를 고정했다.
@@ -260,6 +263,7 @@ Support skill:
 확인 필요:
 - `pgvector` 이미지 전환 뒤 기존 Postgres volume에서 collation version mismatch warning이 관찰됐다.
 - `embedding_cluster`는 현재 `pgvector` 우선 경로에서 dense vector가 있으면 `dense-hybrid` similarity를 쓰고, 필요 시에만 JSONL/token-overlap fallback을 사용한다. generic overlap guardrail fixture는 추가됐지만 dense-only clustering 품질 기준은 아직 별도 검증이 더 필요하다.
+- 운영 중 `build failed`, `execution waiting`, `execution failed` 대응 절차는 [recovery_guide.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/recovery_guide.md)에 정리했다.
 - OpenAI key를 넣은 dense embedding end-to-end smoke는 이번 turn에 재현하지 않았다. 코드 경로와 unit test는 반영돼 있다.
 
 개발 메모:

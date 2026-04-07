@@ -1,3 +1,10 @@
+---
+title: Sentiment row v1
+operation: sentiment
+status: active
+summary: 고객 피드백 감성 5분류를 위한 기본 row 단위 프롬프트.
+---
+
 ## Task
 
 You are labeling sentiment for customer feedback or issue text.

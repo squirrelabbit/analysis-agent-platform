@@ -5,6 +5,7 @@ import json
 import math
 import re
 from collections import Counter
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,8 @@ from .rule_config import (
 )
 
 _KIWI_INSTANCES: dict[str, Any] = {}
+_ROW_CACHE: "OrderedDict[tuple[str, int, int], list[dict[str, Any]]]" = OrderedDict()
+_ROW_CACHE_MAX_ENTRIES = 8
 
 
 def _iter_documents(dataset_name: str, text_column: str) -> list[str]:
@@ -47,16 +50,30 @@ def _iter_documents(dataset_name: str, text_column: str) -> list[str]:
 
 def _iter_rows(dataset_name: str) -> list[dict[str, Any]]:
     path = Path(dataset_name)
+    stat = path.stat()
+    cache_key = (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+    cached_rows = _ROW_CACHE.get(cache_key)
+    if cached_rows is not None:
+        _ROW_CACHE.move_to_end(cache_key)
+        return [dict(row) for row in cached_rows]
+
     suffix = path.suffix.lower()
     if suffix == ".csv":
-        return _read_csv_rows(path)
-    if suffix == ".jsonl":
-        return _read_jsonl_rows(path)
-    if suffix == ".parquet":
-        return _read_parquet_rows(path)
-    if suffix == ".txt":
-        return [{"text": line.strip()} for line in path.read_text(encoding="utf-8").splitlines()]
-    raise ValueError("dataset_name must point to a .csv, .jsonl, .parquet, or .txt file")
+        rows = _read_csv_rows(path)
+    elif suffix == ".jsonl":
+        rows = _read_jsonl_rows(path)
+    elif suffix == ".parquet":
+        rows = _read_parquet_rows(path)
+    elif suffix == ".txt":
+        rows = [{"text": line.strip()} for line in path.read_text(encoding="utf-8").splitlines()]
+    else:
+        raise ValueError("dataset_name must point to a .csv, .jsonl, .parquet, or .txt file")
+
+    _ROW_CACHE[cache_key] = rows
+    _ROW_CACHE.move_to_end(cache_key)
+    while len(_ROW_CACHE) > _ROW_CACHE_MAX_ENTRIES:
+        _ROW_CACHE.popitem(last=False)
+    return [dict(row) for row in rows]
 
 
 def _read_csv_rows(path: Path) -> list[dict[str, Any]]:

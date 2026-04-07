@@ -9,6 +9,7 @@ from ..config import load_config
 from ..prompt_registry import (
     render_prepare_batch_prompt,
     render_prepare_prompt,
+    render_sentiment_batch_prompt,
     render_sentiment_prompt,
 )
 from ..skill_bundle import plan_skill_names
@@ -747,6 +748,44 @@ def _label_sentiment(text: str, *, client: AnthropicClient | None, prompt_versio
     return _label_sentiment_fallback(text)
 
 
+def _label_sentiments(
+    texts: list[str],
+    *,
+    client: AnthropicClient | None,
+    batch_size: int = 1,
+    prompt_version_override: str = "",
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    normalized_texts = [str(text or "") for text in texts]
+    if not normalized_texts:
+        return [], _free_usage_metadata(
+            provider="deterministic-fallback",
+            model="sentiment-fallback-v1",
+            operation="sentiment_label",
+            request_count=0,
+            cost_status="free_fallback",
+        )
+
+    effective_batch_size = max(1, int(batch_size))
+    if client and client.is_enabled():
+        try:
+            return _label_sentiments_with_llm(
+                client,
+                normalized_texts,
+                batch_size=effective_batch_size,
+                prompt_version_override=prompt_version_override,
+            )
+        except Exception as exc:
+            labeled_rows = [_label_sentiment_fallback(text) for text in normalized_texts]
+            for labeled in labeled_rows:
+                labeled["reason"] = f"{labeled['reason']} (llm_fallback: {exc})"
+            usage = _merge_usage_records([labeled.get("usage") or {} for labeled in labeled_rows])
+            return labeled_rows, usage
+
+    labeled_rows = [_label_sentiment_fallback(text) for text in normalized_texts]
+    usage = _merge_usage_records([labeled.get("usage") or {} for labeled in labeled_rows])
+    return labeled_rows, usage
+
+
 def _label_sentiment_with_llm(
     client: AnthropicClient,
     text: str,
@@ -775,6 +814,78 @@ def _label_sentiment_with_llm(
             model=client._config.model,
         ),
     }
+
+
+def _label_sentiments_with_llm(
+    client: AnthropicClient,
+    texts: list[str],
+    *,
+    batch_size: int = 1,
+    prompt_version_override: str = "",
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not texts:
+        return [], _free_usage_metadata(
+            provider="anthropic",
+            model=client._config.model,
+            operation="sentiment_label",
+            request_count=0,
+            cost_status="not_configured",
+        )
+
+    config = load_config()
+    usage_records: list[dict[str, Any] | None] = []
+    labeled_rows: list[dict[str, Any]] = []
+    effective_batch_size = max(1, int(batch_size))
+    for start in range(0, len(texts), effective_batch_size):
+        batch = texts[start : start + effective_batch_size]
+        if not batch:
+            continue
+        if len(batch) == 1:
+            labeled = _label_sentiment_with_llm(
+                client,
+                batch[0],
+                prompt_version_override=prompt_version_override,
+            )
+            labeled_rows.append(labeled)
+            usage_records.append(labeled.get("usage") or {})
+            continue
+
+        prompt_version, prompt = render_sentiment_batch_prompt(
+            batch,
+            version=prompt_version_override or config.anthropic_sentiment_batch_prompt_version,
+        )
+        response = client.create_json_response(prompt=prompt, schema=_sentiment_batch_schema(), max_tokens=800)
+        rows = list(response.body.get("rows") or [])
+        if len(rows) != len(batch):
+            raise ValueError(f"sentiment batch rows mismatch: expected {len(batch)}, got {len(rows)}")
+        for item in rows:
+            label = str(item.get("label") or "unknown").strip().lower()
+            if label not in SENTIMENT_LABELS:
+                label = "unknown"
+            confidence = float(item.get("confidence") or 0.0)
+            confidence = max(0.0, min(1.0, round(confidence, 4)))
+            labeled_rows.append(
+                {
+                    "label": label,
+                    "confidence": confidence,
+                    "reason": str(item.get("reason") or "").strip(),
+                    "prompt_version": prompt_version,
+                    "usage": _free_usage_metadata(
+                        provider="anthropic",
+                        model=client._config.model,
+                        operation="sentiment_label",
+                        cost_status="batched_in_request",
+                    ),
+                }
+            )
+        usage_records.append(
+            _anthropic_usage_metadata(
+                response.usage,
+                operation="sentiment_label",
+                model=client._config.model,
+            )
+        )
+    return labeled_rows, _merge_usage_records(usage_records)
 
 
 def _label_sentiment_fallback(text: str) -> dict[str, Any]:
@@ -969,6 +1080,20 @@ def _sentiment_schema() -> dict[str, Any]:
     }
 
 
+def _sentiment_batch_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "rows": {
+                "type": "array",
+                "items": _sentiment_schema(),
+            }
+        },
+        "required": ["rows"],
+        "additionalProperties": False,
+    }
+
+
 def _normalize_planner_response(
     response: dict[str, Any],
     payload: dict[str, Any],
@@ -1023,7 +1148,9 @@ __all__ = [
     "_evidence_schema",
     "_free_usage_metadata",
     "_label_sentiment",
+    "_label_sentiments",
     "_label_sentiment_fallback",
+    "_label_sentiments_with_llm",
     "_label_sentiment_with_llm",
     "_matches_sentiment_term",
     "_merge_usage_records",
@@ -1039,4 +1166,5 @@ __all__ = [
     "_run_evidence_pack_with_llm",
     "_run_planner_with_llm",
     "_sentiment_schema",
+    "_sentiment_batch_schema",
 ]

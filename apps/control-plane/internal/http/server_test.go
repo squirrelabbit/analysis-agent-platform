@@ -106,6 +106,13 @@ func TestControlPlaneFlow(t *testing.T) {
 	if resultV1["schema_version"] != "execution-result-v1" {
 		t.Fatalf("unexpected result_v1 schema version: %+v", resultV1)
 	}
+	diagnostics, ok := result["diagnostics"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected execution diagnostics: %+v", result)
+	}
+	if diagnostics["event_count"].(float64) < 1 {
+		t.Fatalf("expected diagnostics event_count >= 1: %+v", diagnostics)
+	}
 
 	rerun := map[string]any{}
 	readJSONResponse(
@@ -208,6 +215,9 @@ func TestExecutionListAndReportDraftEndpoints(t *testing.T) {
 	items, ok := listResponse["items"].([]any)
 	if !ok || len(items) != 1 {
 		t.Fatalf("expected one execution list item: %+v", listResponse)
+	}
+	if diagnostics, ok := items[0].(map[string]any)["diagnostics"].(map[string]any); !ok || diagnostics["event_count"] == nil {
+		t.Fatalf("expected execution diagnostics in list item: %+v", listResponse)
 	}
 
 	reportDraft := map[string]any{}
@@ -320,6 +330,125 @@ func TestScenarioEndpoints(t *testing.T) {
 	)
 	if loaded["user_query"] != "이번 벚꽃 축제 반응 어때?" {
 		t.Fatalf("unexpected loaded scenario: %+v", loaded)
+	}
+}
+
+func TestListAndProfileValidationEndpoints(t *testing.T) {
+	promptsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(promptsDir, "dataset-prepare-anthropic-v1.md"), []byte("---\ntitle: Prepare\noperation: prepare\nstatus: active\nsummary: prepare\n---\n{{raw_text}}"), 0o644); err != nil {
+		t.Fatalf("unexpected write prompt error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(promptsDir, "sentiment-anthropic-v1.md"), []byte("---\ntitle: Sentiment\noperation: sentiment\nstatus: active\nsummary: sentiment\n---\n{{text}}"), 0o644); err != nil {
+		t.Fatalf("unexpected write prompt error: %v", err)
+	}
+	profilesPath := filepath.Join(t.TempDir(), "dataset_profiles.json")
+	if err := os.WriteFile(profilesPath, []byte(`{
+  "defaults":{"unstructured":"default-unstructured-v1"},
+  "profiles":{
+    "default-unstructured-v1":{
+      "profile_id":"default-unstructured-v1",
+      "prepare_prompt_version":"dataset-prepare-anthropic-v1",
+      "sentiment_prompt_version":"sentiment-anthropic-v1",
+      "regex_rule_names":["media_placeholder"],
+      "garbage_rule_names":["ad_marker"]
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatalf("unexpected write profile registry error: %v", err)
+	}
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"prompt_catalog": []map[string]any{
+				{"version": "dataset-prepare-anthropic-v1", "title": "Prepare", "operation": "prepare", "status": "active", "summary": "prepare"},
+				{"version": "sentiment-anthropic-v1", "title": "Sentiment", "operation": "sentiment", "status": "active", "summary": "sentiment"},
+			},
+			"rule_catalog": map[string]any{
+				"available_prepare_regex_rule_names": []string{"media_placeholder"},
+				"default_prepare_regex_rule_names":   []string{"media_placeholder"},
+				"available_garbage_rule_names":       []string{"ad_marker"},
+				"default_garbage_rule_names":         []string{"ad_marker"},
+			},
+		})
+	}))
+	defer worker.Close()
+
+	server := NewServer(config.Config{
+		BindAddr:            ":0",
+		StoreBackend:        "memory",
+		WorkflowEngine:      "noop",
+		DatasetProfilesPath: profilesPath,
+		PromptTemplatesDir:  promptsDir,
+		PythonAIWorkerURL:   worker.URL,
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"list-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	projectList := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/projects", "", http.StatusOK, &projectList)
+	if items, ok := projectList["items"].([]any); !ok || len(items) != 1 {
+		t.Fatalf("expected one project in list: %+v", projectList)
+	}
+
+	dataset := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets",
+		`{"name":"issues","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&dataset,
+	)
+	datasetID := dataset["dataset_id"].(string)
+
+	datasetList := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/projects/"+projectID+"/datasets", "", http.StatusOK, &datasetList)
+	if items, ok := datasetList["items"].([]any); !ok || len(items) != 1 {
+		t.Fatalf("expected one dataset in list: %+v", datasetList)
+	}
+
+	version := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"issues.csv","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&version,
+	)
+
+	versionList := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		"",
+		http.StatusOK,
+		&versionList,
+	)
+	if items, ok := versionList["items"].([]any); !ok || len(items) != 1 {
+		t.Fatalf("expected one dataset version in list: %+v", versionList)
+	}
+
+	validation := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/dataset_profiles/validate", "", http.StatusOK, &validation)
+	if validation["valid"] != true {
+		t.Fatalf("expected valid dataset profile validation: %+v", validation)
+	}
+	registry := validation["registry"].(map[string]any)
+	if registry["source_path"] != profilesPath {
+		t.Fatalf("unexpected profile validation registry source: %+v", registry)
+	}
+	if promptCatalog, ok := registry["prompt_catalog"].([]any); !ok || len(promptCatalog) != 2 {
+		t.Fatalf("expected prompt catalog metadata: %+v", registry)
+	}
+	if ruleCatalog, ok := registry["rule_catalog"].(map[string]any); !ok || len(ruleCatalog) == 0 {
+		t.Fatalf("expected rule catalog metadata: %+v", registry)
 	}
 }
 
@@ -743,6 +872,9 @@ func TestDatasetBuildJobEndpoints(t *testing.T) {
 	if job["completed_at"] == nil {
 		t.Fatalf("expected completed_at in build job: %+v", job)
 	}
+	if diagnostics, ok := job["diagnostics"].(map[string]any); !ok || diagnostics["retry_count"] == nil {
+		t.Fatalf("expected build job diagnostics: %+v", job)
+	}
 
 	listResponse := map[string]any{}
 	readJSONResponse(
@@ -757,6 +889,9 @@ func TestDatasetBuildJobEndpoints(t *testing.T) {
 	items := listResponse["items"].([]any)
 	if len(items) != 1 {
 		t.Fatalf("unexpected build job list: %+v", listResponse)
+	}
+	if diagnostics, ok := items[0].(map[string]any)["diagnostics"].(map[string]any); !ok || diagnostics["retry_count"] == nil {
+		t.Fatalf("expected build job diagnostics in list: %+v", listResponse)
 	}
 }
 

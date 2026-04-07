@@ -4,6 +4,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from .planner import run_planner
+from .prompt_registry import prompt_catalog
+from .runtime.rule_config import (
+    resolve_default_garbage_rule_names,
+    resolve_default_prepare_regex_rule_names,
+    resolve_garbage_rules,
+    resolve_prepare_regex_rules,
+)
 from .skill_bundle import bundle_version, capability_skills
 from .skills.core import (
     run_evidence_pack,
@@ -54,6 +61,13 @@ def capability_payload() -> dict[str, Any]:
             {"name": item.name, "description": item.description}
             for item in supported_capabilities()
         ],
+        "prompt_catalog": prompt_catalog(),
+        "rule_catalog": {
+            "available_prepare_regex_rule_names": sorted(resolve_prepare_regex_rules().keys()),
+            "default_prepare_regex_rule_names": resolve_default_prepare_regex_rule_names(),
+            "available_garbage_rule_names": sorted(resolve_garbage_rules().keys()),
+            "default_garbage_rule_names": resolve_default_garbage_rule_names(),
+        },
     }
 
 

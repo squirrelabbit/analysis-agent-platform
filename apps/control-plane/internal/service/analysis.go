@@ -332,7 +332,7 @@ func (s *AnalysisService) GetExecution(projectID, executionID string) (domain.Ex
 		}
 		return domain.ExecutionSummary{}, err
 	}
-	return execution, nil
+	return withExecutionDiagnostics(execution), nil
 }
 
 func (s *AnalysisService) ListExecutions(projectID string) (domain.ExecutionListResponse, error) {
@@ -348,7 +348,10 @@ func (s *AnalysisService) ListExecutions(projectID string) (domain.ExecutionList
 	}
 	items := make([]domain.ExecutionListItem, 0, len(executions))
 	for _, execution := range executions {
-		items = append(items, executionresult.BuildListItem(execution))
+		execution = withExecutionDiagnostics(execution)
+		item := executionresult.BuildListItem(execution)
+		item.Diagnostics = execution.Diagnostics
+		items = append(items, item)
 	}
 	return domain.ExecutionListResponse{Items: items}, nil
 }
@@ -389,6 +392,7 @@ func (s *AnalysisService) BuildExecutionResult(projectID, executionID string) (d
 		Artifacts:   execution.Artifacts,
 		Contract:    contract,
 		ResultV1:    buildExecutionResultV1(execution, contract),
+		Diagnostics: execution.Diagnostics,
 	}, nil
 }
 
@@ -432,6 +436,46 @@ func (s *AnalysisService) CreateReportDraft(projectID string, input domain.Repor
 	return draft, nil
 }
 
+func withExecutionDiagnostics(execution domain.ExecutionSummary) domain.ExecutionSummary {
+	diagnostics := &domain.ExecutionDiagnostics{
+		EventCount: len(execution.Events),
+	}
+	if len(execution.Events) > 0 {
+		latest := execution.Events[len(execution.Events)-1]
+		diagnostics.LatestEventType = strings.TrimSpace(latest.EventType)
+		diagnostics.LatestEventMessage = strings.TrimSpace(latest.Message)
+	}
+	for index := len(execution.Events) - 1; index >= 0; index-- {
+		event := execution.Events[index]
+		if event.EventType == "WORKFLOW_FAILED" {
+			failureReason := strings.TrimSpace(event.Message)
+			if failureReason == "" {
+				failureReason = strings.TrimSpace(anyStringValue(event.Payload["error"]))
+			}
+			diagnostics.FailureReason = failureReason
+			break
+		}
+	}
+	for index := len(execution.Events) - 1; index >= 0; index-- {
+		event := execution.Events[index]
+		if event.EventType != "WORKFLOW_WAITING" {
+			continue
+		}
+		waitingFor := strings.TrimSpace(anyStringValue(event.Payload["waiting_for"]))
+		reason := strings.TrimSpace(anyStringValue(event.Payload["reason"]))
+		if waitingFor == "" && reason == "" {
+			continue
+		}
+		diagnostics.Waiting = &domain.ExecutionWaitingState{
+			WaitingFor: waitingFor,
+			Reason:     reason,
+		}
+		break
+	}
+	execution.Diagnostics = diagnostics
+	return execution
+}
+
 func (s *AnalysisService) GetReportDraft(projectID, draftID string) (domain.ReportDraft, error) {
 	draft, err := s.store.GetReportDraft(projectID, draftID)
 	if err != nil {
@@ -459,6 +503,20 @@ func optionalStringValue(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+func anyStringValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case *string:
+		return optionalStringValue(typed)
+	default:
+		return fmt.Sprintf("%v", value)
+	}
 }
 
 func latestCompletedStepHooks(events []domain.ExecutionEvent) any {

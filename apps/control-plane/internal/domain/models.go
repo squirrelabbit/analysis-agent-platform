@@ -14,6 +14,10 @@ type ProjectCreateRequest struct {
 	Description *string `json:"description,omitempty"`
 }
 
+type ProjectListResponse struct {
+	Items []Project `json:"items"`
+}
+
 type Scenario struct {
 	ScenarioID     string         `json:"scenario_id"`
 	ProjectID      string         `json:"project_id"`
@@ -96,6 +100,10 @@ type DatasetCreateRequest struct {
 	DataType    *string `json:"data_type,omitempty"`
 }
 
+type DatasetListResponse struct {
+	Items []Dataset `json:"items"`
+}
+
 type DatasetProfile struct {
 	ProfileID              string   `json:"profile_id"`
 	PreparePromptVersion   *string  `json:"prepare_prompt_version,omitempty"`
@@ -145,6 +153,10 @@ type DatasetVersionCreateRequest struct {
 	EmbeddingModel    *string         `json:"embedding_model,omitempty"`
 }
 
+type DatasetVersionListResponse struct {
+	Items []DatasetVersion `json:"items"`
+}
+
 type DatasetPrepareRequest struct {
 	TextColumn *string `json:"text_column,omitempty"`
 	OutputPath *string `json:"output_path,omitempty"`
@@ -167,27 +179,77 @@ type DatasetSentimentBuildRequest struct {
 }
 
 type DatasetBuildJob struct {
-	JobID                 string         `json:"job_id"`
-	ProjectID             string         `json:"project_id"`
-	DatasetID             string         `json:"dataset_id"`
-	DatasetVersionID      string         `json:"dataset_version_id"`
-	BuildType             string         `json:"build_type"`
-	Status                string         `json:"status"`
-	Request               map[string]any `json:"request,omitempty"`
-	TriggeredBy           string         `json:"triggered_by,omitempty"`
-	WorkflowID            *string        `json:"workflow_id,omitempty"`
-	WorkflowRunID         *string        `json:"workflow_run_id,omitempty"`
-	Attempt               int            `json:"attempt"`
-	LastErrorType         *string        `json:"last_error_type,omitempty"`
-	ResumedExecutionCount int            `json:"resumed_execution_count"`
-	CreatedAt             time.Time      `json:"created_at"`
-	StartedAt             *time.Time     `json:"started_at,omitempty"`
-	CompletedAt           *time.Time     `json:"completed_at,omitempty"`
-	ErrorMessage          *string        `json:"error_message,omitempty"`
+	JobID                 string               `json:"job_id"`
+	ProjectID             string               `json:"project_id"`
+	DatasetID             string               `json:"dataset_id"`
+	DatasetVersionID      string               `json:"dataset_version_id"`
+	BuildType             string               `json:"build_type"`
+	Status                string               `json:"status"`
+	Request               map[string]any       `json:"request,omitempty"`
+	TriggeredBy           string               `json:"triggered_by,omitempty"`
+	WorkflowID            *string              `json:"workflow_id,omitempty"`
+	WorkflowRunID         *string              `json:"workflow_run_id,omitempty"`
+	Attempt               int                  `json:"attempt"`
+	LastErrorType         *string              `json:"last_error_type,omitempty"`
+	ResumedExecutionCount int                  `json:"resumed_execution_count"`
+	CreatedAt             time.Time            `json:"created_at"`
+	StartedAt             *time.Time           `json:"started_at,omitempty"`
+	CompletedAt           *time.Time           `json:"completed_at,omitempty"`
+	ErrorMessage          *string              `json:"error_message,omitempty"`
+	Diagnostics           *BuildJobDiagnostics `json:"diagnostics,omitempty"`
 }
 
 type DatasetBuildJobListResponse struct {
 	Items []DatasetBuildJob `json:"items"`
+}
+
+type PromptTemplateMetadata struct {
+	Version       string   `json:"version"`
+	Title         string   `json:"title,omitempty"`
+	Operation     string   `json:"operation,omitempty"`
+	Status        string   `json:"status,omitempty"`
+	Summary       string   `json:"summary,omitempty"`
+	DefaultGroups []string `json:"default_groups,omitempty"`
+}
+
+type DatasetProfileRuleCatalog struct {
+	AvailablePrepareRegexRuleNames []string `json:"available_prepare_regex_rule_names,omitempty"`
+	DefaultPrepareRegexRuleNames   []string `json:"default_prepare_regex_rule_names,omitempty"`
+	AvailableGarbageRuleNames      []string `json:"available_garbage_rule_names,omitempty"`
+	DefaultGarbageRuleNames        []string `json:"default_garbage_rule_names,omitempty"`
+}
+
+type DatasetProfileRegistryView struct {
+	SourcePath              string                     `json:"source_path,omitempty"`
+	PromptTemplatesDir      string                     `json:"prompt_templates_dir,omitempty"`
+	Defaults                map[string]string          `json:"defaults,omitempty"`
+	Profiles                map[string]DatasetProfile  `json:"profiles,omitempty"`
+	AvailablePromptVersions []string                   `json:"available_prompt_versions,omitempty"`
+	PromptCatalog           []PromptTemplateMetadata   `json:"prompt_catalog,omitempty"`
+	RuleCatalog             *DatasetProfileRuleCatalog `json:"rule_catalog,omitempty"`
+}
+
+type DatasetProfileValidationIssue struct {
+	Severity    string `json:"severity"`
+	Code        string `json:"code"`
+	Message     string `json:"message"`
+	Scope       string `json:"scope,omitempty"`
+	ResourceRef string `json:"resource_ref,omitempty"`
+}
+
+type DatasetProfileValidationResponse struct {
+	Registry DatasetProfileRegistryView      `json:"registry"`
+	Valid    bool                            `json:"valid"`
+	Issues   []DatasetProfileValidationIssue `json:"issues,omitempty"`
+}
+
+type BuildJobDiagnostics struct {
+	RetryCount            int     `json:"retry_count"`
+	LastErrorType         *string `json:"last_error_type,omitempty"`
+	LastErrorMessage      *string `json:"last_error_message,omitempty"`
+	WorkflowID            *string `json:"workflow_id,omitempty"`
+	WorkflowRunID         *string `json:"workflow_run_id,omitempty"`
+	ResumedExecutionCount int     `json:"resumed_execution_count"`
 }
 
 type EmbeddingIndexChunk struct {
@@ -276,23 +338,24 @@ type ExecutionEvent struct {
 }
 
 type ExecutionSummary struct {
-	ExecutionID        string             `json:"execution_id"`
-	ProjectID          string             `json:"project_id"`
-	RequestID          string             `json:"request_id"`
-	Plan               SkillPlan          `json:"plan"`
-	Status             string             `json:"status"`
-	CreatedAt          time.Time          `json:"created_at"`
-	EndedAt            *time.Time         `json:"ended_at,omitempty"`
-	RequiredHashes     []string           `json:"required_hashes"`
-	EmbeddingModel     *string            `json:"embedding_model_version,omitempty"`
-	Artifacts          map[string]string  `json:"artifacts"`
-	DatasetVersionID   *string            `json:"dataset_version_id,omitempty"`
-	CodeVersion        *string            `json:"code_version,omitempty"`
-	ParamsHash         *string            `json:"params_hash,omitempty"`
-	SkillBundleVersion *string            `json:"skill_bundle_version,omitempty"`
-	ProfileSnapshot    *DatasetProfile    `json:"profile_snapshot,omitempty"`
-	Events             []ExecutionEvent   `json:"events"`
-	ResultV1Snapshot   *ExecutionResultV1 `json:"-"`
+	ExecutionID        string                `json:"execution_id"`
+	ProjectID          string                `json:"project_id"`
+	RequestID          string                `json:"request_id"`
+	Plan               SkillPlan             `json:"plan"`
+	Status             string                `json:"status"`
+	CreatedAt          time.Time             `json:"created_at"`
+	EndedAt            *time.Time            `json:"ended_at,omitempty"`
+	RequiredHashes     []string              `json:"required_hashes"`
+	EmbeddingModel     *string               `json:"embedding_model_version,omitempty"`
+	Artifacts          map[string]string     `json:"artifacts"`
+	DatasetVersionID   *string               `json:"dataset_version_id,omitempty"`
+	CodeVersion        *string               `json:"code_version,omitempty"`
+	ParamsHash         *string               `json:"params_hash,omitempty"`
+	SkillBundleVersion *string               `json:"skill_bundle_version,omitempty"`
+	ProfileSnapshot    *DatasetProfile       `json:"profile_snapshot,omitempty"`
+	Events             []ExecutionEvent      `json:"events"`
+	ResultV1Snapshot   *ExecutionResultV1    `json:"-"`
+	Diagnostics        *ExecutionDiagnostics `json:"diagnostics,omitempty"`
 }
 
 type ExecutionListItem struct {
@@ -305,6 +368,7 @@ type ExecutionListItem struct {
 	AnswerPreview    *string                `json:"answer_preview,omitempty"`
 	WarningCount     int                    `json:"warning_count"`
 	Waiting          *ExecutionWaitingState `json:"waiting,omitempty"`
+	Diagnostics      *ExecutionDiagnostics  `json:"diagnostics,omitempty"`
 }
 
 type ExecutionListResponse struct {
@@ -333,10 +397,11 @@ type ExecutionRerunResponse struct {
 }
 
 type ExecutionResultResponse struct {
-	ExecutionID string            `json:"execution_id"`
-	Artifacts   map[string]string `json:"artifacts"`
-	Contract    map[string]any    `json:"contract"`
-	ResultV1    ExecutionResultV1 `json:"result_v1"`
+	ExecutionID string                `json:"execution_id"`
+	Artifacts   map[string]string     `json:"artifacts"`
+	Contract    map[string]any        `json:"contract"`
+	ResultV1    ExecutionResultV1     `json:"result_v1"`
+	Diagnostics *ExecutionDiagnostics `json:"diagnostics,omitempty"`
 }
 
 type ReportDraftCreateRequest struct {
@@ -414,6 +479,14 @@ type ExecutionStepResultV1 struct {
 type ExecutionWaitingState struct {
 	WaitingFor string `json:"waiting_for"`
 	Reason     string `json:"reason,omitempty"`
+}
+
+type ExecutionDiagnostics struct {
+	EventCount         int                    `json:"event_count"`
+	LatestEventType    string                 `json:"latest_event_type,omitempty"`
+	LatestEventMessage string                 `json:"latest_event_message,omitempty"`
+	FailureReason      string                 `json:"failure_reason,omitempty"`
+	Waiting            *ExecutionWaitingState `json:"waiting,omitempty"`
 }
 
 type ExecutionDiffStep struct {

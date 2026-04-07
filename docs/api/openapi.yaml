@@ -541,6 +541,18 @@ paths:
                 $ref: "#/components/schemas/DatasetBuildJob"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /dataset_profiles/validate:
+    get:
+      tags: [Datasets]
+      summary: Validate dataset profile registry and prompt/rule references
+      operationId: validateDatasetProfiles
+      responses:
+        "200":
+          description: Dataset profile validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetProfileValidationResponse"
   /projects/{project_id}/analysis_requests:
     post:
       tags: [Analysis]
@@ -1092,6 +1104,92 @@ components:
           type:
             - string
             - "null"
+    PromptTemplateMetadata:
+      type: object
+      properties:
+        version:
+          type: string
+        title:
+          type: string
+        operation:
+          type: string
+        status:
+          type: string
+        summary:
+          type: string
+        default_groups:
+          $ref: "#/components/schemas/StringList"
+      required: [version]
+    DatasetProfileRuleCatalog:
+      type: object
+      properties:
+        available_prepare_regex_rule_names:
+          $ref: "#/components/schemas/StringList"
+        default_prepare_regex_rule_names:
+          $ref: "#/components/schemas/StringList"
+        available_garbage_rule_names:
+          $ref: "#/components/schemas/StringList"
+        default_garbage_rule_names:
+          $ref: "#/components/schemas/StringList"
+    DatasetProfileRegistryView:
+      type: object
+      properties:
+        source_path:
+          type:
+            - string
+            - "null"
+        prompt_templates_dir:
+          type:
+            - string
+            - "null"
+        defaults:
+          additionalProperties:
+            type: string
+          type: object
+        profiles:
+          additionalProperties:
+            $ref: "#/components/schemas/DatasetProfile"
+          type: object
+        available_prompt_versions:
+          $ref: "#/components/schemas/StringList"
+        prompt_catalog:
+          type: array
+          items:
+            $ref: "#/components/schemas/PromptTemplateMetadata"
+        rule_catalog:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetProfileRuleCatalog"
+            - type: "null"
+    DatasetProfileValidationIssue:
+      type: object
+      properties:
+        severity:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+        scope:
+          type:
+            - string
+            - "null"
+        resource_ref:
+          type:
+            - string
+            - "null"
+      required: [severity, code, message]
+    DatasetProfileValidationResponse:
+      type: object
+      properties:
+        registry:
+          $ref: "#/components/schemas/DatasetProfileRegistryView"
+        valid:
+          type: boolean
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetProfileValidationIssue"
+      required: [registry, valid]
     DatasetVersion:
       type: object
       description: |
@@ -1374,6 +1472,10 @@ components:
           type:
             - string
             - "null"
+        diagnostics:
+          anyOf:
+            - $ref: "#/components/schemas/BuildJobDiagnostics"
+            - type: "null"
       required:
         - job_id
         - project_id
@@ -1392,6 +1494,30 @@ components:
           items:
             $ref: "#/components/schemas/DatasetBuildJob"
       required: [items]
+    BuildJobDiagnostics:
+      type: object
+      properties:
+        retry_count:
+          type: integer
+        last_error_type:
+          type:
+            - string
+            - "null"
+        last_error_message:
+          type:
+            - string
+            - "null"
+        workflow_id:
+          type:
+            - string
+            - "null"
+        workflow_run_id:
+          type:
+            - string
+            - "null"
+        resumed_execution_count:
+          type: integer
+      required: [retry_count, resumed_execution_count]
     SkillPlanStep:
       type: object
       properties:
@@ -1608,6 +1734,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ExecutionEvent"
+        diagnostics:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionDiagnostics"
+            - type: "null"
       required:
         - execution_id
         - project_id
@@ -1658,6 +1788,10 @@ components:
         waiting:
           anyOf:
             - $ref: "#/components/schemas/ExecutionWaitingState"
+            - type: "null"
+        diagnostics:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionDiagnostics"
             - type: "null"
       required: [execution_id, status, created_at, warning_count]
     PlanExecuteResponse:
@@ -1716,6 +1850,10 @@ components:
           $ref: "#/components/schemas/AnyMap"
         result_v1:
           $ref: "#/components/schemas/ExecutionResultV1"
+        diagnostics:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionDiagnostics"
+            - type: "null"
       required: [execution_id, artifacts, contract, result_v1]
     ExecutionResultV1:
       type: object
@@ -1813,6 +1951,22 @@ components:
         reason:
           type: string
       required: [waiting_for]
+    ExecutionDiagnostics:
+      type: object
+      properties:
+        event_count:
+          type: integer
+        latest_event_type:
+          type: string
+        latest_event_message:
+          type: string
+        failure_reason:
+          type: string
+        waiting:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionWaitingState"
+            - type: "null"
+      required: [event_count]
     ReportDraftCreateRequest:
       type: object
       properties:

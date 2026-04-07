@@ -116,7 +116,11 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 			return ExecutionRunResult{}, fmt.Errorf("python ai worker returned %d", resp.StatusCode)
 		}
 
-		artifactJSON, err := json.Marshal(taskResponse.Artifact)
+		runtimeArtifact, err := compactPythonArtifactForRuntime(step, taskResponse.Artifact)
+		if err != nil {
+			return ExecutionRunResult{}, err
+		}
+		artifactJSON, err := json.Marshal(runtimeArtifact)
 		if err != nil {
 			return ExecutionRunResult{}, err
 		}
@@ -282,6 +286,70 @@ func compactPythonArtifactForStorage(step domain.SkillPlanStep, artifact map[str
 		return "", err
 	}
 	return string(payload), nil
+}
+
+func compactPythonArtifactForRuntime(step domain.SkillPlanStep, artifact map[string]any) (map[string]any, error) {
+	ref := strings.TrimSpace(stringValue(artifact["artifact_ref"]))
+	if ref == "" {
+		return artifact, nil
+	}
+	switch step.SkillName {
+	case "garbage_filter":
+		return map[string]any{
+			"skill_name":            artifact["skill_name"],
+			"step_id":               artifact["step_id"],
+			"dataset_name":          artifact["dataset_name"],
+			"garbage_rule_names":    artifact["garbage_rule_names"],
+			"artifact_storage_mode": artifact["artifact_storage_mode"],
+			"artifact_ref":          ref,
+			"artifact_format":       artifact["artifact_format"],
+			"row_id_column":         artifact["row_id_column"],
+			"source_index_column":   artifact["source_index_column"],
+			"status_column":         artifact["status_column"],
+			"matched_rules_column":  artifact["matched_rules_column"],
+			"summary":               artifact["summary"],
+			"removed_samples":       artifact["removed_samples"],
+		}, nil
+	case "document_filter":
+		return map[string]any{
+			"skill_name":            artifact["skill_name"],
+			"step_id":               artifact["step_id"],
+			"dataset_name":          artifact["dataset_name"],
+			"query":                 artifact["query"],
+			"match_mode":            artifact["match_mode"],
+			"artifact_storage_mode": artifact["artifact_storage_mode"],
+			"artifact_ref":          ref,
+			"artifact_format":       artifact["artifact_format"],
+			"row_id_column":         artifact["row_id_column"],
+			"source_index_column":   artifact["source_index_column"],
+			"rank_column":           artifact["rank_column"],
+			"score_column":          artifact["score_column"],
+			"summary":               artifact["summary"],
+			"matches":               artifact["matches"],
+		}, nil
+	case "deduplicate_documents":
+		return map[string]any{
+			"skill_name":                    artifact["skill_name"],
+			"step_id":                       artifact["step_id"],
+			"dataset_name":                  artifact["dataset_name"],
+			"artifact_storage_mode":         artifact["artifact_storage_mode"],
+			"artifact_ref":                  ref,
+			"artifact_format":               artifact["artifact_format"],
+			"row_id_column":                 artifact["row_id_column"],
+			"source_index_column":           artifact["source_index_column"],
+			"canonical_row_id_column":       artifact["canonical_row_id_column"],
+			"canonical_source_index_column": artifact["canonical_source_index_column"],
+			"group_id_column":               artifact["group_id_column"],
+			"status_column":                 artifact["status_column"],
+			"similarity_column":             artifact["similarity_column"],
+			"member_count_column":           artifact["member_count_column"],
+			"summary":                       artifact["summary"],
+			"duplicate_records":             artifact["duplicate_records"],
+			"duplicate_groups":              compactDuplicateGroupsPreview(artifact["duplicate_groups"]),
+		}, nil
+	default:
+		return artifact, nil
+	}
 }
 
 func sidecarOutputFileName(skillName string) (string, bool) {

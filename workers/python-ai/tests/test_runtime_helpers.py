@@ -7,6 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pyarrow as pa
+import pyarrow.parquet as pq
+
 from python_ai_worker.runtime.artifacts import (
     _analysis_context_entries,
     _cluster_embedding_records,
@@ -47,6 +50,32 @@ class RuntimeHelperTests(unittest.TestCase):
         result = _selected_source_indices(prior_artifacts)
 
         self.assertEqual(result, {2, 3})
+
+    def test_selected_source_indices_rehydrates_sidecar_filters(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        sidecar_path = temp_dir / "garbage.rows.parquet"
+        pq.write_table(
+            pa.Table.from_pylist(
+                [
+                    {"source_row_index": 1, "filter_status": "retained"},
+                    {"source_row_index": 2, "filter_status": "removed"},
+                    {"source_row_index": 3, "filter_status": "retained"},
+                ]
+            ),
+            sidecar_path,
+        )
+        prior_artifacts = {
+            "filter": {
+                "skill_name": "garbage_filter",
+                "artifact_ref": str(sidecar_path),
+                "source_index_column": "source_row_index",
+                "status_column": "filter_status",
+            }
+        }
+
+        result = _selected_source_indices(prior_artifacts)
+
+        self.assertEqual(result, {1, 3})
 
     def test_select_evidence_candidates_prefers_semantic_search(self) -> None:
         payload = {

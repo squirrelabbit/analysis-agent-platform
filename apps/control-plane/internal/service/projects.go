@@ -45,3 +45,11 @@ func (s *ProjectService) GetProject(projectID string) (domain.Project, error) {
 	}
 	return project, nil
 }
+
+func (s *ProjectService) ListProjects() (domain.ProjectListResponse, error) {
+	items, err := s.store.ListProjects()
+	if err != nil {
+		return domain.ProjectListResponse{}, err
+	}
+	return domain.ProjectListResponse{Items: items}, nil
+}

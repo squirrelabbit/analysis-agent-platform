@@ -1,3 +1,10 @@
+---
+title: Dataset prepare row v2
+operation: prepare
+status: active
+summary: 원문 의미 보존과 complaint detail 보존을 강화한 row 단위 prepare 프롬프트.
+---
+
 ## Task
 
 You are preparing raw VOC or issue text for deterministic downstream analysis.

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from .prompt_registry import (
     DEFAULT_PREPARE_BATCH_PROMPT_VERSION,
     DEFAULT_PREPARE_PROMPT_VERSION,
+    DEFAULT_SENTIMENT_BATCH_PROMPT_VERSION,
     DEFAULT_SENTIMENT_PROMPT_VERSION,
 )
 
@@ -35,6 +36,7 @@ class WorkerConfig:
     anthropic_prepare_prompt_version: str = DEFAULT_PREPARE_PROMPT_VERSION
     anthropic_prepare_batch_prompt_version: str = DEFAULT_PREPARE_BATCH_PROMPT_VERSION
     anthropic_sentiment_prompt_version: str = DEFAULT_SENTIMENT_PROMPT_VERSION
+    anthropic_sentiment_batch_prompt_version: str = DEFAULT_SENTIMENT_BATCH_PROMPT_VERSION
     anthropic_input_price_per_million_tokens: float = 0.0
     anthropic_output_price_per_million_tokens: float = 0.0
     openai_embedding_price_per_million_tokens: float = 0.0
@@ -72,6 +74,10 @@ def load_config() -> WorkerConfig:
         anthropic_prepare_prompt_version=os.getenv("ANTHROPIC_PREPARE_PROMPT_VERSION", DEFAULT_PREPARE_PROMPT_VERSION),
         anthropic_prepare_batch_prompt_version=os.getenv("ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION", DEFAULT_PREPARE_BATCH_PROMPT_VERSION),
         anthropic_sentiment_prompt_version=os.getenv("ANTHROPIC_SENTIMENT_PROMPT_VERSION", DEFAULT_SENTIMENT_PROMPT_VERSION),
+        anthropic_sentiment_batch_prompt_version=os.getenv(
+            "ANTHROPIC_SENTIMENT_BATCH_PROMPT_VERSION",
+            DEFAULT_SENTIMENT_BATCH_PROMPT_VERSION,
+        ),
         anthropic_input_price_per_million_tokens=max(0.0, float(os.getenv("ANTHROPIC_INPUT_PRICE_PER_MILLION_TOKENS", "0"))),
         anthropic_output_price_per_million_tokens=max(0.0, float(os.getenv("ANTHROPIC_OUTPUT_PRICE_PER_MILLION_TOKENS", "0"))),
         openai_embedding_price_per_million_tokens=max(0.0, float(os.getenv("OPENAI_EMBEDDING_PRICE_PER_MILLION_TOKENS", "0"))),

@@ -224,6 +224,21 @@ DRAFT_ID=
 `profile`을 아예 보내지 않으면 data type 기준 기본 profile이 자동으로 resolve되어 dataset version에 저장된다.
 즉 `PROFILE_JSON`은 기본값을 덮고 싶을 때만 넣으면 된다.
 `prepare_prompt_version`, `sentiment_prompt_version` 값은 현재 [config/prompts](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts) 아래 Markdown template 파일명을 그대로 쓴다. 예를 들어 `dataset-prepare-anthropic-v2`는 [dataset-prepare-anthropic-v2.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts/dataset-prepare-anthropic-v2.md)를 뜻한다.
+row prompt version 이름을 profile에 넣어도 batch build 시 대응되는 `*-batch-*` prompt가 있으면 자동으로 그 버전을 사용한다.
+
+profile / prompt / rule 검증:
+
+```bash
+curl -sS "$API/dataset_profiles/validate" | python3 -m json.tool
+```
+
+여기서 확인할 필드:
+
+- `registry.prompt_catalog`
+- `registry.rule_catalog`
+- `issues[].code`
+- `issues[].scope`
+- `issues[].resource_ref`
 
 ### 7-0-a. 시나리오 등록 / 일괄 등록 / 목록 / 상세 조회
 
@@ -519,6 +534,11 @@ curl -sS "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID/bu
 - `items[].attempt`
 - `items[].last_error_type`
 - `items[].resumed_execution_count`
+- `items[].diagnostics.retry_count`
+- `items[].diagnostics.last_error_message`
+- `items[].diagnostics.workflow_id`
+- `items[].diagnostics.workflow_run_id`
+- `items[].diagnostics.resumed_execution_count`
 - `items[].created_at`
 - `items[].started_at`
 - `items[].completed_at`
@@ -532,6 +552,8 @@ BUILD_JOB_ID=
 curl -sS "$API/projects/$PROJECT_ID/dataset_build_jobs/$BUILD_JOB_ID" \
 | python3 -m json.tool
 ```
+
+운영 중 장애 대응 절차는 [recovery_guide.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/recovery_guide.md)를 본다.
 
 비동기 build를 직접 시작할 수도 있다.
 

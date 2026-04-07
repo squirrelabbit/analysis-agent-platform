@@ -7,12 +7,16 @@ from unittest.mock import patch
 
 from python_ai_worker.anthropic_client import AnthropicJSONResponse
 from python_ai_worker.prompt_registry import (
+    available_prompt_versions,
+    prompt_catalog,
     render_prepare_batch_prompt,
     render_prepare_prompt,
+    render_sentiment_batch_prompt,
     render_sentiment_prompt,
 )
 from python_ai_worker.runtime.llm import (
     _anthropic_prepare_client,
+    _label_sentiments_with_llm,
     _label_sentiment_with_llm,
     _prepare_row_with_llm,
     _prepare_rows_with_llm,
@@ -97,6 +101,34 @@ class PromptRegistryTests(unittest.TestCase):
         self.assertIn("Custom prepare prompt", prompt)
         self.assertIn("커스텀 테스트", prompt)
 
+    def test_prompt_catalog_reads_front_matter_and_excludes_non_templates(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        (temp_dir / "README.md").write_text("# readme", encoding="utf-8")
+        (temp_dir / "CHANGELOG.md").write_text("# changelog", encoding="utf-8")
+        (temp_dir / "custom-prepare-v1.md").write_text(
+            "---\n"
+            "title: Custom prepare\n"
+            "operation: prepare\n"
+            "status: experimental\n"
+            "summary: custom summary\n"
+            "---\n\n"
+            "Prompt body {{raw_text}}\n",
+            encoding="utf-8",
+        )
+
+        with patch.dict("os.environ", {"PYTHON_AI_PROMPTS_DIR": str(temp_dir)}, clear=False):
+            versions = available_prompt_versions()
+            catalog = prompt_catalog()
+            version, prompt = render_prepare_prompt("테스트", version="custom-prepare-v1")
+
+        self.assertEqual(versions, ["custom-prepare-v1"])
+        self.assertEqual(catalog[0]["title"], "Custom prepare")
+        self.assertEqual(catalog[0]["operation"], "prepare")
+        self.assertEqual(catalog[0]["status"], "experimental")
+        self.assertEqual(catalog[0]["summary"], "custom summary")
+        self.assertNotIn("title:", prompt)
+        self.assertEqual(version, "custom-prepare-v1")
+
     def test_prepare_row_with_llm_uses_configured_prompt_version(self) -> None:
         client = _RecordingClient(
             {
@@ -174,6 +206,37 @@ class PromptRegistryTests(unittest.TestCase):
 
         self.assertEqual(result["prompt_version"], "sentiment-anthropic-v2")
         self.assertIn("Prefer neutral over negative", client.last_prompt)
+
+    def test_label_sentiments_with_llm_resolves_batch_prompt_from_row_version(self) -> None:
+        client = _RecordingClient(
+            {
+                "rows": [
+                    {"label": "negative", "confidence": 0.8, "reason": "complaint"},
+                    {"label": "neutral", "confidence": 0.7, "reason": "status update"},
+                ]
+            }
+        )
+
+        labels, usage = _label_sentiments_with_llm(
+            client,
+            ["결제 오류가 반복 발생했습니다", "문의 접수 후 확인 중입니다"],
+            batch_size=2,
+            prompt_version_override="sentiment-anthropic-v2",
+        )
+
+        self.assertEqual(labels[0]["prompt_version"], "sentiment-anthropic-batch-v2")
+        self.assertEqual(labels[1]["prompt_version"], "sentiment-anthropic-batch-v2")
+        self.assertIn("batch mode", client.last_prompt)
+        self.assertEqual(usage["total_tokens"], 120)
+
+    def test_render_sentiment_batch_prompt_supports_multiple_versions(self) -> None:
+        version, prompt = render_sentiment_batch_prompt(
+            ["결제 오류가 반복 발생했습니다", "문의 접수 후 확인 중입니다"],
+            version="sentiment-anthropic-v2",
+        )
+
+        self.assertEqual(version, "sentiment-anthropic-batch-v2")
+        self.assertIn("Prefer neutral over negative", prompt)
 
 
 if __name__ == "__main__":

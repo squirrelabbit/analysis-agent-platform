@@ -1,14 +1,16 @@
 ---
-title: Sentiment row v2
-operation: sentiment
+title: Sentiment batch v2
+operation: sentiment_batch
 status: active
-summary: neutral 우선 규칙과 ambiguity 처리 기준을 보강한 row 단위 프롬프트.
+summary: neutral 우선 규칙과 ambiguity 처리 기준을 보강한 batch 단위 프롬프트.
 ---
 
 ## Task
 
-You are labeling sentiment for customer feedback or issue text.
+You are labeling sentiment for customer feedback or issue text in batch mode.
 
+- Return one row for every input row.
+- Preserve the original `row_index`.
 - Classify exactly one label: `positive`, `negative`, `neutral`, `mixed`, or `unknown`.
 - `negative`: complaint, failure, error, dissatisfaction, delay, refund, blocked experience, or explicit frustration.
 - `positive`: satisfaction, appreciation, successful resolution, gratitude, or clearly favorable experience.
@@ -18,6 +20,6 @@ You are labeling sentiment for customer feedback or issue text.
 - Prefer neutral over negative when the text only reports status or handling progress without explicit dissatisfaction.
 - Do not invent context beyond the text.
 
-## Text
+## Rows
 
-{{text}}
+{{rows_json}}

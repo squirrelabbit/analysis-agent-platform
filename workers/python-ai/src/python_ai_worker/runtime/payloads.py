@@ -25,6 +25,7 @@ from .constants import (
 
 DEFAULT_EMBEDDING_CHUNK_MAX_CHARS = 400
 DEFAULT_EMBEDDING_CHUNK_OVERLAP_CHARS = 40
+DEFAULT_SENTIMENT_BATCH_SIZE = 8
 
 
 def _normalize_text_task_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -289,6 +290,7 @@ def _normalize_sentiment_build_payload(payload: dict[str, Any]) -> dict[str, Any
     text_column = str(payload.get("text_column") or "normalized_text").strip()
     model = str(payload.get("model") or "").strip()
     sentiment_prompt_version = str(payload.get("sentiment_prompt_version") or "").strip()
+    sentiment_batch_size = max(1, int(payload.get("sentiment_batch_size") or DEFAULT_SENTIMENT_BATCH_SIZE))
     return {
         "dataset_version_id": str(payload.get("dataset_version_id") or "").strip(),
         "dataset_name": dataset_name,
@@ -296,6 +298,7 @@ def _normalize_sentiment_build_payload(payload: dict[str, Any]) -> dict[str, Any
         "output_path": output_path,
         "model": model,
         "sentiment_prompt_version": sentiment_prompt_version,
+        "sentiment_batch_size": sentiment_batch_size,
     }
 
 

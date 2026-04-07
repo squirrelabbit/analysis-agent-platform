@@ -878,29 +878,62 @@ class TaskTests(unittest.TestCase):
         temp_dir = Path(tempfile.mkdtemp())
         prepared_path = temp_dir / "issues.prepared.parquet"
         sentiment_path = temp_dir / "issues.sentiment.parquet"
-        table = pa.Table.from_pylist([{"normalized_text": "결제 오류가 반복 발생했습니다", "channel": "app"}])
+        table = pa.Table.from_pylist(
+            [
+                {"normalized_text": "결제 오류가 반복 발생했습니다", "channel": "app"},
+                {"normalized_text": "문의 접수 후 확인 중입니다", "channel": "app"},
+            ]
+        )
         pq.write_table(table, prepared_path)
 
         with patch(
             "python_ai_worker.skills.dataset_build.rt._anthropic_prepare_client",
             return_value=self._DummyEnabledClient(),
         ), patch(
-            "python_ai_worker.skills.dataset_build.rt._label_sentiment",
-            return_value={
-                "label": "negative",
-                "confidence": 0.82,
-                "reason": "negative markers detected",
-                "prompt_version": "sentiment-anthropic-v2",
-                "usage": {
+            "python_ai_worker.skills.dataset_build.rt._label_sentiments",
+            return_value=(
+                [
+                    {
+                        "label": "negative",
+                        "confidence": 0.82,
+                        "reason": "negative markers detected",
+                        "prompt_version": "sentiment-anthropic-batch-v2",
+                        "usage": {
+                            "provider": "anthropic",
+                            "model": "claude-test",
+                            "operation": "sentiment_label",
+                            "request_count": 1,
+                            "input_tokens": 12,
+                            "output_tokens": 4,
+                            "total_tokens": 16,
+                        },
+                    },
+                    {
+                        "label": "neutral",
+                        "confidence": 0.74,
+                        "reason": "status update",
+                        "prompt_version": "sentiment-anthropic-batch-v2",
+                        "usage": {
+                            "provider": "anthropic",
+                            "model": "claude-test",
+                            "operation": "sentiment_label",
+                            "request_count": 1,
+                            "input_tokens": 12,
+                            "output_tokens": 4,
+                            "total_tokens": 16,
+                        },
+                    },
+                ],
+                {
                     "provider": "anthropic",
                     "model": "claude-test",
                     "operation": "sentiment_label",
                     "request_count": 1,
-                    "input_tokens": 12,
-                    "output_tokens": 4,
-                    "total_tokens": 16,
+                    "input_tokens": 24,
+                    "output_tokens": 8,
+                    "total_tokens": 32,
                 },
-            },
+            ),
         ) as label_mock:
             result = run_sentiment_label(
                 {
@@ -909,17 +942,20 @@ class TaskTests(unittest.TestCase):
                     "text_column": "normalized_text",
                     "output_path": str(sentiment_path),
                     "sentiment_prompt_version": "sentiment-anthropic-v2",
+                    "sentiment_batch_size": 8,
                 }
             )
 
         _, kwargs = label_mock.call_args
         self.assertEqual(kwargs["prompt_version_override"], "sentiment-anthropic-v2")
-        self.assertEqual(result["artifact"]["sentiment_prompt_version"], "sentiment-anthropic-v2")
+        self.assertEqual(kwargs["batch_size"], 8)
+        self.assertEqual(result["artifact"]["sentiment_prompt_version"], "sentiment-anthropic-batch-v2")
         self.assertTrue(sentiment_path.exists())
         labeled_rows = self._read_parquet_rows(sentiment_path)
         self.assertEqual(labeled_rows[0]["row_id"], "version-sentiment-profile:row:0")
         self.assertEqual(labeled_rows[0]["source_row_index"], 0)
         self.assertEqual(labeled_rows[0]["sentiment_label"], "negative")
+        self.assertEqual(labeled_rows[1]["sentiment_label"], "neutral")
         self.assertNotIn("normalized_text", labeled_rows[0])
 
     def test_issue_sentiment_summary(self) -> None:

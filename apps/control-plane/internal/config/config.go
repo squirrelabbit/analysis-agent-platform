@@ -13,6 +13,7 @@ type Config struct {
 	DatabaseURL                             string
 	OpenAPIPath                             string
 	DatasetProfilesPath                     string
+	PromptTemplatesDir                      string
 	DataRoot                                string
 	UploadRoot                              string
 	ArtifactRoot                            string
@@ -43,6 +44,7 @@ func Load() Config {
 	workspaceRoot := detectWorkspaceRoot()
 	openAPIPath := resolvePath(os.Getenv("OPENAPI_PATH"), filepath.Join(workspaceRoot, "docs", "api", "openapi.yaml"), workspaceRoot)
 	datasetProfilesPath := resolvePath(os.Getenv("DATASET_PROFILES_PATH"), filepath.Join(workspaceRoot, "config", "dataset_profiles.json"), workspaceRoot)
+	promptTemplatesDir := resolvePath(os.Getenv("PYTHON_AI_PROMPTS_DIR"), filepath.Join(workspaceRoot, "config", "prompts"), workspaceRoot)
 	dataRoot := resolvePath(os.Getenv("DATA_ROOT"), filepath.Join(workspaceRoot, "data"), workspaceRoot)
 	uploadRoot := resolvePath(os.Getenv("UPLOAD_ROOT"), filepath.Join(dataRoot, "uploads"), workspaceRoot)
 	artifactRoot := resolvePath(os.Getenv("ARTIFACT_ROOT"), filepath.Join(dataRoot, "artifacts"), workspaceRoot)
@@ -90,6 +92,7 @@ func Load() Config {
 		DatabaseURL:                             os.Getenv("DATABASE_URL"),
 		OpenAPIPath:                             openAPIPath,
 		DatasetProfilesPath:                     datasetProfilesPath,
+		PromptTemplatesDir:                      promptTemplatesDir,
 		DataRoot:                                dataRoot,
 		UploadRoot:                              uploadRoot,
 		ArtifactRoot:                            artifactRoot,
