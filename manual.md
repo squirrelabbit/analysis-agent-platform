@@ -153,6 +153,7 @@ docker compose -f compose.dev.yml exec -T python-ai-worker \
 ./apps/control-plane/dev/smoke_taxonomy.sh
 ./apps/control-plane/dev/smoke_auto_resume_sentiment.sh
 ./apps/control-plane/dev/smoke_auto_resume_embedding.sh
+./apps/control-plane/dev/smoke_final_answer.sh
 ```
 
 요약만 보고 싶으면:
@@ -175,6 +176,7 @@ docker compose -f compose.dev.yml exec -T python-ai-worker \
 | taxonomy | [smoke_taxonomy.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_taxonomy.sh) | `dominant_taxonomy`, `dominant_taxonomy_count`, `taxonomy_count` |
 | auto resume 감성 | [smoke_auto_resume_sentiment.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_auto_resume_sentiment.sh) | `result_status`, `waiting_for`, `resume_triggered_by`, `sentiment_job_status` |
 | auto resume 임베딩 | [smoke_auto_resume_embedding.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_auto_resume_embedding.sh) | `retrieval_backend`, `selection_source`, `waiting_for`, `embedding_job_status` |
+| final answer | [smoke_final_answer.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_final_answer.sh) | `final_answer_status`, `generation_mode`, `evidence_count`, `final_answer_event_type` |
 
 특히 확인할 기대값:
 
@@ -184,11 +186,13 @@ docker compose -f compose.dev.yml exec -T python-ai-worker \
 - `smoke_cluster.sh`: `dominant_cluster_label = 결제 / 오류`
 - `smoke_auto_resume_sentiment.sh`: `waiting_for = sentiment_labels`, `resume_triggered_by = dataset_build_job`
 - `smoke_auto_resume_embedding.sh`: `waiting_for = embeddings`, `resume_triggered_by = dataset_build_job`, `selection_source = semantic_search`
+- `smoke_final_answer.sh`: `final_answer_status = ready`, `generation_mode = llm|fallback`, `final_answer_event_type = FINAL_ANSWER_GENERATED`
 
 auto resume smoke fixture:
 
 - `smoke_auto_resume_sentiment.sh`: [data/issues_sentiment.csv](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/data/issues_sentiment.csv)
 - `smoke_auto_resume_embedding.sh`: [data/issues.csv](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/data/issues.csv)
+- `smoke_final_answer.sh`: [data/issues.csv](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/data/issues.csv)
 
 
 ## 7. 수동 API 테스트

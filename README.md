@@ -252,11 +252,13 @@ Support skill:
   - `smoke_taxonomy.sh`
   - `smoke_auto_resume_sentiment.sh`
   - `smoke_auto_resume_embedding.sh`
+  - `smoke_final_answer.sh`
   - smoke script는 source file을 `/uploads`로 올린 뒤 dataset version을 만들어 host/container 경로 차이를 줄인다.
   - 이번 turn 기준 `smoke_semantic.sh`는 새 compose 이미지에서 다시 실행해 통과했다.
   - 이번 turn의 compose 실행에서 `smoke_semantic.sh`, `smoke_cluster.sh`를 `embedding_model=intfloat/multilingual-e5-small` 기준으로 다시 실행해 `embedding_index_backend=pgvector`, `embedding_index_source_format=parquet`, `embedding_vector_dim=384`, `retrieval_backend=pgvector`, `embedding_source_backend=pgvector`, `cluster_similarity_backend=dense-hybrid`, `dominant_cluster_label=결제 / 오류`를 확인했다.
   - `smoke_auto_resume_sentiment.sh`는 `issues_sentiment.csv` 기준으로 `prepare -> sentiment -> auto resume -> completed`를 검증한다.
   - `smoke_auto_resume_embedding.sh`는 `issues.csv` 기준으로 `prepare -> embedding -> auto resume -> completed`와 `selection_source=semantic_search`를 검증한다.
+  - `smoke_final_answer.sh`는 `issues.csv` 기준으로 `semantic_search -> issue_evidence_summary -> final_answer` 경로와 `FINAL_ANSWER_GENERATED` event를 검증한다.
   - 별도 컨테이너 검증과 end-to-end smoke 모두에서 `intfloat/multilingual-e5-small` local model download와 `fastembed`, `384차원` dense embedding 생성을 확인했다.
   - Python unit test에는 generic overlap fixture를 추가해 `dense-hybrid`가 `결제/로그인/배송`처럼 공통 표현이 많은 데이터에서도 `3개 군집`으로 분리되는 케이스를 고정했다.
   - 별도 평가 자산은 local embedding fixture를 기준으로 `semantic_search` top ranking, `embedding_cluster` membership, `dense-only` 대비 `dense-hybrid` 우위를 리포트할 수 있게 정리했다.

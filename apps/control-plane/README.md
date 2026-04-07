@@ -156,6 +156,7 @@
   - [smoke_taxonomy.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_taxonomy.sh)
   - [smoke_auto_resume_sentiment.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_auto_resume_sentiment.sh)
   - [smoke_auto_resume_embedding.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_auto_resume_embedding.sh)
+  - [smoke_final_answer.sh](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/apps/control-plane/dev/smoke_final_answer.sh)
   - smoke script는 입력 파일을 `/uploads` API로 올린 뒤 dataset version을 생성하므로 host/container 경로 차이에 덜 민감하다.
 
 ## 확인 필요
