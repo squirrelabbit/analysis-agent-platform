@@ -458,8 +458,11 @@ func TestPythonAIClientStoresGarbageFilterAsSidecarRefButKeepsRuntimeArtifactFor
 				}
 			}`))
 		case "/tasks/document_filter":
-			if !strings.Contains(string(body), `"retained_indices":[1,2]`) {
-				t.Fatalf("expected retained_indices in prior artifacts, got: %s", string(body))
+			if !strings.Contains(string(body), `"artifact_ref":"`) {
+				t.Fatalf("expected compacted garbage_filter artifact_ref in prior artifacts, got: %s", string(body))
+			}
+			if strings.Contains(string(body), `"retained_indices":[1,2]`) {
+				t.Fatalf("expected runtime garbage_filter artifact to omit retained_indices, got: %s", string(body))
 			}
 			_, _ = w.Write([]byte(`{
 				"notes":["document filter completed"],
@@ -551,8 +554,11 @@ func TestPythonAIClientStoresDocumentFilterAsSidecarRefButKeepsRuntimeArtifactFo
 				}
 			}`))
 		case "/tasks/keyword_frequency":
-			if !strings.Contains(string(body), `"matched_indices":[1,2]`) {
-				t.Fatalf("expected matched_indices in prior artifacts, got: %s", string(body))
+			if !strings.Contains(string(body), `"artifact_ref":"`) {
+				t.Fatalf("expected compacted document_filter artifact_ref in prior artifacts, got: %s", string(body))
+			}
+			if strings.Contains(string(body), `"matched_indices":[1,2]`) {
+				t.Fatalf("expected runtime document_filter artifact to omit matched_indices, got: %s", string(body))
 			}
 			_, _ = w.Write([]byte(`{
 				"notes":["keyword completed"],
@@ -648,8 +654,11 @@ func TestPythonAIClientStoresDeduplicateDocumentsAsSidecarRefButKeepsRuntimeArti
 				}
 			}`))
 		case "/tasks/keyword_frequency":
-			if !strings.Contains(string(body), `"canonical_indices":[0,2]`) {
-				t.Fatalf("expected canonical_indices in prior artifacts, got: %s", string(body))
+			if !strings.Contains(string(body), `"artifact_ref":"`) {
+				t.Fatalf("expected compacted deduplicate_documents artifact_ref in prior artifacts, got: %s", string(body))
+			}
+			if strings.Contains(string(body), `"canonical_indices":[0,2]`) {
+				t.Fatalf("expected runtime deduplicate_documents artifact to omit canonical_indices, got: %s", string(body))
 			}
 			_, _ = w.Write([]byte(`{
 				"notes":["keyword completed"],

@@ -55,6 +55,7 @@ func NewServer(cfg config.Config) *Server {
 	if err := server.datasetService.SetDatasetProfilesPath(cfg.DatasetProfilesPath); err != nil {
 		panic(err)
 	}
+	server.datasetService.SetPromptTemplatesDir(cfg.PromptTemplatesDir)
 	server.datasetService.SetBuildJobStarter(starter)
 	if strings.TrimSpace(cfg.PythonAIWorkerURL) != "" {
 		server.analysisService.SetDependencyBuilder(server.datasetService)
@@ -100,6 +101,7 @@ func (s *Server) routes() {
 		writeJSON(w, stdhttp.StatusOK, registry.SupportedSkills())
 	})
 	s.mux.HandleFunc("POST /projects", s.handleCreateProject)
+	s.mux.HandleFunc("GET /projects", s.handleListProjects)
 	s.mux.HandleFunc("GET /projects/{project_id}", s.handleGetProject)
 	s.mux.HandleFunc("POST /projects/{project_id}/scenarios", s.handleCreateScenario)
 	s.mux.HandleFunc("POST /projects/{project_id}/scenarios/import", s.handleImportScenarios)
@@ -108,9 +110,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/scenarios/{scenario_id}/plans", s.handleCreateScenarioPlan)
 	s.mux.HandleFunc("POST /projects/{project_id}/scenarios/{scenario_id}/execute", s.handleExecuteScenario)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets", s.handleCreateDataset)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets", s.handleListDatasets)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}", s.handleGetDataset)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/uploads", s.handleUploadDataset)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions", s.handleCreateDatasetVersion)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions", s.handleListDatasetVersions)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}", s.handleGetDatasetVersion)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare", s.handleBuildPrepare)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs", s.handleCreatePrepareJob)
@@ -120,6 +124,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embedding_jobs", s.handleCreateEmbeddingJob)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/build_jobs", s.handleListDatasetBuildJobs)
 	s.mux.HandleFunc("GET /projects/{project_id}/dataset_build_jobs/{job_id}", s.handleGetDatasetBuildJob)
+	s.mux.HandleFunc("GET /dataset_profiles/validate", s.handleValidateDatasetProfiles)
 	s.mux.HandleFunc("POST /projects/{project_id}/analysis_requests", s.handleSubmitAnalysis)
 	s.mux.HandleFunc("GET /projects/{project_id}/analysis_requests/{request_id}", s.handleGetRequest)
 	s.mux.HandleFunc("GET /projects/{project_id}/plans/{plan_id}", s.handleGetPlan)
@@ -185,6 +190,15 @@ func (s *Server) handleGetProject(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 		return
 	}
 	writeJSON(w, stdhttp.StatusOK, project)
+}
+
+func (s *Server) handleListProjects(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	response, err := s.projectService.ListProjects()
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
 }
 
 func (s *Server) handleCreateScenario(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -302,6 +316,15 @@ func (s *Server) handleGetDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 	writeJSON(w, stdhttp.StatusOK, response)
 }
 
+func (s *Server) handleListDatasets(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.ListDatasets(r.PathValue("project_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
 func (s *Server) handleUploadDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		writeError(w, stdhttp.StatusBadRequest, "invalid multipart form")
@@ -354,6 +377,18 @@ func (s *Server) handleGetDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp.Re
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
 		r.PathValue("version_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleListDatasetVersions(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.ListDatasetVersions(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
 	)
 	if err != nil {
 		s.writeServiceError(w, err)
@@ -554,6 +589,15 @@ func (s *Server) handleGetDatasetBuildJob(w stdhttp.ResponseWriter, r *stdhttp.R
 		r.PathValue("project_id"),
 		r.PathValue("job_id"),
 	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleValidateDatasetProfiles(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	response, err := s.datasetService.ValidateDatasetProfiles()
 	if err != nil {
 		s.writeServiceError(w, err)
 		return

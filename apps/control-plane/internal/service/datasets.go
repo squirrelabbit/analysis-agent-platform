@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -41,6 +42,7 @@ type DatasetService struct {
 	uploadRoot          string
 	artifactRoot        string
 	datasetProfilesPath string
+	promptTemplatesDir  string
 	profileRegistry     *datasetProfileRegistry
 	buildJobStarter     workflows.Starter
 	httpClient          *http.Client
@@ -49,6 +51,11 @@ type DatasetService struct {
 type workerTaskResponse struct {
 	Notes    []string       `json:"notes"`
 	Artifact map[string]any `json:"artifact"`
+}
+
+type workerCapabilitiesResponse struct {
+	PromptCatalog []domain.PromptTemplateMetadata  `json:"prompt_catalog"`
+	RuleCatalog   domain.DatasetProfileRuleCatalog `json:"rule_catalog"`
 }
 
 func NewDatasetService(repository store.Repository, pythonAIWorkerURL string, uploadRoot string, artifactRoot string) *DatasetService {
@@ -73,6 +80,10 @@ func (s *DatasetService) SetDatasetProfilesPath(path string) error {
 
 func (s *DatasetService) SetBuildJobStarter(starter workflows.Starter) {
 	s.buildJobStarter = starter
+}
+
+func (s *DatasetService) SetPromptTemplatesDir(path string) {
+	s.promptTemplatesDir = strings.TrimSpace(path)
 }
 
 func (s *DatasetService) CreateDataset(projectID string, input domain.DatasetCreateRequest) (domain.Dataset, error) {
@@ -112,6 +123,20 @@ func (s *DatasetService) GetDataset(projectID, datasetID string) (domain.Dataset
 		return domain.Dataset{}, err
 	}
 	return dataset, nil
+}
+
+func (s *DatasetService) ListDatasets(projectID string) (domain.DatasetListResponse, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.DatasetListResponse{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.DatasetListResponse{}, err
+	}
+	items, err := s.store.ListDatasets(projectID)
+	if err != nil {
+		return domain.DatasetListResponse{}, err
+	}
+	return domain.DatasetListResponse{Items: items}, nil
 }
 
 func (s *DatasetService) CreateDatasetVersion(projectID, datasetID string, input domain.DatasetVersionCreateRequest) (domain.DatasetVersion, error) {
@@ -267,6 +292,504 @@ func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionI
 		return domain.DatasetVersion{}, ErrNotFound{Resource: "dataset version"}
 	}
 	return version, nil
+}
+
+func (s *DatasetService) ListDatasetVersions(projectID, datasetID string) (domain.DatasetVersionListResponse, error) {
+	if _, err := s.GetDataset(projectID, datasetID); err != nil {
+		return domain.DatasetVersionListResponse{}, err
+	}
+	items, err := s.store.ListDatasetVersions(projectID, datasetID)
+	if err != nil {
+		return domain.DatasetVersionListResponse{}, err
+	}
+	return domain.DatasetVersionListResponse{Items: items}, nil
+}
+
+func (s *DatasetService) ValidateDatasetProfiles() (domain.DatasetProfileValidationResponse, error) {
+	response := domain.DatasetProfileValidationResponse{
+		Registry: domain.DatasetProfileRegistryView{
+			SourcePath:         s.datasetProfilesPath,
+			PromptTemplatesDir: s.promptTemplatesDir,
+		},
+		Valid: true,
+	}
+	if s.profileRegistry != nil {
+		response.Registry.Defaults = cloneStringMap(s.profileRegistry.Defaults)
+		response.Registry.Profiles = cloneProfileMap(s.profileRegistry.Profiles)
+	}
+
+	promptCatalog, err := s.promptCatalog()
+	if err != nil {
+		return domain.DatasetProfileValidationResponse{}, err
+	}
+	response.Registry.PromptCatalog = promptCatalog
+	promptVersions := make([]string, 0, len(promptCatalog))
+	promptMetadata := make(map[string]domain.PromptTemplateMetadata, len(promptCatalog))
+	for _, item := range promptCatalog {
+		promptVersions = append(promptVersions, strings.TrimSpace(item.Version))
+		promptMetadata[strings.TrimSpace(item.Version)] = item
+	}
+	response.Registry.AvailablePromptVersions = promptVersions
+
+	issues := make([]domain.DatasetProfileValidationIssue, 0)
+	var ruleCatalog *domain.DatasetProfileRuleCatalog
+	if capabilities, err := s.fetchWorkerCapabilities(); err != nil {
+		issues = append(issues, domain.DatasetProfileValidationIssue{
+			Severity: "warning",
+			Code:     "worker_capabilities_unavailable",
+			Message:  fmt.Sprintf("python-ai worker capability 조회에 실패했습니다: %v", err),
+			Scope:    "worker",
+		})
+	} else if capabilities != nil {
+		response.Registry.RuleCatalog = &capabilities.RuleCatalog
+		ruleCatalog = &capabilities.RuleCatalog
+		if len(response.Registry.PromptCatalog) == 0 && len(capabilities.PromptCatalog) > 0 {
+			response.Registry.PromptCatalog = capabilities.PromptCatalog
+			response.Registry.AvailablePromptVersions = nil
+			promptMetadata = make(map[string]domain.PromptTemplateMetadata, len(capabilities.PromptCatalog))
+			for _, item := range capabilities.PromptCatalog {
+				version := strings.TrimSpace(item.Version)
+				if version == "" {
+					continue
+				}
+				response.Registry.AvailablePromptVersions = append(response.Registry.AvailablePromptVersions, version)
+				promptMetadata[version] = item
+			}
+		}
+	}
+	availablePrepareRules := stringSet(nil)
+	availableGarbageRules := stringSet(nil)
+	if ruleCatalog != nil {
+		availablePrepareRules = stringSet(ruleCatalog.AvailablePrepareRegexRuleNames)
+		availableGarbageRules = stringSet(ruleCatalog.AvailableGarbageRuleNames)
+	}
+	validatePromptVersion := func(owner, scope, resourceRef, fieldName string, value *string, allowedOperations ...string) {
+		trimmed := strings.TrimSpace(optionalStringValue(value))
+		if trimmed == "" {
+			return
+		}
+		meta, ok := promptMetadata[trimmed]
+		if !ok {
+			issues = append(issues, domain.DatasetProfileValidationIssue{
+				Severity:    "error",
+				Code:        fieldName + "_missing",
+				Message:     fmt.Sprintf("%s 의 %s %q 가 prompt 디렉터리에 없습니다.", owner, fieldName, trimmed),
+				Scope:       scope,
+				ResourceRef: resourceRef,
+			})
+			return
+		}
+		operation := strings.TrimSpace(meta.Operation)
+		if operation == "" {
+			return
+		}
+		for _, allowed := range allowedOperations {
+			if operation == allowed {
+				return
+			}
+		}
+		issues = append(issues, domain.DatasetProfileValidationIssue{
+			Severity:    "error",
+			Code:        fieldName + "_operation_mismatch",
+			Message:     fmt.Sprintf("%s 의 %s %q 는 %s 작업용 prompt가 아닙니다.", owner, fieldName, trimmed, strings.Join(allowedOperations, "/")),
+			Scope:       scope,
+			ResourceRef: resourceRef,
+		})
+	}
+	validateRuleNames := func(owner, scope, resourceRef, fieldName string, values []string, available map[string]struct{}) {
+		if len(values) == 0 {
+			return
+		}
+		if len(available) == 0 {
+			issues = append(issues, domain.DatasetProfileValidationIssue{
+				Severity:    "warning",
+				Code:        fieldName + "_catalog_unavailable",
+				Message:     fmt.Sprintf("%s 의 %s 를 검증할 worker rule catalog를 조회하지 못했습니다.", owner, fieldName),
+				Scope:       scope,
+				ResourceRef: resourceRef,
+			})
+			return
+		}
+		for _, value := range values {
+			ruleName := strings.TrimSpace(value)
+			if ruleName == "" {
+				continue
+			}
+			if _, ok := available[ruleName]; ok {
+				continue
+			}
+			issues = append(issues, domain.DatasetProfileValidationIssue{
+				Severity:    "error",
+				Code:        fieldName + "_missing",
+				Message:     fmt.Sprintf("%s 의 %s %q 가 worker rule catalog에 없습니다.", owner, fieldName, ruleName),
+				Scope:       scope,
+				ResourceRef: resourceRef,
+			})
+		}
+	}
+	if s.profileRegistry == nil {
+		issues = append(issues, domain.DatasetProfileValidationIssue{
+			Severity: "warning",
+			Code:     "registry_missing",
+			Message:  "dataset profile registry가 비어 있어 version 생성 시 명시적 profile만 사용됩니다.",
+		})
+	} else {
+		for dataType, profileID := range s.profileRegistry.Defaults {
+			if strings.TrimSpace(profileID) == "" {
+				issues = append(issues, domain.DatasetProfileValidationIssue{
+					Severity:    "error",
+					Code:        "default_profile_empty",
+					Message:     fmt.Sprintf("defaults.%s 가 비어 있습니다.", dataType),
+					Scope:       "registry_default",
+					ResourceRef: "defaults." + dataType,
+				})
+				continue
+			}
+			if s.profileRegistry.profileByID(profileID) == nil {
+				issues = append(issues, domain.DatasetProfileValidationIssue{
+					Severity:    "error",
+					Code:        "default_profile_unknown",
+					Message:     fmt.Sprintf("defaults.%s 가 존재하지 않는 profile %q 를 가리킵니다.", dataType, profileID),
+					Scope:       "registry_default",
+					ResourceRef: "defaults." + dataType,
+				})
+			}
+		}
+		for profileKey, profile := range s.profileRegistry.Profiles {
+			resourceRef := "profiles/" + strings.TrimSpace(profileKey)
+			effectiveID := strings.TrimSpace(profile.ProfileID)
+			if effectiveID == "" {
+				issues = append(issues, domain.DatasetProfileValidationIssue{
+					Severity:    "warning",
+					Code:        "profile_id_inferred",
+					Message:     fmt.Sprintf("profile %q 는 profile_id 가 비어 있어 key 값으로 해석됩니다.", profileKey),
+					Scope:       "profile",
+					ResourceRef: resourceRef,
+				})
+				effectiveID = strings.TrimSpace(profileKey)
+			}
+			if effectiveID != strings.TrimSpace(profileKey) {
+				issues = append(issues, domain.DatasetProfileValidationIssue{
+					Severity:    "warning",
+					Code:        "profile_id_mismatch",
+					Message:     fmt.Sprintf("profile key %q 와 profile_id %q 가 다릅니다.", profileKey, effectiveID),
+					Scope:       "profile",
+					ResourceRef: resourceRef,
+				})
+			}
+			validatePromptVersion(fmt.Sprintf("profile %q", profileKey), "profile", resourceRef, "prepare_prompt", profile.PreparePromptVersion, "prepare", "prepare_batch")
+			validatePromptVersion(fmt.Sprintf("profile %q", profileKey), "profile", resourceRef, "sentiment_prompt", profile.SentimentPromptVersion, "sentiment", "sentiment_batch")
+			validateRuleNames(fmt.Sprintf("profile %q", profileKey), "profile", resourceRef, "regex_rule", profile.RegexRuleNames, availablePrepareRules)
+			validateRuleNames(fmt.Sprintf("profile %q", profileKey), "profile", resourceRef, "garbage_rule", profile.GarbageRuleNames, availableGarbageRules)
+		}
+	}
+	if scanIssues, err := s.validateExistingDatasetVersions(promptMetadata, availablePrepareRules, availableGarbageRules); err != nil {
+		return domain.DatasetProfileValidationResponse{}, err
+	} else {
+		issues = append(issues, scanIssues...)
+	}
+
+	for _, issue := range issues {
+		if issue.Severity == "error" {
+			response.Valid = false
+			break
+		}
+	}
+	response.Issues = issues
+	return response, nil
+}
+
+func (s *DatasetService) availablePromptVersions() ([]string, error) {
+	catalog, err := s.promptCatalog()
+	if err != nil {
+		return nil, err
+	}
+	versions := make([]string, 0, len(catalog))
+	for _, item := range catalog {
+		version := strings.TrimSpace(item.Version)
+		if version == "" {
+			continue
+		}
+		versions = append(versions, version)
+	}
+	return versions, nil
+}
+
+func (s *DatasetService) promptCatalog() ([]domain.PromptTemplateMetadata, error) {
+	dir := strings.TrimSpace(s.promptTemplatesDir)
+	if dir == "" {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	catalog := make([]domain.PromptTemplateMetadata, 0)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(entry.Name())
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		stem := strings.TrimSuffix(name, ".md")
+		if stem == "" || stem == "README" || stem == "CHANGELOG" {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, err
+		}
+		metadata := parsePromptFrontMatter(string(content))
+		catalog = append(catalog, domain.PromptTemplateMetadata{
+			Version:       stem,
+			Title:         defaultPromptMetaValue(metadata["title"], stem),
+			Operation:     defaultPromptMetaValue(metadata["operation"], inferPromptOperation(stem)),
+			Status:        defaultPromptMetaValue(metadata["status"], "active"),
+			Summary:       strings.TrimSpace(metadata["summary"]),
+			DefaultGroups: inferPromptDefaultGroups(stem),
+		})
+	}
+	sort.Slice(catalog, func(i, j int) bool {
+		return catalog[i].Version < catalog[j].Version
+	})
+	return catalog, nil
+}
+
+func (s *DatasetService) fetchWorkerCapabilities() (*workerCapabilitiesResponse, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(s.pythonAIWorkerURL), "/")
+	if baseURL == "" {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/capabilities", nil)
+	if err != nil {
+		return nil, err
+	}
+	client := s.httpClient
+	if client == nil {
+		client = &http.Client{}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("python-ai worker returned %d", resp.StatusCode)
+	}
+	var payload workerCapabilitiesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return &payload, nil
+}
+
+func parsePromptFrontMatter(raw string) map[string]string {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "---\n") {
+		return map[string]string{}
+	}
+	lines := strings.Split(trimmed, "\n")
+	metadata := make(map[string]string)
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "---" {
+			break
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		metadata[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	return metadata
+}
+
+func inferPromptOperation(version string) string {
+	trimmed := strings.TrimSpace(version)
+	switch {
+	case strings.Contains(trimmed, "prepare-anthropic-batch"):
+		return "prepare_batch"
+	case strings.Contains(trimmed, "prepare-anthropic"):
+		return "prepare"
+	case strings.Contains(trimmed, "sentiment-anthropic-batch"):
+		return "sentiment_batch"
+	case strings.Contains(trimmed, "sentiment-anthropic"):
+		return "sentiment"
+	default:
+		return "custom"
+	}
+}
+
+func inferPromptDefaultGroups(version string) []string {
+	switch strings.TrimSpace(version) {
+	case "dataset-prepare-anthropic-v1":
+		return []string{"prepare"}
+	case "dataset-prepare-anthropic-batch-v1":
+		return []string{"prepare_batch"}
+	case "sentiment-anthropic-v1":
+		return []string{"sentiment"}
+	case "sentiment-anthropic-batch-v1":
+		return []string{"sentiment_batch"}
+	default:
+		return nil
+	}
+}
+
+func defaultPromptMetaValue(value string, fallback string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback
+	}
+	return trimmed
+}
+
+func (s *DatasetService) validateExistingDatasetVersions(
+	promptMetadata map[string]domain.PromptTemplateMetadata,
+	availablePrepareRules map[string]struct{},
+	availableGarbageRules map[string]struct{},
+) ([]domain.DatasetProfileValidationIssue, error) {
+	projects, err := s.store.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	issues := make([]domain.DatasetProfileValidationIssue, 0)
+	validatePromptVersion := func(owner, resourceRef, fieldName string, value *string, allowedOperations ...string) {
+		trimmed := strings.TrimSpace(optionalStringValue(value))
+		if trimmed == "" {
+			return
+		}
+		meta, ok := promptMetadata[trimmed]
+		if !ok {
+			issues = append(issues, domain.DatasetProfileValidationIssue{
+				Severity:    "error",
+				Code:        fieldName + "_missing",
+				Message:     fmt.Sprintf("%s 의 %s %q 가 현재 prompt registry에 없습니다.", owner, fieldName, trimmed),
+				Scope:       "dataset_version",
+				ResourceRef: resourceRef,
+			})
+			return
+		}
+		for _, allowed := range allowedOperations {
+			if strings.TrimSpace(meta.Operation) == allowed {
+				return
+			}
+		}
+		issues = append(issues, domain.DatasetProfileValidationIssue{
+			Severity:    "error",
+			Code:        fieldName + "_operation_mismatch",
+			Message:     fmt.Sprintf("%s 의 %s %q 는 %s 작업용 prompt가 아닙니다.", owner, fieldName, trimmed, strings.Join(allowedOperations, "/")),
+			Scope:       "dataset_version",
+			ResourceRef: resourceRef,
+		})
+	}
+	validateRuleNames := func(owner, resourceRef, fieldName string, values []string, available map[string]struct{}) {
+		if len(values) == 0 || len(available) == 0 {
+			return
+		}
+		for _, value := range values {
+			ruleName := strings.TrimSpace(value)
+			if ruleName == "" {
+				continue
+			}
+			if _, ok := available[ruleName]; ok {
+				continue
+			}
+			issues = append(issues, domain.DatasetProfileValidationIssue{
+				Severity:    "error",
+				Code:        fieldName + "_missing",
+				Message:     fmt.Sprintf("%s 의 %s %q 가 현재 worker rule catalog에 없습니다.", owner, fieldName, ruleName),
+				Scope:       "dataset_version",
+				ResourceRef: resourceRef,
+			})
+		}
+	}
+	for _, project := range projects {
+		datasets, err := s.store.ListDatasets(project.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		for _, dataset := range datasets {
+			versions, err := s.store.ListDatasetVersions(project.ProjectID, dataset.DatasetID)
+			if err != nil {
+				return nil, err
+			}
+			for _, version := range versions {
+				resourceRef := fmt.Sprintf("projects/%s/datasets/%s/versions/%s", project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+				owner := fmt.Sprintf("dataset version %q", version.DatasetVersionID)
+				if version.Profile != nil {
+					validatePromptVersion(owner, resourceRef, "prepare_prompt", version.Profile.PreparePromptVersion, "prepare", "prepare_batch")
+					validatePromptVersion(owner, resourceRef, "sentiment_prompt", version.Profile.SentimentPromptVersion, "sentiment", "sentiment_batch")
+					validateRuleNames(owner, resourceRef, "regex_rule", version.Profile.RegexRuleNames, availablePrepareRules)
+					validateRuleNames(owner, resourceRef, "garbage_rule", version.Profile.GarbageRuleNames, availableGarbageRules)
+					profileID := strings.TrimSpace(version.Profile.ProfileID)
+					if profileID != "" && s.profileRegistry != nil && s.profileRegistry.profileByID(profileID) == nil {
+						issues = append(issues, domain.DatasetProfileValidationIssue{
+							Severity:    "warning",
+							Code:        "dataset_version_profile_unknown",
+							Message:     fmt.Sprintf("%s 가 현재 registry에 없는 profile_id %q 를 참조합니다.", owner, profileID),
+							Scope:       "dataset_version",
+							ResourceRef: resourceRef,
+						})
+					}
+				}
+				validatePromptVersion(owner, resourceRef, "prepare_prompt", version.PreparePromptVer, "prepare", "prepare_batch")
+				validatePromptVersion(owner, resourceRef, "sentiment_prompt", version.SentimentPromptVer, "sentiment", "sentiment_batch")
+			}
+		}
+	}
+	return issues, nil
+}
+
+func stringSet(values []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		result[trimmed] = struct{}{}
+	}
+	return result
+}
+
+func cloneStringMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make(map[string]string, len(input))
+	for key, value := range input {
+		output[key] = value
+	}
+	return output
+}
+
+func cloneProfileMap(input map[string]domain.DatasetProfile) map[string]domain.DatasetProfile {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make(map[string]domain.DatasetProfile, len(input))
+	for key, value := range input {
+		profile := value
+		if normalized := normalizeDatasetProfile(&profile); normalized != nil {
+			output[key] = *normalized
+			continue
+		}
+		output[key] = value
+	}
+	return output
+}
+
+func slicesSortStrings(values []string) {
+	if len(values) < 2 {
+		return
+	}
+	sort.Strings(values)
 }
 
 func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest) (domain.DatasetVersion, error) {

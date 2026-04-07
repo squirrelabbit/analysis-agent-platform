@@ -126,6 +126,25 @@ func (s *MemoryStore) GetDataset(projectID, datasetID string) (domain.Dataset, e
 	return dataset, nil
 }
 
+func (s *MemoryStore) ListDatasets(projectID string) ([]domain.Dataset, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.Dataset, 0)
+	for _, dataset := range s.datasets {
+		if dataset.ProjectID != projectID {
+			continue
+		}
+		items = append(items, dataset)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].DatasetID < items[j].DatasetID
+		}
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+	return items, nil
+}
+
 func (s *MemoryStore) SaveDatasetVersion(version domain.DatasetVersion) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -141,6 +160,28 @@ func (s *MemoryStore) GetDatasetVersion(projectID, datasetVersionID string) (dom
 		return domain.DatasetVersion{}, ErrNotFound
 	}
 	return version, nil
+}
+
+func (s *MemoryStore) ListDatasetVersions(projectID, datasetID string) ([]domain.DatasetVersion, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.DatasetVersion, 0)
+	for _, version := range s.versions {
+		if version.ProjectID != projectID {
+			continue
+		}
+		if datasetID != "" && version.DatasetID != datasetID {
+			continue
+		}
+		items = append(items, version)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].DatasetVersionID > items[j].DatasetVersionID
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	return items, nil
 }
 
 func (s *MemoryStore) SaveDatasetBuildJob(job domain.DatasetBuildJob) error {

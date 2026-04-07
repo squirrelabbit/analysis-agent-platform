@@ -1,3 +1,10 @@
+---
+title: Dataset prepare row v1
+operation: prepare
+status: active
+summary: 초기 row 단위 prepare 프롬프트. 기본 정제와 keep/review/drop 판정을 수행한다.
+---
+
 ## Task
 
 You are preparing raw VOC or issue text for deterministic downstream analysis.

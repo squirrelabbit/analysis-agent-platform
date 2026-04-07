@@ -362,6 +362,8 @@ def _extract_document_filter_indices(prior_artifacts: Any) -> set[int] | None:
             indices.add(int(item))
         except (TypeError, ValueError):
             continue
+    if not indices:
+        indices = _sidecar_source_indices(artifact)
     return indices
 
 
@@ -375,6 +377,8 @@ def _extract_garbage_filter_indices(prior_artifacts: Any) -> set[int] | None:
             indices.add(int(item))
         except (TypeError, ValueError):
             continue
+    if not indices:
+        indices = _sidecar_source_indices(artifact, status_column="filter_status", include_values={"retained"})
     return indices
 
 
@@ -386,6 +390,32 @@ def _extract_deduplicated_indices(prior_artifacts: Any) -> set[int] | None:
     for item in artifact.get("canonical_indices") or []:
         try:
             indices.add(int(item))
+        except (TypeError, ValueError):
+            continue
+    if not indices:
+        indices = _sidecar_source_indices(artifact, status_column="dedup_status", include_values={"canonical"})
+    return indices
+
+
+def _sidecar_source_indices(
+    artifact: dict[str, Any],
+    *,
+    status_column: str = "",
+    include_values: set[str] | None = None,
+) -> set[int]:
+    artifact_ref = str(artifact.get("artifact_ref") or "").strip()
+    source_index_column = str(artifact.get("source_index_column") or "source_index").strip() or "source_index"
+    if not artifact_ref:
+        return set()
+    values = {str(item).strip() for item in set(include_values or set()) if str(item).strip()}
+    indices: set[int] = set()
+    for row in _iter_rows(artifact_ref):
+        if status_column and values:
+            status = str(row.get(status_column) or "").strip()
+            if status not in values:
+                continue
+        try:
+            indices.add(int(row.get(source_index_column) or 0))
         except (TypeError, ValueError):
             continue
     return indices

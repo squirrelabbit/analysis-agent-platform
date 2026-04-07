@@ -123,10 +123,12 @@
 - 현재 기본 정책은 `prepare=eager`, `sentiment/embedding=lazy`다.
 - 기본 profile registry는 현재 [dataset_profiles.json](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/dataset_profiles.json) 에 있고, `DATASET_PROFILES_PATH`로 바꿀 수 있다.
 - dataset version 생성 시 `profile`을 안 주면 registry의 data type 기본 profile을 resolve해 저장한다.
+- `GET /dataset_profiles/validate`는 현재 registry 기본값, prompt template front matter, worker rule catalog를 함께 읽어 prompt/rule 오타와 drift를 점검한다.
 - version 생성 시 worker URL이 설정돼 있으면 `prepare`를 먼저 자동 시도한다.
 - `prepare_jobs`, `sentiment_jobs`, `embedding_jobs`는 현재 Temporal workflow로 실행되고, `GET /dataset_build_jobs/{job_id}` 또는 version 단위 `GET /build_jobs`로 상태를 확인할 수 있다.
 - build workflow는 현재 `TEMPORAL_BUILD_TASK_QUEUE`를 따로 사용하고, 값을 비우면 `<TEMPORAL_TASK_QUEUE>-build`를 기본값으로 쓴다.
 - build job에는 현재 `workflow_id`, `workflow_run_id`, `attempt`, `last_error_type`, `resumed_execution_count`가 저장된다.
+- build job 응답에는 현재 `diagnostics.retry_count`, `diagnostics.last_error_message`, `diagnostics.workflow_id`, `diagnostics.workflow_run_id`, `diagnostics.resumed_execution_count`가 추가로 내려간다.
 - activity timeout/retry 기본값은 현재 `prepare=20분/4회`, `sentiment=45분/4회`, `embedding=60분/3회`, `backoff=10초 x2 최대 5분`이다.
 - worker HTTP timeout은 현재 `prepare=10분`, `sentiment=30분`, `embedding=45분`으로 분리돼 있다.
 - worker 동시성 기본값은 현재 `analysis activity=8`, `build activity=4`, `prepare slot=3`, `sentiment slot=2`, `embedding slot=1`이다.
@@ -135,6 +137,8 @@
 - 그래도 준비되지 못한 경우에만 workflow가 `waiting`으로 전이된다.
 - build job이 완료되면 같은 dataset version을 기다리던 execution은 dependency를 다시 계산한 뒤 자동으로 `resume`된다.
 - 수동 `resume`은 자동 orchestration으로 해결하지 못한 외부 의존성 예외를 처리할 때만 사용하면 된다.
+- execution/list/result 응답에는 현재 `diagnostics.event_count`, `diagnostics.latest_event_type`, `diagnostics.latest_event_message`, `diagnostics.failure_reason`, `diagnostics.waiting`가 포함된다.
+- 운영 장애 대응 절차는 [recovery_guide.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/recovery_guide.md)를 참고한다.
 - 확인 필요: dataset build workflow history의 장기 보존 기간은 아직 Temporal 서버 기본값을 따르고 있고, 운영 환경별 실제 동시성 상한은 머신 자원 기준으로 추가 튜닝이 필요하다.
 
 ## 검증 메모

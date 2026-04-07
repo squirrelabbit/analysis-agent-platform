@@ -273,6 +273,44 @@ func (s *PostgresStore) GetDataset(projectID, datasetID string) (domain.Dataset,
 	return dataset, nil
 }
 
+func (s *PostgresStore) ListDatasets(projectID string) ([]domain.Dataset, error) {
+	rows, err := s.db.Query(
+		`SELECT dataset_id::text, project_id::text, name, description, data_type, created_at
+		 FROM datasets
+		 WHERE project_id = $1::uuid
+		 ORDER BY created_at ASC, dataset_id ASC`,
+		projectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.Dataset, 0)
+	for rows.Next() {
+		var dataset domain.Dataset
+		var description sql.NullString
+		if err := rows.Scan(
+			&dataset.DatasetID,
+			&dataset.ProjectID,
+			&dataset.Name,
+			&description,
+			&dataset.DataType,
+			&dataset.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if description.Valid {
+			dataset.Description = &description.String
+		}
+		items = append(items, dataset)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error {
 	metadataJSON, err := marshalJSON(version.Metadata)
 	if err != nil {
@@ -432,6 +470,107 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 		version.EmbeddingURI = &embeddingURI.String
 	}
 	return version, nil
+}
+
+func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]domain.DatasetVersion, error) {
+	rows, err := s.db.Query(
+		`SELECT dataset_version_id, dataset_id::text, project_id::text, storage_uri, data_type,
+		        record_count, metadata, profile, prepare_status, prepare_model, prepare_prompt_version,
+		        prepare_uri, prepared_at, sentiment_status, sentiment_model, sentiment_uri,
+		        sentiment_labeled_at, sentiment_prompt_version, embedding_status, embedding_model,
+		        embedding_uri, created_at, ready_at
+		 FROM dataset_versions
+		 WHERE project_id = $1::uuid AND dataset_id = $2::uuid
+		 ORDER BY created_at DESC, dataset_version_id DESC`,
+		projectID,
+		datasetID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.DatasetVersion, 0)
+	for rows.Next() {
+		var version domain.DatasetVersion
+		var recordCount sql.NullInt64
+		var metadataRaw []byte
+		var profileRaw []byte
+		var prepareModel sql.NullString
+		var preparePromptVersion sql.NullString
+		var prepareURI sql.NullString
+		var sentimentModel sql.NullString
+		var sentimentURI sql.NullString
+		var sentimentPromptVersion sql.NullString
+		var embeddingModel sql.NullString
+		var embeddingURI sql.NullString
+		if err := rows.Scan(
+			&version.DatasetVersionID,
+			&version.DatasetID,
+			&version.ProjectID,
+			&version.StorageURI,
+			&version.DataType,
+			&recordCount,
+			&metadataRaw,
+			&profileRaw,
+			&version.PrepareStatus,
+			&prepareModel,
+			&preparePromptVersion,
+			&prepareURI,
+			&version.PreparedAt,
+			&version.SentimentStatus,
+			&sentimentModel,
+			&sentimentURI,
+			&version.SentimentLabeledAt,
+			&sentimentPromptVersion,
+			&version.EmbeddingStatus,
+			&embeddingModel,
+			&embeddingURI,
+			&version.CreatedAt,
+			&version.ReadyAt,
+		); err != nil {
+			return nil, err
+		}
+		if recordCount.Valid {
+			value := int(recordCount.Int64)
+			version.RecordCount = &value
+		}
+		if err := unmarshalJSON(metadataRaw, &version.Metadata, map[string]any{}); err != nil {
+			return nil, err
+		}
+		if err := unmarshalNullableJSON(profileRaw, &version.Profile); err != nil {
+			return nil, err
+		}
+		if prepareModel.Valid {
+			version.PrepareModel = &prepareModel.String
+		}
+		if preparePromptVersion.Valid {
+			version.PreparePromptVer = &preparePromptVersion.String
+		}
+		if prepareURI.Valid {
+			version.PrepareURI = &prepareURI.String
+		}
+		if sentimentModel.Valid {
+			version.SentimentModel = &sentimentModel.String
+		}
+		if sentimentURI.Valid {
+			version.SentimentURI = &sentimentURI.String
+		}
+		if sentimentPromptVersion.Valid {
+			version.SentimentPromptVer = &sentimentPromptVersion.String
+		}
+		if embeddingModel.Valid {
+			version.EmbeddingModel = &embeddingModel.String
+		}
+		if embeddingURI.Valid {
+			version.EmbeddingURI = &embeddingURI.String
+		}
+		items = append(items, version)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func (s *PostgresStore) SaveDatasetBuildJob(job domain.DatasetBuildJob) error {
@@ -1401,6 +1540,19 @@ func unmarshalJSON[T any](raw []byte, target *T, fallback T) error {
 		return nil
 	}
 	return json.Unmarshal(raw, target)
+}
+
+func unmarshalNullableJSON[T any](raw []byte, target **T) error {
+	if len(raw) == 0 || string(raw) == "null" {
+		*target = nil
+		return nil
+	}
+	var value T
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	*target = &value
+	return nil
 }
 
 func nullableString(value *string) any {
