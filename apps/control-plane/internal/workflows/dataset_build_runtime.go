@@ -46,6 +46,7 @@ type DatasetBuildRunner interface {
 	BuildPrepare(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest) (domain.DatasetVersion, error)
 	BuildSentiment(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest) (domain.DatasetVersion, error)
 	BuildEmbeddings(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error)
+	BuildClusters(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest) (domain.DatasetVersion, error)
 }
 
 type WaitingExecutionResumer interface {
@@ -73,6 +74,7 @@ type DatasetBuildConcurrencyLimits struct {
 	Prepare   int `json:"prepare"`
 	Sentiment int `json:"sentiment"`
 	Embedding int `json:"embedding"`
+	Cluster   int `json:"cluster"`
 }
 
 func RegisterDatasetBuildRuntime(registrar RuntimeRegistrar, activities DatasetBuildActivities) {
@@ -229,6 +231,13 @@ func (a *DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, inp
 		}
 		_, err = a.Builder.BuildEmbeddings(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
 		return classifyDatasetBuildError(err)
+	case "cluster":
+		request, err := decodeBuildRequest[domain.DatasetClusterBuildRequest](job.Request)
+		if err != nil {
+			return temporal.NewNonRetryableApplicationError(err.Error(), "invalid_request", err)
+		}
+		_, err = a.Builder.BuildClusters(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
+		return classifyDatasetBuildError(err)
 	default:
 		return temporal.NewNonRetryableApplicationError(
 			fmt.Sprintf("unsupported dataset build type: %s", job.BuildType),
@@ -368,6 +377,9 @@ func datasetBuildExecuteActivityOptions(buildType string) workflow.ActivityOptio
 	case "embedding":
 		timeout = 60 * time.Minute
 		maxAttempts = 3
+	case "cluster":
+		timeout = 60 * time.Minute
+		maxAttempts = 3
 	}
 	return workflow.ActivityOptions{
 		StartToCloseTimeout: timeout,
@@ -478,6 +490,7 @@ type datasetBuildLimiter struct {
 	prepare   chan struct{}
 	sentiment chan struct{}
 	embedding chan struct{}
+	cluster   chan struct{}
 }
 
 func newDatasetBuildLimiter(limits DatasetBuildConcurrencyLimits) *datasetBuildLimiter {
@@ -485,6 +498,7 @@ func newDatasetBuildLimiter(limits DatasetBuildConcurrencyLimits) *datasetBuildL
 		prepare:   makeSemaphore(limits.Prepare),
 		sentiment: makeSemaphore(limits.Sentiment),
 		embedding: makeSemaphore(limits.Embedding),
+		cluster:   makeSemaphore(limits.Cluster),
 	}
 }
 
@@ -511,6 +525,8 @@ func (l *datasetBuildLimiter) semaphore(buildType string) chan struct{} {
 		return l.sentiment
 	case "embedding":
 		return l.embedding
+	case "cluster":
+		return l.cluster
 	default:
 		return nil
 	}

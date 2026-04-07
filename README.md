@@ -39,10 +39,10 @@
 - prompt version 이름은 현재 [config/prompts](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts) 아래 Markdown template 파일과 1:1로 대응된다. 예를 들어 `dataset-prepare-anthropic-v2`는 [dataset-prepare-anthropic-v2.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts/dataset-prepare-anthropic-v2.md)를 읽는다.
 - `GET /dataset_profiles/validate`는 현재 profile registry, prompt template front matter, worker rule catalog를 함께 읽어 prompt/rule 오타와 drift를 사전에 검증한다.
 - dataset version 생성/업로드 시 현재 `prepare`는 기본적으로 async build job을 자동 enqueue하고, execution은 필요한 step에 따라 `sentiment`, `embedding`을 자동으로 먼저 준비한 뒤 진행한다. build가 끝나면 같은 dataset version을 기다리던 execution을 자동으로 다시 enqueue한다. `waiting`은 자동 orchestration으로 흡수하지 못한 예외 상황에 가깝다.
-- dataset build에는 현재 `prepare_jobs`, `sentiment_jobs`, `embedding_jobs` async API와 `dataset_build_jobs` 조회 API가 추가돼 long-running build를 별도 추적할 수 있고, 실행은 Temporal workflow가 담당한다.
+- dataset build에는 현재 `prepare_jobs`, `sentiment_jobs`, `embedding_jobs`, `cluster_jobs` async API와 `dataset_build_jobs` 조회 API가 추가돼 long-running build를 별도 추적할 수 있고, 실행은 Temporal workflow가 담당한다.
 - Temporal build workflow는 현재 별도 build queue를 사용한다. 기본값은 `TEMPORAL_BUILD_TASK_QUEUE=<TEMPORAL_TASK_QUEUE>-build`이고, build job 메타데이터에는 `workflow_id`, `workflow_run_id`, `attempt`, `last_error_type`, `resumed_execution_count`가 남는다.
-- build activity 정책은 현재 `prepare=20분/최대 4회`, `sentiment=45분/최대 4회`, `embedding=60분/최대 3회`이고, backoff는 `10초 -> x2 -> 최대 5분`이다. worker HTTP timeout은 `prepare=10분`, `sentiment=30분`, `embedding=45분`으로 분리했다.
-- build worker 동시성 기본값은 현재 `analysis activity=8`, `build activity=4`, `prepare slot=3`, `sentiment slot=2`, `embedding slot=1`이다. 환경변수는 `TEMPORAL_ANALYSIS_MAX_CONCURRENT_ACTIVITIES`, `TEMPORAL_BUILD_MAX_CONCURRENT_ACTIVITIES`, `DATASET_BUILD_PREPARE_MAX_CONCURRENT`, `DATASET_BUILD_SENTIMENT_MAX_CONCURRENT`, `DATASET_BUILD_EMBEDDING_MAX_CONCURRENT`를 사용한다.
+- build activity 정책은 현재 `prepare=20분/최대 4회`, `sentiment=45분/최대 4회`, `embedding=60분/최대 3회`, `cluster=60분/최대 3회`이고, backoff는 `10초 -> x2 -> 최대 5분`이다. worker HTTP timeout은 `prepare=10분`, `sentiment=30분`, `embedding=45분`, `cluster=45분`으로 분리했다.
+- build worker 동시성 기본값은 현재 `analysis activity=8`, `build activity=4`, `prepare slot=3`, `sentiment slot=2`, `embedding slot=1`, `cluster slot=1`이다. 환경변수는 `TEMPORAL_ANALYSIS_MAX_CONCURRENT_ACTIVITIES`, `TEMPORAL_BUILD_MAX_CONCURRENT_ACTIVITIES`, `DATASET_BUILD_PREPARE_MAX_CONCURRENT`, `DATASET_BUILD_SENTIMENT_MAX_CONCURRENT`, `DATASET_BUILD_EMBEDDING_MAX_CONCURRENT`, `DATASET_BUILD_CLUSTER_MAX_CONCURRENT`를 사용한다.
 - control plane은 현재 기동 시 startup reconciliation을 수행한다. 이전 실행에서 남아 있던 `queued/running` dataset build job은 다시 dispatch하고, `queued/running` execution은 다시 enqueue하며, `waiting` execution은 dataset dependency를 다시 계산해 resume 가능 여부를 재평가한다.
 - build job 응답에는 현재 `diagnostics.retry_count`, `diagnostics.last_error_message`, `diagnostics.workflow_id`, `diagnostics.workflow_run_id`, `diagnostics.resumed_execution_count`가 추가로 내려간다.
 - execution/list/result 응답에는 현재 `diagnostics.event_count`, `diagnostics.latest_event_type`, `diagnostics.latest_event_message`, `diagnostics.failure_reason`, `diagnostics.waiting`가 함께 내려간다.
@@ -52,7 +52,7 @@
 - `sentiment_label` 기본 출력은 이제 `row_id`, `source_row_index`, 감성 컬럼 중심의 sidecar이고, `issue_sentiment_summary`는 `prepared_dataset_name`을 함께 받아 텍스트를 조인한다.
 - `embedding`은 현재 `chunks.parquet`를 먼저 만들고, 기본 `embedding_model=intfloat/multilingual-e5-small` 기준으로 FastEmbed local model dense vector를 생성한다. 운영 기본 산출물은 `embeddings.index.parquet`와 `pgvector` 적재이며, `embeddings.jsonl`은 `debug_export_jsonl=true`로 명시했을 때만 debug/export용으로 남긴다. 필요하면 OpenAI model override를 줄 수 있고, dense 호출이 불가하면 `token-overlap-v1` projection fallback으로 내려간다.
 - `semantic_search`는 현재 `pgvector` index를 우선 조회하고, index metadata가 dense model이면 같은 model로 query vector를 다시 만든다. 분석 plan과 worker 입력도 이제 `embedding_index_ref + chunk_ref`를 우선 사용하고, `embedding_uri`는 명시적 fallback일 때만 사용한다. 검색 결과는 chunk citation(`chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`)을 반환하고, `issue_evidence_summary`는 이를 evidence artifact까지 유지한다.
-- `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 함께 둔 `dense-hybrid` similarity를 사용한다. `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` sidecar와 token-overlap 경로로 fallback한다.
+- `embedding_cluster`는 현재 dataset-level `cluster_jobs` materialized artifact를 우선 읽고, full-dataset cluster artifact가 없을 때만 `pgvector + chunks.parquet` on-demand clustering으로 fallback한다. 1차 materialization 입력은 `embeddings.index.parquet + chunks.parquet`이다.
 - dataset build artifact는 현재 `row_id/ref/format` 메타데이터를 함께 남겨 다음 단계의 chunk/vector index 전환 기반을 잡아 두었다.
 - control plane은 `embedding` build가 끝나면 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 token count를 64차원 hashed projection으로 바꾼 뒤 `embedding_index_chunks`에 적재한다. index source를 찾지 못할 때만 `embeddings.jsonl` legacy fallback을 사용한다.
 - dataset version metadata에는 현재 `prepare_usage`, `sentiment_usage`, `embedding_usage`가 함께 저장되고, execution result contract에는 실행 artifact 기준 `usage_summary`가 집계된다.
@@ -265,7 +265,7 @@ Support skill:
 
 확인 필요:
 - `pgvector` 이미지 전환 뒤 기존 Postgres volume에서 collation version mismatch warning이 관찰됐다.
-- `embedding_cluster`는 현재 `pgvector` 우선 경로에서 dense vector가 있으면 `dense-hybrid` similarity를 쓰고, 필요 시에만 JSONL/token-overlap fallback을 사용한다. generic overlap guardrail fixture는 추가됐지만 dense-only clustering 품질 기준은 아직 별도 검증이 더 필요하다.
+- `embedding_cluster`는 현재 full-dataset 경로에서는 `cluster_jobs` materialized artifact를 우선 읽고, subset/prior filter가 붙거나 artifact가 없을 때만 기존 `pgvector` 또는 JSONL fallback 기반 on-demand clustering으로 내려간다. generic overlap guardrail fixture는 유지되지만 cluster materialization 이후의 품질 기준은 아직 별도 검증이 더 필요하다.
 - 운영 중 `build failed`, `execution waiting`, `execution failed` 대응 절차는 [recovery_guide.md](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/docs/recovery_guide.md)에 정리했다.
 - OpenAI key를 넣은 dense embedding end-to-end smoke는 이번 turn에 재현하지 않았다. 코드 경로와 unit test는 반영돼 있다.
 

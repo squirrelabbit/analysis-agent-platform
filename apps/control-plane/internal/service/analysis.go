@@ -30,6 +30,7 @@ type executionDependencyBuilder interface {
 	CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy string) (domain.DatasetBuildJob, error)
 	CreateSentimentJob(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
 	CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
+	CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
 }
 
 func NewAnalysisService(repository store.Repository, starter workflows.Starter, planGenerator planner.Planner) *AnalysisService {
@@ -272,6 +273,7 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 	needsPrepare := planRequiresPrepare(plan)
 	needsSentiment := planRequiresSentiment(plan)
 	needsEmbedding := planRequiresEmbedding(plan)
+	needsCluster := planRequiresCluster(plan)
 
 	if needsPrepare && requiresPrepare(version) && !datasetPrepareReady(version) {
 		if _, err := s.dependencyBuilder.CreatePrepareJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, triggeredBy); err != nil {
@@ -295,6 +297,16 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 	}
 	if needsEmbedding && !datasetEmbeddingReady(version) {
 		if _, err := s.dependencyBuilder.CreateEmbeddingJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}, triggeredBy); err != nil {
+			return domain.DatasetVersion{}, err
+		}
+		latest, err := s.store.GetDatasetVersion(projectID, versionID)
+		if err != nil {
+			return domain.DatasetVersion{}, err
+		}
+		return latest, nil
+	}
+	if needsCluster && !datasetClusterReady(version) {
+		if _, err := s.dependencyBuilder.CreateClusterJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetClusterBuildRequest{}, triggeredBy); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
@@ -1399,6 +1411,15 @@ func planRequiresEmbedding(plan domain.SkillPlan) bool {
 	return false
 }
 
+func planRequiresCluster(plan domain.SkillPlan) bool {
+	for _, step := range plan.Steps {
+		if strings.TrimSpace(step.SkillName) == "embedding_cluster" {
+			return true
+		}
+	}
+	return false
+}
+
 func datasetPrepareReady(version domain.DatasetVersion) bool {
 	return version.PrepareStatus == "ready" && version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != ""
 }
@@ -1431,6 +1452,9 @@ func planDependenciesReady(plan domain.SkillPlan, version domain.DatasetVersion)
 		return false
 	}
 	if planRequiresEmbedding(plan) && !datasetEmbeddingReady(version) {
+		return false
+	}
+	if planRequiresCluster(plan) && !datasetClusterReady(version) {
 		return false
 	}
 	return true
@@ -1608,6 +1632,14 @@ func enrichInputsForSkill(step *domain.SkillPlanStep, version domain.DatasetVers
 		}
 		if !inputPresent(step.Inputs, "embedding_index_ref") {
 			step.Inputs["embedding_uri"] = deriveEmbeddingURI(version)
+		}
+	}
+	if step.SkillName == "embedding_cluster" && !inputPresent(step.Inputs, "cluster_ref") {
+		if value := strings.TrimSpace(metadataString(version.Metadata, "cluster_ref", "")); value != "" {
+			step.Inputs["cluster_ref"] = value
+		}
+		if value := strings.TrimSpace(metadataString(version.Metadata, "cluster_format", "")); value != "" {
+			step.Inputs["cluster_format"] = value
 		}
 	}
 }

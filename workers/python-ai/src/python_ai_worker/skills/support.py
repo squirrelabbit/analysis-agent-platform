@@ -653,11 +653,27 @@ def run_dictionary_tagging(payload: dict[str, Any]) -> dict[str, Any]:
 def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_embedding_cluster_payload(payload)
     inputs = normalized["step"].get("inputs") or {}
+    prior_artifacts = payload.get("prior_artifacts")
+    if normalized["cluster_ref"] and not rt._iter_prior_artifacts(prior_artifacts):
+        precomputed = _load_precomputed_cluster_artifact(normalized["cluster_ref"])
+        if precomputed is not None:
+            artifact = dict(precomputed)
+            artifact["step_id"] = normalized["step"].get("step_id")
+            artifact["dataset_name"] = normalized["dataset_name"]
+            artifact["cluster_ref"] = normalized["cluster_ref"]
+            artifact["cluster_format"] = normalized["cluster_format"] or "json"
+            return {
+                "notes": [
+                    f"embedding_cluster loaded precomputed cluster artifact",
+                    f"cluster_ref: {normalized['cluster_ref']}",
+                ],
+                "artifact": artifact,
+            }
     records, source_backend, source_ref = _embedding_cluster_records(
         dataset_version_id=_semantic_dataset_version_id(payload, inputs),
         embedding_index_ref=normalized["embedding_index_ref"],
         embedding_uri=normalized["embedding_uri"],
-        prior_artifacts=payload.get("prior_artifacts"),
+        prior_artifacts=prior_artifacts,
         chunk_ref=normalized["chunk_ref"],
         chunk_format=normalized["chunk_format"],
     )
@@ -684,6 +700,8 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
             "embedding_uri": normalized["embedding_uri"],
             "embedding_index_ref": normalized["embedding_index_ref"],
             "embedding_source_backend": source_backend,
+            "cluster_ref": normalized["cluster_ref"],
+            "cluster_format": normalized["cluster_format"],
             "chunk_ref": normalized["chunk_ref"],
             "chunk_format": normalized["chunk_format"],
             "summary": {
@@ -697,6 +715,19 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
             "clusters": clusters,
         },
     }
+
+
+def _load_precomputed_cluster_artifact(cluster_ref: str) -> dict[str, Any] | None:
+    path = Path(cluster_ref)
+    if not path.exists():
+        return None
+    try:
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(decoded, dict):
+        return None
+    return decoded
 
 
 def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:

@@ -122,6 +122,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_jobs", s.handleCreateSentimentJob)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embeddings", s.handleBuildEmbeddings)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embedding_jobs", s.handleCreateEmbeddingJob)
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/cluster_jobs", s.handleCreateClusterJob)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/build_jobs", s.handleListDatasetBuildJobs)
 	s.mux.HandleFunc("GET /projects/{project_id}/dataset_build_jobs/{job_id}", s.handleGetDatasetBuildJob)
 	s.mux.HandleFunc("GET /dataset_profiles/validate", s.handleValidateDatasetProfiles)
@@ -519,6 +520,26 @@ func (s *Server) handleCreateEmbeddingJob(w stdhttp.ResponseWriter, r *stdhttp.R
 		return
 	}
 	response, err := s.datasetService.CreateEmbeddingJob(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		payload,
+		"api",
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusAccepted, response)
+}
+
+func (s *Server) handleCreateClusterJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetClusterBuildRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreateClusterJob(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
 		r.PathValue("version_id"),

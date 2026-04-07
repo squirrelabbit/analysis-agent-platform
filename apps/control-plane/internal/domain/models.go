@@ -171,6 +171,16 @@ type DatasetEmbeddingBuildRequest struct {
 	Force            *bool   `json:"force,omitempty"`
 }
 
+type DatasetClusterBuildRequest struct {
+	EmbeddingIndexSourceRef *string  `json:"embedding_index_source_ref,omitempty"`
+	ChunkRef                *string  `json:"chunk_ref,omitempty"`
+	OutputPath              *string  `json:"output_path,omitempty"`
+	SimilarityThreshold     *float64 `json:"similarity_threshold,omitempty"`
+	TopN                    *int     `json:"top_n,omitempty"`
+	SampleN                 *int     `json:"sample_n,omitempty"`
+	Force                   *bool    `json:"force,omitempty"`
+}
+
 type DatasetSentimentBuildRequest struct {
 	TextColumn *string `json:"text_column,omitempty"`
 	OutputPath *string `json:"output_path,omitempty"`

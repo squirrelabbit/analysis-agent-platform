@@ -576,15 +576,20 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSI
   -H 'Content-Type: application/json' \
   -d '{"embedding_model":"intfloat/multilingual-e5-small"}' \
 | python3 -m json.tool
+
+curl -sS -X POST "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID/cluster_jobs" \
+  -H 'Content-Type: application/json' \
+  -d '{}' \
+| python3 -m json.tool
 ```
 
 주의:
 
 - 현재 async build job은 Temporal workflow로 실행된다.
 - 기본 build queue는 `TEMPORAL_BUILD_TASK_QUEUE`이고, 비우면 `<TEMPORAL_TASK_QUEUE>-build`를 사용한다.
-- 현재 기본 activity 정책은 `prepare=20분/최대 4회`, `sentiment=45분/최대 4회`, `embedding=60분/최대 3회`, `backoff=10초 x2 최대 5분`이다.
-- worker HTTP timeout은 현재 `prepare=10분`, `sentiment=30분`, `embedding=45분`으로 분리돼 있다.
-- worker 동시성 기본값은 현재 `analysis activity=8`, `build activity=4`, `prepare slot=3`, `sentiment slot=2`, `embedding slot=1`이다.
+- 현재 기본 activity 정책은 `prepare=20분/최대 4회`, `sentiment=45분/최대 4회`, `embedding=60분/최대 3회`, `cluster=60분/최대 3회`, `backoff=10초 x2 최대 5분`이다.
+- worker HTTP timeout은 현재 `prepare=10분`, `sentiment=30분`, `embedding=45분`, `cluster=45분`으로 분리돼 있다.
+- worker 동시성 기본값은 현재 `analysis activity=8`, `build activity=4`, `prepare slot=3`, `sentiment slot=2`, `embedding slot=1`, `cluster slot=1`이다.
 - build 완료 후 같은 dataset version을 기다리던 execution은 dependency를 다시 계산한 뒤 자동 resume을 시도한다.
 - 확인 필요: build workflow history의 장기 보존 기간은 아직 Temporal 서버 기본값을 따르고 있고, 운영 환경별 실제 동시성 상한은 머신 자원 기준으로 추가 튜닝이 필요하다.
 
@@ -976,7 +981,7 @@ docker compose -f compose.dev.yml logs postgres
 | sentiment 결과 Parquet 저장 | 완료 | `sentiment.parquet` 경로 |
 | chunk Parquet 생성 | 완료 | embedding 전에 chunk dataset 생성 |
 | pgvector 적재 | 완료 | embedding 후 index 적재 |
-| dataset build async job 생성 / 조회 | 완료 | `POST .../prepare_jobs`, `POST .../sentiment_jobs`, `POST .../embedding_jobs`, `GET .../build_jobs`, `GET /dataset_build_jobs/{job_id}` |
+| dataset build async job 생성 / 조회 | 완료 | `POST .../prepare_jobs`, `POST .../sentiment_jobs`, `POST .../embedding_jobs`, `POST .../cluster_jobs`, `GET .../build_jobs`, `GET /dataset_build_jobs/{job_id}` |
 | upload 후 자동 prepare 실행 | 완료 | eager 정책으로 async prepare job 자동 enqueue |
 | execution 전 sentiment / embedding 자동 build | 부분완료 | dependency가 필요하면 sync build를 먼저 시도 |
 | upload 후 prepare -> sentiment -> embedding 자동 연쇄 | 미구현 | sentiment, embedding warm-up 연쇄는 아직 없음 |

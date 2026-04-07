@@ -69,6 +69,7 @@ func main() {
 				Prepare:   cfg.DatasetBuildPrepareMaxConcurrent,
 				Sentiment: cfg.DatasetBuildSentimentMaxConcurrent,
 				Embedding: cfg.DatasetBuildEmbeddingMaxConcurrent,
+				Cluster:   cfg.DatasetBuildClusterMaxConcurrent,
 			},
 		})
 	}
@@ -84,7 +85,7 @@ func main() {
 		registerAnalysisWorker(w)
 		registerBuildWorker(w)
 		log.Printf(
-			"temporal worker listening on %s namespace=%s analysis_queue=%s build_queue=%s analysis_max=%d build_max=%d prepare_max=%d sentiment_max=%d embedding_max=%d duckdb=%s python_ai=%s",
+			"temporal worker listening on %s namespace=%s analysis_queue=%s build_queue=%s analysis_max=%d build_max=%d prepare_max=%d sentiment_max=%d embedding_max=%d cluster_max=%d duckdb=%s python_ai=%s",
 			cfg.TemporalAddress,
 			cfg.TemporalNamespace,
 			cfg.TemporalTaskQueue,
@@ -94,6 +95,7 @@ func main() {
 			cfg.DatasetBuildPrepareMaxConcurrent,
 			cfg.DatasetBuildSentimentMaxConcurrent,
 			cfg.DatasetBuildEmbeddingMaxConcurrent,
+			cfg.DatasetBuildClusterMaxConcurrent,
 			cfg.DuckDBPath,
 			cfg.PythonAIWorkerURL,
 		)
@@ -121,7 +123,7 @@ func main() {
 	}
 
 	log.Printf(
-		"temporal worker listening on %s namespace=%s analysis_queue=%s build_queue=%s analysis_max=%d build_max=%d prepare_max=%d sentiment_max=%d embedding_max=%d duckdb=%s python_ai=%s",
+		"temporal worker listening on %s namespace=%s analysis_queue=%s build_queue=%s analysis_max=%d build_max=%d prepare_max=%d sentiment_max=%d embedding_max=%d cluster_max=%d duckdb=%s python_ai=%s",
 		cfg.TemporalAddress,
 		cfg.TemporalNamespace,
 		cfg.TemporalTaskQueue,
@@ -131,6 +133,7 @@ func main() {
 		cfg.DatasetBuildPrepareMaxConcurrent,
 		cfg.DatasetBuildSentimentMaxConcurrent,
 		cfg.DatasetBuildEmbeddingMaxConcurrent,
+		cfg.DatasetBuildClusterMaxConcurrent,
 		cfg.DuckDBPath,
 		cfg.PythonAIWorkerURL,
 	)

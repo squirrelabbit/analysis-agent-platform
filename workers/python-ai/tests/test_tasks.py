@@ -17,6 +17,7 @@ from python_ai_worker.tasks import (
     run_dictionary_tagging,
     run_document_filter,
     run_document_sample,
+    run_dataset_cluster_build,
     run_dataset_prepare,
     run_embedding,
     run_embedding_cluster,
@@ -123,6 +124,64 @@ class TaskTests(unittest.TestCase):
         artifact = result["artifact"]
         self.assertEqual(artifact["skill_name"], "execution_final_answer")
         self.assertEqual(artifact["answer_text"], "결제 오류 이슈가 반복되고 있습니다.")
+
+    def test_dataset_cluster_build_materializes_cluster_artifact_and_embedding_cluster_reads_it(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_cluster.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            for row in (
+                "결제 오류가 반복 발생했습니다",
+                "결제 승인 오류가 다시 발생했습니다",
+                "로그인이 자주 실패합니다",
+                "로그인 인증 오류가 반복됩니다",
+                "배송 문의가 계속 들어옵니다",
+            ):
+                writer.writerow({"text": row})
+
+        embedding_result = run_embedding(
+            {
+                "dataset_version_id": "version-cluster-build",
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "output_path": str(temp_dir / "issues_cluster.embeddings.jsonl"),
+            }
+        )
+        cluster_build_result = run_dataset_cluster_build(
+            {
+                "dataset_version_id": "version-cluster-build",
+                "dataset_name": str(csv_path),
+                "embedding_index_source_ref": embedding_result["artifact"]["embedding_index_source_ref"],
+                "chunk_ref": embedding_result["artifact"]["chunk_ref"],
+                "output_path": str(temp_dir / "issues_cluster.clusters.json"),
+                "cluster_similarity_threshold": 0.2,
+                "sample_n": 2,
+                "top_n": 3,
+            }
+        )
+
+        cluster_path = Path(cluster_build_result["artifact"]["cluster_ref"])
+        self.assertTrue(cluster_path.exists())
+        materialized = json.loads(cluster_path.read_text(encoding="utf-8"))
+        self.assertEqual(materialized["skill_name"], "embedding_cluster")
+        self.assertGreaterEqual(materialized["summary"]["cluster_count"], 1)
+
+        cluster_result = run_embedding_cluster(
+            {
+                "dataset_name": str(csv_path),
+                "embedding_index_ref": embedding_result["artifact"]["embedding_index_source_ref"],
+                "cluster_ref": str(cluster_path),
+                "cluster_format": "json",
+                "sample_n": 2,
+                "top_n": 3,
+            }
+        )
+
+        self.assertEqual(cluster_result["artifact"]["cluster_ref"], str(cluster_path))
+        self.assertEqual(cluster_result["artifact"]["summary"], materialized["summary"])
+        self.assertEqual(cluster_result["artifact"]["clusters"], materialized["clusters"])
+        self.assertIn("precomputed cluster artifact", cluster_result["notes"][0])
 
     def test_rule_based_planner_without_key(self) -> None:
         with patch.dict(

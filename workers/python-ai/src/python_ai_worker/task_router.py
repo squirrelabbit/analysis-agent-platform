@@ -23,7 +23,7 @@ from .skills.core import (
     run_issue_trend_summary,
     run_unstructured_issue_summary,
 )
-from .skills.dataset_build import run_dataset_prepare, run_embedding, run_sentiment_label
+from .skills.dataset_build import run_dataset_cluster_build, run_dataset_prepare, run_embedding, run_sentiment_label
 from .skills.presentation import run_execution_final_answer
 from .skills.support import (
     run_cluster_label_candidates,
@@ -92,6 +92,7 @@ def task_handlers() -> dict[str, Any]:
         "planner": run_planner,
         "execution_final_answer": run_execution_final_answer,
         "dataset_prepare": run_dataset_prepare,
+        "dataset_cluster_build": run_dataset_cluster_build,
         "sentiment_label": run_sentiment_label,
         "embedding": run_embedding,
         "garbage_filter": run_garbage_filter,

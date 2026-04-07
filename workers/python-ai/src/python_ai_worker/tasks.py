@@ -14,7 +14,7 @@ from .skills.core import (  # noqa: F401
     run_issue_trend_summary,
     run_unstructured_issue_summary,
 )
-from .skills.dataset_build import run_dataset_prepare, run_embedding, run_sentiment_label  # noqa: F401
+from .skills.dataset_build import run_dataset_cluster_build, run_dataset_prepare, run_embedding, run_sentiment_label  # noqa: F401
 from .skills.presentation import run_execution_final_answer  # noqa: F401
 from .skills.support import (  # noqa: F401
     run_cluster_label_candidates,
@@ -47,6 +47,7 @@ __all__ = [
     "capability_names",
     "capability_payload",
     "run_cluster_label_candidates",
+    "run_dataset_cluster_build",
     "run_dataset_prepare",
     "run_deduplicate_documents",
     "run_dictionary_tagging",

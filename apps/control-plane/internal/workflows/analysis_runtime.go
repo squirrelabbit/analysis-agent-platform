@@ -248,7 +248,8 @@ func (a AnalysisActivities) CheckExecutionReadiness(ctx context.Context, input A
 	needsPrepare := requiresPrepareReady(execution.Plan)
 	needsSentiment := requiresSentimentReady(execution.Plan)
 	needsEmbedding := requiresEmbeddingReady(execution.Plan)
-	if !needsPrepare && !needsSentiment && !needsEmbedding {
+	needsCluster := requiresClusterReady(execution.Plan)
+	if !needsPrepare && !needsSentiment && !needsEmbedding && !needsCluster {
 		return ExecutionReadinessResult{
 			Ready:     true,
 			Status:    execution.Status,
@@ -296,6 +297,19 @@ func (a AnalysisActivities) CheckExecutionReadiness(ctx context.Context, input A
 				Timestamp:  a.now(),
 				WaitingFor: "embeddings",
 				Reason:     "dataset version embeddings are not ready",
+			}, nil
+		}
+	}
+	if needsCluster {
+		clusterReady := strings.TrimSpace(fmt.Sprintf("%v", version.Metadata["cluster_status"])) == "ready" &&
+			strings.TrimSpace(fmt.Sprintf("%v", version.Metadata["cluster_ref"])) != ""
+		if !clusterReady {
+			return ExecutionReadinessResult{
+				Ready:      false,
+				Status:     "waiting",
+				Timestamp:  a.now(),
+				WaitingFor: "cluster_artifact",
+				Reason:     "dataset version cluster artifact is not ready",
 			}, nil
 		}
 	}
@@ -555,6 +569,15 @@ func requiresEmbeddingReady(plan domain.SkillPlan) bool {
 	return false
 }
 
+func requiresClusterReady(plan domain.SkillPlan) bool {
+	for _, step := range plan.Steps {
+		if strings.TrimSpace(step.SkillName) == "embedding_cluster" {
+			return true
+		}
+	}
+	return false
+}
+
 func requiresPrepareReady(plan domain.SkillPlan) bool {
 	for _, step := range plan.Steps {
 		definition, ok := registry.Skill(step.SkillName)
@@ -612,6 +635,14 @@ func refreshWorkflowPlanWithDatasetVersion(plan domain.SkillPlan, version domain
 				plan.Steps[index].Inputs["embedding_uri"] = strings.TrimSpace(*version.EmbeddingURI)
 			} else {
 				delete(plan.Steps[index].Inputs, "embedding_uri")
+			}
+		}
+		if plan.Steps[index].SkillName == "embedding_cluster" {
+			if value := workflowMetadataString(version.Metadata, "cluster_ref", ""); value != "" {
+				plan.Steps[index].Inputs["cluster_ref"] = value
+			}
+			if value := workflowMetadataString(version.Metadata, "cluster_format", ""); value != "" {
+				plan.Steps[index].Inputs["cluster_format"] = value
 			}
 		}
 	}

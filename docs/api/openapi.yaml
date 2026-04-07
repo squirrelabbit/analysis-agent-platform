@@ -502,6 +502,32 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/cluster_jobs:
+    post:
+      tags: [Datasets]
+      summary: Enqueue async cluster materialization job
+      operationId: createClusterJob
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetClusterBuildRequest"
+      responses:
+        "202":
+          description: Cluster build job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetBuildJob"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/build_jobs:
     get:
       tags: [Datasets]
@@ -1400,6 +1426,37 @@ components:
           type:
             - boolean
             - "null"
+    DatasetClusterBuildRequest:
+      type: object
+      properties:
+        embedding_index_source_ref:
+          type:
+            - string
+            - "null"
+        chunk_ref:
+          type:
+            - string
+            - "null"
+        output_path:
+          type:
+            - string
+            - "null"
+        similarity_threshold:
+          type:
+            - number
+            - "null"
+        top_n:
+          type:
+            - integer
+            - "null"
+        sample_n:
+          type:
+            - integer
+            - "null"
+        force:
+          type:
+            - boolean
+            - "null"
     DatasetSentimentBuildRequest:
       type: object
       properties:
@@ -1432,7 +1489,7 @@ components:
           type: string
         build_type:
           type: string
-          enum: [prepare, sentiment, embedding]
+          enum: [prepare, sentiment, embedding, cluster]
         status:
           type: string
         request:
