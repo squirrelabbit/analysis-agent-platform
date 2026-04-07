@@ -24,6 +24,7 @@ from .skills.core import (
     run_unstructured_issue_summary,
 )
 from .skills.dataset_build import run_dataset_prepare, run_embedding, run_sentiment_label
+from .skills.presentation import run_execution_final_answer
 from .skills.support import (
     run_cluster_label_candidates,
     run_deduplicate_documents,
@@ -48,6 +49,10 @@ class TaskCapability:
 
 
 PLANNER_CAPABILITY = TaskCapability(name="planner", description="Generate replayable skill plans.")
+FINAL_ANSWER_CAPABILITY = TaskCapability(
+    name="execution_final_answer",
+    description="Generate grounded final answers from completed execution results.",
+)
 
 
 def capability_names() -> list[str]:
@@ -72,7 +77,7 @@ def capability_payload() -> dict[str, Any]:
 
 
 def supported_capabilities() -> list[TaskCapability]:
-    capabilities = [PLANNER_CAPABILITY]
+    capabilities = [PLANNER_CAPABILITY, FINAL_ANSWER_CAPABILITY]
     for skill in capability_skills():
         name = str(skill.get("name") or "").strip()
         description = str(skill.get("description") or "").strip()
@@ -85,6 +90,7 @@ def supported_capabilities() -> list[TaskCapability]:
 def task_handlers() -> dict[str, Any]:
     return {
         "planner": run_planner,
+        "execution_final_answer": run_execution_final_answer,
         "dataset_prepare": run_dataset_prepare,
         "sentiment_label": run_sentiment_label,
         "embedding": run_embedding,

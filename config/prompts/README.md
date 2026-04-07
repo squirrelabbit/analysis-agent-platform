@@ -16,12 +16,17 @@
   - `dataset-prepare-anthropic-batch-v2.md`
   - `sentiment-anthropic-v2.md`
   - `sentiment-anthropic-batch-v1.md`
+  - `execution-final-answer-v1.md`
 
 placeholder:
 
 - `{{raw_text}}`
 - `{{rows_json}}`
 - `{{text}}`
+- `{{question}}`
+- `{{scenario_json}}`
+- `{{result_json}}`
+- `{{evidence_json}}`
 
 운영 메모:
 
@@ -29,6 +34,7 @@ placeholder:
 - 필요하면 `PYTHON_AI_PROMPTS_DIR`로 다른 template 디렉터리를 지정할 수 있다.
 - 기본 prompt version은 dataset profile이나 worker env에서 고른다.
 - `prepare_prompt_version`, `sentiment_prompt_version`에 row 버전 이름을 넣어도 batch 실행 시 대응되는 `*-batch-*` prompt가 있으면 자동으로 그 버전을 사용한다.
+- 최종 사용자 답변 레이어는 현재 worker env의 `ANTHROPIC_EXECUTION_FINAL_ANSWER_PROMPT_VERSION` 또는 기본값 `execution-final-answer-v1`을 사용한다.
 - control plane의 `/dataset_profiles/validate`는 이 디렉터리를 읽어 prompt version 존재 여부와 front matter 기반 metadata를 확인한다.
 
 기본값 변경 절차:

@@ -978,6 +978,10 @@ func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
 	if err != nil {
 		return err
 	}
+	finalAnswerSnapshotJSON, err := marshalJSON(execution.FinalAnswerSnapshot)
+	if err != nil {
+		return err
+	}
 	profileSnapshotJSON, err := marshalJSON(execution.ProfileSnapshot)
 	if err != nil {
 		return err
@@ -987,9 +991,10 @@ func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
 		`INSERT INTO executions (
 		     execution_id, project_id, plan_id, status, ended_at, embedding_model_version,
 		     required_hashes, artifacts, dataset_version_id, code_version, params_hash,
-		     skill_bundle_version, events, result_v1_snapshot, profile_snapshot, created_at
+		     skill_bundle_version, events, result_v1_snapshot, final_answer_snapshot, final_answer_prompt_version,
+		     final_answer_error, profile_snapshot, created_at
 		 ) VALUES (
-		     $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16
+		     $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17, $18::jsonb, $19
 		 )
 		 ON CONFLICT (execution_id) DO UPDATE
 		 SET status = EXCLUDED.status,
@@ -1003,6 +1008,9 @@ func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
 		     skill_bundle_version = EXCLUDED.skill_bundle_version,
 		     events = EXCLUDED.events,
 		     result_v1_snapshot = EXCLUDED.result_v1_snapshot,
+		     final_answer_snapshot = EXCLUDED.final_answer_snapshot,
+		     final_answer_prompt_version = EXCLUDED.final_answer_prompt_version,
+		     final_answer_error = EXCLUDED.final_answer_error,
 		     profile_snapshot = EXCLUDED.profile_snapshot`,
 		execution.ExecutionID,
 		execution.ProjectID,
@@ -1018,6 +1026,9 @@ func (s *PostgresStore) SaveExecution(execution domain.ExecutionSummary) error {
 		nullableString(execution.SkillBundleVersion),
 		eventsJSON,
 		resultV1SnapshotJSON,
+		finalAnswerSnapshotJSON,
+		nullableString(execution.FinalAnswerPromptVersion),
+		nullableString(execution.FinalAnswerError),
 		profileSnapshotJSON,
 		execution.CreatedAt,
 	)
@@ -1030,7 +1041,8 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 		        e.status, e.ended_at, e.required_hashes, e.embedding_model_version, e.artifacts,
 		        e.dataset_version_id, e.code_version, e.params_hash, e.skill_bundle_version, e.events,
 		        e.created_at,
-		        e.result_v1_snapshot, e.profile_snapshot
+		        e.result_v1_snapshot, e.final_answer_snapshot, e.final_answer_prompt_version,
+		        e.final_answer_error, e.profile_snapshot
 		 FROM executions e
 		 JOIN skill_plans p ON p.plan_id = e.plan_id
 		 WHERE e.project_id = $1::uuid AND e.execution_id = $2::uuid`,
@@ -1049,6 +1061,9 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 	var skillBundleVersion sql.NullString
 	var eventsRaw []byte
 	var resultV1SnapshotRaw []byte
+	var finalAnswerSnapshotRaw []byte
+	var finalAnswerPromptVersion sql.NullString
+	var finalAnswerError sql.NullString
 	var profileSnapshotRaw []byte
 	if err := row.Scan(
 		&execution.ExecutionID,
@@ -1067,6 +1082,9 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 		&eventsRaw,
 		&execution.CreatedAt,
 		&resultV1SnapshotRaw,
+		&finalAnswerSnapshotRaw,
+		&finalAnswerPromptVersion,
+		&finalAnswerError,
 		&profileSnapshotRaw,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1090,6 +1108,9 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 	if err := unmarshalJSON(resultV1SnapshotRaw, &execution.ResultV1Snapshot, (*domain.ExecutionResultV1)(nil)); err != nil {
 		return domain.ExecutionSummary{}, err
 	}
+	if err := unmarshalJSON(finalAnswerSnapshotRaw, &execution.FinalAnswerSnapshot, (*domain.ExecutionFinalAnswer)(nil)); err != nil {
+		return domain.ExecutionSummary{}, err
+	}
 	if err := unmarshalJSON(profileSnapshotRaw, &execution.ProfileSnapshot, (*domain.DatasetProfile)(nil)); err != nil {
 		return domain.ExecutionSummary{}, err
 	}
@@ -1108,12 +1129,19 @@ func (s *PostgresStore) GetExecution(projectID, executionID string) (domain.Exec
 	if skillBundleVersion.Valid {
 		execution.SkillBundleVersion = &skillBundleVersion.String
 	}
+	if finalAnswerPromptVersion.Valid {
+		execution.FinalAnswerPromptVersion = &finalAnswerPromptVersion.String
+	}
+	if finalAnswerError.Valid {
+		execution.FinalAnswerError = &finalAnswerError.String
+	}
 	return execution, nil
 }
 
 func (s *PostgresStore) ListExecutions(projectID string) ([]domain.ExecutionSummary, error) {
 	rows, err := s.db.Query(
-		`SELECT execution_id::text, project_id::text, status, created_at, ended_at, dataset_version_id, result_v1_snapshot
+		`SELECT execution_id::text, project_id::text, status, created_at, ended_at, dataset_version_id,
+		        result_v1_snapshot, final_answer_snapshot, final_answer_error
 		 FROM executions
 		 WHERE project_id = $1::uuid
 		 ORDER BY created_at DESC`,
@@ -1129,6 +1157,8 @@ func (s *PostgresStore) ListExecutions(projectID string) ([]domain.ExecutionSumm
 		var execution domain.ExecutionSummary
 		var datasetVersionID sql.NullString
 		var resultV1SnapshotRaw []byte
+		var finalAnswerSnapshotRaw []byte
+		var finalAnswerError sql.NullString
 		if err := rows.Scan(
 			&execution.ExecutionID,
 			&execution.ProjectID,
@@ -1137,6 +1167,8 @@ func (s *PostgresStore) ListExecutions(projectID string) ([]domain.ExecutionSumm
 			&execution.EndedAt,
 			&datasetVersionID,
 			&resultV1SnapshotRaw,
+			&finalAnswerSnapshotRaw,
+			&finalAnswerError,
 		); err != nil {
 			return nil, err
 		}
@@ -1145,6 +1177,12 @@ func (s *PostgresStore) ListExecutions(projectID string) ([]domain.ExecutionSumm
 		}
 		if err := unmarshalJSON(resultV1SnapshotRaw, &execution.ResultV1Snapshot, (*domain.ExecutionResultV1)(nil)); err != nil {
 			return nil, err
+		}
+		if err := unmarshalJSON(finalAnswerSnapshotRaw, &execution.FinalAnswerSnapshot, (*domain.ExecutionFinalAnswer)(nil)); err != nil {
+			return nil, err
+		}
+		if finalAnswerError.Valid {
+			execution.FinalAnswerError = &finalAnswerError.String
 		}
 		items = append(items, execution)
 	}
@@ -1417,11 +1455,17 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			params_hash TEXT,
 			skill_bundle_version TEXT,
 			result_v1_snapshot JSONB,
+			final_answer_snapshot JSONB,
+			final_answer_prompt_version TEXT,
+			final_answer_error TEXT,
 			profile_snapshot JSONB,
 			events JSONB,
 			created_at TIMESTAMPTZ NOT NULL
 		)`,
 		`ALTER TABLE executions ADD COLUMN IF NOT EXISTS result_v1_snapshot JSONB`,
+		`ALTER TABLE executions ADD COLUMN IF NOT EXISTS final_answer_snapshot JSONB`,
+		`ALTER TABLE executions ADD COLUMN IF NOT EXISTS final_answer_prompt_version TEXT`,
+		`ALTER TABLE executions ADD COLUMN IF NOT EXISTS final_answer_error TEXT`,
 		`ALTER TABLE executions ADD COLUMN IF NOT EXISTS profile_snapshot JSONB`,
 		`CREATE TABLE IF NOT EXISTS report_drafts (
 			draft_id UUID PRIMARY KEY,

@@ -63,6 +63,15 @@ func TestAnalysisExecutionWorkflowCompletesAndPersistsExecution(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("unexpected save execution error: %v", err)
 	}
+	if err := repo.SaveRequest(domain.AnalysisRequest{
+		RequestID: "request-1",
+		ProjectID: "project-1",
+		Goal:      "핵심 이슈를 요약해줘",
+		Context:   map[string]any{"channel": "app"},
+		CreatedAt: fixedNow.Add(-2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("unexpected save request error: %v", err)
+	}
 
 	RegisterAnalysisRuntime(env, AnalysisActivities{
 		Repo: repo,
@@ -78,6 +87,14 @@ func TestAnalysisExecutionWorkflowCompletesAndPersistsExecution(t *testing.T) {
 					{Phase: "before", StepID: "step-1", SkillName: "structured_kpi_summary"},
 					{Phase: "after", StepID: "step-1", SkillName: "structured_kpi_summary", Payload: map[string]any{"status": "completed"}},
 				},
+			},
+		},
+		AnswerGenerator: fakeFinalAnswerGenerator{
+			answer: domain.ExecutionFinalAnswer{
+				SchemaVersion:  "execution-final-answer-v1",
+				Status:         "ready",
+				GenerationMode: "llm",
+				AnswerText:     "최종 답변 요약",
 			},
 		},
 		Now: func() time.Time {
@@ -134,10 +151,10 @@ func TestAnalysisExecutionWorkflowCompletesAndPersistsExecution(t *testing.T) {
 	if execution.EndedAt == nil || !execution.EndedAt.Equal(fixedNow) {
 		t.Fatalf("unexpected ended_at: %+v", execution.EndedAt)
 	}
-	if len(execution.Events) != 2 {
+	if len(execution.Events) != 3 {
 		t.Fatalf("unexpected event count: %d", len(execution.Events))
 	}
-	if execution.Events[0].EventType != "WORKFLOW_STARTED" || execution.Events[1].EventType != "WORKFLOW_COMPLETED" {
+	if execution.Events[0].EventType != "WORKFLOW_STARTED" || execution.Events[1].EventType != "WORKFLOW_COMPLETED" || execution.Events[2].EventType != "FINAL_ANSWER_GENERATED" {
 		t.Fatalf("unexpected events: %+v", execution.Events)
 	}
 	if hooks, ok := execution.Events[1].Payload["step_hooks"].([]skills.StepHookRecord); !ok || len(hooks) != 2 {
@@ -148,6 +165,12 @@ func TestAnalysisExecutionWorkflowCompletesAndPersistsExecution(t *testing.T) {
 	}
 	if execution.ResultV1Snapshot.SchemaVersion != "execution-result-v1" {
 		t.Fatalf("unexpected result v1 snapshot: %+v", execution.ResultV1Snapshot)
+	}
+	if execution.FinalAnswerSnapshot == nil {
+		t.Fatalf("expected final answer snapshot to be persisted: %+v", execution)
+	}
+	if execution.FinalAnswerSnapshot.AnswerText != "최종 답변 요약" {
+		t.Fatalf("unexpected final answer snapshot: %+v", execution.FinalAnswerSnapshot)
 	}
 }
 
@@ -593,4 +616,16 @@ func (f fakeExecutionRunner) Run(_ context.Context, _ domain.ExecutionSummary) (
 		return skills.ExecutionRunResult{}, f.err
 	}
 	return f.result, nil
+}
+
+type fakeFinalAnswerGenerator struct {
+	answer domain.ExecutionFinalAnswer
+	err    error
+}
+
+func (f fakeFinalAnswerGenerator) Generate(_ context.Context, _ skills.FinalAnswerRequest) (domain.ExecutionFinalAnswer, []string, error) {
+	if f.err != nil {
+		return domain.ExecutionFinalAnswer{}, nil, f.err
+	}
+	return f.answer, []string{"generated in test"}, nil
 }

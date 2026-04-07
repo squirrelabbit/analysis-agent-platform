@@ -338,24 +338,27 @@ type ExecutionEvent struct {
 }
 
 type ExecutionSummary struct {
-	ExecutionID        string                `json:"execution_id"`
-	ProjectID          string                `json:"project_id"`
-	RequestID          string                `json:"request_id"`
-	Plan               SkillPlan             `json:"plan"`
-	Status             string                `json:"status"`
-	CreatedAt          time.Time             `json:"created_at"`
-	EndedAt            *time.Time            `json:"ended_at,omitempty"`
-	RequiredHashes     []string              `json:"required_hashes"`
-	EmbeddingModel     *string               `json:"embedding_model_version,omitempty"`
-	Artifacts          map[string]string     `json:"artifacts"`
-	DatasetVersionID   *string               `json:"dataset_version_id,omitempty"`
-	CodeVersion        *string               `json:"code_version,omitempty"`
-	ParamsHash         *string               `json:"params_hash,omitempty"`
-	SkillBundleVersion *string               `json:"skill_bundle_version,omitempty"`
-	ProfileSnapshot    *DatasetProfile       `json:"profile_snapshot,omitempty"`
-	Events             []ExecutionEvent      `json:"events"`
-	ResultV1Snapshot   *ExecutionResultV1    `json:"-"`
-	Diagnostics        *ExecutionDiagnostics `json:"diagnostics,omitempty"`
+	ExecutionID              string                `json:"execution_id"`
+	ProjectID                string                `json:"project_id"`
+	RequestID                string                `json:"request_id"`
+	Plan                     SkillPlan             `json:"plan"`
+	Status                   string                `json:"status"`
+	CreatedAt                time.Time             `json:"created_at"`
+	EndedAt                  *time.Time            `json:"ended_at,omitempty"`
+	RequiredHashes           []string              `json:"required_hashes"`
+	EmbeddingModel           *string               `json:"embedding_model_version,omitempty"`
+	Artifacts                map[string]string     `json:"artifacts"`
+	DatasetVersionID         *string               `json:"dataset_version_id,omitempty"`
+	CodeVersion              *string               `json:"code_version,omitempty"`
+	ParamsHash               *string               `json:"params_hash,omitempty"`
+	SkillBundleVersion       *string               `json:"skill_bundle_version,omitempty"`
+	ProfileSnapshot          *DatasetProfile       `json:"profile_snapshot,omitempty"`
+	Events                   []ExecutionEvent      `json:"events"`
+	ResultV1Snapshot         *ExecutionResultV1    `json:"-"`
+	FinalAnswerSnapshot      *ExecutionFinalAnswer `json:"-"`
+	FinalAnswerPromptVersion *string               `json:"-"`
+	FinalAnswerError         *string               `json:"-"`
+	Diagnostics              *ExecutionDiagnostics `json:"diagnostics,omitempty"`
 }
 
 type ExecutionListItem struct {
@@ -401,6 +404,7 @@ type ExecutionResultResponse struct {
 	Artifacts   map[string]string     `json:"artifacts"`
 	Contract    map[string]any        `json:"contract"`
 	ResultV1    ExecutionResultV1     `json:"result_v1"`
+	FinalAnswer *ExecutionFinalAnswer `json:"final_answer,omitempty"`
 	Diagnostics *ExecutionDiagnostics `json:"diagnostics,omitempty"`
 }
 
@@ -455,6 +459,22 @@ type ExecutionResultV1 struct {
 	Waiting            *ExecutionWaitingState  `json:"waiting,omitempty"`
 }
 
+type ExecutionFinalAnswer struct {
+	SchemaVersion     string           `json:"schema_version"`
+	Status            string           `json:"status"`
+	GenerationMode    string           `json:"generation_mode,omitempty"`
+	Headline          string           `json:"headline,omitempty"`
+	AnswerText        string           `json:"answer_text"`
+	KeyPoints         []string         `json:"key_points,omitempty"`
+	Caveats           []string         `json:"caveats,omitempty"`
+	Evidence          []map[string]any `json:"evidence,omitempty"`
+	FollowUpQuestions []string         `json:"follow_up_questions,omitempty"`
+	PromptVersion     *string          `json:"prompt_version,omitempty"`
+	Model             *string          `json:"model,omitempty"`
+	Usage             map[string]any   `json:"usage,omitempty"`
+	GeneratedAt       *time.Time       `json:"generated_at,omitempty"`
+}
+
 type ExecutionResultAnswer struct {
 	Summary           string           `json:"summary"`
 	KeyFindings       []string         `json:"key_findings,omitempty"`
@@ -487,6 +507,8 @@ type ExecutionDiagnostics struct {
 	LatestEventMessage string                 `json:"latest_event_message,omitempty"`
 	FailureReason      string                 `json:"failure_reason,omitempty"`
 	Waiting            *ExecutionWaitingState `json:"waiting,omitempty"`
+	FinalAnswerStatus  string                 `json:"final_answer_status,omitempty"`
+	FinalAnswerError   string                 `json:"final_answer_error,omitempty"`
 }
 
 type ExecutionDiffStep struct {

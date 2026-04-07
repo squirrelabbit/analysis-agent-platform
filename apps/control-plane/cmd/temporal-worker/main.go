@@ -34,6 +34,7 @@ func main() {
 	datasetService.SetBuildJobStarter(starter)
 	analysisService := service.NewAnalysisService(repository, starter, nil)
 	analysisService.SetDependencyBuilder(datasetService)
+	answerGenerator := skills.PythonAIFinalAnswerClient{BaseURL: cfg.PythonAIWorkerURL}
 
 	temporalClient, err := client.Dial(client.Options{
 		HostPort:  cfg.TemporalAddress,
@@ -54,7 +55,8 @@ func main() {
 					ArtifactRoot: cfg.ArtifactRoot,
 				},
 			},
-			Now: workflows.NewAnalysisActivities().Now,
+			AnswerGenerator: answerGenerator,
+			Now:             workflows.NewAnalysisActivities().Now,
 		})
 	}
 	registerBuildWorker := func(w worker.Worker) {

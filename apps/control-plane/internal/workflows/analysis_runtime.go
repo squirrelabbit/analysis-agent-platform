@@ -49,9 +49,10 @@ type ExecutionReadinessResult struct {
 }
 
 type AnalysisActivities struct {
-	Repo   store.Repository
-	Runner skills.ExecutionRunner
-	Now    func() time.Time
+	Repo            store.Repository
+	Runner          skills.ExecutionRunner
+	AnswerGenerator skills.FinalAnswerGenerator
+	Now             func() time.Time
 }
 
 type CompleteExecutionInput struct {
@@ -412,11 +413,83 @@ func (a AnalysisActivities) MarkExecutionCompleted(ctx context.Context, input Co
 		return ExecutionLifecycleResult{}, err
 	}
 
+	if a.AnswerGenerator != nil {
+		request, err := repo.GetRequest(input.WorkflowInput.ProjectID, execution.RequestID)
+		if err == nil {
+			answer, notes, generationErr := a.AnswerGenerator.Generate(
+				ctx,
+				skills.FinalAnswerRequest{
+					ExecutionID: execution.ExecutionID,
+					ProjectID:   execution.ProjectID,
+					Question:    strings.TrimSpace(request.Goal),
+					Context:     cloneInputMap(request.Context),
+					ResultV1:    snapshot,
+				},
+			)
+			if generationErr != nil {
+				errText := generationErr.Error()
+				execution.FinalAnswerError = &errText
+				execution.Events = append(execution.Events, domain.ExecutionEvent{
+					ExecutionID: input.WorkflowInput.ExecutionID,
+					TS:          now,
+					Level:       "warn",
+					EventType:   "FINAL_ANSWER_FAILED",
+					Message:     "final answer generation failed",
+					Payload: map[string]any{
+						"error": errText,
+					},
+				})
+			} else {
+				if answer.GeneratedAt == nil {
+					generatedAt := now
+					answer.GeneratedAt = &generatedAt
+				}
+				execution.FinalAnswerSnapshot = &answer
+				execution.FinalAnswerPromptVersion = answer.PromptVersion
+				execution.FinalAnswerError = nil
+				execution.Events = append(execution.Events, domain.ExecutionEvent{
+					ExecutionID: input.WorkflowInput.ExecutionID,
+					TS:          now,
+					Level:       "info",
+					EventType:   "FINAL_ANSWER_GENERATED",
+					Message:     "final answer generated from execution result",
+					Payload: map[string]any{
+						"generation_mode": answer.GenerationMode,
+						"prompt_version":  optionalString(answer.PromptVersion),
+						"model":           optionalString(answer.Model),
+						"notes":           notes,
+					},
+				})
+			}
+		}
+		if err := repo.SaveExecution(execution); err != nil {
+			return ExecutionLifecycleResult{}, err
+		}
+	}
+
 	return ExecutionLifecycleResult{
 		Status:    execution.Status,
 		Timestamp: now,
 		EventType: "WORKFLOW_COMPLETED",
 	}, nil
+}
+
+func cloneInputMap(source map[string]any) map[string]any {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func optionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func (a AnalysisActivities) MarkExecutionFailed(ctx context.Context, input FailExecutionInput) (ExecutionLifecycleResult, error) {

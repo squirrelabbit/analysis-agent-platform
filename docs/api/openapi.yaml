@@ -1850,6 +1850,10 @@ components:
           $ref: "#/components/schemas/AnyMap"
         result_v1:
           $ref: "#/components/schemas/ExecutionResultV1"
+        final_answer:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionFinalAnswer"
+            - type: "null"
         diagnostics:
           anyOf:
             - $ref: "#/components/schemas/ExecutionDiagnostics"
@@ -1893,6 +1897,51 @@ components:
             - $ref: "#/components/schemas/ExecutionWaitingState"
             - type: "null"
       required: [schema_version, status, step_results]
+    ExecutionFinalAnswer:
+      type: object
+      properties:
+        schema_version:
+          type: string
+        status:
+          type: string
+        generation_mode:
+          type: string
+        headline:
+          type: string
+        answer_text:
+          type: string
+        key_points:
+          type: array
+          items:
+            type: string
+        caveats:
+          type: array
+          items:
+            type: string
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnyMap"
+        follow_up_questions:
+          type: array
+          items:
+            type: string
+        prompt_version:
+          type:
+            - string
+            - "null"
+        model:
+          type:
+            - string
+            - "null"
+        usage:
+          $ref: "#/components/schemas/AnyMap"
+        generated_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required: [schema_version, status, answer_text]
     ExecutionResultAnswer:
       type: object
       properties:
@@ -1966,6 +2015,10 @@ components:
           anyOf:
             - $ref: "#/components/schemas/ExecutionWaitingState"
             - type: "null"
+        final_answer_status:
+          type: string
+        final_answer_error:
+          type: string
       required: [event_count]
     ReportDraftCreateRequest:
       type: object

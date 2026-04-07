@@ -9,6 +9,7 @@ DEFAULT_PREPARE_PROMPT_VERSION = "dataset-prepare-anthropic-v1"
 DEFAULT_PREPARE_BATCH_PROMPT_VERSION = "dataset-prepare-anthropic-batch-v1"
 DEFAULT_SENTIMENT_PROMPT_VERSION = "sentiment-anthropic-v1"
 DEFAULT_SENTIMENT_BATCH_PROMPT_VERSION = "sentiment-anthropic-batch-v1"
+DEFAULT_EXECUTION_FINAL_ANSWER_PROMPT_VERSION = "execution-final-answer-v1"
 PROMPTS_DIR_ENV = "PYTHON_AI_PROMPTS_DIR"
 
 _PROMPT_DEFAULT_GROUPS = {
@@ -16,6 +17,7 @@ _PROMPT_DEFAULT_GROUPS = {
     DEFAULT_PREPARE_BATCH_PROMPT_VERSION: ["prepare_batch"],
     DEFAULT_SENTIMENT_PROMPT_VERSION: ["sentiment"],
     DEFAULT_SENTIMENT_BATCH_PROMPT_VERSION: ["sentiment_batch"],
+    DEFAULT_EXECUTION_FINAL_ANSWER_PROMPT_VERSION: ["execution_final_answer"],
 }
 _PROMPT_DIR_EXCLUDE = {"README", "CHANGELOG"}
 
@@ -73,6 +75,8 @@ def _infer_prompt_operation(version: str) -> str:
         return "sentiment_batch"
     if "sentiment-anthropic" in normalized:
         return "sentiment"
+    if "execution-final-answer" in normalized:
+        return "execution_final_answer"
     return "custom"
 
 
@@ -176,7 +180,31 @@ def render_sentiment_batch_prompt(texts: list[str], version: str = "") -> tuple[
     return prompt_version, prompt
 
 
+def render_execution_final_answer_prompt(
+    *,
+    question: str,
+    scenario_json: str,
+    result_json: str,
+    evidence_json: str,
+    version: str = "",
+) -> tuple[str, str]:
+    prompt_version = version.strip() or DEFAULT_EXECUTION_FINAL_ANSWER_PROMPT_VERSION
+    template = _load_prompt_template(prompt_version, "execution final answer")
+    prompt = _render_template(
+        template,
+        {
+            "question": question,
+            "scenario_json": scenario_json,
+            "result_json": result_json,
+            "evidence_json": evidence_json,
+        },
+        prompt_version,
+    )
+    return prompt_version, prompt
+
+
 __all__ = [
+    "DEFAULT_EXECUTION_FINAL_ANSWER_PROMPT_VERSION",
     "DEFAULT_PREPARE_BATCH_PROMPT_VERSION",
     "DEFAULT_PREPARE_PROMPT_VERSION",
     "DEFAULT_SENTIMENT_BATCH_PROMPT_VERSION",
@@ -184,6 +212,7 @@ __all__ = [
     "PROMPTS_DIR_ENV",
     "available_prompt_versions",
     "prompt_catalog",
+    "render_execution_final_answer_prompt",
     "render_prepare_batch_prompt",
     "render_prepare_prompt",
     "render_sentiment_batch_prompt",

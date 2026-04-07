@@ -302,6 +302,35 @@ def _normalize_sentiment_build_payload(payload: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _normalize_execution_final_answer_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    execution_id = str(payload.get("execution_id") or "").strip()
+    project_id = str(payload.get("project_id") or "").strip()
+    question = str(payload.get("question") or payload.get("goal") or "").strip()
+    context = payload.get("context") or {}
+    if not isinstance(context, dict):
+        context = {}
+    scenario = payload.get("scenario") or context.get("scenario") or {}
+    if not isinstance(scenario, dict):
+        scenario = {}
+    result_v1 = payload.get("result_v1") or {}
+    if not isinstance(result_v1, dict):
+        raise ValueError("result_v1 must be an object")
+    if not question:
+        question = str(scenario.get("user_query") or "").strip()
+    if not question:
+        question = "분석 결과를 요약해줘"
+    prompt_version = str(payload.get("prompt_version") or "").strip()
+    return {
+        "execution_id": execution_id,
+        "project_id": project_id,
+        "question": question,
+        "context": context,
+        "scenario": scenario,
+        "result_v1": result_v1,
+        "prompt_version": prompt_version,
+    }
+
+
 def _default_inputs(skill_name: str, *, goal: str = "") -> dict[str, Any]:
     return default_inputs_for_skill(skill_name, goal=goal)
 
@@ -324,6 +353,7 @@ __all__ = [
     "_normalize_garbage_filter_payload",
     "_normalize_embedding_cluster_payload",
     "_normalize_embedding_payload",
+    "_normalize_execution_final_answer_payload",
     "_normalize_inputs",
     "_normalize_noun_frequency_payload",
     "_normalize_prepare_payload",
