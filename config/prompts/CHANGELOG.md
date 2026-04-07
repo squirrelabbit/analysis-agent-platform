@@ -20,3 +20,8 @@
 ## sentiment-anthropic-batch-v2
 
 - `sentiment-anthropic-v2`의 neutral 우선 규칙과 ambiguity 처리 기준을 batch 응답에도 동일하게 적용한다.
+
+## execution-final-answer-v1
+
+- `result_v1`와 evidence만 사용해 grounded final answer를 생성하는 첫 버전이다.
+- 새 주장보다 요약/정리/주의사항 표시에 집중하도록 제한한다.

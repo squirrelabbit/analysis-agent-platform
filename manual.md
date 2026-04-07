@@ -820,12 +820,17 @@ curl -sS "$API/projects/$PROJECT_ID/executions/$EXEC_ID/result" | python3 -m jso
 - `result_v1.usage_summary`
 - `result_v1.warnings`
 - `result_v1.waiting`
+- `final_answer.status`
+- `final_answer.answer_text`
+- `final_answer.key_points`
+- `final_answer.caveats`
 - evidence artifact 안에 `prompt_compaction.analysis_context`, `prompt_compaction.selected_documents`가 있으면 evidence LLM 입력이 compaction된 것이다.
 
 `contract.usage_summary`는 현재 usage가 남은 artifact를 기준으로 집계한다. 가격 env를 넣지 않았으면 `estimated_cost_usd`는 비어 있거나 0으로 남을 수 있다.
 `contract.step_hooks`는 현재 기본 runtime hook가 남긴 step 전/후 record다. 각 record에는 `phase`, `step_id`, `skill_name`, `payload.input_keys` 또는 `payload.artifact_bytes`, `payload.usage` 같은 값이 들어갈 수 있다.
 `result_v1`는 현재 사용자용 응답 레이어다. `answer`는 대표 artifact를 기준으로 사람이 읽기 좋은 요약/근거/후속질문을 정리하고, `step_results`는 각 skill step의 상태/요약/ref를 묶어준다. 실행이 `waiting`이면 `result_v1.waiting.waiting_for`, `result_v1.waiting.reason`을 먼저 보면 된다.
-execution이 `completed` 상태가 되면 control plane은 현재 `result_v1 snapshot`을 execution metadata에 저장한다. 이후 `/executions/{id}/result`는 이 저장된 snapshot을 우선 사용하므로, 나중에 리스트 선택이나 보고서 초안 생성에서 같은 answer를 재사용하기 쉽다.
+`final_answer`는 `result_v1`와 evidence를 바탕으로 생성되는 grounded LLM 후처리 레이어다. 생성 실패 시 `result_v1` 기반 fallback answer를 응답에서 계속 내려준다.
+execution이 `completed` 상태가 되면 control plane은 현재 `result_v1 snapshot`과 `final_answer snapshot`을 execution metadata에 저장한다. 이후 `/executions/{id}/result`는 이 저장된 snapshot을 우선 사용하므로, 나중에 리스트 선택이나 보고서 초안 생성에서 같은 answer를 재사용하기 쉽다.
 
 
 ### 7-10. execution 목록 preview 조회

@@ -60,9 +60,10 @@
 - 확인 필요: dataset build workflow history의 장기 보존 기간은 아직 Temporal 서버 기본값을 따르고 있고, 운영 환경별 실제 동시성 상한은 머신 자원 기준으로 추가 튜닝이 필요하다.
 - execution runner는 현재 기본 `pre/post step hook`를 사용해 각 step의 입력 키, artifact 크기, usage preview를 `step_hooks`로 남기고, 완료 이벤트와 execution result contract에서 확인할 수 있다.
 - execution result API는 기존 `artifacts + contract`를 유지하면서, 현재 `result_v1`에 사용자용 `answer`, `step_results`, `warnings`, `waiting`, `usage_summary`를 함께 내려준다.
-- execution이 완료되면 control plane은 현재 `result_v1 snapshot`을 execution metadata에 함께 저장하고, `/executions/{id}/result`는 저장된 snapshot을 우선 사용한다.
-- execution 목록 API는 현재 `result_v1 snapshot` 기준 preview를 내려주고, `primary_skill_name`, `answer_preview`, `warning_count`, `waiting`을 함께 보여준다.
-- report draft API는 현재 선택한 execution들의 `result_v1 snapshot`을 묶어 `report-draft-v1` 초안을 저장하고, 이후 같은 draft를 다시 조회할 수 있다.
+- execution 완료 후에는 `result_v1`를 근거로 한 `final_answer` 후처리 레이어를 추가로 생성한다. 이 단계는 raw dataset을 다시 읽지 않고 `result_v1 + evidence`만 사용한다.
+- execution이 완료되면 control plane은 현재 `result_v1 snapshot`과 `final_answer snapshot`을 execution metadata에 함께 저장하고, `/executions/{id}/result`는 저장된 snapshot을 우선 사용한다.
+- execution 목록 API는 현재 `final_answer snapshot`이 있으면 그 preview를 우선 내려주고, 없으면 `result_v1 snapshot`으로 fallback한다.
+- report draft API는 현재 선택한 execution들의 `final_answer snapshot`을 우선 묶고, 없으면 `result_v1 snapshot`으로 fallback한 `report-draft-v1` 초안을 저장한다.
 - 개발용 compose stack은 현재 `pgvector` 이미지와 `vector` extension, `embedding_index_chunks` table을 포함한다.
 - `dataset_prepare`와 `sentiment_label`은 기본 Haiku model을 쓰고, prompt version은 Markdown template registry/env 기본값 위에 dataset version `profile` override를 적용할 수 있다.
 - 비정형 deterministic skill은 Python worker 안에서 `deduplicate_documents`, `dictionary_tagging`, `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`, `issue_taxonomy_summary`까지 확장돼 있다.

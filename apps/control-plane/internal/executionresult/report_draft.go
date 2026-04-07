@@ -9,6 +9,7 @@ import (
 
 func BuildListItem(execution domain.ExecutionSummary) domain.ExecutionListItem {
 	result := executionResultForPresentation(execution)
+	finalAnswer := BuildFinalAnswer(execution)
 	item := domain.ExecutionListItem{
 		ExecutionID:      execution.ExecutionID,
 		Status:           execution.Status,
@@ -19,7 +20,9 @@ func BuildListItem(execution domain.ExecutionSummary) domain.ExecutionListItem {
 	if result.PrimarySkillName != nil {
 		item.PrimarySkillName = stringPointer(strings.TrimSpace(*result.PrimarySkillName))
 	}
-	if result.Answer != nil {
+	if preview := finalAnswerPreview(finalAnswer); preview != "" {
+		item.AnswerPreview = stringPointer(preview)
+	} else if result.Answer != nil {
 		summary := strings.TrimSpace(result.Answer.Summary)
 		if summary != "" {
 			item.AnswerPreview = stringPointer(summary)
@@ -43,6 +46,7 @@ func BuildReportDraftV1(title string, executions []domain.ExecutionSummary) doma
 
 	for _, execution := range executions {
 		result := executionResultForPresentation(execution)
+		finalAnswer := BuildFinalAnswer(execution)
 		section := domain.ReportDraftSection{
 			ExecutionID:  execution.ExecutionID,
 			Status:       execution.Status,
@@ -52,7 +56,13 @@ func BuildReportDraftV1(title string, executions []domain.ExecutionSummary) doma
 		if result.PrimarySkillName != nil {
 			section.PrimarySkillName = stringPointer(strings.TrimSpace(*result.PrimarySkillName))
 		}
-		if result.Answer != nil {
+		if finalAnswer != nil {
+			section.Summary = strings.TrimSpace(finalAnswer.AnswerText)
+			section.KeyFindings = limitStrings(finalAnswer.KeyPoints, 5)
+			section.Evidence = limitEvidence(finalAnswer.Evidence, 3)
+			followUpQuestions = append(followUpQuestions, finalAnswer.FollowUpQuestions...)
+			warnings = append(warnings, finalAnswer.Caveats...)
+		} else if result.Answer != nil {
 			section.Summary = strings.TrimSpace(result.Answer.Summary)
 			section.KeyFindings = limitStrings(result.Answer.KeyFindings, 5)
 			section.Evidence = limitEvidence(result.Answer.Evidence, 3)

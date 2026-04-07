@@ -361,6 +361,7 @@ func (s *AnalysisService) BuildExecutionResult(projectID, executionID string) (d
 	if err != nil {
 		return domain.ExecutionResultResponse{}, err
 	}
+	resultV1 := buildExecutionResultV1(execution, nil)
 
 	contract := map[string]any{
 		"status":          execution.Status,
@@ -391,7 +392,8 @@ func (s *AnalysisService) BuildExecutionResult(projectID, executionID string) (d
 		ExecutionID: execution.ExecutionID,
 		Artifacts:   execution.Artifacts,
 		Contract:    contract,
-		ResultV1:    buildExecutionResultV1(execution, contract),
+		ResultV1:    resultV1,
+		FinalAnswer: executionresult.BuildFinalAnswer(execution),
 		Diagnostics: execution.Diagnostics,
 	}, nil
 }
@@ -439,6 +441,17 @@ func (s *AnalysisService) CreateReportDraft(projectID string, input domain.Repor
 func withExecutionDiagnostics(execution domain.ExecutionSummary) domain.ExecutionSummary {
 	diagnostics := &domain.ExecutionDiagnostics{
 		EventCount: len(execution.Events),
+	}
+	if execution.FinalAnswerSnapshot != nil {
+		diagnostics.FinalAnswerStatus = strings.TrimSpace(execution.FinalAnswerSnapshot.Status)
+		if diagnostics.FinalAnswerStatus == "" {
+			diagnostics.FinalAnswerStatus = "ready"
+		}
+	} else if execution.FinalAnswerError != nil && strings.TrimSpace(*execution.FinalAnswerError) != "" {
+		diagnostics.FinalAnswerStatus = "failed"
+		diagnostics.FinalAnswerError = strings.TrimSpace(*execution.FinalAnswerError)
+	} else if strings.TrimSpace(execution.Status) == "completed" {
+		diagnostics.FinalAnswerStatus = "pending"
 	}
 	if len(execution.Events) > 0 {
 		latest := execution.Events[len(execution.Events)-1]

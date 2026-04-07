@@ -21,6 +21,7 @@ from python_ai_worker.tasks import (
     run_embedding,
     run_embedding_cluster,
     run_evidence_pack,
+    run_execution_final_answer,
     run_garbage_filter,
     run_issue_breakdown_summary,
     run_issue_cluster_summary,
@@ -85,6 +86,40 @@ class TaskTests(unittest.TestCase):
 
         def is_enabled(self) -> bool:
             return True
+
+    def test_run_execution_final_answer_fallback(self) -> None:
+        result = run_execution_final_answer(
+            {
+                "execution_id": "exec-1",
+                "project_id": "project-1",
+                "question": "결제 오류 핵심을 알려줘",
+                "result_v1": {
+                    "status": "completed",
+                    "primary_skill_name": "issue_evidence_summary",
+                    "answer": {
+                        "summary": "결제 오류 이슈가 반복되고 있습니다.",
+                        "key_findings": ["결제 오류 VOC가 반복된다."],
+                        "evidence": [{"snippet": "결제 오류가 반복 발생했습니다."}],
+                        "follow_up_questions": ["결제 실패 구간을 더 볼까요?"],
+                    },
+                    "warnings": ["확인 필요: 샘플 수가 제한적입니다."],
+                    "step_results": [
+                        {
+                            "step_id": "step-1",
+                            "skill_name": "issue_evidence_summary",
+                            "status": "completed",
+                            "summary": "결제 오류 이슈가 반복되고 있습니다.",
+                        }
+                    ],
+                },
+            }
+        )
+
+        answer = result["answer"]
+        self.assertEqual(answer["schema_version"], "execution-final-answer-v1")
+        self.assertEqual(answer["generation_mode"], "fallback")
+        self.assertEqual(answer["answer_text"], "결제 오류 이슈가 반복되고 있습니다.")
+        self.assertEqual(answer["key_points"], ["결제 오류 VOC가 반복된다."])
 
     def test_rule_based_planner_without_key(self) -> None:
         with patch.dict(

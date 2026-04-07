@@ -15,6 +15,7 @@ from .skills.core import (  # noqa: F401
     run_unstructured_issue_summary,
 )
 from .skills.dataset_build import run_dataset_prepare, run_embedding, run_sentiment_label  # noqa: F401
+from .skills.presentation import run_execution_final_answer  # noqa: F401
 from .skills.support import (  # noqa: F401
     run_cluster_label_candidates,
     run_deduplicate_documents,
@@ -53,6 +54,7 @@ __all__ = [
     "run_document_sample",
     "run_embedding",
     "run_embedding_cluster",
+    "run_execution_final_answer",
     "run_evidence_pack",
     "run_garbage_filter",
     "run_issue_breakdown_summary",

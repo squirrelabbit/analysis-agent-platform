@@ -898,6 +898,37 @@ def _evidence_pack_case(ctx: SkillCaseContext) -> dict[str, Any]:
     )
 
 
+def _execution_final_answer_case(ctx: SkillCaseContext) -> dict[str, Any]:
+    return ctx.run(
+        "execution_final_answer",
+        {
+            "execution_id": "exec-skill-case",
+            "project_id": "project-skill-case",
+            "question": "결제 오류 핵심을 알려줘",
+            "context": {"scenario_id": "S1"},
+            "result_v1": {
+                "status": "completed",
+                "primary_skill_name": "issue_evidence_summary",
+                "answer": {
+                    "summary": "결제 오류가 반복되고 있습니다.",
+                    "key_findings": ["결제 오류 VOC가 반복된다."],
+                    "evidence": [{"snippet": "결제 오류가 반복 발생했습니다."}],
+                    "follow_up_questions": ["결제 실패 구간을 더 볼까요?"],
+                },
+                "warnings": ["확인 필요: 샘플 수가 제한적입니다."],
+                "step_results": [
+                    {
+                        "step_id": "step-1",
+                        "skill_name": "issue_evidence_summary",
+                        "status": "completed",
+                        "summary": "결제 오류가 반복되고 있습니다.",
+                    }
+                ],
+            },
+        },
+    )
+
+
 SKILL_CASES: dict[str, SkillCase] = {
     "planner": SkillCase("planner", "rule-based planner fallback case", _planner_case),
     "dataset_prepare": SkillCase("dataset_prepare", "prepare raw rows into normalized jsonl", _dataset_prepare_case),
@@ -925,6 +956,7 @@ SKILL_CASES: dict[str, SkillCase] = {
     "issue_taxonomy_summary": SkillCase("issue_taxonomy_summary", "summarize taxonomy-tagged issues", _issue_taxonomy_summary_case),
     "issue_evidence_summary": SkillCase("issue_evidence_summary", "build final evidence summary from sampled rows", _issue_evidence_summary_case),
     "evidence_pack": SkillCase("evidence_pack", "build reusable evidence bundle from semantic candidates", _evidence_pack_case),
+    "execution_final_answer": SkillCase("execution_final_answer", "rewrite result_v1 into grounded final answer", _execution_final_answer_case),
 }
 
 

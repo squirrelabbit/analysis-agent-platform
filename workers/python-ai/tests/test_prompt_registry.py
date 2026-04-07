@@ -9,6 +9,7 @@ from python_ai_worker.anthropic_client import AnthropicJSONResponse
 from python_ai_worker.prompt_registry import (
     available_prompt_versions,
     prompt_catalog,
+    render_execution_final_answer_prompt,
     render_prepare_batch_prompt,
     render_prepare_prompt,
     render_sentiment_batch_prompt,
@@ -237,6 +238,19 @@ class PromptRegistryTests(unittest.TestCase):
 
         self.assertEqual(version, "sentiment-anthropic-batch-v2")
         self.assertIn("Prefer neutral over negative", prompt)
+
+    def test_render_execution_final_answer_prompt_supports_markdown_template(self) -> None:
+        version, prompt = render_execution_final_answer_prompt(
+            question="결제 오류 핵심을 알려줘",
+            scenario_json='{"scenario_id":"S1"}',
+            result_json='{"status":"completed"}',
+            evidence_json='[{"evidence_id":"evidence-1"}]',
+            version="execution-final-answer-v1",
+        )
+
+        self.assertEqual(version, "execution-final-answer-v1")
+        self.assertIn("결제 오류 핵심을 알려줘", prompt)
+        self.assertIn('"status":"completed"', prompt.replace(" ", ""))
 
 
 if __name__ == "__main__":

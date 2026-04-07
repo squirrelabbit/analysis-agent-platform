@@ -976,6 +976,49 @@ func TestBuildExecutionResultUsesStoredSnapshotWhenPresent(t *testing.T) {
 	}
 }
 
+func TestBuildExecutionResultBuildsFallbackFinalAnswer(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-final-answer",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-1",
+		Status:      "completed",
+		Artifacts: map[string]string{
+			"step:step-1:issue_evidence_summary": `{"skill_name":"issue_evidence_summary","summary":"근거 기반 요약","key_findings":["핵심 포인트"],"evidence":[{"snippet":"근거 snippet"}]}`,
+		},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-final-answer",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "issue_evidence_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	result, err := service.BuildExecutionResult(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution result error: %v", err)
+	}
+	if result.FinalAnswer == nil {
+		t.Fatalf("expected final answer fallback: %+v", result)
+	}
+	if result.FinalAnswer.GenerationMode != "fallback" {
+		t.Fatalf("unexpected final answer generation mode: %+v", result.FinalAnswer)
+	}
+	if result.FinalAnswer.AnswerText != "근거 기반 요약" {
+		t.Fatalf("unexpected final answer text: %+v", result.FinalAnswer)
+	}
+}
+
 func TestExecutePlanCopiesDatasetProfileSnapshot(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
@@ -1074,6 +1117,12 @@ func TestListExecutionsBuildsSnapshotPreview(t *testing.T) {
 				Answer:           &domain.ExecutionResultAnswer{Summary: "이전 실행 요약"},
 				Warnings:         []string{"fallback used"},
 			},
+			FinalAnswerSnapshot: &domain.ExecutionFinalAnswer{
+				SchemaVersion:  "execution-final-answer-v1",
+				Status:         "ready",
+				GenerationMode: "llm",
+				AnswerText:     "이전 실행 최종 답변",
+			},
 		},
 		{
 			ExecutionID: "exec-newer",
@@ -1087,6 +1136,12 @@ func TestListExecutionsBuildsSnapshotPreview(t *testing.T) {
 				Status:           "completed",
 				PrimarySkillName: stringPtr("issue_evidence_summary"),
 				Answer:           &domain.ExecutionResultAnswer{Summary: "최신 실행 요약"},
+			},
+			FinalAnswerSnapshot: &domain.ExecutionFinalAnswer{
+				SchemaVersion:  "execution-final-answer-v1",
+				Status:         "ready",
+				GenerationMode: "llm",
+				AnswerText:     "최신 실행 최종 답변",
 			},
 		},
 	}
@@ -1106,7 +1161,7 @@ func TestListExecutionsBuildsSnapshotPreview(t *testing.T) {
 	if response.Items[0].ExecutionID != "exec-newer" {
 		t.Fatalf("expected newest execution first: %+v", response.Items)
 	}
-	if response.Items[0].AnswerPreview == nil || *response.Items[0].AnswerPreview != "최신 실행 요약" {
+	if response.Items[0].AnswerPreview == nil || *response.Items[0].AnswerPreview != "최신 실행 최종 답변" {
 		t.Fatalf("unexpected answer preview: %+v", response.Items[0])
 	}
 	if response.Items[1].WarningCount != 1 {
@@ -1144,6 +1199,15 @@ func TestCreateReportDraftBuildsSnapshotSections(t *testing.T) {
 				},
 				UsageSummary: map[string]any{"request_count": 1, "total_tokens": 10},
 			},
+			FinalAnswerSnapshot: &domain.ExecutionFinalAnswer{
+				SchemaVersion:     "execution-final-answer-v1",
+				Status:            "ready",
+				GenerationMode:    "llm",
+				AnswerText:        "결제 오류 반복 이슈가 핵심입니다.",
+				KeyPoints:         []string{"결제 오류 VOC가 반복된다."},
+				Evidence:          []map[string]any{{"snippet": "결제 오류가 반복 발생했습니다"}},
+				FollowUpQuestions: []string{"결제 실패 구간을 더 볼까요?"},
+			},
 		},
 		{
 			ExecutionID: "exec-2",
@@ -1162,6 +1226,14 @@ func TestCreateReportDraftBuildsSnapshotSections(t *testing.T) {
 				},
 				UsageSummary: map[string]any{"request_count": 1, "total_tokens": 20},
 				Warnings:     []string{"fallback summary used"},
+			},
+			FinalAnswerSnapshot: &domain.ExecutionFinalAnswer{
+				SchemaVersion:  "execution-final-answer-v1",
+				Status:         "ready",
+				GenerationMode: "llm",
+				AnswerText:     "앱 채널 언급 비중이 가장 높습니다.",
+				KeyPoints:      []string{"앱 채널이 최다 그룹이다."},
+				Caveats:        []string{"fallback summary used"},
 			},
 		},
 	}
@@ -1190,6 +1262,9 @@ func TestCreateReportDraftBuildsSnapshotSections(t *testing.T) {
 	}
 	if draft.Content.Sections[0].ExecutionID != "exec-1" {
 		t.Fatalf("expected selected order to be preserved: %+v", draft.Content.Sections)
+	}
+	if draft.Content.Sections[0].Summary != "결제 오류 반복 이슈가 핵심입니다." {
+		t.Fatalf("expected final answer summary to be preferred: %+v", draft.Content.Sections[0])
 	}
 	if got := draft.Content.UsageSummary["total_tokens"]; got != 30 {
 		t.Fatalf("unexpected usage summary: %+v", draft.Content.UsageSummary)
