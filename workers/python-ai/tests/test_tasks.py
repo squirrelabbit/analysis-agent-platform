@@ -120,6 +120,9 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(answer["generation_mode"], "fallback")
         self.assertEqual(answer["answer_text"], "결제 오류 이슈가 반복되고 있습니다.")
         self.assertEqual(answer["key_points"], ["결제 오류 VOC가 반복된다."])
+        artifact = result["artifact"]
+        self.assertEqual(artifact["skill_name"], "execution_final_answer")
+        self.assertEqual(artifact["answer_text"], "결제 오류 이슈가 반복되고 있습니다.")
 
     def test_rule_based_planner_without_key(self) -> None:
         with patch.dict(
