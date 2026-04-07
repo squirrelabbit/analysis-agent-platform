@@ -37,6 +37,7 @@
 - `POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_jobs`
 - `POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embeddings`
 - `POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embedding_jobs`
+- `POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/cluster_jobs`
 - `GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/build_jobs`
 - `GET /projects/{project_id}/dataset_build_jobs/{job_id}`
 - `POST /projects/{project_id}/analysis_requests`
@@ -96,7 +97,7 @@
 - 시나리오 표가 row 형태로 준비돼 있으면 `POST /projects/{project_id}/scenarios/import`로 여러 시나리오를 한 번에 등록할 수 있다. 같은 `scenario_id`는 하나의 시나리오로 묶고, header 값이 충돌하면 에러를 돌린다.
 - 현재 자동 plan 생성은 `strict`만 지원한다. 즉 저장된 step을 그대로 실행 plan으로 바꾸고, `runtime_skill_name`이 지정된 step 또는 control plane에 등록된 `function_name -> skill_name` 매핑만 허용한다.
 - `POST /projects/{project_id}/scenarios/{scenario_id}/execute`는 현재 strict 시나리오에서 `analysis_request + plan`을 만든 뒤 곧바로 execution enqueue까지 묶어서 처리한다.
-- dataset version이 unstructured 계열이면 현재 version 생성 직후 `prepare` async job을 자동 enqueue하고, `POST /plans/{plan_id}/execute` 또는 `POST /scenarios/{scenario_id}/execute`는 필요한 step이 요구하는 `sentiment`, `embedding` dependency를 먼저 계산해 자동 build를 시도한다.
+- dataset version이 unstructured 계열이면 현재 version 생성 직후 `prepare` async job을 자동 enqueue하고, `POST /plans/{plan_id}/execute` 또는 `POST /scenarios/{scenario_id}/execute`는 필요한 step이 요구하는 `sentiment`, `embedding`, `cluster` dependency를 먼저 계산해 자동 build를 시도한다.
 - 직접 매핑되지 않는 step은 `runtime_skill_name`을 명시해야 하고, `guided`나 guardrail 기반 planner 확장은 backlog다.
 - 관련 설정:
   - `TEMPORAL_ADDRESS`
@@ -108,6 +109,7 @@
   - `DATASET_BUILD_PREPARE_MAX_CONCURRENT`
   - `DATASET_BUILD_SENTIMENT_MAX_CONCURRENT`
   - `DATASET_BUILD_EMBEDDING_MAX_CONCURRENT`
+  - `DATASET_BUILD_CLUSTER_MAX_CONCURRENT`
   - `DUCKDB_PATH`
   - `DATASET_PROFILES_PATH`
   - `PYTHON_AI_WORKER_URL`
@@ -125,13 +127,13 @@
 - dataset version 생성 시 `profile`을 안 주면 registry의 data type 기본 profile을 resolve해 저장한다.
 - `GET /dataset_profiles/validate`는 현재 registry 기본값, prompt template front matter, worker rule catalog를 함께 읽어 prompt/rule 오타와 drift를 점검한다.
 - version 생성 시 worker URL이 설정돼 있으면 `prepare`를 먼저 자동 시도한다.
-- `prepare_jobs`, `sentiment_jobs`, `embedding_jobs`는 현재 Temporal workflow로 실행되고, `GET /dataset_build_jobs/{job_id}` 또는 version 단위 `GET /build_jobs`로 상태를 확인할 수 있다.
+- `prepare_jobs`, `sentiment_jobs`, `embedding_jobs`, `cluster_jobs`는 현재 Temporal workflow로 실행되고, `GET /dataset_build_jobs/{job_id}` 또는 version 단위 `GET /build_jobs`로 상태를 확인할 수 있다.
 - build workflow는 현재 `TEMPORAL_BUILD_TASK_QUEUE`를 따로 사용하고, 값을 비우면 `<TEMPORAL_TASK_QUEUE>-build`를 기본값으로 쓴다.
 - build job에는 현재 `workflow_id`, `workflow_run_id`, `attempt`, `last_error_type`, `resumed_execution_count`가 저장된다.
 - build job 응답에는 현재 `diagnostics.retry_count`, `diagnostics.last_error_message`, `diagnostics.workflow_id`, `diagnostics.workflow_run_id`, `diagnostics.resumed_execution_count`가 추가로 내려간다.
-- activity timeout/retry 기본값은 현재 `prepare=20분/4회`, `sentiment=45분/4회`, `embedding=60분/3회`, `backoff=10초 x2 최대 5분`이다.
+- activity timeout/retry 기본값은 현재 `prepare=20분/4회`, `sentiment=45분/4회`, `embedding=60분/3회`, `cluster=60분/3회`, `backoff=10초 x2 최대 5분`이다.
 - worker HTTP timeout은 현재 `prepare=10분`, `sentiment=30분`, `embedding=45분`으로 분리돼 있다.
-- worker 동시성 기본값은 현재 `analysis activity=8`, `build activity=4`, `prepare slot=3`, `sentiment slot=2`, `embedding slot=1`이다.
+- worker 동시성 기본값은 현재 `analysis activity=8`, `build activity=4`, `prepare slot=3`, `sentiment slot=2`, `embedding slot=1`, `cluster slot=1`이다.
 - control plane 기동 시 현재 startup reconciliation을 한 번 수행한다. 남아 있던 `queued/running` build job은 다시 dispatch하고, `queued/running` execution은 다시 enqueue하며, `waiting` execution은 dependency를 다시 계산해 resume 가능 여부를 재평가한다.
 - execution 시작 전에는 plan step을 보고 `requires_prepare`, `requires_sentiment`, `requires_embedding`를 계산한 뒤 필요한 build를 먼저 자동 시도한다.
 - 그래도 준비되지 못한 경우에만 workflow가 `waiting`으로 전이된다.

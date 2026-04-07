@@ -17,6 +17,7 @@ type fakeExecutionDependencyBuilder struct {
 	prepareStatus   string
 	sentimentStatus string
 	embeddingStatus string
+	clusterStatus   string
 }
 
 func (b *fakeExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _ string) (domain.DatasetBuildJob, error) {
@@ -76,6 +77,27 @@ func (b *fakeExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID
 	return domain.DatasetBuildJob{JobID: "job-embedding", BuildType: "embedding", Status: version.EmbeddingStatus}, nil
 }
 
+func (b *fakeExecutionDependencyBuilder) CreateClusterJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetClusterBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+	b.calls = append(b.calls, "cluster")
+	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	status := builderStatusOrDefault(b.clusterStatus)
+	version.Metadata["cluster_status"] = status
+	if status == "ready" {
+		version.Metadata["cluster_ref"] = "clusters.json"
+		version.Metadata["cluster_format"] = "json"
+	}
+	if err := b.repo.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	return domain.DatasetBuildJob{JobID: "job-cluster", BuildType: "cluster", Status: status}, nil
+}
+
 type lazyExecutionDependencyBuilder struct {
 	repo  store.Repository
 	calls []string
@@ -125,6 +147,22 @@ func (b *lazyExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID
 		return domain.DatasetBuildJob{}, err
 	}
 	return domain.DatasetBuildJob{JobID: "job-embedding", BuildType: "embedding", Status: version.EmbeddingStatus}, nil
+}
+
+func (b *lazyExecutionDependencyBuilder) CreateClusterJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetClusterBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+	b.calls = append(b.calls, "cluster")
+	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.Metadata["cluster_status"] = "queued"
+	if err := b.repo.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	return domain.DatasetBuildJob{JobID: "job-cluster", BuildType: "cluster", Status: "queued"}, nil
 }
 
 func TestSubmitAnalysisUsesPlannerWhenConfigured(t *testing.T) {
@@ -492,6 +530,141 @@ func TestResumeWaitingExecutionsForDatasetVersionAutoResumesReadyExecution(t *te
 	}
 	if current.Events[0].Payload["triggered_by"] != "dataset_build_job" {
 		t.Fatalf("unexpected resume payload: %+v", current.Events[0].Payload)
+	}
+	if len(builder.calls) != 0 {
+		t.Fatalf("expected no dependency enqueue, got %+v", builder.calls)
+	}
+}
+
+func TestResumeWaitingExecutionsForDatasetVersionQueuesClusterWhenMissing(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+	builder := &fakeExecutionDependencyBuilder{
+		repo:          repository,
+		clusterStatus: "queued",
+	}
+	service.SetDependencyBuilder(builder)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	_ = repository.SaveProject(project)
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	_ = repository.SaveDataset(dataset)
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		PrepareStatus:    "ready",
+		PrepareURI:       stringPtr("prepared.parquet"),
+		EmbeddingStatus:  "ready",
+		Metadata: map[string]any{
+			"prepared_text_column":       "normalized_text",
+			"embedding_index_source_ref": "embeddings.index.parquet",
+			"chunk_ref":                  "issues.chunks.parquet",
+			"cluster_status":             "not_requested",
+		},
+	}
+	_ = repository.SaveDatasetVersion(version)
+	execution := domain.ExecutionSummary{
+		ExecutionID:      "exec-1",
+		ProjectID:        project.ProjectID,
+		RequestID:        "request-1",
+		Status:           "waiting",
+		DatasetVersionID: stringPtr(version.DatasetVersionID),
+		Artifacts:        map[string]string{},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-1",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "embedding_cluster", DatasetName: "issues.csv", Inputs: map[string]any{}},
+				{StepID: "step-2", SkillName: "issue_cluster_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+	}
+	_ = repository.SaveExecution(execution)
+
+	resumedCount, err := service.ResumeWaitingExecutionsForDatasetVersion(project.ProjectID, version.DatasetVersionID, "dataset build completed: embedding", "dataset_build_job")
+	if err != nil {
+		t.Fatalf("unexpected auto resume error: %v", err)
+	}
+	if resumedCount != 0 {
+		t.Fatalf("unexpected resumed count: %d", resumedCount)
+	}
+	if len(builder.calls) != 1 || builder.calls[0] != "cluster" {
+		t.Fatalf("unexpected dependency calls: %+v", builder.calls)
+	}
+
+	current, err := repository.GetExecution(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected get execution error: %v", err)
+	}
+	if current.Status != "waiting" {
+		t.Fatalf("expected waiting execution, got %s", current.Status)
+	}
+}
+
+func TestResumeWaitingExecutionsForDatasetVersionAutoResumesReadyClusterExecution(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+	builder := &fakeExecutionDependencyBuilder{repo: repository}
+	service.SetDependencyBuilder(builder)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	_ = repository.SaveProject(project)
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	_ = repository.SaveDataset(dataset)
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		PrepareStatus:    "ready",
+		PrepareURI:       stringPtr("prepared.parquet"),
+		EmbeddingStatus:  "ready",
+		Metadata: map[string]any{
+			"prepared_text_column":       "normalized_text",
+			"embedding_index_source_ref": "embeddings.index.parquet",
+			"chunk_ref":                  "issues.chunks.parquet",
+			"cluster_status":             "ready",
+			"cluster_ref":                "issues.clusters.json",
+			"cluster_format":             "json",
+		},
+	}
+	_ = repository.SaveDatasetVersion(version)
+	execution := domain.ExecutionSummary{
+		ExecutionID:      "exec-1",
+		ProjectID:        project.ProjectID,
+		RequestID:        "request-1",
+		Status:           "waiting",
+		DatasetVersionID: stringPtr(version.DatasetVersionID),
+		Artifacts:        map[string]string{},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-1",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "embedding_cluster", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+	}
+	_ = repository.SaveExecution(execution)
+
+	resumedCount, err := service.ResumeWaitingExecutionsForDatasetVersion(project.ProjectID, version.DatasetVersionID, "dataset build completed: cluster", "dataset_build_job")
+	if err != nil {
+		t.Fatalf("unexpected auto resume error: %v", err)
+	}
+	if resumedCount != 1 {
+		t.Fatalf("unexpected resumed count: %d", resumedCount)
+	}
+
+	current, err := repository.GetExecution(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected get execution error: %v", err)
+	}
+	if current.Status != "queued" {
+		t.Fatalf("expected queued execution, got %s", current.Status)
+	}
+	if len(current.Events) != 1 || current.Events[0].EventType != "RESUME_ENQUEUED" {
+		t.Fatalf("unexpected resume event: %+v", current.Events)
 	}
 	if len(builder.calls) != 0 {
 		t.Fatalf("expected no dependency enqueue, got %+v", builder.calls)

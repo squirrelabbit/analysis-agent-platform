@@ -16,6 +16,7 @@ const (
 	datasetBuildTypePrepare   = "prepare"
 	datasetBuildTypeSentiment = "sentiment"
 	datasetBuildTypeEmbedding = "embedding"
+	datasetBuildTypeCluster   = "cluster"
 )
 
 func (s *DatasetService) CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy string) (domain.DatasetBuildJob, error) {
@@ -125,6 +126,47 @@ func (s *DatasetService) CreateEmbeddingJob(projectID, datasetID, datasetVersion
 	}
 	if err := s.dispatchDatasetBuildJob(job, func() error {
 		_, err := s.BuildEmbeddings(projectID, datasetID, datasetVersionID, input)
+		return err
+	}); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	return job, nil
+}
+
+func (s *DatasetService) CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, datasetBuildTypeCluster); err != nil {
+		return domain.DatasetBuildJob{}, err
+	} else if active != nil {
+		return *active, nil
+	}
+
+	job := domain.DatasetBuildJob{
+		JobID:            id.New(),
+		ProjectID:        projectID,
+		DatasetID:        datasetID,
+		DatasetVersionID: datasetVersionID,
+		BuildType:        datasetBuildTypeCluster,
+		Status:           "queued",
+		Request:          requestToMap(input),
+		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
+		CreatedAt:        time.Now().UTC(),
+	}
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.Metadata["cluster_status"] = "queued"
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := s.store.SaveDatasetBuildJob(job); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := s.dispatchDatasetBuildJob(job, func() error {
+		_, err := s.BuildClusters(projectID, datasetID, datasetVersionID, input)
 		return err
 	}); err != nil {
 		return domain.DatasetBuildJob{}, err

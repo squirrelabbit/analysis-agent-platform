@@ -188,6 +188,8 @@ def _normalize_embedding_cluster_payload(payload: dict[str, Any]) -> dict[str, A
     normalized = _normalize_text_task_payload(payload)
     step = normalized["step"]
     inputs = step.get("inputs") or {}
+    cluster_ref = str(inputs.get("cluster_ref") or payload.get("cluster_ref") or "").strip()
+    cluster_format = str(inputs.get("cluster_format") or payload.get("cluster_format") or "").strip()
     embedding_index_ref = str(inputs.get("embedding_index_ref") or payload.get("embedding_index_ref") or "").strip()
     embedding_uri = str(inputs.get("embedding_uri") or payload.get("embedding_uri") or "").strip()
     chunk_ref = str(inputs.get("chunk_ref") or payload.get("chunk_ref") or "").strip()
@@ -200,6 +202,8 @@ def _normalize_embedding_cluster_payload(payload: dict[str, Any]) -> dict[str, A
         raise ValueError("embedding_uri or embedding_index_ref is required")
     normalized["embedding_uri"] = embedding_uri
     normalized["embedding_index_ref"] = embedding_index_ref
+    normalized["cluster_ref"] = cluster_ref
+    normalized["cluster_format"] = cluster_format
     normalized["chunk_ref"] = chunk_ref
     normalized["chunk_format"] = chunk_format
     normalized["cluster_similarity_threshold"] = round(
@@ -280,6 +284,36 @@ def _normalize_embedding_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_cluster_build_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    dataset_name = str(payload.get("dataset_name") or "").strip()
+    if not dataset_name:
+        raise ValueError("dataset_name is required")
+    embedding_index_source_ref = str(
+        payload.get("embedding_index_source_ref") or payload.get("embedding_index_ref") or ""
+    ).strip()
+    if not embedding_index_source_ref:
+        raise ValueError("embedding_index_source_ref is required")
+    chunk_ref = str(payload.get("chunk_ref") or "").strip()
+    if not chunk_ref:
+        raise ValueError("chunk_ref is required")
+    output_path = str(payload.get("output_path") or f"{dataset_name}.clusters.json").strip()
+    if not output_path:
+        raise ValueError("output_path is required")
+    return {
+        "dataset_version_id": str(payload.get("dataset_version_id") or "").strip(),
+        "dataset_name": dataset_name,
+        "embedding_index_source_ref": embedding_index_source_ref,
+        "chunk_ref": chunk_ref,
+        "output_path": output_path,
+        "cluster_similarity_threshold": round(
+            max(0.0, min(1.0, float(payload.get("cluster_similarity_threshold") or payload.get("similarity_threshold") or DEFAULT_CLUSTER_SIMILARITY_THRESHOLD))),
+            4,
+        ),
+        "top_n": max(1, int(payload.get("top_n") or 10)),
+        "sample_n": max(1, int(payload.get("sample_n") or 3)),
+    }
+
+
 def _normalize_sentiment_build_payload(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_name = str(payload.get("dataset_name") or "").strip()
     if not dataset_name:
@@ -347,6 +381,7 @@ __all__ = [
     "_default_inputs",
     "_normalize_breakdown_task_payload",
     "_normalize_cluster_label_payload",
+    "_normalize_cluster_build_payload",
     "_normalize_compare_task_payload",
     "_normalize_deduplicate_payload",
     "_normalize_dictionary_tagging_payload",

@@ -30,6 +30,7 @@ type Config struct {
 	DatasetBuildPrepareMaxConcurrent        int
 	DatasetBuildSentimentMaxConcurrent      int
 	DatasetBuildEmbeddingMaxConcurrent      int
+	DatasetBuildClusterMaxConcurrent        int
 }
 
 func Load() Config {
@@ -86,6 +87,7 @@ func Load() Config {
 	prepareMaxConcurrent := envPositiveInt("DATASET_BUILD_PREPARE_MAX_CONCURRENT", 3)
 	sentimentMaxConcurrent := envPositiveInt("DATASET_BUILD_SENTIMENT_MAX_CONCURRENT", 2)
 	embeddingMaxConcurrent := envPositiveInt("DATASET_BUILD_EMBEDDING_MAX_CONCURRENT", 1)
+	clusterMaxConcurrent := envPositiveInt("DATASET_BUILD_CLUSTER_MAX_CONCURRENT", 1)
 	return Config{
 		BindAddr:                                addr,
 		StoreBackend:                            storeBackend,
@@ -109,6 +111,7 @@ func Load() Config {
 		DatasetBuildPrepareMaxConcurrent:        prepareMaxConcurrent,
 		DatasetBuildSentimentMaxConcurrent:      sentimentMaxConcurrent,
 		DatasetBuildEmbeddingMaxConcurrent:      embeddingMaxConcurrent,
+		DatasetBuildClusterMaxConcurrent:        clusterMaxConcurrent,
 	}
 }
 

@@ -105,6 +105,15 @@ func (s *DatasetService) recoveryDatasetBuildRunner(job domain.DatasetBuildJob) 
 			_, err := s.BuildEmbeddings(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
 			return err
 		}, nil
+	case datasetBuildTypeCluster:
+		request, err := decodeStartupBuildRequest[domain.DatasetClusterBuildRequest](job.Request)
+		if err != nil {
+			return nil, err
+		}
+		return func() error {
+			_, err := s.BuildClusters(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
+			return err
+		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported dataset build type for reconciliation: %s", job.BuildType)
 	}

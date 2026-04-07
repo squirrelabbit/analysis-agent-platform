@@ -225,6 +225,32 @@ def _embedding_case(ctx: SkillCaseContext) -> dict[str, Any]:
     )
 
 
+def _dataset_cluster_build_case(ctx: SkillCaseContext) -> dict[str, Any]:
+    csv_path = ctx.write_csv("issues_cluster.csv", ["text"], _cluster_rows())
+    embedding = ctx.run(
+        "embedding",
+        {
+            "dataset_version_id": "version-skill-case",
+            "dataset_name": str(csv_path),
+            "text_column": "text",
+            "output_path": str(ctx.temp_dir / "issues_cluster.embeddings.jsonl"),
+        },
+    )
+    return ctx.run(
+        "dataset_cluster_build",
+        {
+            "dataset_version_id": "version-skill-case",
+            "dataset_name": str(csv_path),
+            "embedding_index_source_ref": embedding["artifact"]["embedding_index_source_ref"],
+            "chunk_ref": embedding["artifact"]["chunk_ref"],
+            "output_path": str(ctx.temp_dir / "issues_cluster.clusters.json"),
+            "cluster_similarity_threshold": 0.2,
+            "sample_n": 2,
+            "top_n": 3,
+        },
+    )
+
+
 def _planner_case(ctx: SkillCaseContext) -> dict[str, Any]:
     return ctx.run(
         "planner",
@@ -934,6 +960,11 @@ SKILL_CASES: dict[str, SkillCase] = {
     "dataset_prepare": SkillCase("dataset_prepare", "prepare raw rows into normalized jsonl", _dataset_prepare_case),
     "sentiment_label": SkillCase("sentiment_label", "label prepared rows with fallback sentiment", _sentiment_label_case),
     "embedding": SkillCase("embedding", "build dense-or-token embedding sidecar", _embedding_case),
+    "dataset_cluster_build": SkillCase(
+        "dataset_cluster_build",
+        "materialize dataset-level cluster artifact from embedding index",
+        _dataset_cluster_build_case,
+    ),
     "garbage_filter": SkillCase("garbage_filter", "remove ad, promotion, and placeholder rows", _garbage_filter_case),
     "document_filter": SkillCase("document_filter", "lexical narrowing over issue rows", _document_filter_case),
     "deduplicate_documents": SkillCase("deduplicate_documents", "collapse duplicate or near-duplicate rows", _deduplicate_documents_case),
