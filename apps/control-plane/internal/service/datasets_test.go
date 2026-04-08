@@ -86,6 +86,44 @@ func writeEmbeddingIndexParquet(t *testing.T, path string, rows []map[string]any
 	}
 }
 
+func writeClusterMembershipParquet(t *testing.T, path string, rows []map[string]any) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "cluster-membership.duckdb")
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("unexpected duckdb open error: %v", err)
+	}
+	defer db.Close()
+
+	selects := make([]string, 0, len(rows))
+	for _, row := range rows {
+		isSample := "FALSE"
+		if boolValue(row["is_sample"]) {
+			isSample = "TRUE"
+		}
+		selects = append(selects, fmt.Sprintf(
+			`SELECT '%s' AS cluster_id, %d AS cluster_rank, %d AS cluster_document_count, %d AS source_index, '%s' AS row_id, '%s' AS chunk_id, %d AS chunk_index, '%s' AS text, %s AS is_sample`,
+			escapeDuckDBLiteral(stringValue(row["cluster_id"])),
+			intValue(row["cluster_rank"]),
+			intValue(row["cluster_document_count"]),
+			intValue(row["source_index"]),
+			escapeDuckDBLiteral(stringValue(row["row_id"])),
+			escapeDuckDBLiteral(stringValue(row["chunk_id"])),
+			intValue(row["chunk_index"]),
+			escapeDuckDBLiteral(stringValue(row["text"])),
+			isSample,
+		))
+	}
+	query := fmt.Sprintf(
+		`COPY (%s) TO '%s' (FORMAT PARQUET)`,
+		strings.Join(selects, " UNION ALL "),
+		escapeDuckDBLiteral(path),
+	)
+	if _, err := db.Exec(query); err != nil {
+		t.Fatalf("unexpected parquet write error: %v", err)
+	}
+}
+
 func int64Value(value any) int64 {
 	switch typed := value.(type) {
 	case int:
@@ -117,6 +155,17 @@ func stringValue(value any) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+func boolValue(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
 }
 
 func metadataUsageInt(t *testing.T, metadata map[string]any, key string, usageKey string) int {
@@ -1496,6 +1545,128 @@ func TestBuildClustersStoresSummaryAndMembershipRefs(t *testing.T) {
 	}
 	if got := metadataString(result.Metadata, "cluster_status", ""); got != "ready" {
 		t.Fatalf("unexpected cluster status: %s", got)
+	}
+}
+
+func TestGetClusterMembersLoadsSummaryAndMembership(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-cluster-members", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-cluster-members",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	summaryPath := filepath.Join(t.TempDir(), "clusters.json")
+	membershipPath := filepath.Join(t.TempDir(), "clusters.memberships.parquet")
+	if err := os.WriteFile(summaryPath, []byte(`{
+		"clusters":[
+			{"cluster_id":"cluster-01","document_count":3,"top_terms":[{"term":"결제","count":3}]},
+			{"cluster_id":"cluster-02","document_count":1,"top_terms":[{"term":"배송","count":1}]}
+		]
+	}`), 0o644); err != nil {
+		t.Fatalf("unexpected summary write error: %v", err)
+	}
+	writeClusterMembershipParquet(t, membershipPath, []map[string]any{
+		{
+			"cluster_id":             "cluster-01",
+			"cluster_rank":           1,
+			"cluster_document_count": 3,
+			"source_index":           0,
+			"row_id":                 "row-0",
+			"chunk_id":               "row-0:chunk:0",
+			"chunk_index":            0,
+			"text":                   "결제 오류가 반복 발생했습니다",
+			"is_sample":              true,
+		},
+		{
+			"cluster_id":             "cluster-01",
+			"cluster_rank":           1,
+			"cluster_document_count": 3,
+			"source_index":           1,
+			"row_id":                 "row-1",
+			"chunk_id":               "row-1:chunk:0",
+			"chunk_index":            0,
+			"text":                   "결제 승인 오류가 다시 발생했습니다",
+			"is_sample":              true,
+		},
+		{
+			"cluster_id":             "cluster-01",
+			"cluster_rank":           1,
+			"cluster_document_count": 3,
+			"source_index":           5,
+			"row_id":                 "row-5",
+			"chunk_id":               "row-5:chunk:0",
+			"chunk_index":            0,
+			"text":                   "결제 오류 문의가 접수됐습니다",
+			"is_sample":              false,
+		},
+	})
+
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-cluster-members",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"cluster_status":            "ready",
+			"cluster_ref":               summaryPath,
+			"cluster_summary_ref":       summaryPath,
+			"cluster_membership_ref":    membershipPath,
+			"cluster_membership_format": "parquet",
+		},
+		PrepareStatus:   "ready",
+		SentimentStatus: "not_requested",
+		EmbeddingStatus: "ready",
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	limit := 2
+	samplesOnly := true
+	response, err := service.GetClusterMembers(
+		project.ProjectID,
+		dataset.DatasetID,
+		version.DatasetVersionID,
+		"cluster-01",
+		domain.DatasetClusterMembersQuery{
+			Limit:       &limit,
+			SamplesOnly: &samplesOnly,
+		},
+	)
+	if err != nil {
+		t.Fatalf("unexpected get cluster members error: %v", err)
+	}
+	if response.TotalCount != 3 {
+		t.Fatalf("unexpected total_count: %d", response.TotalCount)
+	}
+	if response.SampleCount != 2 {
+		t.Fatalf("unexpected sample_count: %d", response.SampleCount)
+	}
+	if len(response.Items) != 2 {
+		t.Fatalf("unexpected item count: %d", len(response.Items))
+	}
+	if !response.Items[0].IsSample || !response.Items[1].IsSample {
+		t.Fatalf("expected samples_only response, got %+v", response.Items)
+	}
+	if got := stringValue(response.Cluster["cluster_id"]); got != "cluster-01" {
+		t.Fatalf("unexpected cluster summary payload: %+v", response.Cluster)
+	}
+	if response.ClusterMembershipRef != membershipPath {
+		t.Fatalf("unexpected cluster membership ref: %s", response.ClusterMembershipRef)
 	}
 }
 
