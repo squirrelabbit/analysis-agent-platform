@@ -7,6 +7,38 @@ from typing import Any
 
 from .. import runtime as rt
 
+
+def _cluster_membership_ref(*artifacts: dict[str, Any] | None) -> str:
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        value = str(artifact.get("cluster_membership_ref") or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _cluster_samples_from_membership(cluster_membership_ref: str, cluster_id: str, sample_n: int) -> list[dict[str, Any]]:
+    rows = rt._load_cluster_membership_rows(cluster_membership_ref, cluster_id, limit=max(0, sample_n))
+    samples: list[dict[str, Any]] = []
+    for row in rows:
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        samples.append(
+            {
+                "source_index": int(row.get("source_index") or 0),
+                "row_id": str(row.get("row_id") or "").strip(),
+                "chunk_id": str(row.get("chunk_id") or "").strip(),
+                "chunk_index": int(row.get("chunk_index") or 0),
+                "text": text[:240],
+            }
+        )
+        if len(samples) >= sample_n:
+            break
+    return samples
+
+
 def run_issue_trend_summary(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_trend_task_payload(payload)
     prior = rt._find_prior_artifact(payload.get("prior_artifacts"), "time_bucket_count")
@@ -59,6 +91,7 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_text_task_payload(payload)
     labeled_clusters = rt._find_prior_artifact(payload.get("prior_artifacts"), "cluster_label_candidates")
     embedded_clusters = rt._find_prior_artifact(payload.get("prior_artifacts"), "embedding_cluster")
+    cluster_membership_ref = _cluster_membership_ref(labeled_clusters, embedded_clusters)
 
     clusters: list[dict[str, Any]] = []
     if labeled_clusters:
@@ -113,16 +146,19 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
         start=1,
     ):
         count = int(cluster.get("document_count") or 0)
+        cluster_id = str(cluster.get("cluster_id") or "").strip()
+        membership_samples = _cluster_samples_from_membership(cluster_membership_ref, cluster_id, normalized["sample_n"])
+        samples = membership_samples or list(cluster.get("samples") or [])[: normalized["sample_n"]]
         ranked_clusters.append(
             {
                 "rank": rank,
-                "cluster_id": cluster.get("cluster_id"),
+                "cluster_id": cluster_id,
                 "label": cluster.get("label") or "기타 이슈",
                 "document_count": count,
                 "ratio_pct": round((count / total_documents) * 100, 2) if total_documents > 0 else 0.0,
                 "candidate_labels": list(cluster.get("candidate_labels") or []),
                 "top_terms": list(cluster.get("top_terms") or [])[: normalized["top_n"]],
-                "samples": list(cluster.get("samples") or [])[: normalized["sample_n"]],
+                "samples": samples,
                 "rationale": cluster.get("rationale") or "",
             }
         )
@@ -144,6 +180,7 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "skill_name": "issue_cluster_summary",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
+            "cluster_membership_ref": cluster_membership_ref,
             "summary": summary,
             "clusters": ranked_clusters,
         },

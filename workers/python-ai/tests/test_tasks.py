@@ -1219,6 +1219,79 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(summary_result["artifact"]["summary"]["dominant_cluster_count"], 2)
         self.assertIn("결제", summary_result["artifact"]["clusters"][0]["label"])
 
+    def test_issue_cluster_summary_uses_cluster_membership_to_expand_samples(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_cluster_membership.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            for row in (
+                "결제 오류가 반복 발생했습니다",
+                "결제 승인 오류가 다시 발생했습니다",
+                "결제 오류 문의가 접수됐습니다",
+                "로그인이 계속 실패합니다",
+                "배송 문의가 계속 들어옵니다",
+            ):
+                writer.writerow({"text": row})
+
+        embedding_result = run_embedding(
+            {
+                "dataset_version_id": "version-cluster-membership",
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "output_path": str(temp_dir / "issues_cluster_membership.embeddings.jsonl"),
+            }
+        )
+        cluster_build_result = run_dataset_cluster_build(
+            {
+                "dataset_version_id": "version-cluster-membership",
+                "dataset_name": str(csv_path),
+                "embedding_index_source_ref": embedding_result["artifact"]["embedding_index_source_ref"],
+                "chunk_ref": embedding_result["artifact"]["chunk_ref"],
+                "output_path": str(temp_dir / "issues_cluster_membership.clusters.json"),
+                "cluster_similarity_threshold": 0.2,
+                "sample_n": 2,
+                "top_n": 3,
+            }
+        )
+        cluster_result = run_embedding_cluster(
+            {
+                "dataset_name": str(csv_path),
+                "embedding_index_ref": embedding_result["artifact"]["embedding_index_source_ref"],
+                "cluster_ref": cluster_build_result["artifact"]["cluster_ref"],
+                "cluster_format": "json",
+                "cluster_similarity_threshold": 0.2,
+                "sample_n": 2,
+                "top_n": 3,
+            }
+        )
+        label_result = run_cluster_label_candidates(
+            {
+                "dataset_name": str(csv_path),
+                "sample_n": 2,
+                "top_n": 3,
+                "prior_artifacts": {
+                    "step:cluster": cluster_result["artifact"],
+                },
+            }
+        )
+        summary_result = run_issue_cluster_summary(
+            {
+                "dataset_name": str(csv_path),
+                "sample_n": 3,
+                "top_n": 3,
+                "prior_artifacts": {
+                    "step:cluster": cluster_result["artifact"],
+                    "step:labels": label_result["artifact"],
+                },
+            }
+        )
+
+        self.assertEqual(label_result["artifact"]["cluster_membership_ref"], cluster_result["artifact"]["cluster_membership_ref"])
+        self.assertEqual(summary_result["artifact"]["cluster_membership_ref"], cluster_result["artifact"]["cluster_membership_ref"])
+        self.assertEqual(len(summary_result["artifact"]["clusters"][0]["samples"]), 3)
+        self.assertEqual(summary_result["artifact"]["clusters"][0]["samples"][2]["text"], "결제 오류 문의가 접수됐습니다")
+
     def test_embedding_cluster_uses_dense_vectors_when_available(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues_cluster_dense.csv"
@@ -1869,6 +1942,90 @@ class TaskTests(unittest.TestCase):
         self.assertIn("피크 구간", context[0]["summary"])
         self.assertIn("issue_period_compare", result["artifact"]["summary"])
         self.assertIn("증가", result["artifact"]["summary"])
+
+    def test_issue_evidence_summary_prefers_cluster_membership_for_cluster_goal(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_cluster_evidence.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            for row in (
+                "결제 오류가 반복 발생했습니다",
+                "결제 승인 오류가 다시 발생했습니다",
+                "로그인이 자주 실패합니다",
+                "배송 문의가 계속 들어옵니다",
+            ):
+                writer.writerow({"text": row})
+
+        embedding_result = run_embedding(
+            {
+                "dataset_version_id": "version-cluster-evidence",
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "output_path": str(temp_dir / "issues_cluster_evidence.embeddings.jsonl"),
+            }
+        )
+        cluster_build_result = run_dataset_cluster_build(
+            {
+                "dataset_version_id": "version-cluster-evidence",
+                "dataset_name": str(csv_path),
+                "embedding_index_source_ref": embedding_result["artifact"]["embedding_index_source_ref"],
+                "chunk_ref": embedding_result["artifact"]["chunk_ref"],
+                "output_path": str(temp_dir / "issues_cluster_evidence.clusters.json"),
+                "cluster_similarity_threshold": 0.2,
+                "sample_n": 2,
+                "top_n": 3,
+            }
+        )
+        cluster_result = run_embedding_cluster(
+            {
+                "dataset_name": str(csv_path),
+                "embedding_index_ref": embedding_result["artifact"]["embedding_index_source_ref"],
+                "cluster_ref": cluster_build_result["artifact"]["cluster_ref"],
+                "cluster_format": "json",
+                "cluster_similarity_threshold": 0.2,
+                "sample_n": 2,
+                "top_n": 3,
+            }
+        )
+        label_result = run_cluster_label_candidates(
+            {
+                "dataset_name": str(csv_path),
+                "sample_n": 2,
+                "top_n": 3,
+                "prior_artifacts": {
+                    "step:cluster": cluster_result["artifact"],
+                },
+            }
+        )
+        summary_result = run_issue_cluster_summary(
+            {
+                "dataset_name": str(csv_path),
+                "sample_n": 2,
+                "top_n": 3,
+                "prior_artifacts": {
+                    "step:cluster": cluster_result["artifact"],
+                    "step:labels": label_result["artifact"],
+                },
+            }
+        )
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+            result = run_issue_evidence_summary(
+                {
+                    "dataset_name": str(csv_path),
+                    "query": "주요 이슈 군집을 설명해줘",
+                    "sample_n": 2,
+                    "prior_artifacts": {
+                        "step:cluster": cluster_result["artifact"],
+                        "step:summary": summary_result["artifact"],
+                    },
+                }
+            )
+
+        self.assertEqual(result["artifact"]["selection_source"], "cluster_membership")
+        self.assertEqual(result["artifact"]["evidence"][0]["chunk_id"], "version-cluster-evidence:row:0:chunk:0")
+        self.assertIn("결제", result["artifact"]["evidence"][0]["snippet"])
 
     def test_issue_evidence_summary_compacts_analysis_context_when_limits_are_small(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())

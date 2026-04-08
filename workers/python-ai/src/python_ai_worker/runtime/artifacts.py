@@ -12,6 +12,8 @@ from .common import (
     _iter_documents,
     _iter_embedding_records,
     _iter_rows,
+    _load_cluster_membership_rows,
+    _looks_cluster_goal,
     _match_taxonomies,
     _normalize_prepared_text,
     _parse_timestamp,
@@ -54,6 +56,10 @@ def _select_evidence_candidates(
             _copy_citation_fields(item, selected_item)
             selected.append(selected_item)
         return selected, "semantic_search"
+
+    cluster_candidates = _extract_cluster_membership_candidates(payload.get("prior_artifacts"), normalized)
+    if cluster_candidates:
+        return cluster_candidates, "cluster_membership"
 
     document_samples = _extract_document_samples(payload.get("prior_artifacts"))
     if document_samples:
@@ -116,6 +122,79 @@ def _extract_document_samples(prior_artifacts: Any) -> list[dict[str, Any]]:
                 continue
             samples.append(item)
     return samples
+
+
+def _extract_cluster_membership_candidates(prior_artifacts: Any, normalized: dict[str, Any]) -> list[dict[str, Any]]:
+    query = str(normalized.get("query") or "").strip().lower()
+    if not _looks_cluster_goal(query):
+        return []
+
+    summary_artifact = _find_prior_artifact(prior_artifacts, "issue_cluster_summary")
+    if summary_artifact is not None:
+        candidates = _cluster_candidates_from_artifact(summary_artifact, normalized)
+        if candidates:
+            return candidates
+
+    embedding_artifact = _find_prior_artifact(prior_artifacts, "embedding_cluster")
+    if embedding_artifact is not None:
+        candidates = _cluster_candidates_from_artifact(embedding_artifact, normalized)
+        if candidates:
+            return candidates
+    return []
+
+
+def _cluster_candidates_from_artifact(artifact: dict[str, Any], normalized: dict[str, Any]) -> list[dict[str, Any]]:
+    clusters = artifact.get("clusters")
+    if not isinstance(clusters, list) or not clusters:
+        return []
+    first_cluster = None
+    for item in clusters:
+        if not isinstance(item, dict):
+            continue
+        first_cluster = item
+        break
+    if first_cluster is None:
+        return []
+
+    cluster_id = str(first_cluster.get("cluster_id") or "").strip()
+    cluster_membership_ref = str(artifact.get("cluster_membership_ref") or "").strip()
+    if cluster_membership_ref and cluster_id:
+        rows = _load_cluster_membership_rows(cluster_membership_ref, cluster_id, limit=normalized["sample_n"])
+        selected: list[dict[str, Any]] = []
+        for rank, item in enumerate(rows, start=1):
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            selected_item = {
+                "rank": rank,
+                "source_index": int(item.get("source_index") or 0),
+                "score": float(max(0, len(rows)-rank+1)),
+                "text": text,
+                "row_id": str(item.get("row_id") or "").strip(),
+                "chunk_id": str(item.get("chunk_id") or "").strip(),
+                "chunk_index": int(item.get("chunk_index") or 0),
+            }
+            selected.append(selected_item)
+        if selected:
+            return selected
+
+    fallback_samples = first_cluster.get("samples") or first_cluster.get("sample_documents") or []
+    selected = []
+    for rank, item in enumerate(list(fallback_samples)[: normalized["sample_n"]], start=1):
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        selected_item = {
+            "rank": rank,
+            "source_index": int(item.get("source_index") or 0),
+            "score": float(max(0, len(fallback_samples)-rank+1)),
+            "text": text,
+        }
+        _copy_citation_fields(item, selected_item)
+        selected.append(selected_item)
+    return selected
 
 
 def _iter_prior_artifacts(prior_artifacts: Any) -> list[dict[str, Any]]:

@@ -101,6 +101,54 @@ def _read_parquet_rows(path: Path) -> list[dict[str, Any]]:
     return [dict(row) for row in table.to_pylist()]
 
 
+def _load_cluster_membership_rows(
+    cluster_membership_ref: str,
+    cluster_id: str,
+    *,
+    sample_only: bool = False,
+    limit: int = 0,
+) -> list[dict[str, Any]]:
+    path_text = str(cluster_membership_ref or "").strip()
+    target_cluster_id = str(cluster_id or "").strip()
+    if not path_text or not target_cluster_id:
+        return []
+    path = Path(path_text)
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for raw in _iter_rows(str(path)):
+        item_cluster_id = str(raw.get("cluster_id") or "").strip()
+        if item_cluster_id != target_cluster_id:
+            continue
+        is_sample = bool(raw.get("is_sample"))
+        if sample_only and not is_sample:
+            continue
+        rows.append(
+            {
+                "cluster_id": item_cluster_id,
+                "cluster_rank": int(raw.get("cluster_rank") or 0),
+                "cluster_document_count": int(raw.get("cluster_document_count") or 0),
+                "source_index": int(raw.get("source_index") or 0),
+                "row_id": str(raw.get("row_id") or "").strip(),
+                "chunk_id": str(raw.get("chunk_id") or "").strip(),
+                "chunk_index": int(raw.get("chunk_index") or 0),
+                "text": str(raw.get("text") or "").strip(),
+                "is_sample": is_sample,
+            }
+        )
+    rows.sort(
+        key=lambda item: (
+            0 if item["is_sample"] else 1,
+            int(item["source_index"]),
+            int(item["chunk_index"]),
+            str(item["chunk_id"]),
+        )
+    )
+    if limit > 0:
+        return rows[:limit]
+    return rows
+
+
 def _write_parquet_rows(
     path: Path,
     rows: list[dict[str, Any]],
@@ -496,6 +544,11 @@ def _evidence_rationale(item: dict[str, Any], selection_source: str) -> str:
     if selection_source == "semantic_search":
         score = float(item.get("score") or 0)
         return f"selected by semantic similarity (score={score:.3f})"
+    if selection_source == "cluster_membership":
+        cluster_id = str(item.get("cluster_id") or "").strip()
+        if cluster_id:
+            return f"selected from dominant cluster membership ({cluster_id})"
+        return "selected from dominant cluster membership"
     if selection_source == "document_sample":
         score = float(item.get("score") or 0)
         if score > 0:
@@ -750,6 +803,7 @@ __all__ = [
     "_iter_documents",
     "_iter_embedding_records",
     "_iter_rows",
+    "_load_cluster_membership_rows",
     "_looks_breakdown_goal",
     "_looks_cluster_goal",
     "_looks_compare_goal",
