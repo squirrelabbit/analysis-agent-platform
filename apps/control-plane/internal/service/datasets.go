@@ -821,6 +821,7 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 		version.Metadata = map[string]any{}
 	}
 	version.PrepareURI = &outputPath
+	invalidateDownstreamArtifactsForPrepare(&version, "prepare output changed")
 	if err := ensureParentDir(outputPath); err != nil {
 		return domain.DatasetVersion{}, err
 	}
@@ -954,14 +955,7 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 	}
 	version.Metadata["text_column"] = textColumn
 	version.Metadata["embedding_dataset_name"] = datasetName
-	version.Metadata["cluster_status"] = "not_requested"
-	delete(version.Metadata, "cluster_ref")
-	delete(version.Metadata, "cluster_format")
-	delete(version.Metadata, "cluster_notes")
-	delete(version.Metadata, "cluster_summary")
-	delete(version.Metadata, "cluster_algorithm")
-	delete(version.Metadata, "cluster_source_embedding_ref")
-	delete(version.Metadata, "cluster_error")
+	invalidateClusterArtifacts(&version, "embedding output changed")
 	indexOutputPath := s.deriveEmbeddingIndexSourceURI(version)
 	debugExportJSONL := input.DebugExportJSONL != nil && *input.DebugExportJSONL
 	outputPath := ""
@@ -1137,7 +1131,8 @@ func (s *DatasetService) BuildClusters(projectID, datasetID, datasetVersionID st
 	}
 
 	force := input.Force != nil && *input.Force
-	if datasetClusterReady(version) && !force {
+	normalizedRequest := domain.NormalizeClusterBuildRequest(input)
+	if domain.ClusterRequestMatchesMetadata(normalizedRequest, version.Metadata) && !force {
 		return version, nil
 	}
 
@@ -1161,7 +1156,11 @@ func (s *DatasetService) BuildClusters(projectID, datasetID, datasetVersionID st
 	if input.OutputPath != nil && strings.TrimSpace(*input.OutputPath) != "" {
 		outputPath = strings.TrimSpace(*input.OutputPath)
 	}
+	membershipOutputPath := deriveClusterMembershipURI(outputPath)
 	if err := ensureParentDir(outputPath); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	if err := ensureParentDir(membershipOutputPath); err != nil {
 		return domain.DatasetVersion{}, err
 	}
 
@@ -1171,8 +1170,17 @@ func (s *DatasetService) BuildClusters(projectID, datasetID, datasetVersionID st
 	version.Metadata["cluster_status"] = "building"
 	version.Metadata["cluster_ref"] = outputPath
 	version.Metadata["cluster_format"] = "json"
+	version.Metadata["cluster_summary_ref"] = outputPath
+	version.Metadata["cluster_summary_format"] = "json"
+	version.Metadata["cluster_membership_ref"] = membershipOutputPath
+	version.Metadata["cluster_membership_format"] = "parquet"
 	version.Metadata["cluster_source_embedding_ref"] = embeddingIndexSourceRef
+	version.Metadata["cluster_similarity_threshold"] = *normalizedRequest.SimilarityThreshold
+	version.Metadata["cluster_top_n"] = *normalizedRequest.TopN
+	version.Metadata["cluster_sample_n"] = *normalizedRequest.SampleN
+	version.Metadata["cluster_params_hash"] = domain.ClusterRequestHash(normalizedRequest)
 	delete(version.Metadata, "cluster_error")
+	delete(version.Metadata, "cluster_stale_reason")
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
@@ -1183,18 +1191,9 @@ func (s *DatasetService) BuildClusters(projectID, datasetID, datasetVersionID st
 		"embedding_index_source_ref":   embeddingIndexSourceRef,
 		"chunk_ref":                    chunkRef,
 		"output_path":                  outputPath,
-		"cluster_similarity_threshold": 0.3,
-		"top_n":                        10,
-		"sample_n":                     3,
-	}
-	if input.SimilarityThreshold != nil {
-		payload["cluster_similarity_threshold"] = *input.SimilarityThreshold
-	}
-	if input.TopN != nil {
-		payload["top_n"] = *input.TopN
-	}
-	if input.SampleN != nil {
-		payload["sample_n"] = *input.SampleN
+		"cluster_similarity_threshold": *normalizedRequest.SimilarityThreshold,
+		"top_n":                        *normalizedRequest.TopN,
+		"sample_n":                     *normalizedRequest.SampleN,
 	}
 
 	response, err := s.runWorkerTask(context.Background(), "/tasks/dataset_cluster_build", payload)
@@ -1211,13 +1210,41 @@ func (s *DatasetService) BuildClusters(projectID, datasetID, datasetVersionID st
 	if clusterRef == "" {
 		clusterRef = outputPath
 	}
+	clusterSummaryRef := artifactString(response.Artifact, "cluster_summary_ref")
+	if clusterSummaryRef == "" {
+		clusterSummaryRef = clusterRef
+	}
+	clusterSummaryFormat := artifactString(response.Artifact, "cluster_summary_format")
+	if clusterSummaryFormat == "" {
+		clusterSummaryFormat = artifactString(response.Artifact, "cluster_format")
+	}
+	if clusterSummaryFormat == "" {
+		clusterSummaryFormat = "json"
+	}
+	clusterMembershipRef := artifactString(response.Artifact, "cluster_membership_ref")
+	if clusterMembershipRef == "" {
+		clusterMembershipRef = membershipOutputPath
+	}
+	clusterMembershipFormat := artifactString(response.Artifact, "cluster_membership_format")
+	if clusterMembershipFormat == "" {
+		clusterMembershipFormat = "parquet"
+	}
 	clusterMetadata := map[string]any{
 		"cluster_status":               "ready",
 		"cluster_ref":                  clusterRef,
-		"cluster_format":               artifactString(response.Artifact, "cluster_format"),
+		"cluster_format":               clusterSummaryFormat,
+		"cluster_summary_ref":          clusterSummaryRef,
+		"cluster_summary_format":       clusterSummaryFormat,
+		"cluster_membership_ref":       clusterMembershipRef,
+		"cluster_membership_format":    clusterMembershipFormat,
 		"cluster_notes":                response.Notes,
 		"cluster_algorithm":            artifactString(response.Artifact, "cluster_algorithm"),
 		"cluster_source_embedding_ref": embeddingIndexSourceRef,
+		"cluster_similarity_threshold": *normalizedRequest.SimilarityThreshold,
+		"cluster_top_n":                *normalizedRequest.TopN,
+		"cluster_sample_n":             *normalizedRequest.SampleN,
+		"cluster_params_hash":          domain.ClusterRequestHash(normalizedRequest),
+		"clustered_at":                 now,
 	}
 	if summary, ok := response.Artifact["summary"].(map[string]any); ok {
 		clusterMetadata["cluster_summary"] = summary
@@ -1705,6 +1732,17 @@ func datasetClusterReady(version domain.DatasetVersion) bool {
 		return false
 	}
 	return strings.TrimSpace(metadataString(version.Metadata, "cluster_ref", "")) != ""
+}
+
+func deriveClusterMembershipURI(summaryURI string) string {
+	summaryURI = strings.TrimSpace(summaryURI)
+	if summaryURI == "" {
+		return ""
+	}
+	if strings.HasSuffix(summaryURI, ".json") {
+		return strings.TrimSuffix(summaryURI, ".json") + ".memberships.parquet"
+	}
+	return summaryURI + ".memberships.parquet"
 }
 
 func artifactString(artifact map[string]any, key string) string {

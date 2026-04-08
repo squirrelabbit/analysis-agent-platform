@@ -301,9 +301,8 @@ func (a AnalysisActivities) CheckExecutionReadiness(ctx context.Context, input A
 		}
 	}
 	if needsCluster {
-		clusterReady := strings.TrimSpace(fmt.Sprintf("%v", version.Metadata["cluster_status"])) == "ready" &&
-			strings.TrimSpace(fmt.Sprintf("%v", version.Metadata["cluster_ref"])) != ""
-		if !clusterReady {
+		clusterRequest, ok := domain.ClusterMaterializationRequestForPlan(execution.Plan)
+		if ok && clusterRequest != nil && !domain.ClusterRequestMatchesMetadata(*clusterRequest, version.Metadata) {
 			return ExecutionReadinessResult{
 				Ready:      false,
 				Status:     "waiting",
@@ -637,7 +636,7 @@ func refreshWorkflowPlanWithDatasetVersion(plan domain.SkillPlan, version domain
 				delete(plan.Steps[index].Inputs, "embedding_uri")
 			}
 		}
-		if plan.Steps[index].SkillName == "embedding_cluster" {
+		if plan.Steps[index].SkillName == "embedding_cluster" && domain.ClusterRequestMatchesMetadata(domain.ClusterBuildRequestFromStep(plan.Steps[index]), version.Metadata) {
 			if value := workflowMetadataString(version.Metadata, "cluster_ref", ""); value != "" {
 				plan.Steps[index].Inputs["cluster_ref"] = value
 			}

@@ -61,6 +61,13 @@ def _derive_embedding_index_output_path(embedding_path: Path) -> Path:
     return embedding_path.with_name(name + ".index.parquet")
 
 
+def _derive_cluster_membership_output_path(summary_path: Path) -> Path:
+    name = summary_path.name
+    if name.endswith(".json"):
+        return summary_path.with_name(name[: -len(".json")] + ".memberships.parquet")
+    return summary_path.with_name(name + ".memberships.parquet")
+
+
 def _build_chunk_rows(
     rows: list[dict[str, Any]],
     *,
@@ -123,6 +130,23 @@ def _chunk_output_schema() -> Any:
             ("chunk_text", arrow.string()),
             ("char_start", arrow.int64()),
             ("char_end", arrow.int64()),
+        ]
+    )
+
+
+def _cluster_membership_output_schema() -> Any:
+    arrow, _ = rt._require_pyarrow()
+    return arrow.schema(
+        [
+            ("cluster_id", arrow.string()),
+            ("cluster_rank", arrow.int64()),
+            ("cluster_document_count", arrow.int64()),
+            ("source_index", arrow.int64()),
+            ("row_id", arrow.string()),
+            ("chunk_id", arrow.string()),
+            ("chunk_index", arrow.int64()),
+            ("text", arrow.string()),
+            ("is_sample", arrow.bool_()),
         ]
     )
 
@@ -455,8 +479,10 @@ def _cluster_records_from_index(index_rows: list[dict[str, Any]], chunk_lookup: 
 
 def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_cluster_build_payload(payload)
-    output_path = Path(normalized["output_path"])
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path = Path(normalized["output_path"])
+    membership_path = _derive_cluster_membership_output_path(summary_path)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    membership_path.parent.mkdir(parents=True, exist_ok=True)
 
     index_rows = rt._iter_rows(normalized["embedding_index_source_ref"])
     chunk_lookup = _cluster_chunk_lookup(normalized["chunk_ref"])
@@ -466,6 +492,7 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
         normalized["cluster_similarity_threshold"],
         normalized["sample_n"],
         normalized["top_n"],
+        include_members=True,
     )
     similarity_backends = {
         str(cluster.get("similarity_backend") or "").strip()
@@ -474,38 +501,83 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
     }
     similarity_backend = "mixed" if len(similarity_backends) > 1 else next(iter(similarity_backends), "token-overlap")
     noise_count = len([cluster for cluster in clusters if int(cluster.get("document_count") or 0) == 1])
+    membership_rows: list[dict[str, Any]] = []
+    summary_clusters: list[dict[str, Any]] = []
+    for cluster_rank, cluster in enumerate(clusters, start=1):
+        cluster_id = str(cluster.get("cluster_id") or "").strip()
+        members = list(cluster.get("members") or [])
+        sample_ids = {
+            str(item.get("chunk_id") or "").strip()
+            for item in list(cluster.get("sample_documents") or [])
+            if isinstance(item, dict)
+        }
+        for member in members:
+            if not isinstance(member, dict):
+                continue
+            membership_rows.append(
+                {
+                    "cluster_id": cluster_id,
+                    "cluster_rank": cluster_rank,
+                    "cluster_document_count": int(cluster.get("document_count") or 0),
+                    "source_index": int(member.get("source_index") or 0),
+                    "row_id": str(member.get("row_id") or "").strip(),
+                    "chunk_id": str(member.get("chunk_id") or "").strip(),
+                    "chunk_index": int(member.get("chunk_index") or 0),
+                    "text": str(member.get("text") or "").strip(),
+                    "is_sample": str(member.get("chunk_id") or "").strip() in sample_ids,
+                }
+            )
+        summary_cluster = dict(cluster)
+        summary_cluster.pop("members", None)
+        summary_clusters.append(summary_cluster)
+
     cluster_artifact = {
         "skill_name": "embedding_cluster",
         "dataset_name": normalized["dataset_name"],
         "embedding_source_backend": "embedding-index-parquet",
         "embedding_index_ref": normalized["embedding_index_source_ref"],
+        "cluster_ref": str(summary_path),
+        "cluster_format": "json",
+        "cluster_summary_ref": str(summary_path),
+        "cluster_summary_format": "json",
+        "cluster_membership_ref": str(membership_path),
+        "cluster_membership_format": "parquet",
         "chunk_ref": normalized["chunk_ref"],
         "chunk_format": "parquet" if normalized["chunk_ref"].endswith(".parquet") else "",
         "summary": {
-            "cluster_count": len(clusters),
+            "cluster_count": len(summary_clusters),
             "clustered_document_count": len(records),
             "noise_count": noise_count,
             "similarity_backend": similarity_backend,
             "cluster_similarity_threshold": normalized["cluster_similarity_threshold"],
+            "top_n": normalized["top_n"],
+            "sample_n": normalized["sample_n"],
             "embedding_source_backend": "embedding-index-parquet",
+            "cluster_membership_row_count": len(membership_rows),
         },
-        "clusters": clusters,
+        "clusters": summary_clusters,
     }
-    output_path.write_text(json.dumps(cluster_artifact, ensure_ascii=False), encoding="utf-8")
+    summary_path.write_text(json.dumps(cluster_artifact, ensure_ascii=False), encoding="utf-8")
+    rt._write_parquet_rows(membership_path, membership_rows, schema=_cluster_membership_output_schema())
 
     return {
         "notes": [
             f"dataset cluster artifact generated by python-ai worker",
             f"cluster source index: {normalized['embedding_index_source_ref']}",
-            f"cluster output: {output_path}",
-            f"cluster_count: {len(clusters)}",
+            f"cluster output: {summary_path}",
+            f"cluster membership output: {membership_path}",
+            f"cluster_count: {len(summary_clusters)}",
             f"similarity_backend: {similarity_backend}",
         ],
         "artifact": {
             "skill_name": "dataset_cluster_build",
             "dataset_version_id": normalized["dataset_version_id"],
-            "cluster_ref": str(output_path),
+            "cluster_ref": str(summary_path),
             "cluster_format": "json",
+            "cluster_summary_ref": str(summary_path),
+            "cluster_summary_format": "json",
+            "cluster_membership_ref": str(membership_path),
+            "cluster_membership_format": "parquet",
             "cluster_algorithm": "dense-hybrid-v1",
             "cluster_source_embedding_ref": normalized["embedding_index_source_ref"],
             "chunk_ref": normalized["chunk_ref"],

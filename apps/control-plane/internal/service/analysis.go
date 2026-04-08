@@ -274,6 +274,7 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 	needsSentiment := planRequiresSentiment(plan)
 	needsEmbedding := planRequiresEmbedding(plan)
 	needsCluster := planRequiresCluster(plan)
+	clusterRequest, hasMaterializedClusterRequest := domain.ClusterMaterializationRequestForPlan(plan)
 
 	if needsPrepare && requiresPrepare(version) && !datasetPrepareReady(version) {
 		if _, err := s.dependencyBuilder.CreatePrepareJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, triggeredBy); err != nil {
@@ -305,8 +306,8 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 		}
 		return latest, nil
 	}
-	if needsCluster && !datasetClusterReady(version) {
-		if _, err := s.dependencyBuilder.CreateClusterJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetClusterBuildRequest{}, triggeredBy); err != nil {
+	if needsCluster && hasMaterializedClusterRequest && clusterRequest != nil && !domain.ClusterRequestMatchesMetadata(*clusterRequest, version.Metadata) {
+		if _, err := s.dependencyBuilder.CreateClusterJob(projectID, version.DatasetID, version.DatasetVersionID, *clusterRequest, triggeredBy); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
@@ -1454,7 +1455,7 @@ func planDependenciesReady(plan domain.SkillPlan, version domain.DatasetVersion)
 	if planRequiresEmbedding(plan) && !datasetEmbeddingReady(version) {
 		return false
 	}
-	if planRequiresCluster(plan) && !datasetClusterReady(version) {
+	if planRequiresCluster(plan) && !clusterPlanReady(plan, version) {
 		return false
 	}
 	return true
@@ -1634,7 +1635,7 @@ func enrichInputsForSkill(step *domain.SkillPlanStep, version domain.DatasetVers
 			step.Inputs["embedding_uri"] = deriveEmbeddingURI(version)
 		}
 	}
-	if step.SkillName == "embedding_cluster" && !inputPresent(step.Inputs, "cluster_ref") {
+	if step.SkillName == "embedding_cluster" && !inputPresent(step.Inputs, "cluster_ref") && clusterStepReady(*step, version) {
 		if value := strings.TrimSpace(metadataString(version.Metadata, "cluster_ref", "")); value != "" {
 			step.Inputs["cluster_ref"] = value
 		}

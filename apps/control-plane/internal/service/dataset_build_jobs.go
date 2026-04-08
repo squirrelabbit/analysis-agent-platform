@@ -158,7 +158,13 @@ func (s *DatasetService) CreateClusterJob(projectID, datasetID, datasetVersionID
 	if version.Metadata == nil {
 		version.Metadata = map[string]any{}
 	}
+	normalizedRequest := domain.NormalizeClusterBuildRequest(input)
 	version.Metadata["cluster_status"] = "queued"
+	version.Metadata["cluster_similarity_threshold"] = *normalizedRequest.SimilarityThreshold
+	version.Metadata["cluster_top_n"] = *normalizedRequest.TopN
+	version.Metadata["cluster_sample_n"] = *normalizedRequest.SampleN
+	version.Metadata["cluster_params_hash"] = domain.ClusterRequestHash(normalizedRequest)
+	delete(version.Metadata, "cluster_stale_reason")
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
