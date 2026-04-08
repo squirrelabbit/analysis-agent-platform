@@ -1259,6 +1259,71 @@ func TestBuildExecutionResultIncludesWaitingState(t *testing.T) {
 	}
 }
 
+func TestBuildExecutionResultClearsStaleWaitingDiagnosticsAfterCompletion(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-completed",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-1",
+		Status:      "completed",
+		Artifacts: map[string]string{
+			"step:step-1:issue_evidence_summary": `{"skill_name":"issue_evidence_summary","summary":"done"}`,
+		},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-completed",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "issue_evidence_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		Events: []domain.ExecutionEvent{
+			{
+				ExecutionID: "exec-completed",
+				TS:          now,
+				Level:       "info",
+				EventType:   "WORKFLOW_WAITING",
+				Message:     "execution is waiting for dependency",
+				Payload: map[string]any{
+					"waiting_for": "embeddings",
+					"reason":      "embedding index is not ready",
+				},
+			},
+			{
+				ExecutionID: "exec-completed",
+				TS:          now.Add(time.Minute),
+				Level:       "info",
+				EventType:   "WORKFLOW_COMPLETED",
+				Message:     "execution completed",
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	result, err := service.BuildExecutionResult(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution result error: %v", err)
+	}
+
+	if result.Diagnostics == nil {
+		t.Fatalf("expected diagnostics: %+v", result)
+	}
+	if result.Diagnostics.Waiting != nil {
+		t.Fatalf("expected stale waiting diagnostics to be cleared: %+v", result.Diagnostics)
+	}
+	if result.ResultV1.Waiting != nil {
+		t.Fatalf("expected result_v1 waiting to stay empty for completed execution: %+v", result.ResultV1)
+	}
+}
+
 func TestBuildExecutionResultUsesStoredSnapshotWhenPresent(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)

@@ -483,6 +483,9 @@ func withExecutionDiagnostics(execution domain.ExecutionSummary) domain.Executio
 		}
 	}
 	for index := len(execution.Events) - 1; index >= 0; index-- {
+		if strings.TrimSpace(execution.Status) != "waiting" {
+			break
+		}
 		event := execution.Events[index]
 		if event.EventType != "WORKFLOW_WAITING" {
 			continue
