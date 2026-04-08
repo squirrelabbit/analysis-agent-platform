@@ -157,6 +157,38 @@ type DatasetVersionListResponse struct {
 	Items []DatasetVersion `json:"items"`
 }
 
+type DatasetClusterMembersQuery struct {
+	Limit       *int  `json:"limit,omitempty"`
+	SamplesOnly *bool `json:"samples_only,omitempty"`
+}
+
+type ClusterMember struct {
+	ClusterID            string `json:"cluster_id"`
+	ClusterRank          int    `json:"cluster_rank"`
+	ClusterDocumentCount int    `json:"cluster_document_count"`
+	SourceIndex          int    `json:"source_index"`
+	RowID                string `json:"row_id"`
+	ChunkID              string `json:"chunk_id"`
+	ChunkIndex           int    `json:"chunk_index"`
+	Text                 string `json:"text"`
+	IsSample             bool   `json:"is_sample"`
+}
+
+type DatasetClusterMembersResponse struct {
+	ProjectID            string          `json:"project_id"`
+	DatasetID            string          `json:"dataset_id"`
+	DatasetVersionID     string          `json:"dataset_version_id"`
+	ClusterID            string          `json:"cluster_id"`
+	ClusterSummaryRef    string          `json:"cluster_summary_ref"`
+	ClusterMembershipRef string          `json:"cluster_membership_ref"`
+	Limit                int             `json:"limit"`
+	SamplesOnly          bool            `json:"samples_only"`
+	TotalCount           int             `json:"total_count"`
+	SampleCount          int             `json:"sample_count"`
+	Cluster              map[string]any  `json:"cluster,omitempty"`
+	Items                []ClusterMember `json:"items"`
+}
+
 type DatasetPrepareRequest struct {
 	TextColumn *string `json:"text_column,omitempty"`
 	OutputPath *string `json:"output_path,omitempty"`

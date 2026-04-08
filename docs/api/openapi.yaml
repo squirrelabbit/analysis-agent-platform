@@ -346,6 +346,45 @@ paths:
                 $ref: "#/components/schemas/DatasetVersion"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clusters/{cluster_id}/members:
+    get:
+      tags: [Datasets]
+      summary: Get materialized members for a cluster
+      operationId: getClusterMembers
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: cluster_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 50
+        - name: samples_only
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Cluster membership rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetClusterMembersResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare:
     post:
       tags: [Datasets]
@@ -1388,6 +1427,58 @@ components:
         embedding_model:
           type: string
       required: [file]
+    ClusterMember:
+      type: object
+      properties:
+        cluster_id:
+          type: string
+        cluster_rank:
+          type: integer
+        cluster_document_count:
+          type: integer
+        source_index:
+          type: integer
+        row_id:
+          type: string
+        chunk_id:
+          type: string
+        chunk_index:
+          type: integer
+        text:
+          type: string
+        is_sample:
+          type: boolean
+      required: [cluster_id, cluster_rank, cluster_document_count, source_index, row_id, chunk_id, chunk_index, text, is_sample]
+    DatasetClusterMembersResponse:
+      type: object
+      properties:
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        cluster_id:
+          type: string
+        cluster_summary_ref:
+          type: string
+        cluster_membership_ref:
+          type: string
+        limit:
+          type: integer
+        samples_only:
+          type: boolean
+        total_count:
+          type: integer
+        sample_count:
+          type: integer
+        cluster:
+          $ref: "#/components/schemas/AnyMap"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClusterMember"
+      required: [project_id, dataset_id, dataset_version_id, cluster_id, cluster_summary_ref, cluster_membership_ref, limit, samples_only, total_count, sample_count, items]
     DatasetPrepareRequest:
       type: object
       properties:

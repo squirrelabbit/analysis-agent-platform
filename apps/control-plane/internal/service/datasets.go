@@ -34,6 +34,8 @@ const (
 	workerTaskTimeoutPrepare   = 10 * time.Minute
 	workerTaskTimeoutSentiment = 30 * time.Minute
 	workerTaskTimeoutEmbedding = 45 * time.Minute
+	defaultClusterMembersLimit = 50
+	maxClusterMembersLimit     = 500
 )
 
 type DatasetService struct {
@@ -303,6 +305,71 @@ func (s *DatasetService) ListDatasetVersions(projectID, datasetID string) (domai
 		return domain.DatasetVersionListResponse{}, err
 	}
 	return domain.DatasetVersionListResponse{Items: items}, nil
+}
+
+func (s *DatasetService) GetClusterMembers(
+	projectID, datasetID, datasetVersionID, clusterID string,
+	input domain.DatasetClusterMembersQuery,
+) (domain.DatasetClusterMembersResponse, error) {
+	clusterID = strings.TrimSpace(clusterID)
+	if clusterID == "" {
+		return domain.DatasetClusterMembersResponse{}, ErrInvalidArgument{Message: "cluster_id is required"}
+	}
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetClusterMembersResponse{}, err
+	}
+
+	clusterSummaryRef := strings.TrimSpace(metadataString(version.Metadata, "cluster_summary_ref", ""))
+	if clusterSummaryRef == "" {
+		clusterSummaryRef = strings.TrimSpace(metadataString(version.Metadata, "cluster_ref", ""))
+	}
+	if clusterSummaryRef == "" {
+		return domain.DatasetClusterMembersResponse{}, ErrInvalidArgument{Message: "cluster summary artifact is not ready"}
+	}
+	clusterMembershipRef := strings.TrimSpace(metadataString(version.Metadata, "cluster_membership_ref", ""))
+	if clusterMembershipRef == "" {
+		clusterMembershipRef = deriveClusterMembershipURI(clusterSummaryRef)
+	}
+	if clusterMembershipRef == "" {
+		return domain.DatasetClusterMembersResponse{}, ErrInvalidArgument{Message: "cluster membership artifact is not ready"}
+	}
+
+	clusterSummary, err := loadClusterSummary(clusterSummaryRef, clusterID)
+	if err != nil {
+		return domain.DatasetClusterMembersResponse{}, err
+	}
+
+	limit := defaultClusterMembersLimit
+	if input.Limit != nil {
+		limit = *input.Limit
+	}
+	if limit <= 0 {
+		return domain.DatasetClusterMembersResponse{}, ErrInvalidArgument{Message: "limit must be a positive integer"}
+	}
+	if limit > maxClusterMembersLimit {
+		limit = maxClusterMembersLimit
+	}
+	samplesOnly := input.SamplesOnly != nil && *input.SamplesOnly
+
+	items, totalCount, sampleCount, err := loadClusterMembersFromParquet(clusterMembershipRef, clusterID, limit, samplesOnly)
+	if err != nil {
+		return domain.DatasetClusterMembersResponse{}, err
+	}
+	return domain.DatasetClusterMembersResponse{
+		ProjectID:            projectID,
+		DatasetID:            datasetID,
+		DatasetVersionID:     datasetVersionID,
+		ClusterID:            clusterID,
+		ClusterSummaryRef:    clusterSummaryRef,
+		ClusterMembershipRef: clusterMembershipRef,
+		Limit:                limit,
+		SamplesOnly:          samplesOnly,
+		TotalCount:           totalCount,
+		SampleCount:          sampleCount,
+		Cluster:              clusterSummary,
+		Items:                items,
+	}, nil
 }
 
 func (s *DatasetService) ValidateDatasetProfiles() (domain.DatasetProfileValidationResponse, error) {
@@ -2044,6 +2111,154 @@ func embeddingIndexChunkFromParquetRow(datasetVersionID string, chunkRef string,
 		Embedding:        vector,
 		Metadata:         metadata,
 	}, true, nil
+}
+
+type clusterMembershipParquetRecord struct {
+	ClusterID            string
+	ClusterRank          int
+	ClusterDocumentCount int
+	SourceIndex          int
+	RowID                string
+	ChunkID              string
+	ChunkIndex           int
+	Text                 string
+	IsSample             bool
+}
+
+func loadClusterSummary(summaryRef string, clusterID string) (map[string]any, error) {
+	summaryRef = strings.TrimSpace(summaryRef)
+	if summaryRef == "" {
+		return nil, ErrInvalidArgument{Message: "cluster summary ref is required"}
+	}
+	content, err := os.ReadFile(summaryRef)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNotFound{Resource: "cluster summary artifact"}
+		}
+		return nil, err
+	}
+	var artifact map[string]any
+	if err := json.Unmarshal(content, &artifact); err != nil {
+		return nil, err
+	}
+	clusters, ok := artifact["clusters"].([]any)
+	if !ok {
+		return nil, ErrInvalidArgument{Message: "cluster summary artifact is invalid"}
+	}
+	for _, raw := range clusters {
+		cluster, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(anyStringValue(cluster["cluster_id"])) != clusterID {
+			continue
+		}
+		return mergeStringAny(nil, cluster), nil
+	}
+	return nil, ErrNotFound{Resource: "cluster"}
+}
+
+func loadClusterMembersFromParquet(clusterMembershipRef string, clusterID string, limit int, samplesOnly bool) ([]domain.ClusterMember, int, int, error) {
+	clusterMembershipRef = strings.TrimSpace(clusterMembershipRef)
+	if clusterMembershipRef == "" {
+		return nil, 0, 0, ErrInvalidArgument{Message: "cluster membership ref is required"}
+	}
+	tempHandle, err := os.CreateTemp("", "cluster-members-*.duckdb")
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	dbPath := tempHandle.Name()
+	if err := tempHandle.Close(); err != nil {
+		return nil, 0, 0, err
+	}
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return nil, 0, 0, err
+	}
+	defer os.Remove(dbPath)
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer db.Close()
+
+	countQuery := fmt.Sprintf(
+		`SELECT
+			CAST(COUNT(*) AS BIGINT) AS total_count,
+			CAST(COALESCE(SUM(CASE WHEN is_sample THEN 1 ELSE 0 END), 0) AS BIGINT) AS sample_count
+		FROM read_parquet('%s')
+		WHERE cluster_id = '%s'`,
+		escapeDuckDBLiteral(clusterMembershipRef),
+		escapeDuckDBLiteral(clusterID),
+	)
+	var totalCount int
+	var sampleCount int
+	if err := db.QueryRow(countQuery).Scan(&totalCount, &sampleCount); err != nil {
+		return nil, 0, 0, err
+	}
+
+	filterClause := ""
+	if samplesOnly {
+		filterClause = " AND is_sample = TRUE"
+	}
+	rowsQuery := fmt.Sprintf(
+		`SELECT
+			COALESCE(cluster_id, '') AS cluster_id,
+			CAST(COALESCE(cluster_rank, 0) AS INTEGER) AS cluster_rank,
+			CAST(COALESCE(cluster_document_count, 0) AS INTEGER) AS cluster_document_count,
+			CAST(COALESCE(source_index, 0) AS INTEGER) AS source_index,
+			COALESCE(row_id, '') AS row_id,
+			COALESCE(chunk_id, '') AS chunk_id,
+			CAST(COALESCE(chunk_index, 0) AS INTEGER) AS chunk_index,
+			COALESCE(text, '') AS text,
+			CAST(COALESCE(is_sample, FALSE) AS BOOLEAN) AS is_sample
+		FROM read_parquet('%s')
+		WHERE cluster_id = '%s'%s
+		ORDER BY is_sample DESC, source_index, chunk_index, chunk_id
+		LIMIT %d`,
+		escapeDuckDBLiteral(clusterMembershipRef),
+		escapeDuckDBLiteral(clusterID),
+		filterClause,
+		limit,
+	)
+	rows, err := db.Query(rowsQuery)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.ClusterMember, 0)
+	for rows.Next() {
+		var row clusterMembershipParquetRecord
+		if err := rows.Scan(
+			&row.ClusterID,
+			&row.ClusterRank,
+			&row.ClusterDocumentCount,
+			&row.SourceIndex,
+			&row.RowID,
+			&row.ChunkID,
+			&row.ChunkIndex,
+			&row.Text,
+			&row.IsSample,
+		); err != nil {
+			return nil, 0, 0, err
+		}
+		items = append(items, domain.ClusterMember{
+			ClusterID:            strings.TrimSpace(row.ClusterID),
+			ClusterRank:          row.ClusterRank,
+			ClusterDocumentCount: row.ClusterDocumentCount,
+			SourceIndex:          row.SourceIndex,
+			RowID:                strings.TrimSpace(row.RowID),
+			ChunkID:              strings.TrimSpace(row.ChunkID),
+			ChunkIndex:           row.ChunkIndex,
+			Text:                 strings.TrimSpace(row.Text),
+			IsSample:             row.IsSample,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, 0, err
+	}
+	return items, totalCount, sampleCount, nil
 }
 
 func parseFloat32JSONVector(value string) ([]float32, error) {

@@ -116,6 +116,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions", s.handleCreateDatasetVersion)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions", s.handleListDatasetVersions)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}", s.handleGetDatasetVersion)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clusters/{cluster_id}/members", s.handleGetClusterMembers)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare", s.handleBuildPrepare)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs", s.handleCreatePrepareJob)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment", s.handleBuildSentiment)
@@ -390,6 +391,38 @@ func (s *Server) handleListDatasetVersions(w stdhttp.ResponseWriter, r *stdhttp.
 	response, err := s.datasetService.ListDatasetVersions(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleGetClusterMembers(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	query := domain.DatasetClusterMembersQuery{}
+	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			writeError(w, stdhttp.StatusBadRequest, "limit must be an integer")
+			return
+		}
+		query.Limit = &parsed
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("samples_only")); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			writeError(w, stdhttp.StatusBadRequest, "samples_only must be a boolean")
+			return
+		}
+		query.SamplesOnly = &parsed
+	}
+	response, err := s.datasetService.GetClusterMembers(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		r.PathValue("cluster_id"),
+		query,
 	)
 	if err != nil {
 		s.writeServiceError(w, err)
