@@ -769,6 +769,8 @@ def _cluster_embedding_records(
     sample_n: int,
     top_n: int,
     similarity_mode: str = "dense-hybrid",
+    *,
+    include_members: bool = False,
 ) -> list[dict[str, Any]]:
     working_clusters: list[dict[str, Any]] = []
     ordered_records = sorted(records, key=lambda item: int(item.get("source_index") or 0))
@@ -828,6 +830,7 @@ def _cluster_embedding_records(
             "source_index": int(record.get("source_index") or 0),
             "row_id": str(record.get("row_id") or "").strip(),
             "chunk_id": str(record.get("chunk_id") or "").strip(),
+            "chunk_index": int(record.get("chunk_index") or 0),
             "text": str(record.get("text") or "")[:240],
             "token_counts": token_counts,
             "leading_anchor": leading_anchor,
@@ -901,6 +904,22 @@ def _cluster_embedding_records(
                     }
                     for member in members[:sample_n]
                 ],
+                **(
+                    {
+                        "members": [
+                            {
+                                "source_index": int(member["source_index"]),
+                                "row_id": str(member.get("row_id") or ""),
+                                "chunk_id": str(member.get("chunk_id") or ""),
+                                "chunk_index": int(member.get("chunk_index") or 0),
+                                "text": str(member.get("text") or "")[:240],
+                            }
+                            for member in members
+                        ]
+                    }
+                    if include_members
+                    else {}
+                ),
             }
         )
     return payload_clusters

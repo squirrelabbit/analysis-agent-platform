@@ -656,12 +656,17 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
     prior_artifacts = payload.get("prior_artifacts")
     if normalized["cluster_ref"] and not rt._iter_prior_artifacts(prior_artifacts):
         precomputed = _load_precomputed_cluster_artifact(normalized["cluster_ref"])
-        if precomputed is not None:
+        if precomputed is not None and _precomputed_cluster_matches_request(precomputed, normalized):
             artifact = dict(precomputed)
             artifact["step_id"] = normalized["step"].get("step_id")
             artifact["dataset_name"] = normalized["dataset_name"]
             artifact["cluster_ref"] = normalized["cluster_ref"]
             artifact["cluster_format"] = normalized["cluster_format"] or "json"
+            summary = dict(artifact.get("summary") or {})
+            summary["cluster_similarity_threshold"] = normalized["cluster_similarity_threshold"]
+            summary["top_n"] = normalized["top_n"]
+            summary["sample_n"] = normalized["sample_n"]
+            artifact["summary"] = summary
             return {
                 "notes": [
                     f"embedding_cluster loaded precomputed cluster artifact",
@@ -710,6 +715,8 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
                 "noise_count": noise_count,
                 "similarity_backend": similarity_backend,
                 "cluster_similarity_threshold": normalized["cluster_similarity_threshold"],
+                "top_n": normalized["top_n"],
+                "sample_n": normalized["sample_n"],
                 "embedding_source_backend": source_backend,
             },
             "clusters": clusters,
@@ -728,6 +735,16 @@ def _load_precomputed_cluster_artifact(cluster_ref: str) -> dict[str, Any] | Non
     if not isinstance(decoded, dict):
         return None
     return decoded
+
+
+def _precomputed_cluster_matches_request(artifact: dict[str, Any], normalized: dict[str, Any]) -> bool:
+    summary = artifact.get("summary") or {}
+    if not isinstance(summary, dict):
+        return False
+    threshold = float(summary.get("cluster_similarity_threshold") or 0.3)
+    top_n = int(summary.get("top_n") or normalized.get("top_n") or 10)
+    sample_n = int(summary.get("sample_n") or normalized.get("sample_n") or 3)
+    return round(threshold, 4) == round(float(normalized["cluster_similarity_threshold"]), 4) and top_n == int(normalized["top_n"]) and sample_n == int(normalized["sample_n"])
 
 
 def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:

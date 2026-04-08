@@ -162,10 +162,18 @@ class TaskTests(unittest.TestCase):
         )
 
         cluster_path = Path(cluster_build_result["artifact"]["cluster_ref"])
+        membership_path = Path(cluster_build_result["artifact"]["cluster_membership_ref"])
         self.assertTrue(cluster_path.exists())
+        self.assertTrue(membership_path.exists())
         materialized = json.loads(cluster_path.read_text(encoding="utf-8"))
         self.assertEqual(materialized["skill_name"], "embedding_cluster")
         self.assertGreaterEqual(materialized["summary"]["cluster_count"], 1)
+        self.assertEqual(materialized["summary"]["cluster_similarity_threshold"], 0.2)
+        self.assertEqual(materialized["summary"]["top_n"], 3)
+        self.assertEqual(materialized["summary"]["sample_n"], 2)
+        self.assertEqual(materialized["cluster_membership_ref"], str(membership_path))
+        self.assertEqual(materialized["cluster_membership_format"], "parquet")
+        self.assertGreaterEqual(materialized["summary"]["cluster_membership_row_count"], 1)
 
         cluster_result = run_embedding_cluster(
             {
@@ -173,15 +181,31 @@ class TaskTests(unittest.TestCase):
                 "embedding_index_ref": embedding_result["artifact"]["embedding_index_source_ref"],
                 "cluster_ref": str(cluster_path),
                 "cluster_format": "json",
+                "cluster_similarity_threshold": 0.2,
                 "sample_n": 2,
                 "top_n": 3,
             }
         )
 
         self.assertEqual(cluster_result["artifact"]["cluster_ref"], str(cluster_path))
+        self.assertEqual(cluster_result["artifact"]["cluster_membership_ref"], str(membership_path))
         self.assertEqual(cluster_result["artifact"]["summary"], materialized["summary"])
         self.assertEqual(cluster_result["artifact"]["clusters"], materialized["clusters"])
         self.assertIn("precomputed cluster artifact", cluster_result["notes"][0])
+
+        fallback_cluster_result = run_embedding_cluster(
+            {
+                "dataset_name": str(csv_path),
+                "embedding_index_ref": embedding_result["artifact"]["embedding_index_source_ref"],
+                "cluster_ref": str(cluster_path),
+                "cluster_format": "json",
+                "cluster_similarity_threshold": 0.4,
+                "sample_n": 2,
+                "top_n": 3,
+            }
+        )
+
+        self.assertNotIn("precomputed cluster artifact", fallback_cluster_result["notes"][0])
 
     def test_rule_based_planner_without_key(self) -> None:
         with patch.dict(
