@@ -777,6 +777,12 @@ def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
             "skill_name": "cluster_label_candidates",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
+            "cluster_ref": str((prior or {}).get("cluster_ref") or "").strip(),
+            "cluster_format": str((prior or {}).get("cluster_format") or "").strip(),
+            "cluster_summary_ref": str((prior or {}).get("cluster_summary_ref") or "").strip(),
+            "cluster_summary_format": str((prior or {}).get("cluster_summary_format") or "").strip(),
+            "cluster_membership_ref": str((prior or {}).get("cluster_membership_ref") or "").strip(),
+            "cluster_membership_format": str((prior or {}).get("cluster_membership_format") or "").strip(),
             "summary": {
                 "cluster_count": len(clusters),
                 "label_rule": "top_terms",
