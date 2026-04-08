@@ -1,239 +1,70 @@
 # Python AI Worker
 
-이 디렉터리는 현재 런타임에서 Python이 맡는 AI worker와 비정형 deterministic skill 구현체다.
+이 디렉터리는 현재 런타임에서 Python이 맡는 AI worker와 비정형 분석 task 구현체다.
 
 ## 책임
 
-- planner
+- planner task
 - dataset build task
   - `dataset_prepare`
   - `sentiment_label`
   - `embedding`
-- unstructured support skill
-  - `garbage_filter`
-  - `document_filter`
-  - `deduplicate_documents`
-  - `keyword_frequency`
-  - `noun_frequency`
-  - `sentence_split`
-  - `time_bucket_count`
-  - `meta_group_count`
-  - `document_sample`
-  - `dictionary_tagging`
-  - `embedding_cluster`
-  - `cluster_label_candidates`
-  - `semantic_search`
-  - `evidence_pack`
-- unstructured core skill
-  - `unstructured_issue_summary`
-  - `issue_breakdown_summary`
-  - `issue_cluster_summary`
-  - `issue_trend_summary`
-  - `issue_period_compare`
-  - `issue_sentiment_summary`
-  - `issue_taxonomy_summary`
-  - `issue_evidence_summary`
+  - `dataset_cluster_build`
+- unstructured support/core skill 실행
+- prompt template, rule config, embedding helper 관리
+- `final_answer` 생성 task
 
-## 현재 코드 구조
+## 코드 구조
 
-- `src/python_ai_worker/main.py`
-  - HTTP entrypoint
-- `src/python_ai_worker/task_router.py`
-  - task name -> handler routing
-- `src/python_ai_worker/planner.py`
-  - planner entrypoint와 rule-based planner
-- `src/python_ai_worker/prompt_registry.py`
-  - prepare/sentiment prompt version -> Markdown template resolver
-- `src/python_ai_worker/openai_client.py`
-  - OpenAI Embeddings API client
-- `src/python_ai_worker/runtime/`
-  - `constants.py`: 공통 상수
-  - `payloads.py`: payload normalize와 기본 입력 merge
-  - `common.py`: text/io/date/token helper
-  - `artifacts.py`: prior artifact 선택과 집계 helper
-  - `embeddings.py`: dense embedding helper와 fallback 판단
-  - `llm.py`: planner/evidence/prepare/sentiment LLM helper
-- `src/python_ai_worker/skills/`
-  - `dataset_build.py`: `dataset_prepare`, `sentiment_label`, `embedding`
-  - `support.py`: filter/dedup/tagging/search/cluster support skill
-  - `core.py`: issue summary/evidence/core 분석 skill
-- `src/python_ai_worker/tasks.py`
-  - 기존 import 호환을 위한 export 레이어만 유지한다.
+| 위치 | 역할 |
+| --- | --- |
+| `src/python_ai_worker/main.py` | HTTP entrypoint |
+| `src/python_ai_worker/task_router.py` | task name -> handler routing |
+| `src/python_ai_worker/planner.py` | rule-based planner와 planner entrypoint |
+| `src/python_ai_worker/prompt_registry.py` | prompt version -> Markdown template resolver |
+| `src/python_ai_worker/runtime` | payload, rule, artifact, embedding, LLM helper |
+| `src/python_ai_worker/skills/dataset_build.py` | prepare, sentiment, embedding, cluster build |
+| `src/python_ai_worker/skills/support.py` | filter, search, cluster, tagging 계열 skill |
+| `src/python_ai_worker/skills/core.py` | 요약, 비교, 추세, evidence 계열 skill |
+| `src/python_ai_worker/skills/presentation.py` | `final_answer` 후처리 task |
+| `tests` | runtime helper, task, skill regression test |
 
-## 원칙
+## 현재 runtime 그룹
 
-- workflow 상태를 직접 관리하지 않는다.
-- 운영 API를 직접 소유하지 않는다.
-- contract를 받아 계산 결과만 반환한다.
-- LLM 경로가 실패해도 deterministic fallback을 유지한다.
-- planner 기본 입력, capability 노출, plan 허용 skill 목록은 공용 `skill bundle` 기준으로 맞춘다.
+- dataset build
+  - prepare / sentiment / embedding / cluster materialization
+- support skill
+  - filter, dedup, keyword, noun, sentence split, search, cluster, taxonomy
+- core skill
+  - issue summary, breakdown, trend, compare, sentiment, evidence
+- presentation
+  - grounded `final_answer`
 
-## 현재 구현 범위
+## prompt / rule / profile 연결
 
-- `GET /health`
-- `GET /capabilities`
-- `POST /tasks/planner`
-- `POST /tasks/dataset_prepare`
-- `POST /tasks/sentiment_label`
-- `POST /tasks/embedding`
-- `POST /tasks/document_filter`
-- `POST /tasks/garbage_filter`
-- `POST /tasks/deduplicate_documents`
-- `POST /tasks/keyword_frequency`
-- `POST /tasks/noun_frequency`
-- `POST /tasks/sentence_split`
-- `POST /tasks/time_bucket_count`
-- `POST /tasks/meta_group_count`
-- `POST /tasks/document_sample`
-- `POST /tasks/dictionary_tagging`
-- `POST /tasks/embedding_cluster`
-- `POST /tasks/cluster_label_candidates`
-- `POST /tasks/semantic_search`
-- `POST /tasks/issue_breakdown_summary`
-- `POST /tasks/issue_cluster_summary`
-- `POST /tasks/issue_trend_summary`
-- `POST /tasks/issue_period_compare`
-- `POST /tasks/issue_sentiment_summary`
-- `POST /tasks/issue_taxonomy_summary`
-- `POST /tasks/issue_evidence_summary`
-- `POST /tasks/evidence_pack`
-- `POST /tasks/unstructured_issue_summary`
+- prompt template는 저장소 루트 [../../config/prompts](../../config/prompts) 아래 Markdown 파일로 관리한다.
+- prompt version 이름은 파일명과 1:1로 대응한다.
+- dataset profile 기본값은 [../../config/dataset_profiles.json](../../config/dataset_profiles.json) 에서 관리한다.
+- rule config는 기본 상수 위에 `PYTHON_AI_RULE_CONFIG_PATH`, `PYTHON_AI_RULE_CONFIG_JSON`, request payload override를 순서대로 덮는다.
 
-## skill bundle 연동
+## 자주 쓰는 명령
 
-- runtime source는 저장소 루트의 `config/skill_bundle.json`이다.
-- `GET /capabilities`, `GET /health`, `python -m python_ai_worker.main --describe`는 `skill_bundle_version`을 함께 노출한다.
-- rule-based planner의 sequence와 기본 입력값도 bundle에서 읽는다.
-- `dataset_prepare`, `sentiment_label`, `embedding`은 bundle에 포함되지만 plan skill이 아니라 dataset build task로 본다.
+```bash
+PYTHONPATH=workers/python-ai/src python3 -m unittest discover -s workers/python-ai/tests -p 'test_*.py'
+PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --validate
+PYTHONPATH=workers/python-ai/src python -m python_ai_worker.main --describe
+```
 
-## 실행 메모
+로컬 임베딩 평가는 다음 명령을 사용한다.
 
-- 기본 bind: `127.0.0.1:8090`
-- 환경 변수:
-  - `PYTHON_AI_WORKER_HOST`
-  - `PYTHON_AI_WORKER_PORT`
-  - `PYTHON_AI_WORKER_ROLE`
-  - `PYTHON_AI_WORKER_QUEUE`
-  - `SKILL_BUNDLE_PATH`
-  - `PYTHON_AI_LLM_PROVIDER`
-  - `PYTHON_AI_RULE_CONFIG_PATH`
-  - `PYTHON_AI_RULE_CONFIG_JSON`
-  - `ANTHROPIC_API_KEY`
-  - `ANTHROPIC_MODEL`
-  - `ANTHROPIC_PREPARE_MODEL`
-  - `ANTHROPIC_PREPARE_PROMPT_VERSION`
-  - `ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION`
-  - `ANTHROPIC_SENTIMENT_PROMPT_VERSION`
-  - `PYTHON_AI_PROMPTS_DIR`
-  - `ANTHROPIC_API_URL`
-  - `ANTHROPIC_VERSION`
-  - `ANTHROPIC_MAX_TOKENS`
-  - `ANTHROPIC_TIMEOUT_SEC`
-  - `OPENAI_API_KEY`
-  - `OPENAI_API_URL`
-  - `OPENAI_EMBEDDING_MODEL`
-  - `OPENAI_EMBEDDING_DIMENSIONS`
-- `OPENAI_EMBEDDING_BATCH_SIZE`
-- `OPENAI_TIMEOUT_SEC`
-- `LOCAL_EMBEDDING_MODEL`
-- `EVIDENCE_CONTEXT_MAX_ENTRIES`
-- `EVIDENCE_CONTEXT_MAX_CHARS`
-- `EVIDENCE_CONTEXT_ENTRY_MAX_CHARS`
-- `EVIDENCE_DOCUMENT_TOTAL_CHARS`
-- `EVIDENCE_DOCUMENT_MAX_CHARS`
-- `ANTHROPIC_INPUT_PRICE_PER_MILLION_TOKENS`
-- `ANTHROPIC_OUTPUT_PRICE_PER_MILLION_TOKENS`
-- `OPENAI_EMBEDDING_PRICE_PER_MILLION_TOKENS`
-- 기본 LLM 설정:
-  - provider: `anthropic`
-  - planner/evidence model: `claude-sonnet-4-6`
-  - prepare/sentiment model: `claude-3-5-haiku-latest`
+```bash
+PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.evaluate_embedding_model --model intfloat/multilingual-e5-small --format markdown
+```
 
-## 구현 메모
+## 참고 문서
 
-- `planner`와 `issue_evidence_summary`는 Claude Sonnet을 우선 시도하고 실패 시 deterministic fallback으로 내려간다.
-- `dataset_prepare`와 `sentiment_label`은 기본 `ANTHROPIC_PREPARE_MODEL=claude-3-5-haiku-latest`를 사용하고 실패 시 deterministic fallback으로 내려간다.
-- prepare/sentiment prompt는 현재 [config/prompts](/Users/silverone/00_workspace/01_work/05_TF_project/analysis-support-platform/config/prompts) 아래 Markdown template 파일로 관리하고, `prompt_registry.py`는 버전 이름을 파일명으로 resolve한다. 기본 선택은 `ANTHROPIC_PREPARE_PROMPT_VERSION`, `ANTHROPIC_PREPARE_BATCH_PROMPT_VERSION`, `ANTHROPIC_SENTIMENT_PROMPT_VERSION`으로 바꿀 수 있고, 필요하면 `PYTHON_AI_PROMPTS_DIR`로 template 디렉터리를 통째로 바꿀 수 있다.
-- planner/evidence/prepare/sentiment artifact는 현재 `usage` metadata를 함께 남긴다. provider/model/request_count/token 수를 포함하고, 가격 env가 설정되면 `estimated_cost_usd`를 추가한다.
-- `dataset_prepare`는 Anthropic prepare 경로가 켜져 있으면 기본 `prepare_batch_size=8` 기준 batch 정제를 사용한다.
-- `dataset_prepare` 기본 출력은 `prepared.parquet`이며, 각 row에 `row_id`를 부여하고 `prepared_ref`, `prepare_format=parquet`, `row_id_column`을 함께 남긴다. 명시적으로 `.jsonl` output path를 주면 호환용 JSONL도 계속 생성할 수 있다.
-- `dataset_prepare`에는 `regex_rule_names` 확장 포인트가 있고, 현재 기본 규칙은 `media_placeholder`, `html_artifact`, `url_cleanup`, `zero_width_cleanup`이다. row에는 `prepare_regex_applied_rules`, artifact summary에는 `prepare_regex_rule_hits`를 남긴다.
-- prepare regex, garbage, taxonomy 규칙은 현재 `기본 상수 -> PYTHON_AI_RULE_CONFIG_PATH JSON -> PYTHON_AI_RULE_CONFIG_JSON inline JSON -> request payload override` 순서로 덮는다.
-- worker `/health`와 `--describe`에는 현재 `rule_config.rule_config_path`, `rule_config.rule_config_inline` 상태가 함께 노출된다.
-- `sentiment_label` 기본 출력도 `sentiment.parquet`이며 `row_id`, `source_row_index`, `sentiment_ref`, `sentiment_format=parquet` metadata를 함께 남긴다.
-- `issue_sentiment_summary`는 `prepared_dataset_name` 입력을 함께 받아 `sentiment.parquet`와 `prepared.parquet`를 join해 텍스트 샘플을 복원한다.
-- `embedding` 기본값은 현재 `intfloat/multilingual-e5-small`이고, 입력 row를 text window로 잘라 `chunks.parquet`를 만든 뒤 `fastembed` local model 경로를 우선 시도한다.
-- `embedding_model=text-embedding-*` override를 주면 OpenAI dense embedding 경로를 사용할 수 있다.
-- 예를 들어 기본값 `embedding_model=intfloat/multilingual-e5-small`이면 local model download 뒤 `384차원` embedding을 만들 수 있다.
-- `OPENAI_API_KEY`가 없거나 local/OpenAI dense 호출이 불가하면 `embedding`은 `token-overlap-v1` sidecar로 자동 fallback한다.
-- `embedding` artifact도 현재 `usage` metadata를 남긴다. local FastEmbed는 `free_local`, token-overlap fallback은 `free_fallback`, OpenAI 경로는 `prompt_tokens`와 선택적 `estimated_cost_usd`를 함께 기록한다.
-- 기본 embedding build는 `embeddings.index.parquet`를 주 산출물로 만들고, `embeddings.jsonl`은 `debug_export_jsonl=true` 또는 명시적 `.jsonl` output path를 준 경우에만 debug/export용으로 남긴다.
-- control plane은 build가 끝난 뒤 `embeddings.index.parquet`를 우선 읽어 dense vector가 있으면 그대로, 없으면 64차원 hashed projection vector로 바꿔 `pgvector` table `embedding_index_chunks`에 적재한다. index source를 못 읽을 때만 `embeddings.jsonl`로 fallback한다.
-- `semantic_search`는 현재 `pgvector`를 우선 조회하고, index metadata가 dense model이면 같은 model로 query embedding을 다시 만든다. task input도 `embedding_index_ref + chunk_ref`를 우선 쓰고, `embedding_uri`는 명시적 fallback일 때만 사용한다. 검색 결과에는 `retrieval_backend`, `chunk_id`, `chunk_index`, `char_start`, `char_end`, `chunk_ref`를 함께 남긴다.
-- `BuildEmbeddings` request는 `embedding_model` override를 받아 dataset version에 저장된 기본 model을 바꿔 실행할 수 있다.
-- `issue_evidence_summary`와 `evidence_pack`은 `semantic_search` prior artifact가 있을 때 chunk citation을 evidence artifact까지 그대로 보존한다.
-- `issue_evidence_summary`와 `evidence_pack`은 evidence LLM 입력이 커질 때 `analysis_context`와 selected document text를 prompt budget 기준으로 compaction하고, artifact에 `prompt_compaction.analysis_context`, `prompt_compaction.selected_documents`를 남긴다.
-- `runtime/common.py`는 `.parquet` reader를 지원하므로 `sentiment_label`, `document_filter`, `time_bucket_count` 같은 row 기반 task가 prepared Parquet를 직접 읽을 수 있다.
-- `garbage_filter`는 prepared row를 읽고 `ad_marker`, `promotion_link`, `platform_placeholder`, `empty_or_noise` 규칙으로 광고/협찬/링크 유도/placeholder/noise-only row를 제거한다.
-- `garbage_filter`는 `artifact_output_path`를 받으면 `row_id`, `source_index`, `filter_status`, `matched_rules`를 담은 `rows.parquet` sidecar를 쓴다. control plane execution 경로에서는 이 sidecar ref만 DB artifact에 남기고, step chaining에는 full artifact를 계속 사용한다.
-- `document_filter`는 기본적으로 query token 중 하나라도 맞으면 고르고(`match_mode=any`), `match_mode=all`을 주면 query token을 모두 포함한 문서만 고른다.
-- `document_filter`는 `artifact_output_path`를 받으면 matched row의 `row_id`, `source_index`, `rank`, `score`를 담은 `matches.parquet` sidecar를 쓴다.
-- `deduplicate_documents`는 `artifact_output_path`를 받으면 row별 canonical mapping을 담은 `rows.parquet` sidecar를 쓴다.
-- `noun_frequency`는 현재 filtered row에서 명사 중심 top term을 집계한다. `kiwipiepy`가 있으면 품사 태깅을 사용하고, 없으면 regex token fallback으로 내려간다. `top_nouns`에는 `term_frequency`, `document_frequency`를 함께 남긴다.
-- `sentence_split`은 현재 filtered row를 문장 단위 span으로 나눈다. `kss`가 있으면 한국어 문장 분리기를 우선 쓰고, 없으면 regex fallback으로 내려간다. `artifact_output_path`를 받으면 `row_id`, `source_index`, `sentence_index`, `sentence_text`, `char_start`, `char_end`를 담은 `rows.parquet` sidecar를 쓴다.
-- `issue_evidence_summary`는 `issue_trend_summary`, `issue_breakdown_summary`, `issue_period_compare`, `issue_cluster_summary`, `issue_taxonomy_summary`, `issue_sentiment_summary` 같은 prior artifact를 `analysis_context`로 반영한다.
-- `embedding_cluster`는 현재 `pgvector` index와 `chunks.parquet`를 우선 읽고, dense vector가 있으면 lexical guardrail을 둔 `dense-hybrid` similarity를 우선 사용한다. generic overlap 회귀 fixture가 unit test에 추가됐고, `pgvector`를 읽을 수 없을 때만 `embeddings.jsonl` token fallback을 사용한다.
-- 테스트에는 `dense-only`와 `dense-hybrid`를 같은 generic overlap fixture에서 비교하는 helper 케이스가 있고, 현재 기준으로 `dense-only`는 1개 군집으로 붕괴되고 `dense-hybrid`는 `3개 군집`을 유지한다.
-- 테스트에는 local embedding fixture를 직접 주입해 `semantic_search` top ranking과 `embedding_cluster` membership이 기대 토픽 그룹을 유지하는지 확인하는 회귀 케이스도 포함한다.
-- 고정 평가셋 리포트는 `python_ai_worker.devtools.evaluate_embedding_model` CLI로 만들 수 있고, search top-1/top-k와 cluster `dense-only`/`dense-hybrid` 비교 결과를 markdown/json으로 출력한다.
-- embedding sidecar record는 `row_id`, `chunk_id`, `chunk_index`, `char_start`, `char_end`를 함께 저장하고, 별도 `chunks.parquet`에는 `chunk_text`와 chunk metadata를 남긴다.
-- `deduplicate_documents`는 정규화 텍스트 동일성 + token-set Jaccard similarity를 사용한다.
-- `dictionary_tagging`은 rule-based taxonomy tagging을 사용한다.
-- `embedding_cluster`는 dense vector가 있으면 dense cosine similarity에 token-overlap guardrail을 곱한 `dense-hybrid` greedy clustering을 사용하고, dense가 없으면 token vector cosine similarity로 fallback한다.
-- `cluster_label_candidates`는 cluster top term으로 label 후보를 만든다.
-- helper 단위 테스트는 `workers/python-ai/tests/test_runtime_helpers.py`에서 payload/artifact/planner helper를 직접 검증한다.
-## rule-based planner 패턴
-
-- 일반 요약:
-  - `document_filter -> keyword_frequency -> document_sample -> unstructured_issue_summary -> issue_evidence_summary`
-- 명사 키워드:
-  - `document_filter -> noun_frequency`
-- 문장 분리:
-  - `document_filter -> sentence_split`
-- 광고/가비지 정제:
-  - `garbage_filter -> document_filter -> document_sample -> issue_evidence_summary`
-- 추세:
-  - `document_filter -> time_bucket_count -> document_sample -> issue_trend_summary -> issue_evidence_summary`
-- 분해:
-  - `document_filter -> meta_group_count -> document_sample -> issue_breakdown_summary -> issue_evidence_summary`
-- 비교:
-  - `document_filter -> document_sample -> issue_period_compare -> issue_evidence_summary`
-- 감성:
-  - `document_filter -> document_sample -> issue_sentiment_summary -> issue_evidence_summary`
-- 군집:
-  - `document_filter -> deduplicate_documents -> embedding_cluster -> cluster_label_candidates -> issue_cluster_summary -> issue_evidence_summary`
-- taxonomy:
-  - `document_filter -> dictionary_tagging -> issue_taxonomy_summary -> issue_evidence_summary`
-
-## 메타데이터 확인
-
-- `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.main --describe`
-
-## skill 단위 테스트
-
-- 개별 skill 샘플 케이스 목록 보기
-  - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --list`
-- registry와 샘플 케이스 정합성만 빠르게 확인
-  - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --validate`
-- 로컬 임베딩 평가 리포트
-  - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.evaluate_embedding_model --model intfloat/multilingual-e5-small --format markdown`
-- 개별 skill 직접 실행
-  - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --skill semantic_search --pretty`
-  - `PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --skill issue_cluster_summary --pretty --keep-tempdir`
-- 기본값은 LLM 호출을 강제로 끄고 deterministic fallback 경로로 실행한다.
-  - 실제 키가 있어도 `ANTHROPIC_API_KEY`를 비워서 local case를 안정적으로 재현한다.
-  - LLM 포함 경로까지 보고 싶으면 `--allow-llm`을 사용한다.
-- `python_ai_worker.devtools` 패키지는 `available_skill_cases`, `run_skill_case`, `validate_skill_cases`를 공개 API로 export한다.
-- 자동 검증
-  - `PYTHONPATH=workers/python-ai/src python3 -m unittest discover -s workers/python-ai/tests -p 'test_skill_cases.py'`
-  - 이 테스트는 `task_router`에 등록된 모든 skill/task에 대해 샘플 케이스가 존재하는지와 실제 실행이 되는지를 확인한다.
+- 루트 개요: [../../README.md](../../README.md)
+- 로컬 runbook: [../../docs/operations/local_runbook.md](../../docs/operations/local_runbook.md)
+- 테스트와 smoke: [../../docs/testing/smoke_and_checks.md](../../docs/testing/smoke_and_checks.md)
+- prompt 안내: [../../config/prompts/README.md](../../config/prompts/README.md)
+- skill 설명: [../../docs/skill/skill_registry.md](../../docs/skill/skill_registry.md)

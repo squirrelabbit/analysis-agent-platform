@@ -2,34 +2,36 @@
 
 ## 목적
 
-- 문서를 목표 아키텍처 기준의 최소 세트로 줄인다.
-- 제품 정의, 언어 역할, 마이그레이션 경로를 빠르게 확인할 수 있게 한다.
-- 현재 상태 스냅샷과 daily 작업 로그, 결정 로그를 섞지 않는다.
+- 루트 문서에는 입구만 남기고, 상세 내용은 성격별 문서로 분리한다.
+- 제품 정의, 운영 절차, 테스트 절차, 아키텍처 문서를 서로 섞지 않는다.
+- 코드와 문서가 다르면 코드를 우선 보고, 아직 정리되지 않은 내용만 `확인 필요:`로 남긴다.
 
-## 지금 보면 되는 문서
+## 문서 분류
 
-| 문서 | 역할 |
-| --- | --- |
-| `docs/project_summary.md` | 제품 정의와 현재 실행 흐름의 짧은 스냅샷 |
-| `docs/roadmap.md` | 앞으로 해야 할 작업을 단계별로 정리한 실행 로드맵 |
-| `docs/devlog/README.md` | daily 고민/챌린지 로그 안내와 작성 규칙 |
-| `docs/architecture/target_stack.md` | 목표 아키텍처와 실행 흐름 |
-| `docs/architecture/dev_postgres_reset.md` | `pgvector` 전환 뒤 개발용 Postgres volume 재초기화 절차와 helper script 안내 |
-| `docs/architecture/language_roles.md` | Go, Python, Rust, DuckDB, Postgres의 책임 구분 |
-| `docs/architecture/migration_plan.md` | 레거시 Python MVP에서 목표 구조로 옮기는 단계 |
-| `docs/architecture/unstructured_storage_transition.md` | 비정형 dataset의 JSONL artifact를 Parquet + vector index 구조로 바꾸는 설계 |
-| `docs/architecture/project_map.mmd` | 시스템 수준 구조도 |
-| `docs/skill/skill_registry.md` | Skill contract와 Core/Support 분류 기준 |
-| `docs/skill/analysis_techniques.md` | skill별 분석 기법과 사용 기술 설명 |
-| `docs/skill/preprocessing_candidates.md` | 전처리 후보 skill과 prepare 내부 규칙, backlog 정리 |
-| `docs/api/openapi.yaml` | control-plane HTTP API 명세 |
+| 구분 | 문서 | 역할 |
+| --- | --- | --- |
+| 입구 | `README.md` | 제품 개요, 빠른 시작, 핵심 링크 |
+| 요약 | `docs/project_summary.md` | 현재 제품 정의와 핵심 실행 흐름의 짧은 스냅샷 |
+| 운영 | `manual.md` | 로컬 운영 입구와 상세 문서 링크 |
+| 운영 | `docs/operations/local_runbook.md` | stack 실행, health, 로그, artifact 경로 |
+| 운영 | `docs/recovery_guide.md` | build failed, waiting, failed 대응 절차 |
+| 테스트 | `docs/testing/smoke_and_checks.md` | 코드 테스트와 smoke 검증 순서 |
+| 테스트 | `docs/testing/manual_api_walkthrough.md` | 수동 API 호출 예시 |
+| 아키텍처 | `docs/architecture/*.md` | 목표 구조, 마이그레이션, 저장 방식 설명 |
+| API | `docs/api/openapi.yaml` | control-plane HTTP API 계약 |
+| Skill | `docs/skill/*.md` | runtime skill 계약과 분석 기법 |
+| 결정 로그 | `docs/chat-notes/*.md` | 확정된 결정과 채팅 보관 |
+| 작업 로그 | `docs/devlog/*.md` | daily 고민, 실험, 다음 액션 |
+
+## 지금 가장 자주 보는 문서
+
+- [project_summary.md](project_summary.md)
+- [../manual.md](../manual.md)
+- [operations/local_runbook.md](operations/local_runbook.md)
+- [testing/smoke_and_checks.md](testing/smoke_and_checks.md)
+- [recovery_guide.md](recovery_guide.md)
+- [api/openapi.yaml](api/openapi.yaml)
 
 참고:
-- runtime 기준 skill 메타데이터 source는 문서가 아니라 저장소 루트의 `config/skill_bundle.json`이다.
-
-## 정리 원칙
-
-- 루트/요약 문서에는 현재 상태와 입구 정보만 남긴다.
-- 매일의 고민과 실험 메모는 `docs/devlog/`에 남긴다.
-- 확정된 결정은 `docs/chat-notes/` 아래에 남긴다.
-- 코드와 문서가 다르면 코드를 우선 보고, 아직 옮기지 않은 항목은 `확인 필요:`로 적는다.
+- runtime skill 메타데이터 source는 문서가 아니라 저장소 루트의 `config/skill_bundle.json`이다.
+- dataset profile 기본값은 `config/dataset_profiles.json`, prompt template는 `config/prompts/`를 기준으로 본다.

@@ -69,15 +69,34 @@ npm install
 npm run dev
 ```
 
-## 자주 보는 문서
+## 문서 안내
 
-- 운영/실행 예시: [manual.md](manual.md)
-- control plane 상세: [apps/control-plane/README.md](apps/control-plane/README.md)
-- 제품 요약: [docs/project_summary.md](docs/project_summary.md)
-- 장애 대응: [docs/recovery_guide.md](docs/recovery_guide.md)
-- API 계약: [docs/api/openapi.yaml](docs/api/openapi.yaml)
-- dataset profile registry: [config/dataset_profiles.json](config/dataset_profiles.json)
-- prompt template 안내: [config/prompts/README.md](config/prompts/README.md)
+### 제품과 입구
+
+| 문서 | 역할 |
+| --- | --- |
+| [README.md](README.md) | 제품 개요와 빠른 시작 |
+| [docs/project_summary.md](docs/project_summary.md) | 현재 제품 정의와 핵심 실행 흐름 |
+| [manual.md](manual.md) | 로컬 운영 입구와 상세 문서 링크 |
+
+### 운영과 테스트
+
+| 문서 | 역할 |
+| --- | --- |
+| [docs/operations/local_runbook.md](docs/operations/local_runbook.md) | stack 실행, health, 로그, artifact 경로 |
+| [docs/testing/smoke_and_checks.md](docs/testing/smoke_and_checks.md) | 코드 테스트와 smoke 검증 순서 |
+| [docs/testing/manual_api_walkthrough.md](docs/testing/manual_api_walkthrough.md) | 수동 API 호출 예시 |
+| [docs/recovery_guide.md](docs/recovery_guide.md) | build failed, waiting, failed 대응 절차 |
+
+### 구성과 계약
+
+| 문서 | 역할 |
+| --- | --- |
+| [apps/control-plane/README.md](apps/control-plane/README.md) | control plane 코드맵 |
+| [workers/python-ai/README.md](workers/python-ai/README.md) | python-ai worker 코드맵 |
+| [docs/api/openapi.yaml](docs/api/openapi.yaml) | HTTP API 계약 |
+| [config/dataset_profiles.json](config/dataset_profiles.json) | dataset profile 기본 registry |
+| [config/prompts/README.md](config/prompts/README.md) | prompt template 관리 안내 |
 
 ## 핵심 API 묶음
 
