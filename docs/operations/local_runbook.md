@@ -1,0 +1,81 @@
+# 로컬 운영 Runbook
+
+## 1. stack 실행과 정지
+
+```bash
+docker compose -f compose.dev.yml up -d --build
+docker compose -f compose.dev.yml ps
+docker compose -f compose.dev.yml down
+```
+
+기본 서비스:
+- `control-plane`
+- `python-ai-worker`
+- `temporal`
+- `temporal-worker`
+- `postgres`
+
+## 2. health 확인
+
+```bash
+curl -fsS http://127.0.0.1:18080/health
+curl -fsS http://127.0.0.1:18090/health
+curl -fsS http://127.0.0.1:18080/openapi.yaml | head
+```
+
+Swagger:
+- `http://127.0.0.1:18080/swagger`
+
+## 3. web console scaffold
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+개발 중 프론트는 Docker가 아니라 로컬 dev server로 띄우는 현재 구성을 기준으로 한다.
+
+## 4. 자주 보는 로그
+
+```bash
+docker compose -f compose.dev.yml logs -f control-plane
+docker compose -f compose.dev.yml logs -f temporal-worker
+docker compose -f compose.dev.yml logs -f python-ai-worker
+docker compose -f compose.dev.yml logs -f postgres
+```
+
+운영 이슈를 볼 때 우선순위:
+1. `control-plane`
+2. `temporal-worker`
+3. `python-ai-worker`
+4. `postgres`
+
+## 5. 결과와 artifact 위치
+
+- upload 원본: `data/uploads/`
+- execution artifact: `data/artifacts/`
+- dataset build artifact:
+  - `prepared.parquet`
+  - `sentiment.parquet`
+  - `chunks.parquet`
+  - `embeddings.index.parquet`
+  - `clusters.json`
+
+실행 상태와 snapshot은 Postgres metadata와 artifact 파일을 함께 본다.
+
+## 6. 자주 확인하는 API
+
+- `GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}`
+- `GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/build_jobs`
+- `GET /projects/{project_id}/dataset_build_jobs/{job_id}`
+- `GET /projects/{project_id}/executions/{execution_id}`
+- `GET /projects/{project_id}/executions/{execution_id}/result`
+- `GET /dataset_profiles/validate`
+
+## 7. 관련 문서
+
+- smoke와 테스트: [../testing/smoke_and_checks.md](../testing/smoke_and_checks.md)
+- 수동 API 예시: [../testing/manual_api_walkthrough.md](../testing/manual_api_walkthrough.md)
+- 복구 절차: [../recovery_guide.md](../recovery_guide.md)
+- Postgres reset: [../architecture/dev_postgres_reset.md](../architecture/dev_postgres_reset.md)
