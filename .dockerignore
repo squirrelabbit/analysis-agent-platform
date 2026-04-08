@@ -21,5 +21,3 @@ node_modules
 .git
 .gitignore
 data
-docs/chat-notes/*
-docs/devlog/*
