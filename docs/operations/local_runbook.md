@@ -61,6 +61,7 @@ docker compose -f compose.dev.yml logs -f postgres
   - `chunks.parquet`
   - `embeddings.index.parquet`
   - `clusters.json`
+  - `clusters.memberships.parquet`
 
 실행 상태와 snapshot은 Postgres metadata와 artifact 파일을 함께 본다.
 
@@ -70,7 +71,11 @@ docker compose -f compose.dev.yml logs -f postgres
 - `GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/build_jobs`
 - `GET /projects/{project_id}/dataset_build_jobs/{job_id}`
 - `GET /projects/{project_id}/executions/{execution_id}`
+- `GET /projects/{project_id}/executions/{execution_id}/events`
+- `GET /projects/{project_id}/executions/{execution_id}/progress`
+- `GET /projects/{project_id}/executions/{execution_id}/steps/{step_id}`
 - `GET /projects/{project_id}/executions/{execution_id}/result`
+- `GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clusters/{cluster_id}/members`
 - `GET /dataset_profiles/validate`
 
 ## 7. 관련 문서
