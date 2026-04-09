@@ -459,27 +459,39 @@ type ExecutionEventsResponse struct {
 }
 
 type ExecutionStepProgress struct {
-	StepID        string   `json:"step_id"`
-	SkillName     string   `json:"skill_name"`
-	Status        string   `json:"status"`
-	ArtifactKey   *string  `json:"artifact_key,omitempty"`
-	Summary       string   `json:"summary,omitempty"`
-	Warnings      []string `json:"warnings,omitempty"`
-	SelectionMode string   `json:"selection_mode,omitempty"`
+	StepID        string     `json:"step_id"`
+	SkillName     string     `json:"skill_name"`
+	Status        string     `json:"status"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+	ArtifactKey   *string    `json:"artifact_key,omitempty"`
+	Summary       string     `json:"summary,omitempty"`
+	Warnings      []string   `json:"warnings,omitempty"`
+	SelectionMode string     `json:"selection_mode,omitempty"`
+}
+
+type ExecutionBuildDependency struct {
+	BuildType  string           `json:"build_type"`
+	Status     string           `json:"status"`
+	Ready      bool             `json:"ready"`
+	WaitingFor bool             `json:"waiting_for,omitempty"`
+	LatestJob  *DatasetBuildJob `json:"latest_job,omitempty"`
 }
 
 type ExecutionProgressResponse struct {
-	ExecutionID        string                  `json:"execution_id"`
-	Status             string                  `json:"status"`
-	TotalSteps         int                     `json:"total_steps"`
-	CompletedSteps     int                     `json:"completed_steps"`
-	FailedSteps        int                     `json:"failed_steps"`
-	RunningStep        *ExecutionStepProgress  `json:"running_step,omitempty"`
-	Waiting            *ExecutionWaitingState  `json:"waiting,omitempty"`
-	Steps              []ExecutionStepProgress `json:"steps"`
-	AvailableArtifacts []string                `json:"available_artifacts,omitempty"`
-	ResultPreview      *ExecutionResultAnswer  `json:"result_preview,omitempty"`
-	Diagnostics        *ExecutionDiagnostics   `json:"diagnostics,omitempty"`
+	ExecutionID        string                     `json:"execution_id"`
+	Status             string                     `json:"status"`
+	TotalSteps         int                        `json:"total_steps"`
+	CompletedSteps     int                        `json:"completed_steps"`
+	FailedSteps        int                        `json:"failed_steps"`
+	LastEventAt        *time.Time                 `json:"last_event_at,omitempty"`
+	RunningStep        *ExecutionStepProgress     `json:"running_step,omitempty"`
+	Waiting            *ExecutionWaitingState     `json:"waiting,omitempty"`
+	BuildDependencies  []ExecutionBuildDependency `json:"build_dependencies,omitempty"`
+	Steps              []ExecutionStepProgress    `json:"steps"`
+	AvailableArtifacts []string                   `json:"available_artifacts,omitempty"`
+	ResultPreview      *ExecutionResultAnswer     `json:"result_preview,omitempty"`
+	Diagnostics        *ExecutionDiagnostics      `json:"diagnostics,omitempty"`
 }
 
 type ReportDraftCreateRequest struct {

@@ -1408,11 +1408,121 @@ func TestBuildExecutionProgressReportsRunningStepAndPreview(t *testing.T) {
 	if progress.RunningStep == nil || progress.RunningStep.StepID != "step-2" {
 		t.Fatalf("unexpected running step: %+v", progress.RunningStep)
 	}
+	if progress.RunningStep.StartedAt == nil || !progress.RunningStep.StartedAt.Equal(now.Add(3*time.Second)) {
+		t.Fatalf("unexpected running step start time: %+v", progress.RunningStep)
+	}
+	if progress.LastEventAt == nil || !progress.LastEventAt.Equal(now.Add(3*time.Second)) {
+		t.Fatalf("unexpected last_event_at: %+v", progress)
+	}
 	if len(progress.Steps) != 2 || progress.Steps[0].Status != "completed" || progress.Steps[1].Status != "running" {
 		t.Fatalf("unexpected step progress: %+v", progress.Steps)
 	}
+	if progress.Steps[0].CompletedAt == nil || !progress.Steps[0].CompletedAt.Equal(now.Add(2*time.Second)) {
+		t.Fatalf("unexpected completed step timestamps: %+v", progress.Steps[0])
+	}
 	if progress.ResultPreview == nil || progress.ResultPreview.Summary != "partial summary" {
 		t.Fatalf("unexpected result preview: %+v", progress.ResultPreview)
+	}
+}
+
+func TestBuildExecutionProgressIncludesBuildDependencies(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-1",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		PrepareStatus:    "ready",
+		PrepareURI:       stringPointer("prepared.parquet"),
+		EmbeddingStatus:  "queued",
+		CreatedAt:        time.Now().UTC(),
+		Metadata:         map[string]any{},
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	startedAt := time.Now().UTC()
+	buildJob := domain.DatasetBuildJob{
+		JobID:            "job-embedding-1",
+		ProjectID:        project.ProjectID,
+		DatasetID:        dataset.DatasetID,
+		DatasetVersionID: version.DatasetVersionID,
+		BuildType:        "embedding",
+		Status:           "running",
+		TriggeredBy:      "analysis_execute",
+		CreatedAt:        startedAt.Add(-time.Minute),
+		StartedAt:        &startedAt,
+		Attempt:          1,
+	}
+	if err := repository.SaveDatasetBuildJob(buildJob); err != nil {
+		t.Fatalf("unexpected save dataset build job error: %v", err)
+	}
+
+	execution := domain.ExecutionSummary{
+		ExecutionID:      "exec-waiting-progress",
+		ProjectID:        project.ProjectID,
+		RequestID:        "request-1",
+		Status:           "waiting",
+		DatasetVersionID: stringPointer(version.DatasetVersionID),
+		Artifacts:        map[string]string{},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-waiting-progress",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "semantic_search", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		Events: []domain.ExecutionEvent{
+			{
+				ExecutionID: "exec-waiting-progress",
+				TS:          startedAt,
+				Level:       "info",
+				EventType:   "WORKFLOW_WAITING",
+				Message:     "execution is waiting for dependency",
+				Payload: map[string]any{
+					"waiting_for": "embeddings",
+					"reason":      "dataset version embeddings are not ready",
+				},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	progress, err := service.BuildExecutionProgress(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution progress error: %v", err)
+	}
+
+	if len(progress.BuildDependencies) != 2 {
+		t.Fatalf("expected prepare+embedding dependencies, got %+v", progress.BuildDependencies)
+	}
+	if progress.BuildDependencies[0].BuildType != "prepare" || !progress.BuildDependencies[0].Ready || progress.BuildDependencies[0].Status != "ready" {
+		t.Fatalf("unexpected prepare dependency: %+v", progress.BuildDependencies[0])
+	}
+	if progress.BuildDependencies[1].BuildType != "embedding" || progress.BuildDependencies[1].Ready {
+		t.Fatalf("unexpected embedding dependency readiness: %+v", progress.BuildDependencies[1])
+	}
+	if !progress.BuildDependencies[1].WaitingFor || progress.BuildDependencies[1].LatestJob == nil || progress.BuildDependencies[1].LatestJob.JobID != "job-embedding-1" {
+		t.Fatalf("expected waiting embedding job in progress response: %+v", progress.BuildDependencies[1])
 	}
 }
 
