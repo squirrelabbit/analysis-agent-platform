@@ -108,4 +108,4 @@ skill policy 확인 팁:
 - smoke와 테스트: [../testing/smoke_and_checks.md](../testing/smoke_and_checks.md)
 - 수동 API 예시: [../testing/manual_api_walkthrough.md](../testing/manual_api_walkthrough.md)
 - 복구 절차: [../recovery_guide.md](../recovery_guide.md)
-- Postgres reset: [../architecture/dev_postgres_reset.md](../architecture/dev_postgres_reset.md)
+- Postgres reset: [dev_postgres_reset.md](dev_postgres_reset.md)

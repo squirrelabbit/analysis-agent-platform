@@ -63,4 +63,4 @@ flowchart LR
 
 - 현재 제품 요약: [../project_summary.md](../project_summary.md)
 - 목표 스택: [target_stack.md](target_stack.md)
-- 개발용 Postgres 재초기화: [dev_postgres_reset.md](dev_postgres_reset.md)
+- 개발용 Postgres 재초기화: [../operations/dev_postgres_reset.md](../operations/dev_postgres_reset.md)
