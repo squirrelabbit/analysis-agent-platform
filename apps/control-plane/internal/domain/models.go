@@ -450,6 +450,14 @@ type ExecutionResultResponse struct {
 	Diagnostics *ExecutionDiagnostics `json:"diagnostics,omitempty"`
 }
 
+type ExecutionEventsResponse struct {
+	ExecutionID string                `json:"execution_id"`
+	Status      string                `json:"status"`
+	EventCount  int                   `json:"event_count"`
+	Events      []ExecutionEvent      `json:"events"`
+	Diagnostics *ExecutionDiagnostics `json:"diagnostics,omitempty"`
+}
+
 type ExecutionStepProgress struct {
 	StepID        string   `json:"step_id"`
 	SkillName     string   `json:"skill_name"`

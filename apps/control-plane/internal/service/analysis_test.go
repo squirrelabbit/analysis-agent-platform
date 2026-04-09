@@ -1416,6 +1416,69 @@ func TestBuildExecutionProgressReportsRunningStepAndPreview(t *testing.T) {
 	}
 }
 
+func TestBuildExecutionEventsReturnsTimeline(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-events",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-1",
+		Status:      "running",
+		Artifacts:   map[string]string{},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-events",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "issue_evidence_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		Events: []domain.ExecutionEvent{
+			{
+				ExecutionID: "exec-events",
+				TS:          now,
+				Level:       "info",
+				EventType:   "WORKFLOW_STARTED",
+				Message:     "execution started",
+			},
+			{
+				ExecutionID: "exec-events",
+				TS:          now.Add(time.Second),
+				Level:       "info",
+				EventType:   "STEP_STARTED",
+				Message:     "step started",
+				Payload: map[string]any{
+					"step_id":    "step-1",
+					"skill_name": "issue_evidence_summary",
+				},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	response, err := service.BuildExecutionEvents(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution events error: %v", err)
+	}
+
+	if response.ExecutionID != execution.ExecutionID || response.Status != "running" {
+		t.Fatalf("unexpected execution events response: %+v", response)
+	}
+	if response.EventCount != 2 || len(response.Events) != 2 {
+		t.Fatalf("unexpected event count: %+v", response)
+	}
+	if response.Events[1].EventType != "STEP_STARTED" {
+		t.Fatalf("unexpected latest event: %+v", response.Events[1])
+	}
+}
+
 func TestBuildExecutionResultUsesStoredSnapshotWhenPresent(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
