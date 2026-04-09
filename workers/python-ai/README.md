@@ -33,6 +33,10 @@
 | `src/python_ai_worker/skills/presentation.py` | `final_answer` 후처리 task |
 | `tests` | runtime helper, task, skill regression test |
 
+참고:
+- `preprocess.py`, `aggregate.py`, `retrieve.py`, `summarize.py`가 public skill entrypoint다.
+- 실제 구현 본문은 같은 디렉터리의 private `*_impl.py` 파일로 나뉘어 있다.
+
 ## 현재 runtime 그룹
 
 - dataset build

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-"""Core analysis and evidence skill handlers."""
+"""Private summarize-layer skill implementations."""
 
 from collections import Counter
 from typing import Any
 
 from .. import runtime as rt
-
 
 def _cluster_membership_ref(*artifacts: dict[str, Any] | None) -> str:
     for artifact in artifacts:
@@ -539,15 +538,3 @@ def run_unstructured_issue_summary(payload: dict[str, Any]) -> dict[str, Any]:
         },
     }
 
-
-__all__ = [
-    "run_evidence_pack",
-    "run_issue_breakdown_summary",
-    "run_issue_cluster_summary",
-    "run_issue_evidence_summary",
-    "run_issue_period_compare",
-    "run_issue_sentiment_summary",
-    "run_issue_taxonomy_summary",
-    "run_issue_trend_summary",
-    "run_unstructured_issue_summary",
-]

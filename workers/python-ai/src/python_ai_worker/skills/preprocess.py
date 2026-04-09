@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Preprocess-layer skill handlers."""
 
-from ._legacy_support_impl import (
+from ._preprocess_impl import (
     run_deduplicate_documents,
     run_document_filter,
     run_document_sample,

@@ -12,7 +12,7 @@ from ..skill_policy_registry import (
     load_embedding_cluster_policy,
     load_issue_evidence_summary_policy,
 )
-from . import _legacy_core_impl as _impl
+from . import _summarize_impl as _impl
 from ._policy_utils import annotate_result_policy, requested_policy_version
 from .retrieve import _cluster_label_candidates_from_terms, _cluster_label_rationale
 

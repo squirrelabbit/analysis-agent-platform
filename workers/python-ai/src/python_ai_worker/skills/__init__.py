@@ -6,5 +6,5 @@
 - retrieve: search and cluster retrieval skills
 - summarize: user-facing analysis summary skills
 - presentation: grounded final answer skills
-- support/core: compatibility shims for legacy imports
+- support/core: compatibility shims for older import paths
 """
