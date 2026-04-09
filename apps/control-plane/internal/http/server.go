@@ -129,8 +129,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /projects/{project_id}/dataset_build_jobs/{job_id}", s.handleGetDatasetBuildJob)
 	s.mux.HandleFunc("GET /dataset_profiles", s.handleGetDatasetProfileRegistry)
 	s.mux.HandleFunc("GET /prompt_catalog", s.handleGetPromptCatalog)
+	s.mux.HandleFunc("GET /skill_policy_catalog", s.handleGetSkillPolicyCatalog)
 	s.mux.HandleFunc("GET /rule_catalog", s.handleGetRuleCatalog)
 	s.mux.HandleFunc("GET /dataset_profiles/validate", s.handleValidateDatasetProfiles)
+	s.mux.HandleFunc("GET /skill_policies/validate", s.handleValidateSkillPolicies)
 	s.mux.HandleFunc("POST /projects/{project_id}/analysis_requests", s.handleSubmitAnalysis)
 	s.mux.HandleFunc("GET /projects/{project_id}/analysis_requests/{request_id}", s.handleGetRequest)
 	s.mux.HandleFunc("GET /projects/{project_id}/plans/{plan_id}", s.handleGetPlan)
@@ -689,6 +691,15 @@ func (s *Server) handleValidateDatasetProfiles(w stdhttp.ResponseWriter, _ *stdh
 	writeJSON(w, stdhttp.StatusOK, response)
 }
 
+func (s *Server) handleValidateSkillPolicies(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	response, err := s.datasetService.ValidateSkillPolicies()
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
 func (s *Server) handleGetDatasetProfileRegistry(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 	response, err := s.datasetService.GetDatasetProfileRegistry()
 	if err != nil {
@@ -700,6 +711,15 @@ func (s *Server) handleGetDatasetProfileRegistry(w stdhttp.ResponseWriter, _ *st
 
 func (s *Server) handleGetPromptCatalog(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 	response, err := s.datasetService.GetPromptCatalog()
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleGetSkillPolicyCatalog(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	response, err := s.datasetService.GetSkillPolicyCatalog()
 	if err != nil {
 		s.writeServiceError(w, err)
 		return

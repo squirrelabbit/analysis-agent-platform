@@ -654,6 +654,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PromptCatalogResponse"
+  /skill_policy_catalog:
+    get:
+      tags: [Datasets]
+      summary: Get skill policy catalog
+      operationId: getSkillPolicyCatalog
+      responses:
+        "200":
+          description: Skill policy catalog response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillPolicyCatalogResponse"
   /rule_catalog:
     get:
       tags: [Datasets]
@@ -666,6 +678,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RuleCatalogResponse"
+  /skill_policies/validate:
+    get:
+      tags: [Datasets]
+      summary: Validate worker skill policies
+      operationId: validateSkillPolicies
+      responses:
+        "200":
+          description: Skill policy validation response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillPolicyValidationResponse"
   /projects/{project_id}/analysis_requests:
     post:
       tags: [Analysis]
@@ -1344,6 +1368,22 @@ components:
         default_groups:
           $ref: "#/components/schemas/StringList"
       required: [version]
+    SkillPolicyMetadata:
+      type: object
+      properties:
+        version:
+          type: string
+        skill_name:
+          type: string
+        status:
+          type: string
+        summary:
+          type: string
+        default_groups:
+          $ref: "#/components/schemas/StringList"
+        policy_hash:
+          type: string
+      required: [version]
     DatasetProfileRuleCatalog:
       type: object
       properties:
@@ -1426,6 +1466,62 @@ components:
           items:
             $ref: "#/components/schemas/PromptTemplateMetadata"
       required: [items]
+    SkillPolicyValidationIssue:
+      type: object
+      properties:
+        severity:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+        scope:
+          type:
+            - string
+            - "null"
+        resource_ref:
+          type:
+            - string
+            - "null"
+      required: [severity, code, message]
+    SkillPolicyCatalogResponse:
+      type: object
+      properties:
+        available:
+          type: boolean
+        source:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillPolicyMetadata"
+        warning:
+          type:
+            - string
+            - "null"
+      required: [available]
+    SkillPolicyValidationResponse:
+      type: object
+      properties:
+        available:
+          type: boolean
+        source:
+          type: string
+        valid:
+          type: boolean
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillPolicyValidationIssue"
+        catalog:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillPolicyMetadata"
+        warning:
+          type:
+            - string
+            - "null"
+      required: [available, valid]
     RuleCatalogResponse:
       type: object
       properties:

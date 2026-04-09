@@ -575,6 +575,61 @@ func TestGetRuleCatalogReturnsUnavailableWhenWorkerNotConfigured(t *testing.T) {
 	}
 }
 
+func TestGetSkillPolicyCatalogFallsBackToWorkerCapabilities(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"prompt_catalog": []map[string]any{},
+			"rule_catalog":   map[string]any{},
+			"skill_policy_catalog": []map[string]any{
+				{"version": "embedding-cluster-v1", "skill_name": "embedding_cluster", "policy_hash": "abc123"},
+			},
+			"skill_policy_validation": map[string]any{
+				"valid": true,
+				"catalog": []map[string]any{
+					{"version": "embedding-cluster-v1", "skill_name": "embedding_cluster", "policy_hash": "abc123"},
+				},
+			},
+		})
+	}))
+	defer worker.Close()
+	service.pythonAIWorkerURL = worker.URL
+
+	response, err := service.GetSkillPolicyCatalog()
+	if err != nil {
+		t.Fatalf("unexpected get skill policy catalog error: %v", err)
+	}
+	if !response.Available || len(response.Items) != 1 || response.Items[0].Version != "embedding-cluster-v1" {
+		t.Fatalf("unexpected skill policy catalog response: %+v", response)
+	}
+
+	validation, err := service.ValidateSkillPolicies()
+	if err != nil {
+		t.Fatalf("unexpected validate skill policies error: %v", err)
+	}
+	if !validation.Available || !validation.Valid || len(validation.Catalog) != 1 {
+		t.Fatalf("unexpected skill policy validation response: %+v", validation)
+	}
+}
+
+func TestValidateSkillPoliciesReturnsUnavailableWhenWorkerNotConfigured(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	response, err := service.ValidateSkillPolicies()
+	if err != nil {
+		t.Fatalf("unexpected validate skill policies error: %v", err)
+	}
+	if response.Available {
+		t.Fatalf("expected unavailable skill policy validation response: %+v", response)
+	}
+	if strings.TrimSpace(response.Warning) == "" {
+		t.Fatalf("expected skill policy validation warning: %+v", response)
+	}
+}
+
 func TestCreateDatasetVersionEnqueuesEagerPrepareJobWhenWorkerConfigured(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())

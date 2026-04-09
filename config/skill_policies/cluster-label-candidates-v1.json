@@ -1,0 +1,26 @@
+{
+  "version": "cluster-label-candidates-v1",
+  "skill_name": "cluster_label_candidates",
+  "status": "active",
+  "summary": "top term 기반 cluster label 후보 생성 정책",
+  "policy": {
+    "default_top_n": 10,
+    "default_sample_n": 3,
+    "max_candidate_labels": 3,
+    "ignore_terms": [
+      "이슈",
+      "문제",
+      "문의",
+      "기타"
+    ],
+    "generic_terms": [
+      "서비스",
+      "이용",
+      "관련",
+      "사항"
+    ],
+    "primary_joiner": " / ",
+    "secondary_joiner": ", ",
+    "fallback_label": "기타 이슈"
+  }
+}

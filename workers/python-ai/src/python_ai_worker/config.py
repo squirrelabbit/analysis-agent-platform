@@ -10,6 +10,11 @@ from .prompt_registry import (
     DEFAULT_SENTIMENT_BATCH_PROMPT_VERSION,
     DEFAULT_SENTIMENT_PROMPT_VERSION,
 )
+from .skill_policy_registry import (
+    DEFAULT_CLUSTER_LABEL_POLICY_VERSION,
+    DEFAULT_EMBEDDING_CLUSTER_POLICY_VERSION,
+    DEFAULT_ISSUE_EVIDENCE_SUMMARY_POLICY_VERSION,
+)
 
 
 @dataclass(frozen=True)
@@ -49,6 +54,10 @@ class WorkerConfig:
     evidence_document_max_chars: int = 320
     rule_config_path: str = ""
     rule_config_json: str = ""
+    skill_policies_dir: str = ""
+    embedding_cluster_policy_version: str = DEFAULT_EMBEDDING_CLUSTER_POLICY_VERSION
+    cluster_label_policy_version: str = DEFAULT_CLUSTER_LABEL_POLICY_VERSION
+    issue_evidence_summary_policy_version: str = DEFAULT_ISSUE_EVIDENCE_SUMMARY_POLICY_VERSION
 
 
 def load_config() -> WorkerConfig:
@@ -94,4 +103,17 @@ def load_config() -> WorkerConfig:
         evidence_document_max_chars=max(40, int(os.getenv("EVIDENCE_DOCUMENT_MAX_CHARS", "320"))),
         rule_config_path=os.getenv("PYTHON_AI_RULE_CONFIG_PATH", "").strip(),
         rule_config_json=os.getenv("PYTHON_AI_RULE_CONFIG_JSON", "").strip(),
+        skill_policies_dir=os.getenv("PYTHON_AI_SKILL_POLICIES_DIR", "").strip(),
+        embedding_cluster_policy_version=os.getenv(
+            "PYTHON_AI_EMBEDDING_CLUSTER_POLICY_VERSION",
+            DEFAULT_EMBEDDING_CLUSTER_POLICY_VERSION,
+        ).strip(),
+        cluster_label_policy_version=os.getenv(
+            "PYTHON_AI_CLUSTER_LABEL_POLICY_VERSION",
+            DEFAULT_CLUSTER_LABEL_POLICY_VERSION,
+        ).strip(),
+        issue_evidence_summary_policy_version=os.getenv(
+            "PYTHON_AI_ISSUE_EVIDENCE_SUMMARY_POLICY_VERSION",
+            DEFAULT_ISSUE_EVIDENCE_SUMMARY_POLICY_VERSION,
+        ).strip(),
     )

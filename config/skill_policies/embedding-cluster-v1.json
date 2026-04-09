@@ -1,0 +1,13 @@
+{
+  "version": "embedding-cluster-v1",
+  "skill_name": "embedding_cluster",
+  "status": "active",
+  "summary": "cluster 기본 threshold와 materialized/full-dataset 우선 정책",
+  "policy": {
+    "default_cluster_similarity_threshold": 0.3,
+    "default_top_n": 10,
+    "default_sample_n": 3,
+    "materialized_preference": "prefer_full_dataset",
+    "subset_fallback_policy": "on_demand_subset"
+  }
+}

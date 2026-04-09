@@ -260,6 +260,50 @@ func TestExecutionListAndReportDraftEndpoints(t *testing.T) {
 	}
 }
 
+func TestSkillPolicyCatalogEndpoints(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"prompt_catalog": []map[string]any{},
+				"rule_catalog":   map[string]any{},
+				"skill_policy_catalog": []map[string]any{
+					{"version": "embedding-cluster-v1", "skill_name": "embedding_cluster", "policy_hash": "abc123"},
+				},
+				"skill_policy_validation": map[string]any{
+					"valid": true,
+					"catalog": []map[string]any{
+						{"version": "embedding-cluster-v1", "skill_name": "embedding_cluster", "policy_hash": "abc123"},
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer worker.Close()
+
+	server := NewServer(config.Config{
+		BindAddr:          ":0",
+		StoreBackend:      "memory",
+		WorkflowEngine:    "noop",
+		PythonAIWorkerURL: worker.URL,
+	})
+	handler := server.Handler()
+
+	catalog := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/skill_policy_catalog", "", http.StatusOK, &catalog)
+	if available, _ := catalog["available"].(bool); !available {
+		t.Fatalf("expected available skill policy catalog: %+v", catalog)
+	}
+
+	validation := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/skill_policies/validate", "", http.StatusOK, &validation)
+	if valid, _ := validation["valid"].(bool); !valid {
+		t.Fatalf("expected valid skill policy validation: %+v", validation)
+	}
+}
+
 func TestScenarioEndpoints(t *testing.T) {
 	server := NewServer(config.Config{
 		BindAddr:       ":0",
