@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-"""Compatibility shim for legacy core imports.
+"""Summarize-layer skill handlers."""
 
-Primary runtime imports should use summarize module.
-"""
-
-from .summarize import (
+from ._legacy_core_impl import (
     run_evidence_pack,
     run_issue_breakdown_summary,
     run_issue_cluster_summary,
