@@ -97,6 +97,20 @@ func (r DuckDBRunner) Run(ctx context.Context, execution domain.ExecutionSummary
 			result.StepHooks = append(result.StepHooks, beforeRecords...)
 			artifactJSON, err := r.runStructuredKPISummary(ctx, db, step)
 			if err != nil {
+				afterRecords, hookErr := executeAfterStepHooks(
+					ctx,
+					r.Hooks,
+					execution,
+					step,
+					StepHookOutcome{
+						Status:       "failed",
+						ErrorMessage: err.Error(),
+					},
+				)
+				if hookErr != nil {
+					return StructuredPlanResult{}, errors.Join(fmt.Errorf("step %s (%s): %w", step.StepID, step.SkillName, err), hookErr)
+				}
+				result.StepHooks = append(result.StepHooks, afterRecords...)
 				return StructuredPlanResult{}, fmt.Errorf("step %s (%s): %w", step.StepID, step.SkillName, err)
 			}
 			result.Artifacts[artifactKey(step)] = artifactJSON
@@ -106,8 +120,9 @@ func (r DuckDBRunner) Run(ctx context.Context, execution domain.ExecutionSummary
 				execution,
 				step,
 				StepHookOutcome{
-					Status:        "completed",
-					ArtifactBytes: len(artifactJSON),
+					Status:         "completed",
+					ArtifactBytes:  len(artifactJSON),
+					StoredArtifact: artifactJSON,
 				},
 			)
 			if err != nil {
