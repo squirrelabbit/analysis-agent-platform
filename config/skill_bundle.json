@@ -48,7 +48,13 @@
       "document_filter",
       "sentence_split"
     ],
-    "unstructured_cluster": [
+    "unstructured_cluster_materialized": [
+      "embedding_cluster",
+      "cluster_label_candidates",
+      "issue_cluster_summary",
+      "issue_evidence_summary"
+    ],
+    "unstructured_cluster_subset": [
       "document_filter",
       "deduplicate_documents",
       "embedding_cluster",

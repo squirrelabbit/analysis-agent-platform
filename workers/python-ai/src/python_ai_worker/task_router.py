@@ -53,6 +53,10 @@ FINAL_ANSWER_CAPABILITY = TaskCapability(
     name="execution_final_answer",
     description="Generate grounded final answers from completed execution results.",
 )
+DATASET_CLUSTER_BUILD_CAPABILITY = TaskCapability(
+    name="dataset_cluster_build",
+    description="Materialize dataset-level cluster summary and membership artifacts.",
+)
 
 
 def capability_names() -> list[str]:
@@ -77,11 +81,13 @@ def capability_payload() -> dict[str, Any]:
 
 
 def supported_capabilities() -> list[TaskCapability]:
-    capabilities = [PLANNER_CAPABILITY, FINAL_ANSWER_CAPABILITY]
+    handlers = task_handlers()
+    capabilities = [PLANNER_CAPABILITY, FINAL_ANSWER_CAPABILITY, DATASET_CLUSTER_BUILD_CAPABILITY]
     for skill in capability_skills():
         name = str(skill.get("name") or "").strip()
         description = str(skill.get("description") or "").strip()
-        if not name:
+        engine = str(skill.get("engine") or "").strip()
+        if not name or engine != "python-ai" or name not in handlers:
             continue
         capabilities.append(TaskCapability(name=name, description=description))
     return capabilities
