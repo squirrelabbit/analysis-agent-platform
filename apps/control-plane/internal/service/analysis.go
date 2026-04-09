@@ -478,6 +478,111 @@ func (s *AnalysisService) BuildExecutionEvents(projectID, executionID string) (d
 	}, nil
 }
 
+func (s *AnalysisService) BuildExecutionStepPreview(projectID, executionID, stepID string) (domain.ExecutionStepPreviewResponse, error) {
+	execution, err := s.GetExecution(projectID, executionID)
+	if err != nil {
+		return domain.ExecutionStepPreviewResponse{}, err
+	}
+	targetStepID := strings.TrimSpace(stepID)
+	if targetStepID == "" {
+		return domain.ExecutionStepPreviewResponse{}, ErrInvalidArgument{Message: "step_id is required"}
+	}
+
+	resultV1 := buildExecutionResultV1(execution, nil)
+	stepResults := buildExecutionStepResultsV1(execution, decodeExecutionArtifacts(execution.Artifacts))
+	progressSteps := buildExecutionProgressSteps(execution, stepResults)
+
+	var planStep *domain.SkillPlanStep
+	for index := range execution.Plan.Steps {
+		if execution.Plan.Steps[index].StepID == targetStepID {
+			stepCopy := execution.Plan.Steps[index]
+			planStep = &stepCopy
+			break
+		}
+	}
+	if planStep == nil {
+		return domain.ExecutionStepPreviewResponse{}, ErrNotFound{Resource: "execution step"}
+	}
+
+	var progressStep *domain.ExecutionStepProgress
+	for index := range progressSteps {
+		if progressSteps[index].StepID == targetStepID {
+			copy := progressSteps[index]
+			progressStep = &copy
+			break
+		}
+	}
+
+	var resultStep *domain.ExecutionStepResultV1
+	for index := range resultV1.StepResults {
+		if resultV1.StepResults[index].StepID == targetStepID {
+			copy := resultV1.StepResults[index]
+			resultStep = &copy
+			break
+		}
+	}
+
+	response := domain.ExecutionStepPreviewResponse{
+		ExecutionID: execution.ExecutionID,
+		StepID:      targetStepID,
+		SkillName:   planStep.SkillName,
+		Status:      "pending",
+		Diagnostics: execution.Diagnostics,
+	}
+	if progressStep != nil {
+		response.Status = progressStep.Status
+		response.StartedAt = progressStep.StartedAt
+		response.CompletedAt = progressStep.CompletedAt
+		response.ArtifactKey = progressStep.ArtifactKey
+		response.Summary = progressStep.Summary
+		response.Warnings = progressStep.Warnings
+		response.SelectionMode = progressStep.SelectionMode
+	}
+	if resultStep != nil {
+		if response.Status == "" || response.Status == "pending" {
+			response.Status = resultStep.Status
+		}
+		if response.ArtifactKey == nil {
+			response.ArtifactKey = resultStep.ArtifactKey
+		}
+		if response.Summary == "" {
+			response.Summary = resultStep.Summary
+		}
+		if len(response.Warnings) == 0 {
+			response.Warnings = resultStep.Warnings
+		}
+		if response.SelectionMode == "" {
+			response.SelectionMode = resultStep.SelectionMode
+		}
+		response.Usage = resultStep.Usage
+		response.ArtifactRef = resultStep.ArtifactRef
+	}
+
+	decodedArtifacts := decodeExecutionArtifacts(execution.Artifacts)
+	if artifact := artifactForExecutionStep(decodedArtifacts, execution.Plan, targetStepID, planStep.SkillName); len(artifact) > 0 {
+		response.Preview = buildStepArtifactPreview(artifact)
+		if response.Summary == "" {
+			response.Summary = executionArtifactSummary(artifact)
+		}
+		if response.SelectionMode == "" {
+			response.SelectionMode = strings.TrimSpace(artifactStringValue(artifact["selection_source"]))
+		}
+		if response.ArtifactRef == nil {
+			if ref := firstArtifactRef(artifact); ref != "" {
+				response.ArtifactRef = stringPointer(ref)
+			}
+		}
+	}
+
+	stepEvents := executionEventsForStep(execution.Events, targetStepID)
+	response.EventCount = len(stepEvents)
+	response.Events = stepEvents
+	if response.Status == "" {
+		response.Status = "pending"
+	}
+	return response, nil
+}
+
 func (s *AnalysisService) CreateReportDraft(projectID string, input domain.ReportDraftCreateRequest) (domain.ReportDraft, error) {
 	if _, err := s.store.GetProject(projectID); err != nil {
 		if err == store.ErrNotFound {
@@ -699,6 +804,86 @@ func buildExecutionProgressSteps(execution domain.ExecutionSummary, completed []
 		steps = append(steps, item)
 	}
 	return steps
+}
+
+func executionEventsForStep(events []domain.ExecutionEvent, stepID string) []domain.ExecutionEvent {
+	filtered := make([]domain.ExecutionEvent, 0)
+	for _, event := range events {
+		if strings.TrimSpace(anyStringValue(event.Payload["step_id"])) != stepID {
+			continue
+		}
+		filtered = append(filtered, event)
+	}
+	return filtered
+}
+
+func artifactForExecutionStep(decoded map[string]map[string]any, plan domain.SkillPlan, stepID, skillName string) map[string]any {
+	keys := sortedArtifactKeysFromDecoded(decoded)
+	key := artifactKeyForStep(keys, stepID, skillName)
+	if key == "" {
+		return nil
+	}
+	return decoded[key]
+}
+
+func buildStepArtifactPreview(artifact map[string]any) map[string]any {
+	if len(artifact) == 0 {
+		return nil
+	}
+	preview := map[string]any{
+		"skill_name": strings.TrimSpace(artifactStringValue(artifact["skill_name"])),
+	}
+	if summary := strings.TrimSpace(executionArtifactSummary(artifact)); summary != "" {
+		preview["summary"] = summary
+	}
+	if findings := executionArtifactKeyFindings(artifact); len(findings) > 0 {
+		preview["key_findings"] = limitPreviewStrings(findings, 5)
+	}
+	if evidence := executionArtifactEvidence(artifact); len(evidence) > 0 {
+		preview["evidence"] = limitPreviewEvidence(evidence, 3)
+	}
+	if selectionSource := strings.TrimSpace(artifactStringValue(artifact["selection_source"])); selectionSource != "" {
+		preview["selection_source"] = selectionSource
+	}
+	if citationMode := strings.TrimSpace(artifactStringValue(artifact["citation_mode"])); citationMode != "" {
+		preview["citation_mode"] = citationMode
+	}
+	if warnings := artifactWarnings(artifact); len(warnings) > 0 {
+		preview["warnings"] = limitPreviewStrings(warnings, 5)
+	}
+	if usage := executionUsageMap(artifact); len(usage) > 0 {
+		preview["usage"] = usage
+	}
+	if clusters := executionArtifactMapSlice(artifact["clusters"], 3); len(clusters) > 0 {
+		preview["clusters"] = clusters
+	}
+	if matches := executionArtifactMapSlice(artifact["matches"], 3); len(matches) > 0 {
+		preview["matches"] = matches
+	}
+	if breakdown := executionArtifactMapSlice(artifact["breakdown"], 5); len(breakdown) > 0 {
+		preview["breakdown"] = breakdown
+	}
+	if taxonomy := executionArtifactMapSlice(artifact["taxonomy_breakdown"], 5); len(taxonomy) > 0 {
+		preview["taxonomy_breakdown"] = taxonomy
+	}
+	if summaryMap, ok := artifact["summary"].(map[string]any); ok && len(summaryMap) > 0 {
+		preview["summary_map"] = summaryMap
+	}
+	return preview
+}
+
+func limitPreviewStrings(items []string, limit int) []string {
+	if len(items) <= limit || limit <= 0 {
+		return items
+	}
+	return append([]string{}, items[:limit]...)
+}
+
+func limitPreviewEvidence(items []map[string]any, limit int) []map[string]any {
+	if len(items) <= limit || limit <= 0 {
+		return items
+	}
+	return append([]map[string]any{}, items[:limit]...)
 }
 
 func (s *AnalysisService) buildExecutionDependenciesProgress(projectID string, execution domain.ExecutionSummary) ([]domain.ExecutionBuildDependency, error) {

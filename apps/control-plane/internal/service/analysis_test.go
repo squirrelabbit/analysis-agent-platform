@@ -1589,6 +1589,89 @@ func TestBuildExecutionEventsReturnsTimeline(t *testing.T) {
 	}
 }
 
+func TestBuildExecutionStepPreviewReturnsArtifactPreview(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-step-preview",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-1",
+		Status:      "running",
+		Artifacts: map[string]string{
+			"step:step-1:issue_cluster_summary": `{"skill_name":"issue_cluster_summary","step_id":"step-1","summary":{"dominant_cluster_label":"결제 오류","dominant_cluster_count":12,"cluster_count":3},"clusters":[{"label":"결제 오류","document_count":12},{"label":"로그인 실패","document_count":5}],"selection_source":"cluster_membership","warnings":["sample warning"],"usage":{"input_tokens":120}}`,
+		},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-step-preview",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "issue_cluster_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		Events: []domain.ExecutionEvent{
+			{
+				ExecutionID: "exec-step-preview",
+				TS:          now,
+				Level:       "info",
+				EventType:   "STEP_STARTED",
+				Message:     "step started",
+				Payload: map[string]any{
+					"step_id":    "step-1",
+					"skill_name": "issue_cluster_summary",
+				},
+			},
+			{
+				ExecutionID: "exec-step-preview",
+				TS:          now.Add(time.Second),
+				Level:       "info",
+				EventType:   "STEP_COMPLETED",
+				Message:     "step completed",
+				Payload: map[string]any{
+					"step_id":      "step-1",
+					"skill_name":   "issue_cluster_summary",
+					"artifact_key": "step:step-1:issue_cluster_summary",
+				},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	preview, err := service.BuildExecutionStepPreview(project.ProjectID, execution.ExecutionID, "step-1")
+	if err != nil {
+		t.Fatalf("unexpected build execution step preview error: %v", err)
+	}
+
+	if preview.SkillName != "issue_cluster_summary" || preview.Status != "completed" {
+		t.Fatalf("unexpected step preview status: %+v", preview)
+	}
+	if preview.ArtifactKey == nil || *preview.ArtifactKey != "step:step-1:issue_cluster_summary" {
+		t.Fatalf("unexpected artifact key: %+v", preview)
+	}
+	if preview.EventCount != 2 || len(preview.Events) != 2 {
+		t.Fatalf("unexpected step events: %+v", preview)
+	}
+	if preview.Preview == nil {
+		t.Fatalf("expected artifact preview: %+v", preview)
+	}
+	if preview.Preview["selection_source"] != "cluster_membership" {
+		t.Fatalf("unexpected preview selection source: %+v", preview.Preview)
+	}
+	clusters, ok := preview.Preview["clusters"].([]map[string]any)
+	if !ok || len(clusters) != 2 {
+		t.Fatalf("unexpected cluster preview: %+v", preview.Preview)
+	}
+	if preview.Summary == "" {
+		t.Fatalf("expected summary in step preview: %+v", preview)
+	}
+}
+
 func TestBuildExecutionResultUsesStoredSnapshotWhenPresent(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
