@@ -33,6 +33,8 @@
 - [testing/smoke_and_checks.md](testing/smoke_and_checks.md)
 - [recovery_guide.md](recovery_guide.md)
 - [api/openapi.yaml](api/openapi.yaml)
+- [skill/skill_registry.md](skill/skill_registry.md)
+- [skill/skill_implementation_status.md](skill/skill_implementation_status.md)
 
 참고:
 - runtime skill 메타데이터 source는 문서가 아니라 저장소 루트의 `config/skill_bundle.json`이다.

@@ -1875,15 +1875,15 @@ class TaskTests(unittest.TestCase):
 
         with (
             patch(
-                "python_ai_worker.skills.support._lookup_pgvector_index_metadata",
+                "python_ai_worker.skills.retrieve._lookup_pgvector_index_metadata",
                 return_value={"embedding_model": "intfloat/multilingual-e5-small", "vector_dim": 2},
             ),
             patch(
-                "python_ai_worker.skills.support.rt._generate_query_embedding",
+                "python_ai_worker.skills.retrieve.rt._generate_query_embedding",
                 return_value=[1.0, 0.0],
             ),
             patch(
-                "python_ai_worker.skills.support._query_pgvector_rows",
+                "python_ai_worker.skills.retrieve._query_pgvector_rows",
                 side_effect=fake_query_pgvector_rows,
             ),
         ):
@@ -1949,7 +1949,7 @@ class TaskTests(unittest.TestCase):
         pq.write_table(pa.Table.from_pylist(chunk_rows), chunk_path)
 
         with patch(
-            "python_ai_worker.skills.support._query_pgvector_cluster_rows",
+            "python_ai_worker.skills.retrieve._query_pgvector_cluster_rows",
             return_value=[
                 {
                     "chunk_id": "version-pgvector:row:0:chunk:0",
@@ -2530,11 +2530,11 @@ class TaskTests(unittest.TestCase):
 
         with (
             patch(
-                "python_ai_worker.skills.support._lookup_pgvector_index_metadata",
+                "python_ai_worker.skills.retrieve._lookup_pgvector_index_metadata",
                 return_value={"embedding_model": "token-overlap-v1", "vector_dim": 64},
             ),
             patch(
-                "python_ai_worker.skills.support._query_pgvector_rows",
+                "python_ai_worker.skills.retrieve._query_pgvector_rows",
                 return_value=[
                     {
                         "chunk_id": "version-1:row:0:chunk:0",
@@ -2576,11 +2576,11 @@ class TaskTests(unittest.TestCase):
 
         with (
             patch(
-                "python_ai_worker.skills.support._lookup_pgvector_index_metadata",
+                "python_ai_worker.skills.retrieve._lookup_pgvector_index_metadata",
                 return_value={"embedding_model": "token-overlap-v1", "vector_dim": 64},
             ),
             patch(
-                "python_ai_worker.skills.support._query_pgvector_rows",
+                "python_ai_worker.skills.retrieve._query_pgvector_rows",
                 return_value=[],
             ),
         ):
@@ -2702,15 +2702,15 @@ class TaskTests(unittest.TestCase):
 
         with (
             patch(
-                "python_ai_worker.skills.support._lookup_pgvector_index_metadata",
+                "python_ai_worker.skills.retrieve._lookup_pgvector_index_metadata",
                 return_value={"embedding_model": "text-embedding-3-small", "vector_dim": 3},
             ),
             patch(
-                "python_ai_worker.skills.support.rt._generate_query_embedding",
+                "python_ai_worker.skills.retrieve.rt._generate_query_embedding",
                 return_value=[0.9, 0.1, 0.4],
             ) as generate_query_embedding,
             patch(
-                "python_ai_worker.skills.support._query_pgvector_rows",
+                "python_ai_worker.skills.retrieve._query_pgvector_rows",
                 side_effect=_capture_query,
             ),
         ):
