@@ -51,6 +51,7 @@
 
 - scenario planning mode는 현재 `strict`만 지원한다.
 - dataset build와 execution은 startup reconciliation으로 재기동 후 다시 평가한다.
+- 현재 dev compose는 `TEMPORAL_PERSISTENCE_MODE=dev_ephemeral`, `TEMPORAL_RETENTION_MODE=temporal_dev_default`, `TEMPORAL_RECOVERY_MODE=startup_reconciliation` 기준으로 동작한다.
+- `GET /runtime_status`로 현재 런타임 보장 범위를 조회할 수 있다.
 - 프론트는 `apps/web`에 Vite + React + TypeScript 기반 scaffold가 있고, 실행 중간 상태를 붙일 수 있는 backend API는 준비된 상태다.
 - 확인 필요: Rust worker는 현재 hot path runtime에 연결되지 않았다.
-- 확인 필요: Temporal workflow history 장기 보존은 아직 dev server 기본값을 따른다.

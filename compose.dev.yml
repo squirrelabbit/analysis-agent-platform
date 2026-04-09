@@ -73,6 +73,9 @@ services:
       TEMPORAL_NAMESPACE: default
       TEMPORAL_TASK_QUEUE: analysis-support
       TEMPORAL_BUILD_TASK_QUEUE: analysis-support-build
+      TEMPORAL_PERSISTENCE_MODE: dev_ephemeral
+      TEMPORAL_RETENTION_MODE: temporal_dev_default
+      TEMPORAL_RECOVERY_MODE: startup_reconciliation
       PYTHON_AI_WORKER_URL: http://python-ai-worker:8090
       PLANNER_BACKEND: python-ai
     ports:
@@ -106,6 +109,9 @@ services:
       TEMPORAL_NAMESPACE: default
       TEMPORAL_TASK_QUEUE: analysis-support
       TEMPORAL_BUILD_TASK_QUEUE: analysis-support-build
+      TEMPORAL_PERSISTENCE_MODE: dev_ephemeral
+      TEMPORAL_RETENTION_MODE: temporal_dev_default
+      TEMPORAL_RECOVERY_MODE: startup_reconciliation
       TEMPORAL_ANALYSIS_MAX_CONCURRENT_ACTIVITIES: 8
       TEMPORAL_BUILD_MAX_CONCURRENT_ACTIVITIES: 4
       DATASET_BUILD_PREPARE_MAX_CONCURRENT: 3

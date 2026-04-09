@@ -25,6 +25,9 @@ type Config struct {
 	TemporalNamespace                       string
 	TemporalTaskQueue                       string
 	TemporalBuildTaskQueue                  string
+	TemporalPersistenceMode                 string
+	TemporalRetentionMode                   string
+	TemporalRecoveryMode                    string
 	TemporalAnalysisMaxConcurrentActivities int
 	TemporalBuildMaxConcurrentActivities    int
 	DatasetBuildPrepareMaxConcurrent        int
@@ -82,6 +85,18 @@ func Load() Config {
 	if temporalBuildTaskQueue == "" {
 		temporalBuildTaskQueue = temporalTaskQueue + "-build"
 	}
+	temporalPersistenceMode := os.Getenv("TEMPORAL_PERSISTENCE_MODE")
+	if temporalPersistenceMode == "" {
+		temporalPersistenceMode = "dev_ephemeral"
+	}
+	temporalRetentionMode := os.Getenv("TEMPORAL_RETENTION_MODE")
+	if temporalRetentionMode == "" {
+		temporalRetentionMode = "temporal_dev_default"
+	}
+	temporalRecoveryMode := os.Getenv("TEMPORAL_RECOVERY_MODE")
+	if temporalRecoveryMode == "" {
+		temporalRecoveryMode = "startup_reconciliation"
+	}
 	analysisMaxConcurrentActivities := envPositiveInt("TEMPORAL_ANALYSIS_MAX_CONCURRENT_ACTIVITIES", 8)
 	buildMaxConcurrentActivities := envPositiveInt("TEMPORAL_BUILD_MAX_CONCURRENT_ACTIVITIES", 4)
 	prepareMaxConcurrent := envPositiveInt("DATASET_BUILD_PREPARE_MAX_CONCURRENT", 3)
@@ -106,6 +121,9 @@ func Load() Config {
 		TemporalNamespace:                       temporalNamespace,
 		TemporalTaskQueue:                       temporalTaskQueue,
 		TemporalBuildTaskQueue:                  temporalBuildTaskQueue,
+		TemporalPersistenceMode:                 temporalPersistenceMode,
+		TemporalRetentionMode:                   temporalRetentionMode,
+		TemporalRecoveryMode:                    temporalRecoveryMode,
 		TemporalAnalysisMaxConcurrentActivities: analysisMaxConcurrentActivities,
 		TemporalBuildMaxConcurrentActivities:    buildMaxConcurrentActivities,
 		DatasetBuildPrepareMaxConcurrent:        prepareMaxConcurrent,

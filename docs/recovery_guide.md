@@ -118,5 +118,6 @@ curl -sS -X POST "$API/projects/$PROJECT_ID/executions/$EXEC_ID/resume" \
 
 확인 필요:
 
-- Temporal dev server history persistence는 아직 dev 기본 동작 기준이다.
+- 현재 dev compose는 `TEMPORAL_PERSISTENCE_MODE=dev_ephemeral`, `TEMPORAL_RETENTION_MODE=temporal_dev_default`, `TEMPORAL_RECOVERY_MODE=startup_reconciliation` 기준이다.
+- `GET /runtime_status`로 현재 런타임 보장 범위를 확인할 수 있다.
 - 앱 상태는 Postgres / artifact storage 기준으로 복구되지만, Temporal 자체 history 장기 보존 정책은 별도 운영 환경에서 다시 고정해야 한다.
