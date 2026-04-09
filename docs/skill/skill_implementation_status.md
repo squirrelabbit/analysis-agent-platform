@@ -59,6 +59,6 @@
 ## 운영 메모
 
 - python-ai 구현은 현재 `preprocess / aggregate / retrieve / summarize / presentation` 기준으로 나뉘어 있다.
-- `support.py`, `core.py`는 이전 import path 호환용 shim이고, 실제 구현 본문은 private `*_impl.py` 파일로 나뉘어 있다.
+- public skill entrypoint는 `preprocess.py`, `aggregate.py`, `retrieve.py`, `summarize.py`, `presentation.py`이고, 실제 구현 본문은 private `*_impl.py` 파일로 나뉘어 있다.
 - `embedding_cluster`, `cluster_label_candidates`, `issue_evidence_summary`는 `config/skill_policies/*.json` 기반 versioned policy를 읽는다.
 - `확인 필요:` cluster label 품질과 final answer prompt 품질은 representative dataset 기준 추가 검증이 더 필요하다.
