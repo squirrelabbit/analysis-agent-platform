@@ -627,6 +627,24 @@ func withExecutionDiagnostics(execution domain.ExecutionSummary) domain.Executio
 	diagnostics := &domain.ExecutionDiagnostics{
 		EventCount: len(execution.Events),
 	}
+	if len(execution.Artifacts) > 0 {
+		diagnostics.ArtifactCount = len(execution.Artifacts)
+		diagnostics.ArtifactStorageMode = "compact"
+		totalBytes := 0
+		largestBytes := 0
+		largestKey := ""
+		for key, value := range execution.Artifacts {
+			size := len(value)
+			totalBytes += size
+			if size > largestBytes {
+				largestBytes = size
+				largestKey = key
+			}
+		}
+		diagnostics.ArtifactPayloadBytes = totalBytes
+		diagnostics.LargestArtifactKey = largestKey
+		diagnostics.LargestArtifactBytes = largestBytes
+	}
 	if execution.FinalAnswerSnapshot != nil {
 		diagnostics.FinalAnswerStatus = strings.TrimSpace(execution.FinalAnswerSnapshot.Status)
 		if diagnostics.FinalAnswerStatus == "" {

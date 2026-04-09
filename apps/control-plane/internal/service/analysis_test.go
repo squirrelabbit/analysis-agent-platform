@@ -1767,6 +1767,65 @@ func TestBuildExecutionResultBuildsFallbackFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestBuildExecutionProgressIncludesArtifactStorageDiagnostics(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-storage",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-storage",
+		Status:      "running",
+		Artifacts: map[string]string{
+			"step-1": `{"summary":"cluster summary","clusters":[{"cluster_id":"cluster-1"}]}`,
+			"step-2": `{"summary":"evidence","evidence":[{"snippet":"short"}]}`,
+		},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-storage",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "issue_cluster_summary", DatasetName: "issues.csv", Inputs: map[string]any{"query": "top issues"}},
+			},
+		},
+		Events: []domain.ExecutionEvent{
+			{
+				EventType: "STEP_STARTED",
+				Payload: map[string]any{
+					"step_id":    "step-1",
+					"skill_name": "issue_cluster_summary",
+				},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	progress, err := service.BuildExecutionProgress(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution progress error: %v", err)
+	}
+	if progress.Diagnostics == nil {
+		t.Fatalf("expected diagnostics: %+v", progress)
+	}
+	if progress.Diagnostics.ArtifactCount != 2 {
+		t.Fatalf("unexpected artifact count diagnostics: %+v", progress.Diagnostics)
+	}
+	if progress.Diagnostics.ArtifactStorageMode != "compact" {
+		t.Fatalf("unexpected artifact storage mode: %+v", progress.Diagnostics)
+	}
+	if progress.Diagnostics.ArtifactPayloadBytes <= 0 {
+		t.Fatalf("unexpected artifact payload bytes: %+v", progress.Diagnostics)
+	}
+	if progress.Diagnostics.LargestArtifactBytes <= 0 || progress.Diagnostics.LargestArtifactKey == "" {
+		t.Fatalf("unexpected largest artifact diagnostics: %+v", progress.Diagnostics)
+	}
+}
+
 func TestExecutePlanCopiesDatasetProfileSnapshot(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
