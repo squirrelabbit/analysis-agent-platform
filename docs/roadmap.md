@@ -11,6 +11,7 @@
 - dataset build는 Temporal workflow와 async build job으로 실행된다.
 - execution은 `events`, `progress`, `step preview`, `result`, `final_answer` 조회 API를 제공한다.
 - full-dataset `embedding_cluster`는 precomputed cluster를 우선 사용하고, cluster 산출물은 `summary JSON + membership parquet`로 분리 저장한다.
+- cluster 결과에는 `cluster_execution_mode`와 `cluster_fallback_reason`가 포함돼 materialized/full-dataset 경로와 subset fallback 경로를 구분할 수 있다.
 
 ## 지금 가장 먼저 볼 것
 

@@ -848,6 +848,24 @@ func buildStepArtifactPreview(artifact map[string]any) map[string]any {
 	if citationMode := strings.TrimSpace(artifactStringValue(artifact["citation_mode"])); citationMode != "" {
 		preview["citation_mode"] = citationMode
 	}
+	if clusterExecutionMode := strings.TrimSpace(artifactStringValue(artifact["cluster_execution_mode"])); clusterExecutionMode != "" {
+		preview["cluster_execution_mode"] = clusterExecutionMode
+	}
+	if clusterMaterializationScope := strings.TrimSpace(artifactStringValue(artifact["cluster_materialization_scope"])); clusterMaterializationScope != "" {
+		preview["cluster_materialization_scope"] = clusterMaterializationScope
+	}
+	if clusterFallbackReason := strings.TrimSpace(artifactStringValue(artifact["cluster_fallback_reason"])); clusterFallbackReason != "" {
+		preview["cluster_fallback_reason"] = clusterFallbackReason
+	}
+	if clusterMembershipRef := strings.TrimSpace(artifactStringValue(artifact["cluster_membership_ref"])); clusterMembershipRef != "" {
+		preview["cluster_membership_ref"] = clusterMembershipRef
+	}
+	if clusterRef := strings.TrimSpace(artifactStringValue(artifact["cluster_ref"])); clusterRef != "" {
+		preview["cluster_ref"] = clusterRef
+	}
+	if clusterMaterializedRefUsed, ok := artifact["cluster_materialized_ref_used"].(bool); ok {
+		preview["cluster_materialized_ref_used"] = clusterMaterializedRefUsed
+	}
 	if warnings := artifactWarnings(artifact); len(warnings) > 0 {
 		preview["warnings"] = limitPreviewStrings(warnings, 5)
 	}
