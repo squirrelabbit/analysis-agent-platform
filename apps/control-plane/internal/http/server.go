@@ -133,6 +133,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/plans/{plan_id}/execute", s.handleExecutePlan)
 	s.mux.HandleFunc("GET /projects/{project_id}/executions", s.handleListExecutions)
 	s.mux.HandleFunc("GET /projects/{project_id}/executions/{execution_id}", s.handleGetExecution)
+	s.mux.HandleFunc("GET /projects/{project_id}/executions/{execution_id}/progress", s.handleGetExecutionProgress)
 	s.mux.HandleFunc("GET /projects/{project_id}/executions/{execution_id}/result", s.handleGetExecutionResult)
 	s.mux.HandleFunc("POST /projects/{project_id}/executions/{execution_id}/resume", s.handleResumeExecution)
 	s.mux.HandleFunc("POST /projects/{project_id}/executions/{execution_id}/rerun", s.handleRerunExecution)
@@ -711,6 +712,15 @@ func (s *Server) handleListExecutions(w stdhttp.ResponseWriter, r *stdhttp.Reque
 
 func (s *Server) handleGetExecution(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	response, err := s.analysisService.GetExecution(r.PathValue("project_id"), r.PathValue("execution_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleGetExecutionProgress(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.analysisService.BuildExecutionProgress(r.PathValue("project_id"), r.PathValue("execution_id"))
 	if err != nil {
 		s.writeServiceError(w, err)
 		return

@@ -728,6 +728,23 @@ paths:
                 $ref: "#/components/schemas/ExecutionSummary"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/executions/{execution_id}/progress:
+    get:
+      tags: [Executions]
+      summary: Get execution live progress and partial preview
+      operationId: getExecutionProgress
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ExecutionId"
+      responses:
+        "200":
+          description: Execution progress detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionProgressResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/executions/{execution_id}/result:
     get:
       tags: [Executions]
@@ -2007,6 +2024,44 @@ components:
             - $ref: "#/components/schemas/ExecutionDiagnostics"
             - type: "null"
       required: [execution_id, artifacts, contract, result_v1]
+    ExecutionProgressResponse:
+      type: object
+      properties:
+        execution_id:
+          type: string
+        status:
+          type: string
+        total_steps:
+          type: integer
+        completed_steps:
+          type: integer
+        failed_steps:
+          type: integer
+        running_step:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionStepProgress"
+            - type: "null"
+        waiting:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionWaitingState"
+            - type: "null"
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutionStepProgress"
+        available_artifacts:
+          type: array
+          items:
+            type: string
+        result_preview:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionResultAnswer"
+            - type: "null"
+        diagnostics:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionDiagnostics"
+            - type: "null"
+      required: [execution_id, status, total_steps, completed_steps, failed_steps, steps]
     ExecutionResultV1:
       type: object
       properties:
@@ -2133,6 +2188,28 @@ components:
           type:
             - string
             - "null"
+        warnings:
+          type: array
+          items:
+            type: string
+        selection_mode:
+          type: string
+      required: [step_id, skill_name, status]
+    ExecutionStepProgress:
+      type: object
+      properties:
+        step_id:
+          type: string
+        skill_name:
+          type: string
+        status:
+          type: string
+        artifact_key:
+          type:
+            - string
+            - "null"
+        summary:
+          type: string
         warnings:
           type: array
           items:

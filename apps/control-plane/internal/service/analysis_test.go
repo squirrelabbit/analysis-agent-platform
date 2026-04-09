@@ -1324,6 +1324,98 @@ func TestBuildExecutionResultClearsStaleWaitingDiagnosticsAfterCompletion(t *tes
 	}
 }
 
+func TestBuildExecutionProgressReportsRunningStepAndPreview(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-progress",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-1",
+		Status:      "running",
+		Artifacts: map[string]string{
+			"step:step-1:issue_evidence_summary": `{"skill_name":"issue_evidence_summary","step_id":"step-1","summary":"partial summary","selection_source":"semantic_search","citation_mode":"chunk","key_findings":["finding-a"]}`,
+		},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-progress",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "issue_evidence_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+				{StepID: "step-2", SkillName: "issue_cluster_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		Events: []domain.ExecutionEvent{
+			{
+				ExecutionID: "exec-progress",
+				TS:          now,
+				Level:       "info",
+				EventType:   "WORKFLOW_STARTED",
+				Message:     "execution started",
+			},
+			{
+				ExecutionID: "exec-progress",
+				TS:          now.Add(time.Second),
+				Level:       "info",
+				EventType:   "STEP_STARTED",
+				Message:     "step started",
+				Payload: map[string]any{
+					"step_id":    "step-1",
+					"skill_name": "issue_evidence_summary",
+				},
+			},
+			{
+				ExecutionID: "exec-progress",
+				TS:          now.Add(2 * time.Second),
+				Level:       "info",
+				EventType:   "STEP_COMPLETED",
+				Message:     "step completed",
+				Payload: map[string]any{
+					"step_id":      "step-1",
+					"skill_name":   "issue_evidence_summary",
+					"artifact_key": "step:step-1:issue_evidence_summary",
+				},
+			},
+			{
+				ExecutionID: "exec-progress",
+				TS:          now.Add(3 * time.Second),
+				Level:       "info",
+				EventType:   "STEP_STARTED",
+				Message:     "step started",
+				Payload: map[string]any{
+					"step_id":    "step-2",
+					"skill_name": "issue_cluster_summary",
+				},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	progress, err := service.BuildExecutionProgress(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution progress error: %v", err)
+	}
+
+	if progress.TotalSteps != 2 || progress.CompletedSteps != 1 || progress.FailedSteps != 0 {
+		t.Fatalf("unexpected progress counters: %+v", progress)
+	}
+	if progress.RunningStep == nil || progress.RunningStep.StepID != "step-2" {
+		t.Fatalf("unexpected running step: %+v", progress.RunningStep)
+	}
+	if len(progress.Steps) != 2 || progress.Steps[0].Status != "completed" || progress.Steps[1].Status != "running" {
+		t.Fatalf("unexpected step progress: %+v", progress.Steps)
+	}
+	if progress.ResultPreview == nil || progress.ResultPreview.Summary != "partial summary" {
+		t.Fatalf("unexpected result preview: %+v", progress.ResultPreview)
+	}
+}
+
 func TestBuildExecutionResultUsesStoredSnapshotWhenPresent(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)

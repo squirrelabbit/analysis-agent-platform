@@ -411,6 +411,48 @@ func (s *AnalysisService) BuildExecutionResult(projectID, executionID string) (d
 	}, nil
 }
 
+func (s *AnalysisService) BuildExecutionProgress(projectID, executionID string) (domain.ExecutionProgressResponse, error) {
+	execution, err := s.GetExecution(projectID, executionID)
+	if err != nil {
+		return domain.ExecutionProgressResponse{}, err
+	}
+	resultV1 := buildExecutionResultV1(execution, nil)
+	steps := buildExecutionProgressSteps(execution, resultV1.StepResults)
+	completedSteps := 0
+	failedSteps := 0
+	var runningStep *domain.ExecutionStepProgress
+	for index := range steps {
+		switch strings.TrimSpace(steps[index].Status) {
+		case "completed":
+			completedSteps++
+		case "failed":
+			failedSteps++
+		case "running":
+			if runningStep == nil {
+				copy := steps[index]
+				runningStep = &copy
+			}
+		}
+	}
+	response := domain.ExecutionProgressResponse{
+		ExecutionID:        execution.ExecutionID,
+		Status:             execution.Status,
+		TotalSteps:         len(execution.Plan.Steps),
+		CompletedSteps:     completedSteps,
+		FailedSteps:        failedSteps,
+		RunningStep:        runningStep,
+		Waiting:            executionresult.BuildV1(execution).Waiting,
+		Steps:              steps,
+		AvailableArtifacts: sortedArtifactKeys(execution.Artifacts),
+		Diagnostics:        execution.Diagnostics,
+	}
+	if resultV1.Answer != nil {
+		preview := *resultV1.Answer
+		response.ResultPreview = &preview
+	}
+	return response, nil
+}
+
 func (s *AnalysisService) CreateReportDraft(projectID string, input domain.ReportDraftCreateRequest) (domain.ReportDraft, error) {
 	if _, err := s.store.GetProject(projectID); err != nil {
 		if err == store.ErrNotFound {
@@ -546,6 +588,77 @@ func anyStringValue(value any) string {
 	default:
 		return fmt.Sprintf("%v", value)
 	}
+}
+
+func buildExecutionProgressSteps(execution domain.ExecutionSummary, completed []domain.ExecutionStepResultV1) []domain.ExecutionStepProgress {
+	progressByStepID := map[string]domain.ExecutionStepProgress{}
+	for _, item := range completed {
+		progressByStepID[item.StepID] = domain.ExecutionStepProgress{
+			StepID:        item.StepID,
+			SkillName:     item.SkillName,
+			Status:        item.Status,
+			ArtifactKey:   item.ArtifactKey,
+			Summary:       item.Summary,
+			Warnings:      item.Warnings,
+			SelectionMode: item.SelectionMode,
+		}
+	}
+	for _, step := range execution.Plan.Steps {
+		if _, ok := progressByStepID[step.StepID]; !ok {
+			progressByStepID[step.StepID] = domain.ExecutionStepProgress{
+				StepID:    step.StepID,
+				SkillName: step.SkillName,
+				Status:    "pending",
+			}
+		}
+	}
+	for _, event := range execution.Events {
+		stepID := strings.TrimSpace(anyStringValue(event.Payload["step_id"]))
+		if stepID == "" {
+			continue
+		}
+		item, ok := progressByStepID[stepID]
+		if !ok {
+			item = domain.ExecutionStepProgress{
+				StepID:    stepID,
+				SkillName: strings.TrimSpace(anyStringValue(event.Payload["skill_name"])),
+				Status:    "pending",
+			}
+		}
+		if item.SkillName == "" {
+			item.SkillName = strings.TrimSpace(anyStringValue(event.Payload["skill_name"]))
+		}
+		switch event.EventType {
+		case "STEP_STARTED":
+			item.Status = "running"
+		case "STEP_COMPLETED":
+			item.Status = "completed"
+			if artifactKey := strings.TrimSpace(anyStringValue(event.Payload["artifact_key"])); artifactKey != "" {
+				item.ArtifactKey = &artifactKey
+			}
+		case "STEP_FAILED":
+			item.Status = "failed"
+			if message := strings.TrimSpace(anyStringValue(event.Payload["error"])); message != "" {
+				item.Warnings = uniqueNonEmptyStrings(append(item.Warnings, message))
+			}
+		}
+		progressByStepID[stepID] = item
+	}
+	steps := make([]domain.ExecutionStepProgress, 0, len(execution.Plan.Steps))
+	for _, step := range execution.Plan.Steps {
+		item := progressByStepID[step.StepID]
+		if item.SkillName == "" {
+			item.SkillName = step.SkillName
+		}
+		if item.StepID == "" {
+			item.StepID = step.StepID
+		}
+		if item.Status == "" {
+			item.Status = "pending"
+		}
+		steps = append(steps, item)
+	}
+	return steps
 }
 
 func latestCompletedStepHooks(events []domain.ExecutionEvent) any {

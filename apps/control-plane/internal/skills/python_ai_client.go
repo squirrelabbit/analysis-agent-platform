@@ -84,6 +84,7 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 			PriorArtifacts: priorArtifacts,
 		})
 		if err != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
 			return ExecutionRunResult{}, err
 		}
 
@@ -94,12 +95,14 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 			bytes.NewReader(payload),
 		)
 		if err != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
 			return ExecutionRunResult{}, err
 		}
 		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
 			return ExecutionRunResult{}, err
 		}
 
@@ -107,26 +110,33 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 		decodeErr := json.NewDecoder(resp.Body).Decode(&taskResponse)
 		closeErr := resp.Body.Close()
 		if decodeErr != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, decodeErr)
 			return ExecutionRunResult{}, decodeErr
 		}
 		if closeErr != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, closeErr)
 			return ExecutionRunResult{}, closeErr
 		}
 		if resp.StatusCode >= 300 {
-			return ExecutionRunResult{}, fmt.Errorf("python ai worker returned %d", resp.StatusCode)
+			err = fmt.Errorf("python ai worker returned %d", resp.StatusCode)
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
+			return ExecutionRunResult{}, err
 		}
 
 		runtimeArtifact, err := compactPythonArtifactForRuntime(step, taskResponse.Artifact)
 		if err != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
 			return ExecutionRunResult{}, err
 		}
 		artifactJSON, err := json.Marshal(runtimeArtifact)
 		if err != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
 			return ExecutionRunResult{}, err
 		}
 		runtimeArtifacts[artifactKey(step)] = json.RawMessage(artifactJSON)
 		storedArtifact, err := compactPythonArtifactForStorage(step, taskResponse.Artifact)
 		if err != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
 			return ExecutionRunResult{}, err
 		}
 		result.Artifacts[artifactKey(step)] = storedArtifact
@@ -141,10 +151,11 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 			execution,
 			requestStep,
 			StepHookOutcome{
-				Status:        "completed",
-				ArtifactBytes: len(storedArtifact),
-				ArtifactRef:   stringValue(taskResponse.Artifact["artifact_ref"]),
-				UsageSummary:  extractUsageSummary(taskResponse),
+				Status:         "completed",
+				ArtifactBytes:  len(storedArtifact),
+				ArtifactRef:    stringValue(taskResponse.Artifact["artifact_ref"]),
+				UsageSummary:   extractUsageSummary(taskResponse),
+				StoredArtifact: storedArtifact,
 			},
 		)
 		if err != nil {

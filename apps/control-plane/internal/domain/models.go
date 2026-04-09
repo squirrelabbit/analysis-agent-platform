@@ -450,6 +450,30 @@ type ExecutionResultResponse struct {
 	Diagnostics *ExecutionDiagnostics `json:"diagnostics,omitempty"`
 }
 
+type ExecutionStepProgress struct {
+	StepID        string   `json:"step_id"`
+	SkillName     string   `json:"skill_name"`
+	Status        string   `json:"status"`
+	ArtifactKey   *string  `json:"artifact_key,omitempty"`
+	Summary       string   `json:"summary,omitempty"`
+	Warnings      []string `json:"warnings,omitempty"`
+	SelectionMode string   `json:"selection_mode,omitempty"`
+}
+
+type ExecutionProgressResponse struct {
+	ExecutionID        string                  `json:"execution_id"`
+	Status             string                  `json:"status"`
+	TotalSteps         int                     `json:"total_steps"`
+	CompletedSteps     int                     `json:"completed_steps"`
+	FailedSteps        int                     `json:"failed_steps"`
+	RunningStep        *ExecutionStepProgress  `json:"running_step,omitempty"`
+	Waiting            *ExecutionWaitingState  `json:"waiting,omitempty"`
+	Steps              []ExecutionStepProgress `json:"steps"`
+	AvailableArtifacts []string                `json:"available_artifacts,omitempty"`
+	ResultPreview      *ExecutionResultAnswer  `json:"result_preview,omitempty"`
+	Diagnostics        *ExecutionDiagnostics   `json:"diagnostics,omitempty"`
+}
+
 type ReportDraftCreateRequest struct {
 	Title        *string  `json:"title,omitempty"`
 	ExecutionIDs []string `json:"execution_ids"`

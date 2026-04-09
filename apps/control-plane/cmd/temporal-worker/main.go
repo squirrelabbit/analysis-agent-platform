@@ -46,13 +46,18 @@ func main() {
 	defer temporalClient.Close()
 
 	registerAnalysisWorker := func(w worker.Worker) {
+		stepHooks := []skills.StepHook{
+			skills.RuntimeStepHook{},
+			skills.ExecutionProgressHook{Repo: repository},
+		}
 		workflows.RegisterAnalysisRuntime(w, workflows.AnalysisActivities{
 			Repo: repository,
 			Runner: skills.CompositeRunner{
-				Structured: skills.DuckDBRunner{Path: cfg.DuckDBPath},
+				Structured: skills.DuckDBRunner{Path: cfg.DuckDBPath, Hooks: stepHooks},
 				Unstructured: skills.PythonAIClient{
 					BaseURL:      cfg.PythonAIWorkerURL,
 					ArtifactRoot: cfg.ArtifactRoot,
+					Hooks:        stepHooks,
 				},
 			},
 			AnswerGenerator: answerGenerator,
