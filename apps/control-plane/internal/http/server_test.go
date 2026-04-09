@@ -450,6 +450,33 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 	if ruleCatalog, ok := registry["rule_catalog"].(map[string]any); !ok || len(ruleCatalog) == 0 {
 		t.Fatalf("expected rule catalog metadata: %+v", registry)
 	}
+
+	registryOnly := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/dataset_profiles", "", http.StatusOK, &registryOnly)
+	if registryOnly["source_path"] != profilesPath {
+		t.Fatalf("unexpected dataset profile registry source: %+v", registryOnly)
+	}
+	if promptCatalog, ok := registryOnly["prompt_catalog"].([]any); !ok || len(promptCatalog) != 2 {
+		t.Fatalf("expected prompt catalog in dataset profile registry: %+v", registryOnly)
+	}
+
+	promptCatalogResponse := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/prompt_catalog", "", http.StatusOK, &promptCatalogResponse)
+	if promptCatalogResponse["source_path"] != promptsDir {
+		t.Fatalf("unexpected prompt catalog source path: %+v", promptCatalogResponse)
+	}
+	if items, ok := promptCatalogResponse["items"].([]any); !ok || len(items) != 2 {
+		t.Fatalf("expected prompt catalog items: %+v", promptCatalogResponse)
+	}
+
+	ruleCatalogResponse := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/rule_catalog", "", http.StatusOK, &ruleCatalogResponse)
+	if ruleCatalogResponse["available"] != true {
+		t.Fatalf("expected available rule catalog: %+v", ruleCatalogResponse)
+	}
+	if ruleCatalog, ok := ruleCatalogResponse["catalog"].(map[string]any); !ok || len(ruleCatalog) == 0 {
+		t.Fatalf("expected rule catalog body: %+v", ruleCatalogResponse)
+	}
 }
 
 func TestScenarioPlanEndpoint(t *testing.T) {

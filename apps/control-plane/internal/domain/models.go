@@ -285,6 +285,18 @@ type DatasetProfileValidationResponse struct {
 	Issues   []DatasetProfileValidationIssue `json:"issues,omitempty"`
 }
 
+type PromptCatalogResponse struct {
+	SourcePath string                   `json:"source_path,omitempty"`
+	Items      []PromptTemplateMetadata `json:"items"`
+}
+
+type RuleCatalogResponse struct {
+	Available bool                       `json:"available"`
+	Source    string                     `json:"source,omitempty"`
+	Catalog   *DatasetProfileRuleCatalog `json:"catalog,omitempty"`
+	Warning   string                     `json:"warning,omitempty"`
+}
+
 type BuildJobDiagnostics struct {
 	RetryCount            int     `json:"retry_count"`
 	LastErrorType         *string `json:"last_error_type,omitempty"`
@@ -607,18 +619,18 @@ type ExecutionWaitingState struct {
 }
 
 type ExecutionDiagnostics struct {
-	EventCount         int                    `json:"event_count"`
-	LatestEventType    string                 `json:"latest_event_type,omitempty"`
-	LatestEventMessage string                 `json:"latest_event_message,omitempty"`
-	FailureReason      string                 `json:"failure_reason,omitempty"`
-	Waiting            *ExecutionWaitingState `json:"waiting,omitempty"`
-	FinalAnswerStatus  string                 `json:"final_answer_status,omitempty"`
-	FinalAnswerError   string                 `json:"final_answer_error,omitempty"`
-	ArtifactCount      int                    `json:"artifact_count,omitempty"`
-	ArtifactPayloadBytes int                  `json:"artifact_payload_bytes,omitempty"`
-	LargestArtifactKey string                 `json:"largest_artifact_key,omitempty"`
-	LargestArtifactBytes int                  `json:"largest_artifact_bytes,omitempty"`
-	ArtifactStorageMode string                `json:"artifact_storage_mode,omitempty"`
+	EventCount           int                    `json:"event_count"`
+	LatestEventType      string                 `json:"latest_event_type,omitempty"`
+	LatestEventMessage   string                 `json:"latest_event_message,omitempty"`
+	FailureReason        string                 `json:"failure_reason,omitempty"`
+	Waiting              *ExecutionWaitingState `json:"waiting,omitempty"`
+	FinalAnswerStatus    string                 `json:"final_answer_status,omitempty"`
+	FinalAnswerError     string                 `json:"final_answer_error,omitempty"`
+	ArtifactCount        int                    `json:"artifact_count,omitempty"`
+	ArtifactPayloadBytes int                    `json:"artifact_payload_bytes,omitempty"`
+	LargestArtifactKey   string                 `json:"largest_artifact_key,omitempty"`
+	LargestArtifactBytes int                    `json:"largest_artifact_bytes,omitempty"`
+	ArtifactStorageMode  string                 `json:"artifact_storage_mode,omitempty"`
 }
 
 type ExecutionDiffStep struct {

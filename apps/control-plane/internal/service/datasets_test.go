@@ -535,6 +535,46 @@ func TestValidateDatasetProfilesUsesWorkerRuleCatalogAndScansDatasetVersions(t *
 	}
 }
 
+func TestGetPromptCatalogFallsBackToWorkerCapabilities(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"prompt_catalog": []map[string]any{
+				{"version": "dataset-prepare-anthropic-v1", "operation": "prepare", "title": "Prepare"},
+			},
+			"rule_catalog": map[string]any{},
+		})
+	}))
+	defer worker.Close()
+	service.pythonAIWorkerURL = worker.URL
+
+	response, err := service.GetPromptCatalog()
+	if err != nil {
+		t.Fatalf("unexpected get prompt catalog error: %v", err)
+	}
+	if len(response.Items) != 1 || response.Items[0].Version != "dataset-prepare-anthropic-v1" {
+		t.Fatalf("unexpected prompt catalog fallback response: %+v", response)
+	}
+}
+
+func TestGetRuleCatalogReturnsUnavailableWhenWorkerNotConfigured(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	response, err := service.GetRuleCatalog()
+	if err != nil {
+		t.Fatalf("unexpected get rule catalog error: %v", err)
+	}
+	if response.Available {
+		t.Fatalf("expected unavailable rule catalog response: %+v", response)
+	}
+	if strings.TrimSpace(response.Warning) == "" {
+		t.Fatalf("expected rule catalog warning: %+v", response)
+	}
+}
+
 func TestCreateDatasetVersionEnqueuesEagerPrepareJobWhenWorkerConfigured(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
