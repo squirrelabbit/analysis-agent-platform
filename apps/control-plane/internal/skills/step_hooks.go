@@ -147,9 +147,15 @@ func (h ExecutionProgressHook) AfterStep(_ context.Context, execution domain.Exe
 	if message := strings.TrimSpace(outcome.ErrorMessage); message != "" {
 		payload["error"] = message
 	}
-	if outcomeStatus(outcome.Status) == "completed" && strings.TrimSpace(outcome.StoredArtifact) != "" {
+	storedArtifact := strings.TrimSpace(outcome.StoredArtifact)
+	if outcomeStatus(outcome.Status) == "completed" && storedArtifact != "" {
+		compactedArtifact, err := compactExecutionArtifactForStorage(step, storedArtifact)
+		if err != nil {
+			return StepHookRecord{}, err
+		}
 		key := artifactKey(step)
-		current.Artifacts[key] = outcome.StoredArtifact
+		current.Artifacts[key] = compactedArtifact
+		payload["artifact_bytes"] = len(compactedArtifact)
 		payload["artifact_key"] = key
 	}
 	eventType := "STEP_COMPLETED"

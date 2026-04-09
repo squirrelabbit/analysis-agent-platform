@@ -62,9 +62,9 @@
 - step 완료 시 artifact를 execution row에 즉시 저장하는 구조가 큰 플랜에서 부담이 되는지 확인한다.
 
 할 일:
-1. artifact 크기와 execution row 저장량을 샘플 dataset 기준으로 측정한다.
-2. partial artifact를 execution metadata에 계속 저장할지, 요약본만 남길지 기준을 정한다.
-3. 확인 필요: artifact가 큰 skill은 `artifact_ref + preview`만 execution에 남기는 방식이 더 나은지 검토한다.
+1. step 완료 시 execution row에는 raw artifact 전체 대신 `summary / preview / artifact_ref` 중심 compact payload를 저장한다.
+2. artifact 크기와 execution row 저장량을 샘플 dataset 기준으로 측정한다.
+3. 확인 필요: 어떤 skill은 compact payload만으로 충분하고, 어떤 skill은 별도 drill-down surface가 더 필요한지 정리한다.
 
 결과물:
 - execution progress 저장 정책
