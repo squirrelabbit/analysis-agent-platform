@@ -50,5 +50,5 @@ flowchart LR
 
 - 저장 구조 변화: [unstructured_storage_transition.md](unstructured_storage_transition.md)
 - 언어 책임 구분: [language_roles.md](language_roles.md)
-- 이행 상태: [migration_plan.md](migration_plan.md)
+- 이행 기록: [migration_plan.md](migration_plan.md)
 - 현재 제품 스냅샷: [../project_summary.md](../project_summary.md)

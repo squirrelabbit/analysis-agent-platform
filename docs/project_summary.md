@@ -26,7 +26,7 @@
 - `Python AI worker`
   - planner
   - prepare / sentiment / embedding / cluster build
-  - support/core skill
+  - `preprocess / aggregate / retrieve / summarize / presentation` skill
   - `final_answer` 후처리
 - `Postgres + artifact storage`
   - execution metadata, build job 상태, snapshot 저장
@@ -38,11 +38,12 @@
 
 - dataset version은 생성 시 resolved profile을 저장한다.
 - prompt template는 `config/prompts/*.md`, 기본 dataset profile은 `config/dataset_profiles.json`에서 관리한다.
-- 운영/프론트는 `GET /dataset_profiles`, `GET /prompt_catalog`, `GET /rule_catalog`, `GET /dataset_profiles/validate`로 현재 registry와 catalog 상태를 조회할 수 있다.
+- 운영/프론트는 `GET /dataset_profiles`, `GET /prompt_catalog`, `GET /rule_catalog`, `GET /skill_policy_catalog`, `GET /dataset_profiles/validate`, `GET /skill_policies/validate`로 현재 registry와 catalog 상태를 조회할 수 있다.
 - `prepare`는 eager, `sentiment / embedding / cluster`는 lazy build를 기본 정책으로 둔다.
 - full-dataset `embedding_cluster`는 precomputed cluster artifact를 우선 읽고, subset 경로만 on-demand fallback을 허용한다.
 - cluster artifact와 step preview에는 `cluster_execution_mode`, `cluster_materialization_scope`, `cluster_fallback_reason`가 포함돼 materialized/full-dataset 경로와 subset fallback 경로를 구분할 수 있다.
 - cluster 산출물은 현재 `summary JSON + membership parquet`로 분리 저장한다.
+- `embedding_cluster`, `cluster_label_candidates`, `issue_evidence_summary`는 `config/skill_policies/*.json` 기반 versioned policy를 읽는다.
 - execution 완료 후에는 `result_v1 snapshot`과 `final_answer snapshot`을 함께 남긴다.
 - execution 조회는 현재 `events`, `progress`, `step preview` 경로를 통해 중간 진행 상태를 노출한다.
 - step 완료 시 execution row에는 raw artifact 전체 대신 `summary / preview / artifact_ref` 중심 compact payload를 저장한다.
