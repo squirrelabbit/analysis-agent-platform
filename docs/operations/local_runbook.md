@@ -78,6 +78,11 @@ docker compose -f compose.dev.yml logs -f postgres
 - `GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clusters/{cluster_id}/members`
 - `GET /dataset_profiles/validate`
 
+cluster 경로 확인 팁:
+- `step preview`에서 `cluster_execution_mode`가 `materialized_full_dataset`이면 precomputed cluster를 읽은 경로다.
+- `cluster_execution_mode`가 `on_demand_subset_fallback`이면 prior artifact 때문에 subset 재계산한 경로다.
+- `cluster_fallback_reason`으로 fallback 원인을 본다.
+
 ## 7. 관련 문서
 
 - smoke와 테스트: [../testing/smoke_and_checks.md](../testing/smoke_and_checks.md)

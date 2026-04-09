@@ -18,6 +18,30 @@ def _cluster_membership_ref(*artifacts: dict[str, Any] | None) -> str:
     return ""
 
 
+def _cluster_execution_meta(*artifacts: dict[str, Any] | None) -> dict[str, Any]:
+    meta = {
+        "cluster_execution_mode": "",
+        "cluster_materialization_scope": "",
+        "cluster_materialized_ref_used": False,
+        "cluster_fallback_reason": "",
+    }
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        execution_mode = str(artifact.get("cluster_execution_mode") or "").strip()
+        if execution_mode and not meta["cluster_execution_mode"]:
+            meta["cluster_execution_mode"] = execution_mode
+        scope = str(artifact.get("cluster_materialization_scope") or "").strip()
+        if scope and not meta["cluster_materialization_scope"]:
+            meta["cluster_materialization_scope"] = scope
+        if bool(artifact.get("cluster_materialized_ref_used")):
+            meta["cluster_materialized_ref_used"] = True
+        fallback_reason = str(artifact.get("cluster_fallback_reason") or "").strip()
+        if fallback_reason and not meta["cluster_fallback_reason"]:
+            meta["cluster_fallback_reason"] = fallback_reason
+    return meta
+
+
 def _cluster_samples_from_membership(cluster_membership_ref: str, cluster_id: str, sample_n: int) -> list[dict[str, Any]]:
     rows = rt._load_cluster_membership_rows(cluster_membership_ref, cluster_id, limit=max(0, sample_n))
     samples: list[dict[str, Any]] = []
@@ -92,6 +116,7 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
     labeled_clusters = rt._find_prior_artifact(payload.get("prior_artifacts"), "cluster_label_candidates")
     embedded_clusters = rt._find_prior_artifact(payload.get("prior_artifacts"), "embedding_cluster")
     cluster_membership_ref = _cluster_membership_ref(labeled_clusters, embedded_clusters)
+    cluster_execution_meta = _cluster_execution_meta(labeled_clusters, embedded_clusters)
 
     clusters: list[dict[str, Any]] = []
     if labeled_clusters:
@@ -181,6 +206,10 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
             "cluster_membership_ref": cluster_membership_ref,
+            "cluster_execution_mode": cluster_execution_meta["cluster_execution_mode"],
+            "cluster_materialization_scope": cluster_execution_meta["cluster_materialization_scope"],
+            "cluster_materialized_ref_used": cluster_execution_meta["cluster_materialized_ref_used"],
+            "cluster_fallback_reason": cluster_execution_meta["cluster_fallback_reason"],
             "summary": summary,
             "clusters": ranked_clusters,
         },

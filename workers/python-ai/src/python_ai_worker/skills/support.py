@@ -654,12 +654,19 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_embedding_cluster_payload(payload)
     inputs = normalized["step"].get("inputs") or {}
     prior_artifacts = payload.get("prior_artifacts")
-    if normalized["cluster_ref"] and not rt._iter_prior_artifacts(prior_artifacts):
+    prior_artifact_items = rt._iter_prior_artifacts(prior_artifacts)
+    has_prior_artifacts = len(prior_artifact_items) > 0
+    precomputed = None
+    if normalized["cluster_ref"] and not has_prior_artifacts:
         precomputed = _load_precomputed_cluster_artifact(normalized["cluster_ref"])
         if precomputed is not None and _precomputed_cluster_matches_request(precomputed, normalized):
             artifact = dict(precomputed)
             artifact["step_id"] = normalized["step"].get("step_id")
             artifact["dataset_name"] = normalized["dataset_name"]
+            artifact["cluster_execution_mode"] = str(artifact.get("cluster_execution_mode") or "materialized_full_dataset").strip() or "materialized_full_dataset"
+            artifact["cluster_materialization_scope"] = str(artifact.get("cluster_materialization_scope") or "full_dataset").strip() or "full_dataset"
+            artifact["cluster_materialized_ref_used"] = True
+            artifact["cluster_fallback_reason"] = ""
             artifact["cluster_ref"] = normalized["cluster_ref"]
             artifact["cluster_format"] = normalized["cluster_format"] or "json"
             summary = dict(artifact.get("summary") or {})
@@ -674,6 +681,16 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
                 ],
                 "artifact": artifact,
             }
+    cluster_execution_mode = "on_demand_full_dataset"
+    cluster_materialization_scope = "full_dataset"
+    cluster_materialized_ref_used = False
+    cluster_fallback_reason = ""
+    if has_prior_artifacts:
+        cluster_execution_mode = "on_demand_subset_fallback"
+        cluster_materialization_scope = "subset_selection"
+        cluster_fallback_reason = "prior_artifacts_present"
+    elif normalized["cluster_ref"]:
+        cluster_fallback_reason = "cluster_request_mismatch" if precomputed is not None else "cluster_artifact_unavailable"
     records, source_backend, source_ref = _embedding_cluster_records(
         dataset_version_id=_semantic_dataset_version_id(payload, inputs),
         embedding_index_ref=normalized["embedding_index_ref"],
@@ -690,14 +707,18 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
     }
     similarity_backend = "mixed" if len(similarity_backends) > 1 else next(iter(similarity_backends), "token-overlap")
     noise_count = len([cluster for cluster in clusters if int(cluster["document_count"]) == 1])
+    notes = [
+        f"embedding_cluster built {len(clusters)} clusters",
+        f"embedding source backend: {source_backend}",
+        f"embedding source: {source_ref}",
+        f"similarity_backend: {similarity_backend}",
+        f"cluster_similarity_threshold: {normalized['cluster_similarity_threshold']}",
+        f"cluster_execution_mode: {cluster_execution_mode}",
+    ]
+    if cluster_fallback_reason:
+        notes.append(f"cluster_fallback_reason: {cluster_fallback_reason}")
     return {
-        "notes": [
-            f"embedding_cluster built {len(clusters)} clusters",
-            f"embedding source backend: {source_backend}",
-            f"embedding source: {source_ref}",
-            f"similarity_backend: {similarity_backend}",
-            f"cluster_similarity_threshold: {normalized['cluster_similarity_threshold']}",
-        ],
+        "notes": notes,
         "artifact": {
             "skill_name": "embedding_cluster",
             "step_id": normalized["step"].get("step_id"),
@@ -705,8 +726,16 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
             "embedding_uri": normalized["embedding_uri"],
             "embedding_index_ref": normalized["embedding_index_ref"],
             "embedding_source_backend": source_backend,
+            "cluster_execution_mode": cluster_execution_mode,
+            "cluster_materialization_scope": cluster_materialization_scope,
+            "cluster_materialized_ref_used": cluster_materialized_ref_used,
+            "cluster_fallback_reason": cluster_fallback_reason,
             "cluster_ref": normalized["cluster_ref"],
             "cluster_format": normalized["cluster_format"],
+            "cluster_summary_ref": normalized["cluster_ref"],
+            "cluster_summary_format": normalized["cluster_format"],
+            "cluster_membership_ref": "",
+            "cluster_membership_format": "",
             "chunk_ref": normalized["chunk_ref"],
             "chunk_format": normalized["chunk_format"],
             "summary": {
@@ -777,6 +806,10 @@ def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
             "skill_name": "cluster_label_candidates",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
+            "cluster_execution_mode": str((prior or {}).get("cluster_execution_mode") or "").strip(),
+            "cluster_materialization_scope": str((prior or {}).get("cluster_materialization_scope") or "").strip(),
+            "cluster_materialized_ref_used": bool((prior or {}).get("cluster_materialized_ref_used")),
+            "cluster_fallback_reason": str((prior or {}).get("cluster_fallback_reason") or "").strip(),
             "cluster_ref": str((prior or {}).get("cluster_ref") or "").strip(),
             "cluster_format": str((prior or {}).get("cluster_format") or "").strip(),
             "cluster_summary_ref": str((prior or {}).get("cluster_summary_ref") or "").strip(),

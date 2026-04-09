@@ -1605,7 +1605,7 @@ func TestBuildExecutionStepPreviewReturnsArtifactPreview(t *testing.T) {
 		RequestID:   "request-1",
 		Status:      "running",
 		Artifacts: map[string]string{
-			"step:step-1:issue_cluster_summary": `{"skill_name":"issue_cluster_summary","step_id":"step-1","summary":{"dominant_cluster_label":"결제 오류","dominant_cluster_count":12,"cluster_count":3},"clusters":[{"label":"결제 오류","document_count":12},{"label":"로그인 실패","document_count":5}],"selection_source":"cluster_membership","warnings":["sample warning"],"usage":{"input_tokens":120}}`,
+			"step:step-1:issue_cluster_summary": `{"skill_name":"issue_cluster_summary","step_id":"step-1","summary":{"dominant_cluster_label":"결제 오류","dominant_cluster_count":12,"cluster_count":3},"clusters":[{"label":"결제 오류","document_count":12},{"label":"로그인 실패","document_count":5}],"selection_source":"cluster_membership","cluster_execution_mode":"on_demand_subset_fallback","cluster_materialization_scope":"subset_selection","cluster_fallback_reason":"prior_artifacts_present","warnings":["sample warning"],"usage":{"input_tokens":120}}`,
 		},
 		Plan: domain.SkillPlan{
 			PlanID: "plan-step-preview",
@@ -1662,6 +1662,9 @@ func TestBuildExecutionStepPreviewReturnsArtifactPreview(t *testing.T) {
 	}
 	if preview.Preview["selection_source"] != "cluster_membership" {
 		t.Fatalf("unexpected preview selection source: %+v", preview.Preview)
+	}
+	if preview.Preview["cluster_execution_mode"] != "on_demand_subset_fallback" {
+		t.Fatalf("unexpected cluster execution mode in preview: %+v", preview.Preview)
 	}
 	clusters, ok := preview.Preview["clusters"].([]map[string]any)
 	if !ok || len(clusters) != 2 {

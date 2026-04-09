@@ -200,6 +200,10 @@ class TaskTests(unittest.TestCase):
         self.assertTrue(membership_path.exists())
         materialized = json.loads(cluster_path.read_text(encoding="utf-8"))
         self.assertEqual(materialized["skill_name"], "embedding_cluster")
+        self.assertEqual(materialized["cluster_execution_mode"], "materialized_full_dataset")
+        self.assertEqual(materialized["cluster_materialization_scope"], "full_dataset")
+        self.assertTrue(materialized["cluster_materialized_ref_used"])
+        self.assertEqual(materialized["cluster_fallback_reason"], "")
         self.assertGreaterEqual(materialized["summary"]["cluster_count"], 1)
         self.assertEqual(materialized["summary"]["cluster_similarity_threshold"], 0.2)
         self.assertEqual(materialized["summary"]["top_n"], 3)
@@ -222,6 +226,10 @@ class TaskTests(unittest.TestCase):
 
         self.assertEqual(cluster_result["artifact"]["cluster_ref"], str(cluster_path))
         self.assertEqual(cluster_result["artifact"]["cluster_membership_ref"], str(membership_path))
+        self.assertEqual(cluster_result["artifact"]["cluster_execution_mode"], "materialized_full_dataset")
+        self.assertEqual(cluster_result["artifact"]["cluster_materialization_scope"], "full_dataset")
+        self.assertTrue(cluster_result["artifact"]["cluster_materialized_ref_used"])
+        self.assertEqual(cluster_result["artifact"]["cluster_fallback_reason"], "")
         self.assertEqual(cluster_result["artifact"]["summary"], materialized["summary"])
         self.assertEqual(cluster_result["artifact"]["clusters"], materialized["clusters"])
         self.assertIn("precomputed cluster artifact", cluster_result["notes"][0])
@@ -239,6 +247,72 @@ class TaskTests(unittest.TestCase):
         )
 
         self.assertNotIn("precomputed cluster artifact", fallback_cluster_result["notes"][0])
+        self.assertEqual(fallback_cluster_result["artifact"]["cluster_execution_mode"], "on_demand_full_dataset")
+        self.assertEqual(fallback_cluster_result["artifact"]["cluster_materialization_scope"], "full_dataset")
+        self.assertFalse(fallback_cluster_result["artifact"]["cluster_materialized_ref_used"])
+        self.assertEqual(fallback_cluster_result["artifact"]["cluster_fallback_reason"], "cluster_request_mismatch")
+
+    def test_embedding_cluster_subset_fallback_exposes_reason_and_scope(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_cluster_subset.csv"
+        self._write_csv_rows(
+            csv_path,
+            [
+                "결제 오류가 반복 발생했습니다",
+                "결제 승인 오류가 다시 발생했습니다",
+                "로그인이 자주 실패합니다",
+                "로그인 인증 오류가 반복됩니다",
+                "배송 문의가 계속 들어옵니다",
+            ],
+        )
+
+        embedding_result = run_embedding(
+            {
+                "dataset_version_id": "version-cluster-subset",
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "output_path": str(temp_dir / "issues_cluster_subset.embeddings.jsonl"),
+            }
+        )
+        cluster_build_result = run_dataset_cluster_build(
+            {
+                "dataset_version_id": "version-cluster-subset",
+                "dataset_name": str(csv_path),
+                "embedding_index_source_ref": embedding_result["artifact"]["embedding_index_source_ref"],
+                "chunk_ref": embedding_result["artifact"]["chunk_ref"],
+                "output_path": str(temp_dir / "issues_cluster_subset.clusters.json"),
+                "cluster_similarity_threshold": 0.2,
+                "sample_n": 2,
+                "top_n": 3,
+            }
+        )
+
+        subset_cluster_result = run_embedding_cluster(
+            {
+                "dataset_name": str(csv_path),
+                "embedding_uri": embedding_result["artifact"]["embedding_uri"],
+                "embedding_index_ref": embedding_result["artifact"]["embedding_index_source_ref"],
+                "chunk_ref": embedding_result["artifact"]["chunk_ref"],
+                "chunk_format": embedding_result["artifact"]["chunk_format"],
+                "cluster_ref": cluster_build_result["artifact"]["cluster_ref"],
+                "cluster_format": "json",
+                "cluster_similarity_threshold": 0.2,
+                "sample_n": 2,
+                "top_n": 3,
+                "prior_artifacts": {
+                    "step:document_filter": {
+                        "skill_name": "document_filter",
+                        "matched_indices": [0, 1],
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(subset_cluster_result["artifact"]["cluster_execution_mode"], "on_demand_subset_fallback")
+        self.assertEqual(subset_cluster_result["artifact"]["cluster_materialization_scope"], "subset_selection")
+        self.assertFalse(subset_cluster_result["artifact"]["cluster_materialized_ref_used"])
+        self.assertEqual(subset_cluster_result["artifact"]["cluster_fallback_reason"], "prior_artifacts_present")
+        self.assertEqual(subset_cluster_result["artifact"]["summary"]["clustered_document_count"], 2)
 
     def test_rule_based_planner_without_key(self) -> None:
         with patch.dict(

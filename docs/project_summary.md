@@ -40,6 +40,7 @@
 - prompt template는 `config/prompts/*.md`, 기본 dataset profile은 `config/dataset_profiles.json`에서 관리한다.
 - `prepare`는 eager, `sentiment / embedding / cluster`는 lazy build를 기본 정책으로 둔다.
 - full-dataset `embedding_cluster`는 precomputed cluster artifact를 우선 읽고, subset 경로만 on-demand fallback을 허용한다.
+- cluster artifact와 step preview에는 `cluster_execution_mode`, `cluster_materialization_scope`, `cluster_fallback_reason`가 포함돼 materialized/full-dataset 경로와 subset fallback 경로를 구분할 수 있다.
 - cluster 산출물은 현재 `summary JSON + membership parquet`로 분리 저장한다.
 - execution 완료 후에는 `result_v1 snapshot`과 `final_answer snapshot`을 함께 남긴다.
 - execution 조회는 현재 `events`, `progress`, `step preview` 경로를 통해 중간 진행 상태를 노출한다.
