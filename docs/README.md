@@ -14,6 +14,7 @@
 | 요약 | `docs/project_summary.md` | 현재 제품 정의와 핵심 실행 흐름의 짧은 스냅샷 |
 | 운영 | `manual.md` | 로컬 운영 입구와 상세 문서 링크 |
 | 운영 | `docs/operations/local_runbook.md` | stack 실행, health, 로그, artifact 경로 |
+| 운영 | `docs/operations/frontend_handoff.md` | 프론트 화면 기준 API 호출 순서와 polling 규칙 |
 | 운영 | `docs/recovery_guide.md` | build failed, waiting, failed 대응 절차 |
 | 테스트 | `docs/testing/smoke_and_checks.md` | 코드 테스트와 smoke 검증 순서 |
 | 테스트 | `docs/testing/manual_api_walkthrough.md` | 수동 API 호출 예시 |
@@ -28,6 +29,7 @@
 - [project_summary.md](project_summary.md)
 - [../manual.md](../manual.md)
 - [operations/local_runbook.md](operations/local_runbook.md)
+- [operations/frontend_handoff.md](operations/frontend_handoff.md)
 - [testing/smoke_and_checks.md](testing/smoke_and_checks.md)
 - [recovery_guide.md](recovery_guide.md)
 - [api/openapi.yaml](api/openapi.yaml)

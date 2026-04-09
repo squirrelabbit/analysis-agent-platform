@@ -84,6 +84,7 @@ npm run dev
 | 문서 | 역할 |
 | --- | --- |
 | [docs/operations/local_runbook.md](docs/operations/local_runbook.md) | stack 실행, health, 로그, artifact 경로 |
+| [docs/operations/frontend_handoff.md](docs/operations/frontend_handoff.md) | 프론트 화면 기준 API 호출 순서와 polling 규칙 |
 | [docs/testing/smoke_and_checks.md](docs/testing/smoke_and_checks.md) | 코드 테스트와 smoke 검증 순서 |
 | [docs/testing/manual_api_walkthrough.md](docs/testing/manual_api_walkthrough.md) | 수동 API 호출 예시 |
 | [docs/recovery_guide.md](docs/recovery_guide.md) | build failed, waiting, failed 대응 절차 |

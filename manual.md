@@ -35,6 +35,7 @@ curl -fsS http://127.0.0.1:18090/health
 | 문서 | 역할 |
 | --- | --- |
 | [docs/operations/local_runbook.md](docs/operations/local_runbook.md) | stack 실행, health, 로그, artifact 경로, 로컬 운영 메모 |
+| [docs/operations/frontend_handoff.md](docs/operations/frontend_handoff.md) | 프론트 화면 기준 API 호출 순서와 polling 규칙 |
 | [docs/testing/smoke_and_checks.md](docs/testing/smoke_and_checks.md) | 코드 테스트, smoke script, 추천 검증 순서 |
 | [docs/testing/manual_api_walkthrough.md](docs/testing/manual_api_walkthrough.md) | 프로젝트 생성부터 execution/result 조회까지 수동 API 예시 |
 | [docs/recovery_guide.md](docs/recovery_guide.md) | build failed, execution waiting/failed 대응 절차 |
