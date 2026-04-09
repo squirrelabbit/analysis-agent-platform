@@ -121,9 +121,42 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(answer["generation_mode"], "fallback")
         self.assertEqual(answer["answer_text"], "결제 오류 이슈가 반복되고 있습니다.")
         self.assertEqual(answer["key_points"], ["결제 오류 VOC가 반복된다."])
+        self.assertIn("확인 필요: 샘플 수가 제한적입니다.", answer["caveats"])
         artifact = result["artifact"]
         self.assertEqual(artifact["skill_name"], "execution_final_answer")
         self.assertEqual(artifact["answer_text"], "결제 오류 이슈가 반복되고 있습니다.")
+
+    def test_run_execution_final_answer_fallback_derives_limits_from_sparse_evidence(self) -> None:
+        result = run_execution_final_answer(
+            {
+                "execution_id": "exec-2",
+                "project_id": "project-1",
+                "question": "로그인 오류 핵심을 알려줘",
+                "result_v1": {
+                    "status": "completed",
+                    "primary_skill_name": "issue_cluster_summary",
+                    "answer": {
+                        "summary": "로그인 오류 군집이 가장 크게 나타났습니다.",
+                        "evidence": [{"snippet": "로그인이 자주 실패합니다."}],
+                    },
+                    "warnings": [],
+                    "step_results": [
+                        {
+                            "step_id": "step-1",
+                            "skill_name": "issue_cluster_summary",
+                            "status": "completed",
+                            "summary": "로그인 오류 군집이 12건으로 가장 큽니다.",
+                        }
+                    ],
+                },
+            }
+        )
+
+        answer = result["answer"]
+        self.assertEqual(answer["generation_mode"], "fallback")
+        self.assertEqual(answer["key_points"], ["로그인 오류 군집이 12건으로 가장 큽니다."])
+        self.assertIn("확인 필요: 현재 final_answer 근거 후보가 1건뿐이라 해석 범위가 제한적입니다.", answer["caveats"])
+        self.assertTrue(answer["follow_up_questions"])
 
     def test_dataset_cluster_build_materializes_cluster_artifact_and_embedding_cluster_reads_it(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())

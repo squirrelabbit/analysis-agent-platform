@@ -44,18 +44,19 @@ def _enrich_execution_final_answer_payload(normalized: dict[str, Any]) -> dict[s
     warnings = rt._coerce_string_list(result_v1.get("warnings"))
     key_findings = rt._coerce_string_list(answer.get("key_findings"))
     follow_up_questions = rt._coerce_string_list(answer.get("follow_up_questions"))
-    summary = str(answer.get("summary") or "").strip()
+    summary = " ".join(str(answer.get("summary") or "").split()).strip()
     if not summary:
         summary = "실행 결과가 생성되었지만 대표 요약은 비어 있습니다."
+    if not key_findings:
+        key_findings = _derive_key_findings_from_steps(list(result_v1.get("step_results") or []))
     headline = str(result_v1.get("primary_skill_name") or "").strip()
     if headline:
         headline = f"{headline} 결과 요약"
     else:
         headline = "분석 결과 요약"
-    if warnings:
-        fallback_caveats = list(warnings[:3])
-    else:
-        fallback_caveats = ["확인 필요: 최종 답변은 실행 결과와 근거 snippet 범위 안에서만 해석해야 합니다."]
+    fallback_caveats = _derive_fallback_caveats(warnings, evidence_candidates)
+    if not follow_up_questions:
+        follow_up_questions = _derive_follow_up_questions(result_v1, evidence_candidates)
     result_context = _build_result_context(result_v1, summary, key_findings, warnings)
 
     enriched = dict(normalized)
@@ -100,9 +101,28 @@ def _build_result_context(
         "summary": summary,
         "key_findings": key_findings[:6],
         "warnings": warnings[:6],
+        "warning_count": len(warnings),
+        "evidence_candidate_count": len(_build_evidence_candidates(answer_evidence(result_v1))),
+        "selection_source": str(answer_dict(result_v1).get("selection_source") or "").strip(),
+        "citation_mode": str(answer_dict(result_v1).get("citation_mode") or "").strip(),
         "waiting": waiting,
         "step_results": step_results,
     }
+
+
+def answer_dict(result_v1: dict[str, Any]) -> dict[str, Any]:
+    answer = result_v1.get("answer") or {}
+    if not isinstance(answer, dict):
+        return {}
+    return answer
+
+
+def answer_evidence(result_v1: dict[str, Any]) -> list[Any]:
+    answer = answer_dict(result_v1)
+    raw = answer.get("evidence") or []
+    if isinstance(raw, list):
+        return raw
+    return []
 
 
 def _build_evidence_candidates(items: list[Any]) -> list[dict[str, Any]]:
@@ -131,6 +151,45 @@ def _build_evidence_candidates(items: list[Any]) -> list[dict[str, Any]]:
                 continue
         candidates.append(candidate)
     return candidates[:6]
+
+
+def _derive_key_findings_from_steps(items: list[Any]) -> list[str]:
+    findings: list[str] = []
+    for raw_item in items[:8]:
+        if not isinstance(raw_item, dict):
+            continue
+        status = str(raw_item.get("status") or "").strip()
+        if status != "completed":
+            continue
+        summary = " ".join(str(raw_item.get("summary") or "").split()).strip()
+        if summary:
+            findings.append(summary)
+    return rt._coerce_string_list(findings)[:5]
+
+
+def _derive_fallback_caveats(warnings: list[str], evidence_candidates: list[dict[str, Any]]) -> list[str]:
+    caveats = list(warnings[:3]) if warnings else []
+    if len(evidence_candidates) == 0:
+        caveats.append("확인 필요: 현재 final_answer에 연결된 근거 후보가 없습니다.")
+    elif len(evidence_candidates) == 1:
+        caveats.append("확인 필요: 현재 final_answer 근거 후보가 1건뿐이라 해석 범위가 제한적입니다.")
+    if not caveats:
+        caveats.append("확인 필요: 최종 답변은 실행 결과와 근거 snippet 범위 안에서만 해석해야 합니다.")
+    return rt._coerce_string_list(caveats)[:4]
+
+
+def _derive_follow_up_questions(result_v1: dict[str, Any], evidence_candidates: list[dict[str, Any]]) -> list[str]:
+    primary_skill_name = str(result_v1.get("primary_skill_name") or "").strip()
+    suggestions: list[str] = []
+    if evidence_candidates:
+        suggestions.append("근거 snippet을 더 자세히 볼까요?")
+    if primary_skill_name == "issue_cluster_summary":
+        suggestions.append("주요 군집별 대표 원문을 더 볼까요?")
+    elif primary_skill_name == "issue_sentiment_summary":
+        suggestions.append("감성 분포와 대표 근거를 더 볼까요?")
+    else:
+        suggestions.append("step별 중간 결과를 더 볼까요?")
+    return rt._coerce_string_list(suggestions)[:5]
 
 
 __all__ = [
