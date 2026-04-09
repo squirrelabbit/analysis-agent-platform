@@ -485,6 +485,27 @@ class TaskTests(unittest.TestCase):
 
         self.assertEqual(
             [step["skill_name"] for step in result["plan"]["steps"]],
+            ["embedding_cluster", "cluster_label_candidates", "issue_cluster_summary", "issue_evidence_summary"],
+        )
+
+    def test_rule_based_planner_builds_issue_cluster_summary_subset_sequence(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PYTHON_AI_LLM_PROVIDER": "anthropic",
+            },
+            clear=False,
+        ):
+            result = run_planner(
+                {
+                    "dataset_name": "issues_cluster.csv",
+                    "data_type": "unstructured",
+                    "goal": "최근 문의 중에서 주요 이슈 군집을 묶어서 보여줘",
+                }
+            )
+
+        self.assertEqual(
+            [step["skill_name"] for step in result["plan"]["steps"]],
             ["document_filter", "deduplicate_documents", "embedding_cluster", "cluster_label_candidates", "issue_cluster_summary", "issue_evidence_summary"],
         )
 
