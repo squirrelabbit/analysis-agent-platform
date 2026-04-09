@@ -728,6 +728,23 @@ paths:
                 $ref: "#/components/schemas/ExecutionSummary"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/executions/{execution_id}/events:
+    get:
+      tags: [Executions]
+      summary: Get execution event timeline
+      operationId: getExecutionEvents
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ExecutionId"
+      responses:
+        "200":
+          description: Execution event timeline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionEventsResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/executions/{execution_id}/progress:
     get:
       tags: [Executions]
@@ -2024,6 +2041,24 @@ components:
             - $ref: "#/components/schemas/ExecutionDiagnostics"
             - type: "null"
       required: [execution_id, artifacts, contract, result_v1]
+    ExecutionEventsResponse:
+      type: object
+      properties:
+        execution_id:
+          type: string
+        status:
+          type: string
+        event_count:
+          type: integer
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutionEvent"
+        diagnostics:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionDiagnostics"
+            - type: "null"
+      required: [execution_id, status, event_count, events]
     ExecutionProgressResponse:
       type: object
       properties:

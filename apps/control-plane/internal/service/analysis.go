@@ -453,6 +453,20 @@ func (s *AnalysisService) BuildExecutionProgress(projectID, executionID string) 
 	return response, nil
 }
 
+func (s *AnalysisService) BuildExecutionEvents(projectID, executionID string) (domain.ExecutionEventsResponse, error) {
+	execution, err := s.GetExecution(projectID, executionID)
+	if err != nil {
+		return domain.ExecutionEventsResponse{}, err
+	}
+	return domain.ExecutionEventsResponse{
+		ExecutionID: execution.ExecutionID,
+		Status:      execution.Status,
+		EventCount:  len(execution.Events),
+		Events:      execution.Events,
+		Diagnostics: execution.Diagnostics,
+	}, nil
+}
+
 func (s *AnalysisService) CreateReportDraft(projectID string, input domain.ReportDraftCreateRequest) (domain.ReportDraft, error) {
 	if _, err := s.store.GetProject(projectID); err != nil {
 		if err == store.ErrNotFound {
