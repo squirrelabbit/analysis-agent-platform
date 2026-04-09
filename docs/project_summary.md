@@ -44,6 +44,7 @@
 - cluster 산출물은 현재 `summary JSON + membership parquet`로 분리 저장한다.
 - execution 완료 후에는 `result_v1 snapshot`과 `final_answer snapshot`을 함께 남긴다.
 - execution 조회는 현재 `events`, `progress`, `step preview` 경로를 통해 중간 진행 상태를 노출한다.
+- step 완료 시 execution row에는 raw artifact 전체 대신 `summary / preview / artifact_ref` 중심 compact payload를 저장한다.
 
 ## 현재 범위
 

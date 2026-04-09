@@ -113,7 +113,11 @@ func (r DuckDBRunner) Run(ctx context.Context, execution domain.ExecutionSummary
 				result.StepHooks = append(result.StepHooks, afterRecords...)
 				return StructuredPlanResult{}, fmt.Errorf("step %s (%s): %w", step.StepID, step.SkillName, err)
 			}
-			result.Artifacts[artifactKey(step)] = artifactJSON
+			compactedArtifactJSON, err := compactExecutionArtifactForStorage(step, artifactJSON)
+			if err != nil {
+				return StructuredPlanResult{}, fmt.Errorf("step %s (%s) compact artifact: %w", step.StepID, step.SkillName, err)
+			}
+			result.Artifacts[artifactKey(step)] = compactedArtifactJSON
 			afterRecords, err := executeAfterStepHooks(
 				ctx,
 				r.Hooks,
@@ -121,8 +125,8 @@ func (r DuckDBRunner) Run(ctx context.Context, execution domain.ExecutionSummary
 				step,
 				StepHookOutcome{
 					Status:         "completed",
-					ArtifactBytes:  len(artifactJSON),
-					StoredArtifact: artifactJSON,
+					ArtifactBytes:  len(compactedArtifactJSON),
+					StoredArtifact: compactedArtifactJSON,
 				},
 			)
 			if err != nil {

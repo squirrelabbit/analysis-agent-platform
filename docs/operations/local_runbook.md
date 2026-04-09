@@ -64,6 +64,7 @@ docker compose -f compose.dev.yml logs -f postgres
   - `clusters.memberships.parquet`
 
 실행 상태와 snapshot은 Postgres metadata와 artifact 파일을 함께 본다.
+execution row에는 raw artifact 전체가 아니라 compact payload가 저장되므로, 큰 본문이 필요하면 `artifact_ref`나 dataset build sidecar를 직접 본다.
 
 ## 6. 자주 확인하는 API
 
