@@ -27,10 +27,8 @@
 | 구현 현실 | `docs/skill/skill_implementation_status.md` | 스킬 구현 방식과 안정도 |
 | 기록 | `docs/chat-notes/*.md`, `docs/devlog/*.md` | 결정과 작업 이력 |
 
-## 역사 문서
+## 역사/참고 문서
 
-- [architecture/migration_plan.md](architecture/migration_plan.md)
-  - 완료된 이행 기록
 - [architecture/unstructured_storage_transition.md](architecture/unstructured_storage_transition.md)
   - 현재 저장 구조 참고와 전환 배경
 
