@@ -762,6 +762,28 @@ paths:
                 $ref: "#/components/schemas/ExecutionProgressResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/executions/{execution_id}/steps/{step_id}:
+    get:
+      tags: [Executions]
+      summary: Get execution step preview
+      operationId: getExecutionStepPreview
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ExecutionId"
+        - name: step_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Execution step preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionStepPreviewResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/executions/{execution_id}/result:
     get:
       tags: [Executions]
@@ -2106,6 +2128,58 @@ components:
             - $ref: "#/components/schemas/ExecutionDiagnostics"
             - type: "null"
       required: [execution_id, status, total_steps, completed_steps, failed_steps, steps]
+    ExecutionStepPreviewResponse:
+      type: object
+      properties:
+        execution_id:
+          type: string
+        step_id:
+          type: string
+        skill_name:
+          type: string
+        status:
+          type: string
+        started_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        completed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        artifact_key:
+          type:
+            - string
+            - "null"
+        artifact_ref:
+          type:
+            - string
+            - "null"
+        summary:
+          type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        selection_mode:
+          type: string
+        usage:
+          $ref: "#/components/schemas/AnyMap"
+        preview:
+          $ref: "#/components/schemas/AnyMap"
+        event_count:
+          type: integer
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutionEvent"
+        diagnostics:
+          anyOf:
+            - $ref: "#/components/schemas/ExecutionDiagnostics"
+            - type: "null"
+      required: [execution_id, step_id, skill_name, status, event_count]
     ExecutionResultV1:
       type: object
       properties:

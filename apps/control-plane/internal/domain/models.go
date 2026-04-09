@@ -494,6 +494,25 @@ type ExecutionProgressResponse struct {
 	Diagnostics        *ExecutionDiagnostics      `json:"diagnostics,omitempty"`
 }
 
+type ExecutionStepPreviewResponse struct {
+	ExecutionID   string                `json:"execution_id"`
+	StepID        string                `json:"step_id"`
+	SkillName     string                `json:"skill_name"`
+	Status        string                `json:"status"`
+	StartedAt     *time.Time            `json:"started_at,omitempty"`
+	CompletedAt   *time.Time            `json:"completed_at,omitempty"`
+	ArtifactKey   *string               `json:"artifact_key,omitempty"`
+	ArtifactRef   *string               `json:"artifact_ref,omitempty"`
+	Summary       string                `json:"summary,omitempty"`
+	Warnings      []string              `json:"warnings,omitempty"`
+	SelectionMode string                `json:"selection_mode,omitempty"`
+	Usage         map[string]any        `json:"usage,omitempty"`
+	Preview       map[string]any        `json:"preview,omitempty"`
+	EventCount    int                   `json:"event_count"`
+	Events        []ExecutionEvent      `json:"events,omitempty"`
+	Diagnostics   *ExecutionDiagnostics `json:"diagnostics,omitempty"`
+}
+
 type ReportDraftCreateRequest struct {
 	Title        *string  `json:"title,omitempty"`
 	ExecutionIDs []string `json:"execution_ids"`
