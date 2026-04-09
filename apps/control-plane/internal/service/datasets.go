@@ -566,6 +566,58 @@ func (s *DatasetService) ValidateDatasetProfiles() (domain.DatasetProfileValidat
 	return response, nil
 }
 
+func (s *DatasetService) GetDatasetProfileRegistry() (domain.DatasetProfileRegistryView, error) {
+	validation, err := s.ValidateDatasetProfiles()
+	if err != nil {
+		return domain.DatasetProfileRegistryView{}, err
+	}
+	return validation.Registry, nil
+}
+
+func (s *DatasetService) GetPromptCatalog() (domain.PromptCatalogResponse, error) {
+	catalog, err := s.promptCatalog()
+	if err != nil {
+		return domain.PromptCatalogResponse{}, err
+	}
+	if len(catalog) == 0 {
+		capabilities, err := s.fetchWorkerCapabilities()
+		if err != nil {
+			return domain.PromptCatalogResponse{}, err
+		}
+		if capabilities != nil {
+			catalog = append([]domain.PromptTemplateMetadata(nil), capabilities.PromptCatalog...)
+		}
+	}
+	return domain.PromptCatalogResponse{
+		SourcePath: s.promptTemplatesDir,
+		Items:      catalog,
+	}, nil
+}
+
+func (s *DatasetService) GetRuleCatalog() (domain.RuleCatalogResponse, error) {
+	capabilities, err := s.fetchWorkerCapabilities()
+	if err != nil {
+		return domain.RuleCatalogResponse{
+			Available: false,
+			Source:    "worker_capabilities",
+			Warning:   fmt.Sprintf("python-ai worker capability 조회에 실패했습니다: %v", err),
+		}, nil
+	}
+	if capabilities == nil {
+		return domain.RuleCatalogResponse{
+			Available: false,
+			Source:    "worker_capabilities",
+			Warning:   "python-ai worker URL이 설정되지 않아 rule catalog를 조회하지 못했습니다.",
+		}, nil
+	}
+	catalog := capabilities.RuleCatalog
+	return domain.RuleCatalogResponse{
+		Available: true,
+		Source:    "worker_capabilities",
+		Catalog:   &catalog,
+	}, nil
+}
+
 func (s *DatasetService) availablePromptVersions() ([]string, error) {
 	catalog, err := s.promptCatalog()
 	if err != nil {

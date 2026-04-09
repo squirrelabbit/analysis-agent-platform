@@ -126,6 +126,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/cluster_jobs", s.handleCreateClusterJob)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/build_jobs", s.handleListDatasetBuildJobs)
 	s.mux.HandleFunc("GET /projects/{project_id}/dataset_build_jobs/{job_id}", s.handleGetDatasetBuildJob)
+	s.mux.HandleFunc("GET /dataset_profiles", s.handleGetDatasetProfileRegistry)
+	s.mux.HandleFunc("GET /prompt_catalog", s.handleGetPromptCatalog)
+	s.mux.HandleFunc("GET /rule_catalog", s.handleGetRuleCatalog)
 	s.mux.HandleFunc("GET /dataset_profiles/validate", s.handleValidateDatasetProfiles)
 	s.mux.HandleFunc("POST /projects/{project_id}/analysis_requests", s.handleSubmitAnalysis)
 	s.mux.HandleFunc("GET /projects/{project_id}/analysis_requests/{request_id}", s.handleGetRequest)
@@ -655,6 +658,33 @@ func (s *Server) handleGetDatasetBuildJob(w stdhttp.ResponseWriter, r *stdhttp.R
 
 func (s *Server) handleValidateDatasetProfiles(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 	response, err := s.datasetService.ValidateDatasetProfiles()
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleGetDatasetProfileRegistry(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	response, err := s.datasetService.GetDatasetProfileRegistry()
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleGetPromptCatalog(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	response, err := s.datasetService.GetPromptCatalog()
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleGetRuleCatalog(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	response, err := s.datasetService.GetRuleCatalog()
 	if err != nil {
 		s.writeServiceError(w, err)
 		return

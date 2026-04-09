@@ -618,6 +618,42 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DatasetProfileValidationResponse"
+  /dataset_profiles:
+    get:
+      tags: [Datasets]
+      summary: Get dataset profile registry view
+      operationId: getDatasetProfileRegistry
+      responses:
+        "200":
+          description: Dataset profile registry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetProfileRegistryView"
+  /prompt_catalog:
+    get:
+      tags: [Datasets]
+      summary: Get prompt template catalog
+      operationId: getPromptCatalog
+      responses:
+        "200":
+          description: Prompt catalog response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptCatalogResponse"
+  /rule_catalog:
+    get:
+      tags: [Datasets]
+      summary: Get worker rule catalog
+      operationId: getRuleCatalog
+      responses:
+        "200":
+          description: Rule catalog response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuleCatalogResponse"
   /projects/{project_id}/analysis_requests:
     post:
       tags: [Analysis]
@@ -1311,6 +1347,34 @@ components:
           items:
             $ref: "#/components/schemas/DatasetProfileValidationIssue"
       required: [registry, valid]
+    PromptCatalogResponse:
+      type: object
+      properties:
+        source_path:
+          type:
+            - string
+            - "null"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PromptTemplateMetadata"
+      required: [items]
+    RuleCatalogResponse:
+      type: object
+      properties:
+        available:
+          type: boolean
+        source:
+          type: string
+        catalog:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetProfileRuleCatalog"
+            - type: "null"
+        warning:
+          type:
+            - string
+            - "null"
+      required: [available]
     DatasetVersion:
       type: object
       description: |

@@ -38,6 +38,7 @@
 
 - dataset version은 생성 시 resolved profile을 저장한다.
 - prompt template는 `config/prompts/*.md`, 기본 dataset profile은 `config/dataset_profiles.json`에서 관리한다.
+- 운영/프론트는 `GET /dataset_profiles`, `GET /prompt_catalog`, `GET /rule_catalog`, `GET /dataset_profiles/validate`로 현재 registry와 catalog 상태를 조회할 수 있다.
 - `prepare`는 eager, `sentiment / embedding / cluster`는 lazy build를 기본 정책으로 둔다.
 - full-dataset `embedding_cluster`는 precomputed cluster artifact를 우선 읽고, subset 경로만 on-demand fallback을 허용한다.
 - cluster artifact와 step preview에는 `cluster_execution_mode`, `cluster_materialization_scope`, `cluster_fallback_reason`가 포함돼 materialized/full-dataset 경로와 subset fallback 경로를 구분할 수 있다.
