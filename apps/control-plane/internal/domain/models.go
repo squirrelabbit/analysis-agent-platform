@@ -649,3 +649,36 @@ type ExecutionDiffResponse struct {
 	ChangedSteps    int                 `json:"changed_steps"`
 	Steps           []ExecutionDiffStep `json:"steps"`
 }
+
+type OperationsFailureItem struct {
+	ID          string     `json:"id"`
+	Status      string     `json:"status"`
+	Type        string     `json:"type,omitempty"`
+	Message     string     `json:"message,omitempty"`
+	OccurredAt  *time.Time `json:"occurred_at,omitempty"`
+	RetryCount  int        `json:"retry_count,omitempty"`
+	ResourceRef string     `json:"resource_ref,omitempty"`
+}
+
+type OperationsExecutionSummary struct {
+	Total               int                     `json:"total"`
+	ByStatus            map[string]int          `json:"by_status,omitempty"`
+	WaitingByDependency map[string]int          `json:"waiting_by_dependency,omitempty"`
+	FinalAnswerByStatus map[string]int          `json:"final_answer_by_status,omitempty"`
+	RecentFailures      []OperationsFailureItem `json:"recent_failures,omitempty"`
+}
+
+type OperationsBuildJobSummary struct {
+	Total          int                       `json:"total"`
+	ByStatus       map[string]int            `json:"by_status,omitempty"`
+	ByType         map[string]map[string]int `json:"by_type,omitempty"`
+	RetryingJobs   int                       `json:"retrying_jobs"`
+	RecentFailures []OperationsFailureItem   `json:"recent_failures,omitempty"`
+}
+
+type OperationsSummaryResponse struct {
+	ProjectID   string                     `json:"project_id"`
+	GeneratedAt time.Time                  `json:"generated_at"`
+	Executions  OperationsExecutionSummary `json:"executions"`
+	BuildJobs   OperationsBuildJobSummary  `json:"build_jobs"`
+}

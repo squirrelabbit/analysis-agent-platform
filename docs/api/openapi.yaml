@@ -837,6 +837,22 @@ paths:
                 $ref: "#/components/schemas/ExecutionResultResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/operations/summary:
+    get:
+      tags: [Executions]
+      summary: Get aggregated operations summary for a project
+      operationId: getOperationsSummary
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Operations summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationsSummaryResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/executions/{execution_id}/resume:
     post:
       tags: [Executions]
@@ -1037,6 +1053,10 @@ components:
       type: object
       additionalProperties:
         type: string
+    IntegerMap:
+      type: object
+      additionalProperties:
+        type: integer
     Project:
       type: object
       properties:
@@ -2244,6 +2264,74 @@ components:
             - $ref: "#/components/schemas/ExecutionDiagnostics"
             - type: "null"
       required: [execution_id, step_id, skill_name, status, event_count]
+    OperationsFailureItem:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        type:
+          type: string
+        message:
+          type: string
+        occurred_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        retry_count:
+          type: integer
+        resource_ref:
+          type: string
+      required: [id, status]
+    OperationsExecutionSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        by_status:
+          $ref: "#/components/schemas/IntegerMap"
+        waiting_by_dependency:
+          $ref: "#/components/schemas/IntegerMap"
+        final_answer_by_status:
+          $ref: "#/components/schemas/IntegerMap"
+        recent_failures:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperationsFailureItem"
+      required: [total]
+    OperationsBuildJobSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        by_status:
+          $ref: "#/components/schemas/IntegerMap"
+        by_type:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/IntegerMap"
+        retrying_jobs:
+          type: integer
+        recent_failures:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperationsFailureItem"
+      required: [total, retrying_jobs]
+    OperationsSummaryResponse:
+      type: object
+      properties:
+        project_id:
+          type: string
+        generated_at:
+          type: string
+          format: date-time
+        executions:
+          $ref: "#/components/schemas/OperationsExecutionSummary"
+        build_jobs:
+          $ref: "#/components/schemas/OperationsBuildJobSummary"
+      required: [project_id, generated_at, executions, build_jobs]
     ExecutionResultV1:
       type: object
       properties:

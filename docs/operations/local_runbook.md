@@ -26,6 +26,12 @@ curl -fsS http://127.0.0.1:18080/openapi.yaml | head
 Swagger:
 - `http://127.0.0.1:18080/swagger`
 
+프로젝트 단위 운영 요약:
+
+```bash
+curl -fsS "$API/projects/$PROJECT_ID/operations/summary" | jq
+```
+
 ## 3. web console scaffold
 
 ```bash
@@ -76,6 +82,7 @@ execution row에는 raw artifact 전체가 아니라 compact payload가 저장�
 - `GET /projects/{project_id}/executions/{execution_id}/progress`
 - `GET /projects/{project_id}/executions/{execution_id}/steps/{step_id}`
 - `GET /projects/{project_id}/executions/{execution_id}/result`
+- `GET /projects/{project_id}/operations/summary`
 - `GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clusters/{cluster_id}/members`
 - `GET /dataset_profiles/validate`
 - `GET /dataset_profiles`

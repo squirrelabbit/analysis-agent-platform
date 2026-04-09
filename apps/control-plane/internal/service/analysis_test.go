@@ -1976,6 +1976,149 @@ func TestListExecutionsBuildsSnapshotPreview(t *testing.T) {
 	}
 }
 
+func TestGetOperationsSummaryAggregatesExecutionsAndBuildJobs(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-ops", Name: "ops"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	failedMessage := "python worker timeout"
+	lastErrorType := "worker_timeout"
+	for _, execution := range []domain.ExecutionSummary{
+		{
+			ExecutionID: "exec-running",
+			ProjectID:   project.ProjectID,
+			RequestID:   "request-1",
+			Status:      "running",
+			CreatedAt:   now.Add(-5 * time.Minute),
+			Plan:        domain.SkillPlan{PlanID: "plan-1"},
+			Artifacts:   map[string]string{},
+			Events: []domain.ExecutionEvent{
+				{ExecutionID: "exec-running", TS: now.Add(-4 * time.Minute), EventType: "WORKFLOW_STARTED", Message: "started"},
+			},
+		},
+		{
+			ExecutionID:      "exec-waiting",
+			ProjectID:        project.ProjectID,
+			RequestID:        "request-2",
+			Status:           "waiting",
+			CreatedAt:        now.Add(-4 * time.Minute),
+			DatasetVersionID: stringPointer("version-1"),
+			Plan:             domain.SkillPlan{PlanID: "plan-2"},
+			Artifacts:        map[string]string{},
+			Events: []domain.ExecutionEvent{
+				{ExecutionID: "exec-waiting", TS: now.Add(-3 * time.Minute), EventType: "WORKFLOW_WAITING", Message: "waiting", Payload: map[string]any{"waiting_for": "embeddings", "reason": "not ready"}},
+			},
+		},
+		{
+			ExecutionID: "exec-failed",
+			ProjectID:   project.ProjectID,
+			RequestID:   "request-3",
+			Status:      "failed",
+			CreatedAt:   now.Add(-3 * time.Minute),
+			EndedAt:     timePointer(now.Add(-2 * time.Minute)),
+			Plan:        domain.SkillPlan{PlanID: "plan-3"},
+			Artifacts:   map[string]string{},
+			Events: []domain.ExecutionEvent{
+				{ExecutionID: "exec-failed", TS: now.Add(-2 * time.Minute), EventType: "WORKFLOW_FAILED", Message: "worker failed", Payload: map[string]any{"error": "llm failure"}},
+			},
+		},
+		{
+			ExecutionID: "exec-completed",
+			ProjectID:   project.ProjectID,
+			RequestID:   "request-4",
+			Status:      "completed",
+			CreatedAt:   now.Add(-2 * time.Minute),
+			EndedAt:     timePointer(now.Add(-time.Minute)),
+			Plan:        domain.SkillPlan{PlanID: "plan-4"},
+			Artifacts:   map[string]string{},
+			FinalAnswerSnapshot: &domain.ExecutionFinalAnswer{
+				Status: "ready",
+			},
+			Events: []domain.ExecutionEvent{
+				{ExecutionID: "exec-completed", TS: now.Add(-time.Minute), EventType: "WORKFLOW_COMPLETED", Message: "completed"},
+			},
+		},
+	} {
+		if err := repository.SaveExecution(execution); err != nil {
+			t.Fatalf("unexpected save execution error: %v", err)
+		}
+	}
+
+	for _, job := range []domain.DatasetBuildJob{
+		{
+			JobID:            "job-prepare",
+			ProjectID:        project.ProjectID,
+			DatasetID:        "dataset-1",
+			DatasetVersionID: "version-1",
+			BuildType:        "prepare",
+			Status:           "completed",
+			Attempt:          1,
+			CreatedAt:        now.Add(-10 * time.Minute),
+			CompletedAt:      timePointer(now.Add(-9 * time.Minute)),
+		},
+		{
+			JobID:            "job-embedding",
+			ProjectID:        project.ProjectID,
+			DatasetID:        "dataset-1",
+			DatasetVersionID: "version-1",
+			BuildType:        "embedding",
+			Status:           "running",
+			Attempt:          2,
+			CreatedAt:        now.Add(-6 * time.Minute),
+			StartedAt:        timePointer(now.Add(-5 * time.Minute)),
+		},
+		{
+			JobID:            "job-cluster",
+			ProjectID:        project.ProjectID,
+			DatasetID:        "dataset-1",
+			DatasetVersionID: "version-1",
+			BuildType:        "cluster",
+			Status:           "failed",
+			Attempt:          3,
+			LastErrorType:    &lastErrorType,
+			ErrorMessage:     &failedMessage,
+			CreatedAt:        now.Add(-4 * time.Minute),
+			CompletedAt:      timePointer(now.Add(-3 * time.Minute)),
+		},
+	} {
+		if err := repository.SaveDatasetBuildJob(job); err != nil {
+			t.Fatalf("unexpected save build job error: %v", err)
+		}
+	}
+
+	summary, err := service.GetOperationsSummary(project.ProjectID)
+	if err != nil {
+		t.Fatalf("unexpected operations summary error: %v", err)
+	}
+
+	if summary.Executions.Total != 4 || summary.Executions.ByStatus["failed"] != 1 || summary.Executions.ByStatus["waiting"] != 1 {
+		t.Fatalf("unexpected execution summary: %+v", summary.Executions)
+	}
+	if summary.Executions.WaitingByDependency["embeddings"] != 1 {
+		t.Fatalf("unexpected waiting summary: %+v", summary.Executions.WaitingByDependency)
+	}
+	if summary.Executions.FinalAnswerByStatus["ready"] != 1 {
+		t.Fatalf("unexpected final answer summary: %+v", summary.Executions.FinalAnswerByStatus)
+	}
+	if len(summary.Executions.RecentFailures) != 1 || summary.Executions.RecentFailures[0].ID != "exec-failed" {
+		t.Fatalf("unexpected execution failures: %+v", summary.Executions.RecentFailures)
+	}
+	if summary.BuildJobs.Total != 3 || summary.BuildJobs.ByStatus["failed"] != 1 || summary.BuildJobs.ByType["cluster"]["failed"] != 1 {
+		t.Fatalf("unexpected build job summary: %+v", summary.BuildJobs)
+	}
+	if summary.BuildJobs.RetryingJobs != 2 {
+		t.Fatalf("unexpected retrying jobs count: %+v", summary.BuildJobs)
+	}
+	if len(summary.BuildJobs.RecentFailures) != 1 || summary.BuildJobs.RecentFailures[0].ID != "job-cluster" {
+		t.Fatalf("unexpected build job failures: %+v", summary.BuildJobs.RecentFailures)
+	}
+}
+
 func TestCreateReportDraftBuildsSnapshotSections(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
@@ -2189,6 +2332,10 @@ func TestResolvedTextColumnForSkillTreatsDefaultTextAsPlaceholderWhenRawColumnDi
 }
 
 func stringPtr(value string) *string {
+	return &value
+}
+
+func timePointer(value time.Time) *time.Time {
 	return &value
 }
 
