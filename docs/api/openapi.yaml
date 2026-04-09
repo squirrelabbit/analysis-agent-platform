@@ -2072,6 +2072,11 @@ components:
           type: integer
         failed_steps:
           type: integer
+        last_event_at:
+          type:
+            - string
+            - "null"
+          format: date-time
         running_step:
           anyOf:
             - $ref: "#/components/schemas/ExecutionStepProgress"
@@ -2080,6 +2085,10 @@ components:
           anyOf:
             - $ref: "#/components/schemas/ExecutionWaitingState"
             - type: "null"
+        build_dependencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExecutionBuildDependency"
         steps:
           type: array
           items:
@@ -2239,6 +2248,16 @@ components:
           type: string
         status:
           type: string
+        started_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        completed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
         artifact_key:
           type:
             - string
@@ -2252,6 +2271,23 @@ components:
         selection_mode:
           type: string
       required: [step_id, skill_name, status]
+    ExecutionBuildDependency:
+      type: object
+      properties:
+        build_type:
+          type: string
+          enum: [prepare, sentiment, embedding, cluster]
+        status:
+          type: string
+        ready:
+          type: boolean
+        waiting_for:
+          type: boolean
+        latest_job:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetBuildJob"
+            - type: "null"
+      required: [build_type, status, ready]
     ExecutionWaitingState:
       type: object
       properties:

@@ -418,6 +418,10 @@ func (s *AnalysisService) BuildExecutionProgress(projectID, executionID string) 
 	}
 	resultV1 := buildExecutionResultV1(execution, nil)
 	steps := buildExecutionProgressSteps(execution, resultV1.StepResults)
+	buildDependencies, err := s.buildExecutionDependenciesProgress(projectID, execution)
+	if err != nil {
+		return domain.ExecutionProgressResponse{}, err
+	}
 	completedSteps := 0
 	failedSteps := 0
 	var runningStep *domain.ExecutionStepProgress
@@ -434,14 +438,21 @@ func (s *AnalysisService) BuildExecutionProgress(projectID, executionID string) 
 			}
 		}
 	}
+	var lastEventAt *time.Time
+	if len(execution.Events) > 0 {
+		ts := execution.Events[len(execution.Events)-1].TS
+		lastEventAt = &ts
+	}
 	response := domain.ExecutionProgressResponse{
 		ExecutionID:        execution.ExecutionID,
 		Status:             execution.Status,
 		TotalSteps:         len(execution.Plan.Steps),
 		CompletedSteps:     completedSteps,
 		FailedSteps:        failedSteps,
+		LastEventAt:        lastEventAt,
 		RunningStep:        runningStep,
 		Waiting:            executionresult.BuildV1(execution).Waiting,
+		BuildDependencies:  buildDependencies,
 		Steps:              steps,
 		AvailableArtifacts: sortedArtifactKeys(execution.Artifacts),
 		Diagnostics:        execution.Diagnostics,
@@ -645,13 +656,28 @@ func buildExecutionProgressSteps(execution domain.ExecutionSummary, completed []
 		switch event.EventType {
 		case "STEP_STARTED":
 			item.Status = "running"
+			eventTS := event.TS
+			item.StartedAt = &eventTS
+			item.CompletedAt = nil
 		case "STEP_COMPLETED":
 			item.Status = "completed"
+			if item.StartedAt == nil {
+				eventTS := event.TS
+				item.StartedAt = &eventTS
+			}
+			eventTS := event.TS
+			item.CompletedAt = &eventTS
 			if artifactKey := strings.TrimSpace(anyStringValue(event.Payload["artifact_key"])); artifactKey != "" {
 				item.ArtifactKey = &artifactKey
 			}
 		case "STEP_FAILED":
 			item.Status = "failed"
+			if item.StartedAt == nil {
+				eventTS := event.TS
+				item.StartedAt = &eventTS
+			}
+			eventTS := event.TS
+			item.CompletedAt = &eventTS
 			if message := strings.TrimSpace(anyStringValue(event.Payload["error"])); message != "" {
 				item.Warnings = uniqueNonEmptyStrings(append(item.Warnings, message))
 			}
@@ -673,6 +699,153 @@ func buildExecutionProgressSteps(execution domain.ExecutionSummary, completed []
 		steps = append(steps, item)
 	}
 	return steps
+}
+
+func (s *AnalysisService) buildExecutionDependenciesProgress(projectID string, execution domain.ExecutionSummary) ([]domain.ExecutionBuildDependency, error) {
+	if execution.DatasetVersionID == nil || strings.TrimSpace(*execution.DatasetVersionID) == "" {
+		return nil, nil
+	}
+
+	versionID := strings.TrimSpace(*execution.DatasetVersionID)
+	version, err := s.store.GetDatasetVersion(projectID, versionID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return nil, ErrNotFound{Resource: "dataset version"}
+		}
+		return nil, err
+	}
+
+	requiredBuildTypes := requiredBuildTypesForPlan(execution.Plan)
+	if len(requiredBuildTypes) == 0 {
+		return nil, nil
+	}
+	jobs, err := s.store.ListDatasetBuildJobs(projectID, versionID)
+	if err != nil {
+		return nil, err
+	}
+	latestJobsByType := latestDatasetBuildJobsByType(jobs)
+	waitingState := latestWaitingState(execution.Status, execution.Events)
+	waitingBuildType := buildTypeForWaitingState(waitingState)
+	clusterRequest, hasMaterializedClusterRequest := domain.ClusterMaterializationRequestForPlan(execution.Plan)
+
+	dependencies := make([]domain.ExecutionBuildDependency, 0, len(requiredBuildTypes))
+	for _, buildType := range requiredBuildTypes {
+		if buildType == datasetBuildTypeCluster && (!hasMaterializedClusterRequest || clusterRequest == nil) {
+			continue
+		}
+		ready, status := dependencyStatusForVersion(buildType, version, clusterRequest, hasMaterializedClusterRequest)
+		dependency := domain.ExecutionBuildDependency{
+			BuildType:  buildType,
+			Status:     status,
+			Ready:      ready,
+			WaitingFor: buildType == waitingBuildType,
+		}
+		if job, ok := latestJobsByType[buildType]; ok {
+			jobCopy := withBuildJobDiagnostics(job)
+			dependency.LatestJob = &jobCopy
+			if !dependency.Ready {
+				dependency.Status = strings.TrimSpace(job.Status)
+			}
+		}
+		dependencies = append(dependencies, dependency)
+	}
+	return dependencies, nil
+}
+
+func requiredBuildTypesForPlan(plan domain.SkillPlan) []string {
+	buildTypes := make([]string, 0, 4)
+	if planRequiresPrepare(plan) {
+		buildTypes = append(buildTypes, datasetBuildTypePrepare)
+	}
+	if planRequiresSentiment(plan) {
+		buildTypes = append(buildTypes, datasetBuildTypeSentiment)
+	}
+	if planRequiresEmbedding(plan) {
+		buildTypes = append(buildTypes, datasetBuildTypeEmbedding)
+	}
+	if planRequiresCluster(plan) {
+		buildTypes = append(buildTypes, datasetBuildTypeCluster)
+	}
+	return buildTypes
+}
+
+func latestDatasetBuildJobsByType(items []domain.DatasetBuildJob) map[string]domain.DatasetBuildJob {
+	latest := make(map[string]domain.DatasetBuildJob)
+	for _, item := range items {
+		current, ok := latest[item.BuildType]
+		if !ok || item.CreatedAt.After(current.CreatedAt) {
+			latest[item.BuildType] = item
+		}
+	}
+	return latest
+}
+
+func buildTypeForWaitingState(waiting *domain.ExecutionWaitingState) string {
+	if waiting == nil {
+		return ""
+	}
+	switch strings.TrimSpace(waiting.WaitingFor) {
+	case "dataset_prepare":
+		return datasetBuildTypePrepare
+	case "sentiment_labels":
+		return datasetBuildTypeSentiment
+	case "embeddings":
+		return datasetBuildTypeEmbedding
+	case "cluster_artifact":
+		return datasetBuildTypeCluster
+	default:
+		return ""
+	}
+}
+
+func dependencyStatusForVersion(buildType string, version domain.DatasetVersion, clusterRequest *domain.DatasetClusterBuildRequest, hasMaterializedClusterRequest bool) (bool, string) {
+	switch buildType {
+	case datasetBuildTypePrepare:
+		ready := datasetPrepareReady(version)
+		status := strings.TrimSpace(version.PrepareStatus)
+		if status == "" {
+			status = "missing"
+		}
+		if ready {
+			status = "ready"
+		}
+		return ready, status
+	case datasetBuildTypeSentiment:
+		ready := datasetSentimentReady(version)
+		status := strings.TrimSpace(version.SentimentStatus)
+		if status == "" {
+			status = "missing"
+		}
+		if ready {
+			status = "ready"
+		}
+		return ready, status
+	case datasetBuildTypeEmbedding:
+		ready := datasetEmbeddingReady(version)
+		status := strings.TrimSpace(version.EmbeddingStatus)
+		if status == "" {
+			status = "missing"
+		}
+		if ready {
+			status = "ready"
+		}
+		return ready, status
+	case datasetBuildTypeCluster:
+		if !hasMaterializedClusterRequest || clusterRequest == nil {
+			return false, "not_required"
+		}
+		ready := domain.ClusterRequestMatchesMetadata(*clusterRequest, version.Metadata)
+		status := strings.TrimSpace(anyStringValue(version.Metadata["cluster_status"]))
+		if status == "" {
+			status = "missing"
+		}
+		if ready {
+			status = "ready"
+		}
+		return ready, status
+	default:
+		return false, "missing"
+	}
 }
 
 func latestCompletedStepHooks(events []domain.ExecutionEvent) any {
