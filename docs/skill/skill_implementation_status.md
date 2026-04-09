@@ -135,6 +135,8 @@
 
 - python-ai skill 구현은 현재 `preprocess / aggregate / retrieve / summarize / presentation` 기준으로 나뉘어 있다.
 - `support.py`, `core.py`는 runtime 주 진입점이 아니라 legacy import 호환 레이어다.
+- `embedding_cluster`, `cluster_label_candidates`, `issue_evidence_summary`는 `config/skill_policies/*.json` 기반 versioned policy를 읽는다.
+- 위 세 스킬 artifact에는 `policy_version`, `policy_hash`가 남아 replay와 비교에 사용된다.
 - broad cluster 질문은 planner가 `materialized cluster` 경로를 우선 타도록 최근 정리되었다.
 - subset/filter가 앞에 붙는 cluster 질문은 현재도 on-demand fallback을 사용한다.
 - worker capability surface는 실제 실행 가능한 `python-ai` task만 노출하도록 정리되었다.

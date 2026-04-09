@@ -1,0 +1,15 @@
+{
+  "version": "issue-evidence-summary-v1",
+  "skill_name": "issue_evidence_summary",
+  "status": "active",
+  "summary": "evidence source 우선순위와 최대 근거 개수 정책",
+  "policy": {
+    "selection_source_priority": [
+      "semantic_search",
+      "cluster_membership",
+      "document_sample",
+      "lexical_overlap"
+    ],
+    "max_selected_documents": 3
+  }
+}

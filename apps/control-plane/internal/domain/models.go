@@ -254,6 +254,15 @@ type PromptTemplateMetadata struct {
 	DefaultGroups []string `json:"default_groups,omitempty"`
 }
 
+type SkillPolicyMetadata struct {
+	Version       string   `json:"version"`
+	SkillName     string   `json:"skill_name,omitempty"`
+	Status        string   `json:"status,omitempty"`
+	Summary       string   `json:"summary,omitempty"`
+	DefaultGroups []string `json:"default_groups,omitempty"`
+	PolicyHash    string   `json:"policy_hash,omitempty"`
+}
+
 type DatasetProfileRuleCatalog struct {
 	AvailablePrepareRegexRuleNames []string `json:"available_prepare_regex_rule_names,omitempty"`
 	DefaultPrepareRegexRuleNames   []string `json:"default_prepare_regex_rule_names,omitempty"`
@@ -288,6 +297,30 @@ type DatasetProfileValidationResponse struct {
 type PromptCatalogResponse struct {
 	SourcePath string                   `json:"source_path,omitempty"`
 	Items      []PromptTemplateMetadata `json:"items"`
+}
+
+type SkillPolicyValidationIssue struct {
+	Severity    string `json:"severity"`
+	Code        string `json:"code"`
+	Message     string `json:"message"`
+	Scope       string `json:"scope,omitempty"`
+	ResourceRef string `json:"resource_ref,omitempty"`
+}
+
+type SkillPolicyCatalogResponse struct {
+	Available bool                  `json:"available"`
+	Source    string                `json:"source,omitempty"`
+	Items     []SkillPolicyMetadata `json:"items,omitempty"`
+	Warning   string                `json:"warning,omitempty"`
+}
+
+type SkillPolicyValidationResponse struct {
+	Available bool                         `json:"available"`
+	Source    string                       `json:"source,omitempty"`
+	Valid     bool                         `json:"valid"`
+	Issues    []SkillPolicyValidationIssue `json:"issues,omitempty"`
+	Catalog   []SkillPolicyMetadata        `json:"catalog,omitempty"`
+	Warning   string                       `json:"warning,omitempty"`
 }
 
 type RuleCatalogResponse struct {

@@ -5,6 +5,7 @@ from typing import Any
 
 from .planner import run_planner
 from .prompt_registry import prompt_catalog
+from .skill_policy_registry import skill_policy_catalog, validate_skill_policies
 from .runtime.rule_config import (
     resolve_default_garbage_rule_names,
     resolve_default_prepare_regex_rule_names,
@@ -75,6 +76,8 @@ def capability_payload() -> dict[str, Any]:
             for item in supported_capabilities()
         ],
         "prompt_catalog": prompt_catalog(),
+        "skill_policy_catalog": skill_policy_catalog(),
+        "skill_policy_validation": validate_skill_policies(),
         "rule_catalog": {
             "available_prepare_regex_rule_names": sorted(resolve_prepare_regex_rules().keys()),
             "default_prepare_regex_rule_names": resolve_default_prepare_regex_rule_names(),

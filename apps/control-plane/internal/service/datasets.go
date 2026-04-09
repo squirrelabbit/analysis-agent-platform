@@ -56,8 +56,10 @@ type workerTaskResponse struct {
 }
 
 type workerCapabilitiesResponse struct {
-	PromptCatalog []domain.PromptTemplateMetadata  `json:"prompt_catalog"`
-	RuleCatalog   domain.DatasetProfileRuleCatalog `json:"rule_catalog"`
+	PromptCatalog         []domain.PromptTemplateMetadata      `json:"prompt_catalog"`
+	RuleCatalog           domain.DatasetProfileRuleCatalog     `json:"rule_catalog"`
+	SkillPolicyCatalog    []domain.SkillPolicyMetadata         `json:"skill_policy_catalog"`
+	SkillPolicyValidation domain.SkillPolicyValidationResponse `json:"skill_policy_validation"`
 }
 
 func NewDatasetService(repository store.Repository, pythonAIWorkerURL string, uploadRoot string, artifactRoot string) *DatasetService {
@@ -616,6 +618,55 @@ func (s *DatasetService) GetRuleCatalog() (domain.RuleCatalogResponse, error) {
 		Source:    "worker_capabilities",
 		Catalog:   &catalog,
 	}, nil
+}
+
+func (s *DatasetService) GetSkillPolicyCatalog() (domain.SkillPolicyCatalogResponse, error) {
+	capabilities, err := s.fetchWorkerCapabilities()
+	if err != nil {
+		return domain.SkillPolicyCatalogResponse{
+			Available: false,
+			Source:    "worker_capabilities",
+			Warning:   fmt.Sprintf("python-ai worker capability 조회에 실패했습니다: %v", err),
+		}, nil
+	}
+	if capabilities == nil {
+		return domain.SkillPolicyCatalogResponse{
+			Available: false,
+			Source:    "worker_capabilities",
+			Warning:   "python-ai worker URL이 설정되지 않아 skill policy catalog를 조회하지 못했습니다.",
+		}, nil
+	}
+	return domain.SkillPolicyCatalogResponse{
+		Available: true,
+		Source:    "worker_capabilities",
+		Items:     append([]domain.SkillPolicyMetadata(nil), capabilities.SkillPolicyCatalog...),
+	}, nil
+}
+
+func (s *DatasetService) ValidateSkillPolicies() (domain.SkillPolicyValidationResponse, error) {
+	capabilities, err := s.fetchWorkerCapabilities()
+	if err != nil {
+		return domain.SkillPolicyValidationResponse{
+			Available: false,
+			Source:    "worker_capabilities",
+			Valid:     false,
+			Warning:   fmt.Sprintf("python-ai worker capability 조회에 실패했습니다: %v", err),
+		}, nil
+	}
+	if capabilities == nil {
+		return domain.SkillPolicyValidationResponse{
+			Available: false,
+			Source:    "worker_capabilities",
+			Valid:     false,
+			Warning:   "python-ai worker URL이 설정되지 않아 skill policy validation을 조회하지 못했습니다.",
+		}, nil
+	}
+	response := capabilities.SkillPolicyValidation
+	response.Available = true
+	if strings.TrimSpace(response.Source) == "" {
+		response.Source = "worker_capabilities"
+	}
+	return response, nil
 }
 
 func (s *DatasetService) availablePromptVersions() ([]string, error) {
