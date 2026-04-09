@@ -2,10 +2,9 @@ from __future__ import annotations
 
 """Retrieve-layer skill handlers and retrieval helpers.
 
-This module is the primary import surface for retrieval/search/cluster skills.
-Legacy implementation bodies still live in ``_legacy_support_impl`` during the
-refactor, but helper globals are rebound on each call so tests and future
-patching can target this module instead of the legacy file.
+This module is the public import surface for retrieval/search/cluster skills.
+Implementation bodies live in the private ``_retrieve_impl`` module so tests
+and callers can patch this module without importing a catch-all legacy file.
 """
 
 from contextlib import contextmanager
@@ -13,7 +12,7 @@ from typing import Any, Iterator
 
 from ..config import load_config
 from ..skill_policy_registry import load_cluster_label_policy, load_embedding_cluster_policy
-from . import _legacy_support_impl as _impl
+from . import _retrieve_impl as _impl
 from ._policy_utils import annotate_result_policy, requested_policy_version, with_payload_defaults
 
 rt = _impl.rt
@@ -38,7 +37,7 @@ _semantic_matches_from_pgvector = _impl._semantic_matches_from_pgvector
 _semantic_matches_from_sidecar = _impl._semantic_matches_from_sidecar
 _semantic_query_vector = _impl._semantic_query_vector
 
-_LEGACY_HELPER_NAMES = [
+_RETRIEVE_HELPER_NAMES = [
     "_base_semantic_match",
     "_chunk_rows_by_id",
     "_coerce_json_dict",
@@ -62,10 +61,10 @@ _LEGACY_HELPER_NAMES = [
 
 
 @contextmanager
-def _bind_legacy_helpers() -> Iterator[None]:
-    original = {name: getattr(_impl, name) for name in _LEGACY_HELPER_NAMES}
+def _bind_retrieve_helpers() -> Iterator[None]:
+    original = {name: getattr(_impl, name) for name in _RETRIEVE_HELPER_NAMES}
     try:
-        for name in _LEGACY_HELPER_NAMES:
+        for name in _RETRIEVE_HELPER_NAMES:
             setattr(_impl, name, globals()[name])
         yield
     finally:
@@ -145,7 +144,7 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
             "sample_n": policy_config["default_sample_n"],
         },
     )
-    with _bind_legacy_helpers():
+    with _bind_retrieve_helpers():
         result = _impl.run_embedding_cluster(payload_with_defaults)
     artifact = result.get("artifact") or {}
     if isinstance(artifact, dict):
@@ -176,7 +175,7 @@ def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
             "sample_n": policy_config["default_sample_n"],
         },
     )
-    with _bind_legacy_helpers(), _bind_cluster_label_policy(policy):
+    with _bind_retrieve_helpers(), _bind_cluster_label_policy(policy):
         result = _impl.run_cluster_label_candidates(payload_with_defaults)
     artifact = result.get("artifact") or {}
     if isinstance(artifact, dict):
@@ -193,7 +192,7 @@ def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
-    with _bind_legacy_helpers():
+    with _bind_retrieve_helpers():
         return _impl.run_semantic_search(payload)
 
 
