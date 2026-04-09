@@ -2389,6 +2389,16 @@ components:
           type: string
         final_answer_error:
           type: string
+        artifact_count:
+          type: integer
+        artifact_payload_bytes:
+          type: integer
+        largest_artifact_key:
+          type: string
+        largest_artifact_bytes:
+          type: integer
+        artifact_storage_mode:
+          type: string
       required: [event_count]
     ReportDraftCreateRequest:
       type: object

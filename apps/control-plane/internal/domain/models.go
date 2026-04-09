@@ -614,6 +614,11 @@ type ExecutionDiagnostics struct {
 	Waiting            *ExecutionWaitingState `json:"waiting,omitempty"`
 	FinalAnswerStatus  string                 `json:"final_answer_status,omitempty"`
 	FinalAnswerError   string                 `json:"final_answer_error,omitempty"`
+	ArtifactCount      int                    `json:"artifact_count,omitempty"`
+	ArtifactPayloadBytes int                  `json:"artifact_payload_bytes,omitempty"`
+	LargestArtifactKey string                 `json:"largest_artifact_key,omitempty"`
+	LargestArtifactBytes int                  `json:"largest_artifact_bytes,omitempty"`
+	ArtifactStorageMode string                `json:"artifact_storage_mode,omitempty"`
 }
 
 type ExecutionDiffStep struct {
