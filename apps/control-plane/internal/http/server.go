@@ -140,6 +140,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /projects/{project_id}/executions/{execution_id}/progress", s.handleGetExecutionProgress)
 	s.mux.HandleFunc("GET /projects/{project_id}/executions/{execution_id}/steps/{step_id}", s.handleGetExecutionStepPreview)
 	s.mux.HandleFunc("GET /projects/{project_id}/executions/{execution_id}/result", s.handleGetExecutionResult)
+	s.mux.HandleFunc("GET /projects/{project_id}/operations/summary", s.handleGetOperationsSummary)
 	s.mux.HandleFunc("POST /projects/{project_id}/executions/{execution_id}/resume", s.handleResumeExecution)
 	s.mux.HandleFunc("POST /projects/{project_id}/executions/{execution_id}/rerun", s.handleRerunExecution)
 	s.mux.HandleFunc("GET /projects/{project_id}/executions/diff", s.handleDiffExecutions)
@@ -807,6 +808,15 @@ func (s *Server) handleGetReportDraft(w stdhttp.ResponseWriter, r *stdhttp.Reque
 
 func (s *Server) handleGetExecutionResult(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	response, err := s.analysisService.BuildExecutionResult(r.PathValue("project_id"), r.PathValue("execution_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleGetOperationsSummary(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.analysisService.GetOperationsSummary(r.PathValue("project_id"))
 	if err != nil {
 		s.writeServiceError(w, err)
 		return
