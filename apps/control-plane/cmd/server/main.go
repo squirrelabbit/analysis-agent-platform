@@ -12,6 +12,19 @@ import (
 func main() {
 	displaytime.UseKSTAsLocal()
 	cfg := config.Load()
+	if cfg.WorkflowEngine == "temporal" {
+		log.Printf(
+			"temporal runtime mode: persistence=%s retention=%s recovery=%s address=%s namespace=%s",
+			cfg.TemporalPersistenceMode,
+			cfg.TemporalRetentionMode,
+			cfg.TemporalRecoveryMode,
+			cfg.TemporalAddress,
+			cfg.TemporalNamespace,
+		)
+		if cfg.TemporalPersistenceMode == "dev_ephemeral" || cfg.TemporalRetentionMode == "temporal_dev_default" {
+			log.Printf("warning: Temporal history durability is limited in the current runtime; rely on startup reconciliation plus Postgres/artifact state for recovery")
+		}
+	}
 	server := apphttp.NewServer(cfg)
 	if err := server.RunStartupReconciliation(); err != nil {
 		log.Printf("startup reconciliation failed: %v", err)

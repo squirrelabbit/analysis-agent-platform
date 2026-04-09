@@ -682,3 +682,22 @@ type OperationsSummaryResponse struct {
 	Executions  OperationsExecutionSummary `json:"executions"`
 	BuildJobs   OperationsBuildJobSummary  `json:"build_jobs"`
 }
+
+type RuntimeStatusTemporal struct {
+	Address         string `json:"address,omitempty"`
+	Namespace       string `json:"namespace,omitempty"`
+	TaskQueue       string `json:"task_queue,omitempty"`
+	BuildTaskQueue  string `json:"build_task_queue,omitempty"`
+	PersistenceMode string `json:"persistence_mode,omitempty"`
+	RetentionMode   string `json:"retention_mode,omitempty"`
+	RecoveryMode    string `json:"recovery_mode,omitempty"`
+}
+
+type RuntimeStatusResponse struct {
+	Status         string                 `json:"status"`
+	Stack          string                 `json:"stack"`
+	WorkflowEngine string                 `json:"workflow_engine,omitempty"`
+	StoreBackend   string                 `json:"store_backend,omitempty"`
+	PlannerBackend string                 `json:"planner_backend,omitempty"`
+	Temporal       *RuntimeStatusTemporal `json:"temporal,omitempty"`
+}

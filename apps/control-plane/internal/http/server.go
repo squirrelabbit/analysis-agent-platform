@@ -94,6 +94,7 @@ func (s *Server) routes() {
 			"stack":  "go-control-plane-scaffold",
 		})
 	})
+	s.mux.HandleFunc("GET /runtime_status", s.handleRuntimeStatus)
 	s.mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPI)
 	s.mux.HandleFunc("GET /swagger", s.handleSwaggerUI)
 	s.mux.HandleFunc("GET /swagger/", s.handleSwaggerUI)
@@ -153,6 +154,28 @@ func writeJSON(w stdhttp.ResponseWriter, status int, payload any) {
 	w.WriteHeader(status)
 	encoder := json.NewEncoder(w)
 	_ = encoder.Encode(displaytime.NormalizeForJSON(payload))
+}
+
+func (s *Server) handleRuntimeStatus(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	response := domain.RuntimeStatusResponse{
+		Status:         "ok",
+		Stack:          "go-control-plane-scaffold",
+		WorkflowEngine: strings.TrimSpace(s.cfg.WorkflowEngine),
+		StoreBackend:   strings.TrimSpace(s.cfg.StoreBackend),
+		PlannerBackend: strings.TrimSpace(s.cfg.PlannerBackend),
+	}
+	if strings.TrimSpace(s.cfg.WorkflowEngine) == "temporal" {
+		response.Temporal = &domain.RuntimeStatusTemporal{
+			Address:         strings.TrimSpace(s.cfg.TemporalAddress),
+			Namespace:       strings.TrimSpace(s.cfg.TemporalNamespace),
+			TaskQueue:       strings.TrimSpace(s.cfg.TemporalTaskQueue),
+			BuildTaskQueue:  strings.TrimSpace(s.cfg.TemporalBuildTaskQueue),
+			PersistenceMode: strings.TrimSpace(s.cfg.TemporalPersistenceMode),
+			RetentionMode:   strings.TrimSpace(s.cfg.TemporalRetentionMode),
+			RecoveryMode:    strings.TrimSpace(s.cfg.TemporalRecoveryMode),
+		}
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
 }
 
 func (s *Server) handleCreateProject(w stdhttp.ResponseWriter, r *stdhttp.Request) {

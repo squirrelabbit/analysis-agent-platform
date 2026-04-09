@@ -38,6 +38,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+  /runtime_status:
+    get:
+      tags: [System]
+      summary: Runtime status and Temporal durability mode
+      operationId: getRuntimeStatus
+      responses:
+        "200":
+          description: Runtime status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeStatusResponse"
   /skills:
     get:
       tags: [System]
@@ -1035,6 +1047,41 @@ components:
         stack:
           type: string
           example: go-control-plane-scaffold
+      required: [status, stack]
+    RuntimeStatusTemporal:
+      type: object
+      properties:
+        address:
+          type: string
+        namespace:
+          type: string
+        task_queue:
+          type: string
+        build_task_queue:
+          type: string
+        persistence_mode:
+          type: string
+        retention_mode:
+          type: string
+        recovery_mode:
+          type: string
+    RuntimeStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        stack:
+          type: string
+        workflow_engine:
+          type: string
+        store_backend:
+          type: string
+        planner_backend:
+          type: string
+        temporal:
+          anyOf:
+            - $ref: "#/components/schemas/RuntimeStatusTemporal"
+            - type: "null"
       required: [status, stack]
     ErrorResponse:
       type: object

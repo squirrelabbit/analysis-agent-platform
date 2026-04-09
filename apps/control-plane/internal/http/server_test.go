@@ -18,11 +18,20 @@ import (
 
 func TestControlPlaneFlow(t *testing.T) {
 	server := NewServer(config.Config{
-		BindAddr:       ":0",
-		StoreBackend:   "memory",
-		WorkflowEngine: "noop",
+		BindAddr:                ":0",
+		StoreBackend:            "memory",
+		WorkflowEngine:          "noop",
+		TemporalPersistenceMode: "dev_ephemeral",
+		TemporalRetentionMode:   "temporal_dev_default",
+		TemporalRecoveryMode:    "startup_reconciliation",
 	})
 	handler := server.Handler()
+
+	runtimeStatus := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/runtime_status", "", http.StatusOK, &runtimeStatus)
+	if runtimeStatus["status"] != "ok" || runtimeStatus["workflow_engine"] != "noop" {
+		t.Fatalf("unexpected runtime status response: %+v", runtimeStatus)
+	}
 
 	project := map[string]any{}
 	createProjectBody := `{"name":"demo-project","description":"test"}`
