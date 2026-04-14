@@ -157,6 +157,37 @@ func writePreparedPreviewParquet(t *testing.T, path string, rows []map[string]an
 	}
 }
 
+func writeSentimentPreviewParquet(t *testing.T, path string, rows []map[string]any) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "sentiment-preview.duckdb")
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("unexpected duckdb open error: %v", err)
+	}
+	defer db.Close()
+
+	selects := make([]string, 0, len(rows))
+	for _, row := range rows {
+		selects = append(selects, fmt.Sprintf(
+			`SELECT %d AS source_row_index, '%s' AS row_id, '%s' AS sentiment_label, %f AS sentiment_confidence, '%s' AS sentiment_reason, '%s' AS sentiment_prompt_version`,
+			intValue(row["source_row_index"]),
+			escapeDuckDBLiteral(stringValue(row["row_id"])),
+			escapeDuckDBLiteral(stringValue(row["sentiment_label"])),
+			floatValue(row["sentiment_confidence"]),
+			escapeDuckDBLiteral(stringValue(row["sentiment_reason"])),
+			escapeDuckDBLiteral(stringValue(row["sentiment_prompt_version"])),
+		))
+	}
+	query := fmt.Sprintf(
+		`COPY (%s) TO '%s' (FORMAT PARQUET)`,
+		strings.Join(selects, " UNION ALL "),
+		escapeDuckDBLiteral(path),
+	)
+	if _, err := db.Exec(query); err != nil {
+		t.Fatalf("unexpected parquet write error: %v", err)
+	}
+}
+
 func int64Value(value any) int64 {
 	switch typed := value.(type) {
 	case int:
@@ -178,6 +209,19 @@ func intValue(value any) int {
 		return int(typed)
 	case float64:
 		return int(typed)
+	default:
+		return 0
+	}
+}
+
+func floatValue(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
 	default:
 		return 0
 	}
@@ -2151,6 +2195,115 @@ func TestGetPreparePreviewBuildsSummaryAndWarningPanel(t *testing.T) {
 	}
 	if response.WarningPanel.Samples[0].PrepareDisposition != "review" {
 		t.Fatalf("unexpected warning sample: %+v", response.WarningPanel.Samples[0])
+	}
+}
+
+func TestGetSentimentPreviewBuildsSummary(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-sentiment-preview", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-sentiment-preview",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	sentimentPath := filepath.Join(t.TempDir(), "sentiment.parquet")
+	writeSentimentPreviewParquet(t, sentimentPath, []map[string]any{
+		{
+			"source_row_index":         0,
+			"row_id":                   "row-0",
+			"sentiment_label":          "negative",
+			"sentiment_confidence":     0.91,
+			"sentiment_reason":         "결제 실패와 오류 반복 언급",
+			"sentiment_prompt_version": "sentiment-anthropic-v2",
+		},
+		{
+			"source_row_index":         2,
+			"row_id":                   "row-2",
+			"sentiment_label":          "neutral",
+			"sentiment_confidence":     0.64,
+			"sentiment_reason":         "상태 설명 중심",
+			"sentiment_prompt_version": "sentiment-anthropic-v2",
+		},
+	})
+
+	labeledAt := time.Now().UTC()
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-sentiment-preview",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"sentiment_ref":               sentimentPath,
+			"sentiment_format":            "parquet",
+			"sentiment_text_column":       "normalized_text",
+			"sentiment_label_column":      "sentiment_label",
+			"sentiment_confidence_column": "sentiment_confidence",
+			"sentiment_reason_column":     "sentiment_reason",
+			"row_id_column":               "row_id",
+			"sentiment_summary": map[string]any{
+				"input_row_count":      3,
+				"labeled_row_count":    2,
+				"text_column":          "normalized_text",
+				"sentiment_batch_size": 8,
+				"label_counts": map[string]any{
+					"negative": 1,
+					"neutral":  1,
+				},
+			},
+		},
+		PrepareStatus:      "ready",
+		SentimentStatus:    "ready",
+		SentimentURI:       datasetStringPtr(sentimentPath),
+		SentimentLabeledAt: &labeledAt,
+		EmbeddingStatus:    "not_requested",
+		CreatedAt:          time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	limit := 2
+	response, err := service.GetSentimentPreview(
+		project.ProjectID,
+		dataset.DatasetID,
+		version.DatasetVersionID,
+		domain.DatasetSentimentPreviewQuery{Limit: &limit},
+	)
+	if err != nil {
+		t.Fatalf("unexpected get sentiment preview error: %v", err)
+	}
+	if response.SentimentRef != sentimentPath {
+		t.Fatalf("unexpected sentiment_ref: %s", response.SentimentRef)
+	}
+	if response.SampleLimit != 2 {
+		t.Fatalf("unexpected sample_limit: %d", response.SampleLimit)
+	}
+	if response.Summary == nil || response.Summary.LabeledRowCount != 2 {
+		t.Fatalf("unexpected summary payload: %+v", response.Summary)
+	}
+	if response.Summary.LabelCounts["negative"] != 1 {
+		t.Fatalf("unexpected label_counts payload: %+v", response.Summary.LabelCounts)
+	}
+	if len(response.Samples) != 2 {
+		t.Fatalf("unexpected samples: %+v", response.Samples)
+	}
+	if response.Samples[0].SentimentLabel != "negative" {
+		t.Fatalf("unexpected first sample: %+v", response.Samples[0])
+	}
+	if response.Samples[1].SentimentConfidence != 0.64 {
+		t.Fatalf("unexpected second sample confidence: %+v", response.Samples[1])
 	}
 }
 

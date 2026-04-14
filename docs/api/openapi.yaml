@@ -419,6 +419,55 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_preview:
+    get:
+      tags: [Datasets]
+      summary: Get structured sentiment preview for a dataset version
+      operationId: getDatasetSentimentPreview
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 10
+      responses:
+        "200":
+          description: Sentiment preview detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetSentimentPreviewResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_download:
+    get:
+      tags: [Datasets]
+      summary: Download sentiment-labeled dataset as CSV for a dataset version
+      operationId: downloadSentimentDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Sentiment CSV download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clusters/{cluster_id}/members:
     get:
       tags: [Datasets]
@@ -1851,6 +1900,76 @@ components:
             - $ref: "#/components/schemas/DatasetPrepareWarningPanel"
             - type: "null"
       required: [project_id, dataset_id, dataset_version_id, prepare_status, prepared_ref, prepare_format, raw_text_column, prepared_text_column, row_id_column, sample_limit, samples]
+    DatasetSentimentSummary:
+      type: object
+      properties:
+        input_row_count:
+          type: integer
+        labeled_row_count:
+          type: integer
+        text_column:
+          type: string
+        sentiment_batch_size:
+          type: integer
+        label_counts:
+          $ref: "#/components/schemas/IntegerMap"
+      required: [input_row_count, labeled_row_count, text_column, sentiment_batch_size]
+    DatasetSentimentSample:
+      type: object
+      properties:
+        source_row_index:
+          type: integer
+        row_id:
+          type: string
+        sentiment_label:
+          type: string
+        sentiment_confidence:
+          type: number
+          format: double
+        sentiment_reason:
+          type: string
+      required: [source_row_index, row_id, sentiment_label, sentiment_confidence, sentiment_reason]
+    DatasetSentimentPreviewResponse:
+      type: object
+      properties:
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        sentiment_status:
+          type: string
+        sentiment_labeled_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        sentiment_ref:
+          type: string
+        sentiment_format:
+          type: string
+        sentiment_text_column:
+          type: string
+        sentiment_label_column:
+          type: string
+        sentiment_confidence_column:
+          type: string
+        sentiment_reason_column:
+          type: string
+        row_id_column:
+          type: string
+        summary:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetSentimentSummary"
+            - type: "null"
+        sample_limit:
+          type: integer
+        samples:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetSentimentSample"
+      required: [project_id, dataset_id, dataset_version_id, sentiment_status, sentiment_ref, sentiment_format, sentiment_text_column, sentiment_label_column, sentiment_confidence_column, sentiment_reason_column, row_id_column, sample_limit, samples]
     DatasetUploadRequest:
       type: object
       properties:

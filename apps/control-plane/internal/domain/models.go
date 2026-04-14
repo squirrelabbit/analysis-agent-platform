@@ -206,6 +206,44 @@ type DatasetPreparePreviewResponse struct {
 	WarningPanel       *DatasetPrepareWarningPanel `json:"warning_panel,omitempty"`
 }
 
+type DatasetSentimentPreviewQuery struct {
+	Limit *int `json:"limit,omitempty"`
+}
+
+type DatasetSentimentSummary struct {
+	InputRowCount      int            `json:"input_row_count"`
+	LabeledRowCount    int            `json:"labeled_row_count"`
+	TextColumn         string         `json:"text_column"`
+	SentimentBatchSize int            `json:"sentiment_batch_size"`
+	LabelCounts        map[string]int `json:"label_counts,omitempty"`
+}
+
+type DatasetSentimentSample struct {
+	SourceRowIndex      int     `json:"source_row_index"`
+	RowID               string  `json:"row_id"`
+	SentimentLabel      string  `json:"sentiment_label"`
+	SentimentConfidence float64 `json:"sentiment_confidence"`
+	SentimentReason     string  `json:"sentiment_reason"`
+}
+
+type DatasetSentimentPreviewResponse struct {
+	ProjectID                 string                   `json:"project_id"`
+	DatasetID                 string                   `json:"dataset_id"`
+	DatasetVersionID          string                   `json:"dataset_version_id"`
+	SentimentStatus           string                   `json:"sentiment_status"`
+	SentimentLabeledAt        *time.Time               `json:"sentiment_labeled_at,omitempty"`
+	SentimentRef              string                   `json:"sentiment_ref"`
+	SentimentFormat           string                   `json:"sentiment_format"`
+	SentimentTextColumn       string                   `json:"sentiment_text_column"`
+	SentimentLabelColumn      string                   `json:"sentiment_label_column"`
+	SentimentConfidenceColumn string                   `json:"sentiment_confidence_column"`
+	SentimentReasonColumn     string                   `json:"sentiment_reason_column"`
+	RowIDColumn               string                   `json:"row_id_column"`
+	Summary                   *DatasetSentimentSummary `json:"summary,omitempty"`
+	SampleLimit               int                      `json:"sample_limit"`
+	Samples                   []DatasetSentimentSample `json:"samples"`
+}
+
 type DatasetClusterMembersQuery struct {
 	Limit       *int  `json:"limit,omitempty"`
 	SamplesOnly *bool `json:"samples_only,omitempty"`

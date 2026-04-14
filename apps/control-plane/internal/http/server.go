@@ -119,6 +119,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}", s.handleGetDatasetVersion)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_preview", s.handleGetPreparePreview)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_download", s.handleDownloadPreparedDataset)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_preview", s.handleGetSentimentPreview)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_download", s.handleDownloadSentimentDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clusters/{cluster_id}/members", s.handleGetClusterMembers)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare", s.handleBuildPrepare)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs", s.handleCreatePrepareJob)
@@ -525,6 +527,60 @@ func (s *Server) handleDownloadPreparedDataset(w stdhttp.ResponseWriter, r *stdh
 	if err != nil {
 		if os.IsNotExist(err) {
 			s.writeServiceError(w, service.ErrNotFound{Resource: "prepare artifact"})
+			return
+		}
+		s.writeServiceError(w, err)
+		return
+	}
+	defer handle.Close()
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
+	w.WriteHeader(stdhttp.StatusOK)
+	if _, err := w.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
+		return
+	}
+	_, _ = io.Copy(w, handle)
+}
+
+func (s *Server) handleGetSentimentPreview(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	query := domain.DatasetSentimentPreviewQuery{}
+	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			writeError(w, stdhttp.StatusBadRequest, "limit must be an integer")
+			return
+		}
+		query.Limit = &parsed
+	}
+	response, err := s.datasetService.GetSentimentPreview(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		query,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDownloadSentimentDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	artifactPath, filename, err := s.datasetService.ResolveSentimentDownload(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	defer os.Remove(artifactPath)
+	handle, err := os.Open(artifactPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.writeServiceError(w, service.ErrNotFound{Resource: "sentiment artifact"})
 			return
 		}
 		s.writeServiceError(w, err)
