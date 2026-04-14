@@ -28,6 +28,19 @@ from .constants import NEGATIVE_SENTIMENT_TERMS, POSITIVE_SENTIMENT_TERMS, SENTI
 from .payloads import _normalize_inputs
 
 
+def _normalize_runtime_llm_mode(mode: str) -> str:
+    normalized = str(mode or "default").strip().lower()
+    if not normalized:
+        return "default"
+    if normalized in {"default", "enabled", "disabled"}:
+        return normalized
+    return "default"
+
+
+def _llm_mode_disables_remote(mode: str) -> bool:
+    return _normalize_runtime_llm_mode(mode) == "disabled"
+
+
 def _anthropic_client() -> AnthropicClient | None:
     config = load_config()
     if config.llm_provider.lower() != "anthropic":
@@ -44,11 +57,32 @@ def _anthropic_client() -> AnthropicClient | None:
     )
 
 
-def _anthropic_prepare_client(model_override: str = "") -> AnthropicClient | None:
+def _anthropic_prepare_client(model_override: str = "", *, llm_mode: str = "default") -> AnthropicClient | None:
     config = load_config()
+    if _llm_mode_disables_remote(llm_mode):
+        return None
     if config.llm_provider.lower() != "anthropic":
         return None
     model = model_override.strip() or config.anthropic_prepare_model.strip() or config.anthropic_model
+    return AnthropicClient(
+        AnthropicConfig(
+            api_key=config.anthropic_api_key,
+            model=model,
+            api_url=config.anthropic_api_url,
+            version=config.anthropic_version,
+            max_tokens=config.anthropic_max_tokens,
+            timeout_sec=config.anthropic_timeout_sec,
+        )
+    )
+
+
+def _anthropic_sentiment_client(model_override: str = "", *, llm_mode: str = "default") -> AnthropicClient | None:
+    config = load_config()
+    if _llm_mode_disables_remote(llm_mode):
+        return None
+    if config.llm_provider.lower() != "anthropic":
+        return None
+    model = model_override.strip() or config.anthropic_sentiment_model.strip() or config.anthropic_model
     return AnthropicClient(
         AnthropicConfig(
             api_key=config.anthropic_api_key,
@@ -1264,6 +1298,7 @@ def _normalize_planner_response(
 __all__ = [
     "_anthropic_client",
     "_anthropic_prepare_client",
+    "_anthropic_sentiment_client",
     "_anthropic_usage_metadata",
     "_compact_analysis_context",
     "_compact_evidence_documents_for_prompt",

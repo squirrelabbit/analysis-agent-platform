@@ -237,7 +237,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     output_format = _prepare_output_format(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    client = rt._anthropic_prepare_client(normalized["model"])
+    client = rt._anthropic_prepare_client(normalized["model"], llm_mode=normalized["llm_mode"])
     kept_count = 0
     review_count = 0
     dropped_count = 0
@@ -751,7 +751,7 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     output_format = _artifact_output_format(output_path, "sentiment")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    client = rt._anthropic_prepare_client(normalized["model"])
+    client = rt._anthropic_sentiment_client(normalized["model"], llm_mode=normalized["llm_mode"])
     label_counts: Counter[str] = Counter()
     skipped_rows = 0
     labeled_count = 0

@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import python_ai_worker.prompt_registry as prompt_registry_module
 from python_ai_worker.anthropic_client import AnthropicJSONResponse
 from python_ai_worker.prompt_registry import (
     available_prompt_versions,
@@ -52,6 +53,21 @@ class _RecordingClient:
 
 
 class PromptRegistryTests(unittest.TestCase):
+    def test_prompt_dir_resolves_container_style_layout(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        prompt_dir = temp_dir / "app" / "config" / "prompts"
+        prompt_dir.mkdir(parents=True)
+
+        with patch.dict("os.environ", {}, clear=False):
+            with patch.object(
+                prompt_registry_module,
+                "__file__",
+                str(temp_dir / "app" / "src" / "python_ai_worker" / "prompt_registry.py"),
+            ):
+                resolved = prompt_registry_module._prompt_templates_dir()
+
+        self.assertEqual(resolved, prompt_dir.resolve())
+
     def test_prepare_client_defaults_to_haiku_model(self) -> None:
         with patch.dict(
             "os.environ",

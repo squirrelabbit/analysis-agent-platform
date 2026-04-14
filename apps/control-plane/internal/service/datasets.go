@@ -38,6 +38,12 @@ const (
 	maxClusterMembersLimit     = 500
 )
 
+const (
+	datasetLLMModeDefault  = "default"
+	datasetLLMModeEnabled  = "enabled"
+	datasetLLMModeDisabled = "disabled"
+)
+
 type DatasetService struct {
 	store               store.Repository
 	pythonAIWorkerURL   string
@@ -154,7 +160,10 @@ func (s *DatasetService) CreateDatasetVersion(projectID, datasetID string, input
 		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "storage_uri is required"}
 	}
 
-	version := s.buildDatasetVersionRecord(projectID, dataset, storageURI, input)
+	version, err := s.buildDatasetVersionRecord(projectID, dataset, storageURI, input)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
@@ -186,7 +195,10 @@ func (s *DatasetService) UploadDatasetVersion(projectID, datasetID string, input
 	})
 	input.StorageURI = storedPath
 
-	version := s.buildDatasetVersionRecord(projectID, dataset, storedPath, input)
+	version, err := s.buildDatasetVersionRecord(projectID, dataset, storedPath, input)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
 	version.DatasetVersionID = versionID
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
@@ -194,7 +206,7 @@ func (s *DatasetService) UploadDatasetVersion(projectID, datasetID string, input
 	return s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version), nil
 }
 
-func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset domain.Dataset, storageURI string, input domain.DatasetVersionCreateRequest) domain.DatasetVersion {
+func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset domain.Dataset, storageURI string, input domain.DatasetVersionCreateRequest) (domain.DatasetVersion, error) {
 	dataType := normalizeDatasetDataType(input.DataType, dataset.DataType)
 	metadata := input.Metadata
 	if metadata == nil {
@@ -203,6 +215,14 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 	profile := s.resolveDatasetProfile(dataType, input.Profile)
 	if profile != nil && strings.TrimSpace(profile.ProfileID) != "" {
 		metadata["profile_id"] = profile.ProfileID
+	}
+	prepareLLMMode, err := normalizeDatasetLLMMode(input.PrepareLLMMode, "prepare_llm_mode")
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	sentimentLLMMode, err := normalizeDatasetLLMMode(input.SentimentLLMMode, "sentiment_llm_mode")
+	if err != nil {
+		return domain.DatasetVersion{}, err
 	}
 
 	prepareRequired := defaultPrepareRequired(dataType, input.PrepareRequired)
@@ -239,8 +259,10 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 		Metadata:         metadata,
 		Profile:          profile,
 		PrepareStatus:    prepareStatus,
+		PrepareLLMMode:   prepareLLMMode,
 		PrepareModel:     input.PrepareModel,
 		SentimentStatus:  sentimentStatus,
+		SentimentLLMMode: sentimentLLMMode,
 		SentimentModel:   input.SentimentModel,
 		EmbeddingStatus:  embeddingStatus,
 		EmbeddingModel:   input.EmbeddingModel,
@@ -261,7 +283,7 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 	if sentimentRequired {
 		version.Metadata["sentiment_required"] = true
 	}
-	return version
+	return version, nil
 }
 
 func (s *DatasetService) resolveDatasetProfile(dataType string, explicit *domain.DatasetProfile) *domain.DatasetProfile {
@@ -276,6 +298,22 @@ func (s *DatasetService) maybeRunEagerPrepare(projectID, datasetID string, versi
 		return version
 	}
 	if _, err := s.CreatePrepareJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "dataset_version_create"); err == nil {
+		latest, getErr := s.GetDatasetVersion(projectID, datasetID, version.DatasetVersionID)
+		if getErr == nil {
+			return latest
+		}
+	}
+	return version
+}
+
+func (s *DatasetService) maybeRunEagerSentiment(projectID, datasetID string, version domain.DatasetVersion) domain.DatasetVersion {
+	if strings.TrimSpace(s.pythonAIWorkerURL) == "" {
+		return version
+	}
+	if !requiresSentiment(version) || !isPrepareReady(version) {
+		return version
+	}
+	if _, err := s.CreateSentimentJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}, "dataset_prepare_complete"); err == nil {
 		latest, getErr := s.GetDatasetVersion(projectID, datasetID, version.DatasetVersionID)
 		if getErr == nil {
 			return latest
@@ -1009,6 +1047,7 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 		"dataset_name":       version.StorageURI,
 		"text_column":        textColumn,
 		"output_path":        outputPath,
+		"llm_mode":           version.PrepareLLMMode,
 	}
 	if version.Profile != nil {
 		if len(version.Profile.RegexRuleNames) > 0 {
@@ -1089,7 +1128,7 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
-	return version, nil
+	return s.maybeRunEagerSentiment(projectID, datasetID, version), nil
 }
 
 func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error) {
@@ -1481,6 +1520,7 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 		"dataset_name":       datasetName,
 		"text_column":        textColumn,
 		"output_path":        outputPath,
+		"llm_mode":           version.SentimentLLMMode,
 	}
 	if version.Profile != nil && version.Profile.SentimentPromptVersion != nil && strings.TrimSpace(*version.Profile.SentimentPromptVersion) != "" {
 		payload["sentiment_prompt_version"] = strings.TrimSpace(*version.Profile.SentimentPromptVersion)
@@ -1676,6 +1716,22 @@ func normalizeDatasetDataType(value *string, fallback string) string {
 	return dataType
 }
 
+func normalizeDatasetLLMMode(value *string, fieldName string) (string, error) {
+	if value == nil {
+		return datasetLLMModeDefault, nil
+	}
+	mode := strings.ToLower(strings.TrimSpace(*value))
+	if mode == "" {
+		return datasetLLMModeDefault, nil
+	}
+	switch mode {
+	case datasetLLMModeDefault, datasetLLMModeEnabled, datasetLLMModeDisabled:
+		return mode, nil
+	default:
+		return "", ErrInvalidArgument{Message: fmt.Sprintf("%s must be one of default, enabled, disabled", fieldName)}
+	}
+}
+
 func (s *DatasetService) deriveEmbeddingURI(version domain.DatasetVersion) string {
 	if version.EmbeddingURI != nil && strings.TrimSpace(*version.EmbeddingURI) != "" {
 		return strings.TrimSpace(*version.EmbeddingURI)
@@ -1868,6 +1924,15 @@ func requiresPrepare(version domain.DatasetVersion) bool {
 	switch version.DataType {
 	case "unstructured", "mixed", "both":
 		return version.PrepareStatus != "not_requested" && version.PrepareStatus != "not_applicable"
+	default:
+		return false
+	}
+}
+
+func requiresSentiment(version domain.DatasetVersion) bool {
+	switch version.DataType {
+	case "unstructured", "mixed", "both":
+		return version.SentimentStatus != "" && version.SentimentStatus != "not_requested" && version.SentimentStatus != "not_applicable"
 	default:
 		return false
 	}

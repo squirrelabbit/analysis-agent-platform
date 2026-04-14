@@ -537,10 +537,16 @@ func datasetVersionCreateRequestFromMultipart(form *multipart.Form) (domain.Data
 	} else if ok {
 		payload.PrepareRequired = &value
 	}
+	if value := firstFormValue(form, "prepare_llm_mode"); value != "" {
+		payload.PrepareLLMMode = stringPtr(value)
+	}
 	if value, ok, err := optionalBoolFormValue(form, "sentiment_required"); err != nil {
 		return payload, err
 	} else if ok {
 		payload.SentimentRequired = &value
+	}
+	if value := firstFormValue(form, "sentiment_llm_mode"); value != "" {
+		payload.SentimentLLMMode = stringPtr(value)
 	}
 	if value, ok, err := optionalBoolFormValue(form, "embedding_required"); err != nil {
 		return payload, err

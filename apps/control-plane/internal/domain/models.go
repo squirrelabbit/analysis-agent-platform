@@ -123,11 +123,13 @@ type DatasetVersion struct {
 	Metadata           map[string]any  `json:"metadata"`
 	Profile            *DatasetProfile `json:"profile,omitempty"`
 	PrepareStatus      string          `json:"prepare_status"`
+	PrepareLLMMode     string          `json:"prepare_llm_mode"`
 	PrepareModel       *string         `json:"prepare_model,omitempty"`
 	PreparePromptVer   *string         `json:"prepare_prompt_version,omitempty"`
 	PrepareURI         *string         `json:"prepare_uri,omitempty"`
 	PreparedAt         *time.Time      `json:"prepared_at,omitempty"`
 	SentimentStatus    string          `json:"sentiment_status"`
+	SentimentLLMMode   string          `json:"sentiment_llm_mode"`
 	SentimentModel     *string         `json:"sentiment_model,omitempty"`
 	SentimentURI       *string         `json:"sentiment_uri,omitempty"`
 	SentimentLabeledAt *time.Time      `json:"sentiment_labeled_at,omitempty"`
@@ -146,8 +148,10 @@ type DatasetVersionCreateRequest struct {
 	Metadata          map[string]any  `json:"metadata,omitempty"`
 	Profile           *DatasetProfile `json:"profile,omitempty"`
 	PrepareRequired   *bool           `json:"prepare_required,omitempty"`
+	PrepareLLMMode    *string         `json:"prepare_llm_mode,omitempty"`
 	PrepareModel      *string         `json:"prepare_model,omitempty"`
 	SentimentRequired *bool           `json:"sentiment_required,omitempty"`
+	SentimentLLMMode  *string         `json:"sentiment_llm_mode,omitempty"`
 	SentimentModel    *string         `json:"sentiment_model,omitempty"`
 	EmbeddingRequired *bool           `json:"embedding_required,omitempty"`
 	EmbeddingModel    *string         `json:"embedding_model,omitempty"`

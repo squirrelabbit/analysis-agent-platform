@@ -227,6 +227,15 @@ def _normalize_cluster_label_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return _normalize_text_task_payload(payload)
 
 
+def _normalize_llm_mode(value: Any) -> str:
+    mode = str(value or "default").strip().lower()
+    if not mode:
+        return "default"
+    if mode not in {"default", "enabled", "disabled"}:
+        raise ValueError("llm_mode must be one of default, enabled, disabled")
+    return mode
+
+
 def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_name = str(payload.get("dataset_name") or "").strip()
     if not dataset_name:
@@ -236,6 +245,7 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("output_path is required")
     text_column = str(payload.get("text_column") or "text").strip()
     model = str(payload.get("model") or "").strip()
+    llm_mode = _normalize_llm_mode(payload.get("llm_mode"))
     prepare_batch_size = max(1, int(payload.get("prepare_batch_size") or DEFAULT_PREPARE_BATCH_SIZE))
     regex_rule_names = _normalize_prepare_regex_rule_names(payload.get("regex_rule_names"))
     prepare_prompt_version = str(payload.get("prepare_prompt_version") or "").strip()
@@ -245,6 +255,7 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "text_column": text_column,
         "output_path": output_path,
         "model": model,
+        "llm_mode": llm_mode,
         "prepare_batch_size": prepare_batch_size,
         "regex_rule_names": regex_rule_names,
         "prepare_prompt_version": prepare_prompt_version,
@@ -323,6 +334,7 @@ def _normalize_sentiment_build_payload(payload: dict[str, Any]) -> dict[str, Any
         raise ValueError("output_path is required")
     text_column = str(payload.get("text_column") or "normalized_text").strip()
     model = str(payload.get("model") or "").strip()
+    llm_mode = _normalize_llm_mode(payload.get("llm_mode"))
     sentiment_prompt_version = str(payload.get("sentiment_prompt_version") or "").strip()
     sentiment_batch_size = max(1, int(payload.get("sentiment_batch_size") or DEFAULT_SENTIMENT_BATCH_SIZE))
     return {
@@ -331,6 +343,7 @@ def _normalize_sentiment_build_payload(payload: dict[str, Any]) -> dict[str, Any
         "text_column": text_column,
         "output_path": output_path,
         "model": model,
+        "llm_mode": llm_mode,
         "sentiment_prompt_version": sentiment_prompt_version,
         "sentiment_batch_size": sentiment_batch_size,
     }
