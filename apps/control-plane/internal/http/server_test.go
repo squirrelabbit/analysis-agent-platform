@@ -1148,6 +1148,159 @@ func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 	}
 }
 
+func TestSentimentPreviewAndDownloadEndpoints(t *testing.T) {
+	artifactRoot := t.TempDir()
+	sentimentPath := ""
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/tasks/sentiment_label":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"sentiment_uri":               sentimentPath,
+					"sentiment_ref":               sentimentPath,
+					"sentiment_format":            "parquet",
+					"sentiment_label_column":      "sentiment_label",
+					"sentiment_confidence_column": "sentiment_confidence",
+					"sentiment_reason_column":     "sentiment_reason",
+					"row_id_column":               "row_id",
+					"summary": map[string]any{
+						"input_row_count":      3,
+						"labeled_row_count":    2,
+						"text_column":          "text",
+						"sentiment_batch_size": 8,
+						"label_counts": map[string]any{
+							"negative": 1,
+							"neutral":  1,
+						},
+					},
+				},
+			})
+		default:
+			t.Fatalf("unexpected worker path: %s", r.URL.Path)
+		}
+	}))
+	defer worker.Close()
+
+	server := NewServer(config.Config{
+		BindAddr:          ":0",
+		StoreBackend:      "memory",
+		WorkflowEngine:    "noop",
+		PythonAIWorkerURL: worker.URL,
+		ArtifactRoot:      artifactRoot,
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"sentiment-preview-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	dataset := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets",
+		`{"name":"issues","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&dataset,
+	)
+	datasetID := dataset["dataset_id"].(string)
+
+	version := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"issues.csv","data_type":"unstructured","prepare_required":false}`,
+		http.StatusCreated,
+		&version,
+	)
+	versionID := version["dataset_version_id"].(string)
+
+	sentimentPath = filepath.Join(artifactRoot, "projects", projectID, "datasets", datasetID, "versions", versionID, "sentiment", "sentiment.parquet")
+	if err := os.MkdirAll(filepath.Dir(sentimentPath), 0o755); err != nil {
+		t.Fatalf("unexpected mkdir error: %v", err)
+	}
+	writeSentimentPreviewParquetForHTTP(t, sentimentPath, []map[string]any{
+		{
+			"source_row_index":         0,
+			"row_id":                   "row-0",
+			"sentiment_label":          "negative",
+			"sentiment_confidence":     0.91,
+			"sentiment_reason":         "결제 실패와 오류 반복 언급",
+			"sentiment_prompt_version": "sentiment-anthropic-v2",
+		},
+		{
+			"source_row_index":         2,
+			"row_id":                   "row-2",
+			"sentiment_label":          "neutral",
+			"sentiment_confidence":     0.64,
+			"sentiment_reason":         "상태 설명 중심",
+			"sentiment_prompt_version": "sentiment-anthropic-v2",
+		},
+	})
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/sentiment",
+		`{}`,
+		http.StatusAccepted,
+		nil,
+	)
+
+	preview := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/sentiment_preview?limit=2",
+		"",
+		http.StatusOK,
+		&preview,
+	)
+	if preview["sentiment_ref"] != sentimentPath {
+		t.Fatalf("unexpected sentiment_ref: %+v", preview)
+	}
+	if preview["sample_limit"] != float64(2) {
+		t.Fatalf("unexpected sample_limit: %+v", preview)
+	}
+	summary, ok := preview["summary"].(map[string]any)
+	if !ok || summary["labeled_row_count"] != float64(2) {
+		t.Fatalf("unexpected summary payload: %+v", preview)
+	}
+	samples, ok := preview["samples"].([]any)
+	if !ok || len(samples) != 2 {
+		t.Fatalf("unexpected samples payload: %+v", preview)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/sentiment_download", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected download status: got=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "text/csv; charset=utf-8" {
+		t.Fatalf("unexpected content-type: %s", contentType)
+	}
+	if disposition := recorder.Header().Get("Content-Disposition"); !strings.Contains(disposition, "attachment; filename=") || !strings.Contains(disposition, "sentiment.csv") {
+		t.Fatalf("unexpected content-disposition: %s", disposition)
+	}
+	body := recorder.Body.Bytes()
+	if len(body) < 3 || !bytes.Equal(body[:3], []byte{0xEF, 0xBB, 0xBF}) {
+		t.Fatalf("expected utf-8 bom in csv export: %v", body)
+	}
+	csvBody := string(body[3:])
+	if !strings.Contains(csvBody, "source_row_index,row_id,sentiment_label,sentiment_confidence,sentiment_reason,sentiment_prompt_version") {
+		t.Fatalf("unexpected csv header: %s", csvBody)
+	}
+	if !strings.Contains(csvBody, "row-0") || !strings.Contains(csvBody, "row-2") {
+		t.Fatalf("unexpected csv rows: %s", csvBody)
+	}
+}
+
 func TestOpenAPIDocumentAndSwaggerUI(t *testing.T) {
 	openapiDir := t.TempDir()
 	openapiPath := filepath.Join(openapiDir, "openapi.yaml")
@@ -1329,6 +1482,37 @@ func writePreparedPreviewParquetForHTTP(t *testing.T, path string, rows []map[st
 			escapeDuckDBLiteralForHTTP(row["normalized_text"].(string)),
 			escapeDuckDBLiteralForHTTP(row["prepare_disposition"].(string)),
 			escapeDuckDBLiteralForHTTP(row["prepare_reason"].(string)),
+		))
+	}
+	query := fmt.Sprintf(
+		`COPY (%s) TO '%s' (FORMAT PARQUET)`,
+		strings.Join(selects, " UNION ALL "),
+		escapeDuckDBLiteralForHTTP(path),
+	)
+	if _, err := db.Exec(query); err != nil {
+		t.Fatalf("unexpected parquet write error: %v", err)
+	}
+}
+
+func writeSentimentPreviewParquetForHTTP(t *testing.T, path string, rows []map[string]any) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "sentiment-preview-http.duckdb")
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("unexpected duckdb open error: %v", err)
+	}
+	defer db.Close()
+
+	selects := make([]string, 0, len(rows))
+	for _, row := range rows {
+		selects = append(selects, fmt.Sprintf(
+			`SELECT %d AS source_row_index, '%s' AS row_id, '%s' AS sentiment_label, %f AS sentiment_confidence, '%s' AS sentiment_reason, '%s' AS sentiment_prompt_version`,
+			row["source_row_index"].(int),
+			escapeDuckDBLiteralForHTTP(row["row_id"].(string)),
+			escapeDuckDBLiteralForHTTP(row["sentiment_label"].(string)),
+			row["sentiment_confidence"].(float64),
+			escapeDuckDBLiteralForHTTP(row["sentiment_reason"].(string)),
+			escapeDuckDBLiteralForHTTP(row["sentiment_prompt_version"].(string)),
 		))
 	}
 	query := fmt.Sprintf(

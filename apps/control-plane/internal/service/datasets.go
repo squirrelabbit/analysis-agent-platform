@@ -31,13 +31,15 @@ const DefaultEmbeddingModel = "intfloat/multilingual-e5-small"
 const tokenProjectionVectorDim = 64
 
 const (
-	workerTaskTimeoutPrepare   = 10 * time.Minute
-	workerTaskTimeoutSentiment = 30 * time.Minute
-	workerTaskTimeoutEmbedding = 45 * time.Minute
-	defaultClusterMembersLimit = 50
-	maxClusterMembersLimit     = 500
-	defaultPreparePreviewLimit = 10
-	maxPreparePreviewLimit     = 20
+	workerTaskTimeoutPrepare     = 10 * time.Minute
+	workerTaskTimeoutSentiment   = 30 * time.Minute
+	workerTaskTimeoutEmbedding   = 45 * time.Minute
+	defaultClusterMembersLimit   = 50
+	maxClusterMembersLimit       = 500
+	defaultPreparePreviewLimit   = 10
+	maxPreparePreviewLimit       = 20
+	defaultSentimentPreviewLimit = 10
+	maxSentimentPreviewLimit     = 20
 )
 
 const (
@@ -449,6 +451,97 @@ func (s *DatasetService) ResolvePrepareDownload(projectID, datasetID, datasetVer
 	filename := strings.TrimSpace(filepath.Base(preparedRef))
 	if filename == "" || filename == "." || filename == string(filepath.Separator) {
 		filename = "prepared.csv"
+	} else if strings.HasSuffix(strings.ToLower(filename), ".parquet") {
+		filename = filename[:len(filename)-len(".parquet")] + ".csv"
+	} else {
+		filename = filename + ".csv"
+	}
+	return exportPath, filename, nil
+}
+
+func (s *DatasetService) GetSentimentPreview(
+	projectID, datasetID, datasetVersionID string,
+	input domain.DatasetSentimentPreviewQuery,
+) (domain.DatasetSentimentPreviewResponse, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetSentimentPreviewResponse{}, err
+	}
+
+	sentimentRef, sentimentFormat, err := resolveSentimentArtifact(version)
+	if err != nil {
+		return domain.DatasetSentimentPreviewResponse{}, err
+	}
+	if sentimentFormat != "parquet" {
+		return domain.DatasetSentimentPreviewResponse{}, ErrInvalidArgument{Message: "sentiment preview supports parquet artifact only"}
+	}
+
+	limit := defaultSentimentPreviewLimit
+	if input.Limit != nil {
+		limit = *input.Limit
+	}
+	if limit <= 0 {
+		return domain.DatasetSentimentPreviewResponse{}, ErrInvalidArgument{Message: "limit must be a positive integer"}
+	}
+	if limit > maxSentimentPreviewLimit {
+		limit = maxSentimentPreviewLimit
+	}
+
+	samples, err := loadSentimentSamplesFromParquet(sentimentRef, limit)
+	if err != nil {
+		return domain.DatasetSentimentPreviewResponse{}, err
+	}
+
+	response := domain.DatasetSentimentPreviewResponse{
+		ProjectID:                 projectID,
+		DatasetID:                 datasetID,
+		DatasetVersionID:          datasetVersionID,
+		SentimentStatus:           version.SentimentStatus,
+		SentimentLabeledAt:        version.SentimentLabeledAt,
+		SentimentRef:              sentimentRef,
+		SentimentFormat:           sentimentFormat,
+		SentimentTextColumn:       metadataString(version.Metadata, "sentiment_text_column", defaultPreparedTextColumn(version)),
+		SentimentLabelColumn:      metadataString(version.Metadata, "sentiment_label_column", "sentiment_label"),
+		SentimentConfidenceColumn: metadataString(version.Metadata, "sentiment_confidence_column", "sentiment_confidence"),
+		SentimentReasonColumn:     metadataString(version.Metadata, "sentiment_reason_column", "sentiment_reason"),
+		RowIDColumn:               metadataString(version.Metadata, "row_id_column", "row_id"),
+		Summary:                   cloneSentimentSummary(buildSentimentSummary(version.Metadata)),
+		SampleLimit:               limit,
+		Samples:                   samples,
+	}
+
+	return response, nil
+}
+
+func (s *DatasetService) ResolveSentimentDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return "", "", err
+	}
+	sentimentRef, sentimentFormat, err := resolveSentimentArtifact(version)
+	if err != nil {
+		return "", "", err
+	}
+	if sentimentFormat != "parquet" {
+		return "", "", ErrInvalidArgument{Message: "sentiment download supports parquet artifact only"}
+	}
+	info, statErr := os.Stat(sentimentRef)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return "", "", ErrNotFound{Resource: "sentiment artifact"}
+		}
+		return "", "", statErr
+	}
+	if info.IsDir() {
+		return "", "", ErrInvalidArgument{Message: "sentiment artifact must be a file"}
+	}
+	exportPath, err := exportSentimentCSVFromParquet(sentimentRef)
+	if err != nil {
+		return "", "", err
+	}
+	filename := strings.TrimSpace(filepath.Base(sentimentRef))
+	if filename == "" || filename == "." || filename == string(filepath.Separator) {
+		filename = "sentiment.csv"
 	} else if strings.HasSuffix(strings.ToLower(filename), ".parquet") {
 		filename = filename[:len(filename)-len(".parquet")] + ".csv"
 	} else {
@@ -2011,6 +2104,23 @@ func enrichDatasetVersionView(version *domain.DatasetVersion) {
 	version.PrepareSummary = buildPrepareSummary(version.Metadata)
 }
 
+func buildSentimentSummary(metadata map[string]any) *domain.DatasetSentimentSummary {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw, ok := metadata["sentiment_summary"].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	return &domain.DatasetSentimentSummary{
+		InputRowCount:      intValueOrZero(raw["input_row_count"]),
+		LabeledRowCount:    intValueOrZero(raw["labeled_row_count"]),
+		TextColumn:         strings.TrimSpace(anyStringValue(raw["text_column"])),
+		SentimentBatchSize: intValueOrZero(raw["sentiment_batch_size"]),
+		LabelCounts:        intMapValue(raw["label_counts"]),
+	}
+}
+
 func buildPrepareSummary(metadata map[string]any) *domain.DatasetPrepareSummary {
 	if len(metadata) == 0 {
 		return nil
@@ -2027,6 +2137,17 @@ func buildPrepareSummary(metadata map[string]any) *domain.DatasetPrepareSummary 
 		DroppedCount:         intValueOrZero(raw["dropped_count"]),
 		PrepareRegexRuleHits: intMapValue(raw["prepare_regex_rule_hits"]),
 	}
+}
+
+func cloneSentimentSummary(summary *domain.DatasetSentimentSummary) *domain.DatasetSentimentSummary {
+	if summary == nil {
+		return nil
+	}
+	cloned := *summary
+	if len(summary.LabelCounts) > 0 {
+		cloned.LabelCounts = cloneStringIntMap(summary.LabelCounts)
+	}
+	return &cloned
 }
 
 func clonePrepareSummary(summary *domain.DatasetPrepareSummary) *domain.DatasetPrepareSummary {
@@ -2133,6 +2254,21 @@ func resolvePrepareArtifact(version domain.DatasetVersion) (string, string, erro
 		prepareFormat = inferArtifactFormat(preparedRef, "parquet")
 	}
 	return preparedRef, prepareFormat, nil
+}
+
+func resolveSentimentArtifact(version domain.DatasetVersion) (string, string, error) {
+	sentimentRef := strings.TrimSpace(metadataString(version.Metadata, "sentiment_ref", ""))
+	if sentimentRef == "" && version.SentimentURI != nil {
+		sentimentRef = strings.TrimSpace(*version.SentimentURI)
+	}
+	if version.SentimentStatus != "ready" || sentimentRef == "" {
+		return "", "", ErrInvalidArgument{Message: "sentiment artifact is not ready"}
+	}
+	sentimentFormat := strings.TrimSpace(metadataString(version.Metadata, "sentiment_format", ""))
+	if sentimentFormat == "" {
+		sentimentFormat = inferArtifactFormat(sentimentRef, "parquet")
+	}
+	return sentimentRef, sentimentFormat, nil
 }
 
 func deriveClusterMembershipURI(summaryURI string) string {
@@ -2270,6 +2406,14 @@ type preparePreviewParquetRecord struct {
 	NormalizedText     string
 	PrepareDisposition string
 	PrepareReason      string
+}
+
+type sentimentPreviewParquetRecord struct {
+	SourceRowIndex      int
+	RowID               string
+	SentimentLabel      string
+	SentimentConfidence float64
+	SentimentReason     string
 }
 
 func loadEmbeddingIndexChunks(datasetVersionID string, embeddingRef string, chunkRef string, embeddingModel string) ([]domain.EmbeddingIndexChunk, error) {
@@ -2592,6 +2736,87 @@ func loadPrepareSamplesFromParquet(preparedRef string, limit int, disposition st
 	return items, nil
 }
 
+func loadSentimentSamplesFromParquet(sentimentRef string, limit int) ([]domain.DatasetSentimentSample, error) {
+	sentimentRef = strings.TrimSpace(sentimentRef)
+	if sentimentRef == "" {
+		return nil, ErrInvalidArgument{Message: "sentiment artifact ref is required"}
+	}
+	if limit <= 0 {
+		return nil, ErrInvalidArgument{Message: "limit must be a positive integer"}
+	}
+	if _, err := os.Stat(sentimentRef); err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNotFound{Resource: "sentiment artifact"}
+		}
+		return nil, err
+	}
+	tempHandle, err := os.CreateTemp("", "sentiment-preview-*.duckdb")
+	if err != nil {
+		return nil, err
+	}
+	dbPath := tempHandle.Name()
+	if err := tempHandle.Close(); err != nil {
+		return nil, err
+	}
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	defer os.Remove(dbPath)
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	query := fmt.Sprintf(
+		`SELECT
+			CAST(COALESCE(source_row_index, 0) AS INTEGER) AS source_row_index,
+			COALESCE(row_id, '') AS row_id,
+			COALESCE(sentiment_label, '') AS sentiment_label,
+			CAST(COALESCE(sentiment_confidence, 0) AS DOUBLE) AS sentiment_confidence,
+			COALESCE(sentiment_reason, '') AS sentiment_reason
+		FROM read_parquet('%s')
+		ORDER BY source_row_index, row_id
+		LIMIT %d`,
+		escapeDuckDBLiteral(sentimentRef),
+		limit,
+	)
+	rows, err := db.Query(query)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no files found") {
+			return nil, ErrNotFound{Resource: "sentiment artifact"}
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.DatasetSentimentSample, 0)
+	for rows.Next() {
+		var row sentimentPreviewParquetRecord
+		if err := rows.Scan(
+			&row.SourceRowIndex,
+			&row.RowID,
+			&row.SentimentLabel,
+			&row.SentimentConfidence,
+			&row.SentimentReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, domain.DatasetSentimentSample{
+			SourceRowIndex:      row.SourceRowIndex,
+			RowID:               strings.TrimSpace(row.RowID),
+			SentimentLabel:      strings.TrimSpace(row.SentimentLabel),
+			SentimentConfidence: row.SentimentConfidence,
+			SentimentReason:     strings.TrimSpace(row.SentimentReason),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func exportPrepareCSVFromParquet(preparedRef string) (string, error) {
 	preparedRef = strings.TrimSpace(preparedRef)
 	if preparedRef == "" {
@@ -2641,6 +2866,64 @@ func exportPrepareCSVFromParquet(preparedRef string) (string, error) {
 			ORDER BY source_row_index, row_id
 		) TO '%s' (FORMAT CSV, HEADER)`,
 		escapeDuckDBLiteral(preparedRef),
+		escapeDuckDBLiteral(csvPath),
+	)
+	if _, err := db.Exec(query); err != nil {
+		_ = os.Remove(csvPath)
+		return "", err
+	}
+	return csvPath, nil
+}
+
+func exportSentimentCSVFromParquet(sentimentRef string) (string, error) {
+	sentimentRef = strings.TrimSpace(sentimentRef)
+	if sentimentRef == "" {
+		return "", ErrInvalidArgument{Message: "sentiment artifact ref is required"}
+	}
+	if _, err := os.Stat(sentimentRef); err != nil {
+		if os.IsNotExist(err) {
+			return "", ErrNotFound{Resource: "sentiment artifact"}
+		}
+		return "", err
+	}
+
+	csvHandle, err := os.CreateTemp("", "sentiment-export-*.csv")
+	if err != nil {
+		return "", err
+	}
+	csvPath := csvHandle.Name()
+	if err := csvHandle.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(csvPath); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+
+	tempHandle, err := os.CreateTemp("", "sentiment-export-*.duckdb")
+	if err != nil {
+		return "", err
+	}
+	dbPath := tempHandle.Name()
+	if err := tempHandle.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	defer os.Remove(dbPath)
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+
+	query := fmt.Sprintf(
+		`COPY (
+			SELECT * FROM read_parquet('%s')
+			ORDER BY source_row_index, row_id
+		) TO '%s' (FORMAT CSV, HEADER)`,
+		escapeDuckDBLiteral(sentimentRef),
 		escapeDuckDBLiteral(csvPath),
 	)
 	if _, err := db.Exec(query); err != nil {
