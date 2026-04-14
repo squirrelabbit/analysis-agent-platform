@@ -1027,6 +1027,58 @@ func TestOpenAPIDocumentAndSwaggerUI(t *testing.T) {
 	}
 }
 
+func TestCORSPreflightAllowsConfiguredOrigin(t *testing.T) {
+	server := NewServer(config.Config{
+		BindAddr:           ":0",
+		StoreBackend:       "memory",
+		WorkflowEngine:     "noop",
+		CORSAllowedOrigins: []string{"http://127.0.0.1:4173"},
+	})
+	handler := server.Handler()
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodOptions, "/projects", nil)
+	req.Header.Set("Origin", "http://127.0.0.1:4173")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "content-type,authorization")
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("unexpected preflight status: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "http://127.0.0.1:4173" {
+		t.Fatalf("unexpected allow-origin header: %q", got)
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodPost) {
+		t.Fatalf("unexpected allow-methods header: %q", got)
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Headers"); got != "content-type,authorization" {
+		t.Fatalf("unexpected allow-headers header: %q", got)
+	}
+}
+
+func TestCORSDoesNotExposeHeadersForUnknownOrigin(t *testing.T) {
+	server := NewServer(config.Config{
+		BindAddr:           ":0",
+		StoreBackend:       "memory",
+		WorkflowEngine:     "noop",
+		CORSAllowedOrigins: []string{"http://127.0.0.1:4173"},
+	})
+	handler := server.Handler()
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected health status: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("unexpected allow-origin header for unknown origin: %q", got)
+	}
+}
+
 func readJSONResponse(
 	t *testing.T,
 	handler http.Handler,
