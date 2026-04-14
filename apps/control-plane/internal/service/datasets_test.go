@@ -126,6 +126,37 @@ func writeClusterMembershipParquet(t *testing.T, path string, rows []map[string]
 	}
 }
 
+func writePreparedPreviewParquet(t *testing.T, path string, rows []map[string]any) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "prepare-preview.duckdb")
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("unexpected duckdb open error: %v", err)
+	}
+	defer db.Close()
+
+	selects := make([]string, 0, len(rows))
+	for _, row := range rows {
+		selects = append(selects, fmt.Sprintf(
+			`SELECT %d AS source_row_index, '%s' AS row_id, '%s' AS raw_text, '%s' AS normalized_text, '%s' AS prepare_disposition, '%s' AS prepare_reason`,
+			intValue(row["source_row_index"]),
+			escapeDuckDBLiteral(stringValue(row["row_id"])),
+			escapeDuckDBLiteral(stringValue(row["raw_text"])),
+			escapeDuckDBLiteral(stringValue(row["normalized_text"])),
+			escapeDuckDBLiteral(stringValue(row["prepare_disposition"])),
+			escapeDuckDBLiteral(stringValue(row["prepare_reason"])),
+		))
+	}
+	query := fmt.Sprintf(
+		`COPY (%s) TO '%s' (FORMAT PARQUET)`,
+		strings.Join(selects, " UNION ALL "),
+		escapeDuckDBLiteral(path),
+	)
+	if _, err := db.Exec(query); err != nil {
+		t.Fatalf("unexpected parquet write error: %v", err)
+	}
+}
+
 func int64Value(value any) int64 {
 	switch typed := value.(type) {
 	case int:
@@ -1995,6 +2026,131 @@ func TestGetClusterMembersLoadsSummaryAndMembership(t *testing.T) {
 	}
 	if response.ClusterMembershipRef != membershipPath {
 		t.Fatalf("unexpected cluster membership ref: %s", response.ClusterMembershipRef)
+	}
+}
+
+func TestGetPreparePreviewBuildsSummaryAndWarningPanel(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-prepare-preview", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-prepare-preview",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	preparedPath := filepath.Join(t.TempDir(), "prepared.parquet")
+	writePreparedPreviewParquet(t, preparedPath, []map[string]any{
+		{
+			"source_row_index":    0,
+			"row_id":              "row-0",
+			"raw_text":            "결제 오류가 반복 발생했습니다!!!",
+			"normalized_text":     "결제 오류가 반복 발생했습니다.",
+			"prepare_disposition": "keep",
+			"prepare_reason":      "noise removed",
+		},
+		{
+			"source_row_index":    2,
+			"row_id":              "row-2",
+			"raw_text":            "로그인이 자주 실패하고 오류가 보입니다",
+			"normalized_text":     "로그인이 자주 실패하고 오류가 보입니다.",
+			"prepare_disposition": "review",
+			"prepare_reason":      "needs review",
+		},
+	})
+
+	preparedAt := time.Now().UTC()
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-prepare-preview",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"prepared_ref":         preparedPath,
+			"prepared_format":      "parquet",
+			"raw_text_column":      "text",
+			"prepared_text_column": "normalized_text",
+			"row_id_column":        "row_id",
+			"prepare_summary": map[string]any{
+				"input_row_count":  3,
+				"output_row_count": 2,
+				"kept_count":       1,
+				"review_count":     1,
+				"dropped_count":    1,
+				"prepare_regex_rule_hits": map[string]any{
+					"html_artifact": 1,
+					"url_cleanup":   1,
+				},
+			},
+		},
+		PrepareStatus:   "ready",
+		PrepareURI:      datasetStringPtr(preparedPath),
+		PreparedAt:      &preparedAt,
+		SentimentStatus: "not_requested",
+		EmbeddingStatus: "not_requested",
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	loadedVersion, err := service.GetDatasetVersion(project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset version error: %v", err)
+	}
+	if loadedVersion.PrepareSummary == nil {
+		t.Fatalf("expected prepare_summary in dataset version: %+v", loadedVersion)
+	}
+	if loadedVersion.PrepareSummary.ReviewCount != 1 {
+		t.Fatalf("unexpected review_count: %+v", loadedVersion.PrepareSummary)
+	}
+	if loadedVersion.PrepareSummary.PrepareRegexRuleHits["html_artifact"] != 1 {
+		t.Fatalf("unexpected prepare_regex_rule_hits: %+v", loadedVersion.PrepareSummary.PrepareRegexRuleHits)
+	}
+
+	limit := 2
+	response, err := service.GetPreparePreview(
+		project.ProjectID,
+		dataset.DatasetID,
+		version.DatasetVersionID,
+		domain.DatasetPreparePreviewQuery{Limit: &limit},
+	)
+	if err != nil {
+		t.Fatalf("unexpected get prepare preview error: %v", err)
+	}
+	if response.PreparedRef != preparedPath {
+		t.Fatalf("unexpected prepared_ref: %s", response.PreparedRef)
+	}
+	if response.SampleLimit != 2 {
+		t.Fatalf("unexpected sample_limit: %d", response.SampleLimit)
+	}
+	if response.Summary == nil || response.Summary.DroppedCount != 1 {
+		t.Fatalf("unexpected summary payload: %+v", response.Summary)
+	}
+	if len(response.Samples) != 2 {
+		t.Fatalf("unexpected samples: %+v", response.Samples)
+	}
+	if response.Samples[0].RawText != "결제 오류가 반복 발생했습니다!!!" {
+		t.Fatalf("unexpected first sample: %+v", response.Samples[0])
+	}
+	if response.WarningPanel == nil {
+		t.Fatalf("expected warning_panel for review rows: %+v", response)
+	}
+	if response.WarningPanel.ReviewCount != 1 || len(response.WarningPanel.Samples) != 1 {
+		t.Fatalf("unexpected warning_panel payload: %+v", response.WarningPanel)
+	}
+	if response.WarningPanel.Samples[0].PrepareDisposition != "review" {
+		t.Fatalf("unexpected warning sample: %+v", response.WarningPanel.Samples[0])
 	}
 }
 
