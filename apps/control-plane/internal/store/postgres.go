@@ -324,11 +324,11 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 	_, err = s.db.Exec(
 		`INSERT INTO dataset_versions (
 		     dataset_version_id, dataset_id, project_id, storage_uri, data_type, record_count,
-		     metadata, profile, prepare_status, prepare_model, prepare_prompt_version, prepare_uri, prepared_at,
-		     sentiment_status, sentiment_model, sentiment_uri, sentiment_labeled_at, sentiment_prompt_version,
+		     metadata, profile, prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version, prepare_uri, prepared_at,
+		     sentiment_status, sentiment_llm_mode, sentiment_model, sentiment_uri, sentiment_labeled_at, sentiment_prompt_version,
 		     embedding_status, embedding_model, embedding_uri, created_at, ready_at
 		 ) VALUES (
-		     $1, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+		     $1, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
 		 )
 		 ON CONFLICT (dataset_version_id) DO UPDATE
 		 SET dataset_id = EXCLUDED.dataset_id,
@@ -339,11 +339,13 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 		     metadata = EXCLUDED.metadata,
 		     profile = EXCLUDED.profile,
 		     prepare_status = EXCLUDED.prepare_status,
+		     prepare_llm_mode = EXCLUDED.prepare_llm_mode,
 		     prepare_model = EXCLUDED.prepare_model,
 		     prepare_prompt_version = EXCLUDED.prepare_prompt_version,
 		     prepare_uri = EXCLUDED.prepare_uri,
 		     prepared_at = EXCLUDED.prepared_at,
 		     sentiment_status = EXCLUDED.sentiment_status,
+		     sentiment_llm_mode = EXCLUDED.sentiment_llm_mode,
 		     sentiment_model = EXCLUDED.sentiment_model,
 		     sentiment_uri = EXCLUDED.sentiment_uri,
 		     sentiment_labeled_at = EXCLUDED.sentiment_labeled_at,
@@ -362,11 +364,13 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 		metadataJSON,
 		profileJSON,
 		version.PrepareStatus,
+		version.PrepareLLMMode,
 		nullableString(version.PrepareModel),
 		nullableString(version.PreparePromptVer),
 		nullableString(version.PrepareURI),
 		nullableTime(version.PreparedAt),
 		version.SentimentStatus,
+		version.SentimentLLMMode,
 		nullableString(version.SentimentModel),
 		nullableString(version.SentimentURI),
 		nullableTime(version.SentimentLabeledAt),
@@ -383,8 +387,8 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (domain.DatasetVersion, error) {
 	row := s.db.QueryRow(
 		`SELECT dataset_version_id, dataset_id::text, project_id::text, storage_uri, data_type,
-		        record_count, metadata, profile, prepare_status, prepare_model, prepare_prompt_version,
-		        prepare_uri, prepared_at, sentiment_status, sentiment_model, sentiment_uri,
+		        record_count, metadata, profile, prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version,
+		        prepare_uri, prepared_at, sentiment_status, sentiment_llm_mode, sentiment_model, sentiment_uri,
 		        sentiment_labeled_at, sentiment_prompt_version, embedding_status, embedding_model,
 		        embedding_uri, created_at, ready_at
 		 FROM dataset_versions
@@ -415,11 +419,13 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 		&metadataRaw,
 		&profileRaw,
 		&version.PrepareStatus,
+		&version.PrepareLLMMode,
 		&prepareModel,
 		&preparePromptVersion,
 		&prepareURI,
 		&version.PreparedAt,
 		&version.SentimentStatus,
+		&version.SentimentLLMMode,
 		&sentimentModel,
 		&sentimentURI,
 		&version.SentimentLabeledAt,
@@ -475,8 +481,8 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]domain.DatasetVersion, error) {
 	rows, err := s.db.Query(
 		`SELECT dataset_version_id, dataset_id::text, project_id::text, storage_uri, data_type,
-		        record_count, metadata, profile, prepare_status, prepare_model, prepare_prompt_version,
-		        prepare_uri, prepared_at, sentiment_status, sentiment_model, sentiment_uri,
+		        record_count, metadata, profile, prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version,
+		        prepare_uri, prepared_at, sentiment_status, sentiment_llm_mode, sentiment_model, sentiment_uri,
 		        sentiment_labeled_at, sentiment_prompt_version, embedding_status, embedding_model,
 		        embedding_uri, created_at, ready_at
 		 FROM dataset_versions
@@ -514,11 +520,13 @@ func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]doma
 			&metadataRaw,
 			&profileRaw,
 			&version.PrepareStatus,
+			&version.PrepareLLMMode,
 			&prepareModel,
 			&preparePromptVersion,
 			&prepareURI,
 			&version.PreparedAt,
 			&version.SentimentStatus,
+			&version.SentimentLLMMode,
 			&sentimentModel,
 			&sentimentURI,
 			&version.SentimentLabeledAt,
@@ -1363,11 +1371,13 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			metadata JSONB NOT NULL,
 			profile JSONB,
 			prepare_status TEXT NOT NULL DEFAULT 'not_requested',
+			prepare_llm_mode TEXT NOT NULL DEFAULT 'default',
 			prepare_model TEXT,
 			prepare_prompt_version TEXT,
 			prepare_uri TEXT,
 			prepared_at TIMESTAMPTZ,
 			sentiment_status TEXT NOT NULL DEFAULT 'not_requested',
+			sentiment_llm_mode TEXT NOT NULL DEFAULT 'default',
 			sentiment_model TEXT,
 			sentiment_uri TEXT,
 			sentiment_labeled_at TIMESTAMPTZ,
@@ -1380,11 +1390,13 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		)`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS profile JSONB`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_status TEXT NOT NULL DEFAULT 'not_requested'`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_llm_mode TEXT NOT NULL DEFAULT 'default'`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_model TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_prompt_version TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_uri TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepared_at TIMESTAMPTZ`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_status TEXT NOT NULL DEFAULT 'not_requested'`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_llm_mode TEXT NOT NULL DEFAULT 'default'`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_model TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_uri TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_labeled_at TIMESTAMPTZ`,

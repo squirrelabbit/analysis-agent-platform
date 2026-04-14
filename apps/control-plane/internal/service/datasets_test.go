@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -217,6 +219,46 @@ func waitForDatasetVersionPrepareReady(t *testing.T, service *DatasetService, pr
 	return domain.DatasetVersion{}
 }
 
+func waitForDatasetBuildJobByType(t *testing.T, service *DatasetService, projectID, datasetID, versionID, buildType string) domain.DatasetBuildJob {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		jobs, err := service.ListDatasetBuildJobs(projectID, datasetID, versionID)
+		if err == nil {
+			for _, job := range jobs.Items {
+				if job.BuildType == buildType {
+					return job
+				}
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	jobs, err := service.ListDatasetBuildJobs(projectID, datasetID, versionID)
+	if err != nil {
+		t.Fatalf("unexpected list dataset build jobs error: %v", err)
+	}
+	t.Fatalf("expected dataset build job type %s, got %+v", buildType, jobs.Items)
+	return domain.DatasetBuildJob{}
+}
+
+func waitForDatasetVersionSentimentReady(t *testing.T, service *DatasetService, projectID, datasetID, versionID string) domain.DatasetVersion {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		version, err := service.GetDatasetVersion(projectID, datasetID, versionID)
+		if err == nil && version.SentimentStatus == "ready" {
+			return version
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	version, err := service.GetDatasetVersion(projectID, datasetID, versionID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset version error: %v", err)
+	}
+	t.Fatalf("expected dataset version sentiment ready, got %s", version.SentimentStatus)
+	return domain.DatasetVersion{}
+}
+
 func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	repository := store.NewMemoryStore()
 	uploadRoot := t.TempDir()
@@ -240,6 +282,7 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 
 	var requestedPath string
 	var requestedOutputPath string
+	var requestedLLMMode string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -247,6 +290,7 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 		}
 		requestedPath = r.URL.Path
 		requestedOutputPath = payload["output_path"].(string)
+		requestedLLMMode = payload["llm_mode"].(string)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"notes": []string{"prepare completed"},
 			"artifact": map[string]any{
@@ -300,6 +344,9 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	if requestedPath != "/tasks/dataset_prepare" {
 		t.Fatalf("unexpected worker path: %s", requestedPath)
 	}
+	if requestedLLMMode != "default" {
+		t.Fatalf("unexpected prepare llm mode: %s", requestedLLMMode)
+	}
 	if !strings.HasPrefix(requestedOutputPath, artifactRoot) {
 		t.Fatalf("unexpected prepare output path: %s", requestedOutputPath)
 	}
@@ -326,6 +373,86 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	}
 	if version.RecordCount == nil || *version.RecordCount != 7 {
 		t.Fatalf("unexpected record count: %+v", version.RecordCount)
+	}
+	if version.PrepareLLMMode != "default" {
+		t.Fatalf("unexpected stored prepare llm mode: %s", version.PrepareLLMMode)
+	}
+}
+
+func TestCreateDatasetVersionStoresExplicitLLMModes(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-llm-mode", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-llm-mode",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI:        "/tmp/issues.csv",
+		DataType:          datasetStringPtr("unstructured"),
+		PrepareLLMMode:    datasetStringPtr("disabled"),
+		SentimentRequired: datasetBoolPtr(true),
+		SentimentLLMMode:  datasetStringPtr("enabled"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected create dataset version error: %v", err)
+	}
+	if version.PrepareLLMMode != "disabled" {
+		t.Fatalf("unexpected prepare llm mode: %s", version.PrepareLLMMode)
+	}
+	if version.SentimentLLMMode != "enabled" {
+		t.Fatalf("unexpected sentiment llm mode: %s", version.SentimentLLMMode)
+	}
+
+	stored, err := service.GetDatasetVersion(project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset version error: %v", err)
+	}
+	if stored.PrepareLLMMode != "disabled" || stored.SentimentLLMMode != "enabled" {
+		t.Fatalf("unexpected stored llm modes: prepare=%s sentiment=%s", stored.PrepareLLMMode, stored.SentimentLLMMode)
+	}
+}
+
+func TestCreateDatasetVersionRejectsInvalidLLMMode(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-invalid-llm-mode", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-invalid-llm-mode",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	_, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI:     "/tmp/issues.csv",
+		PrepareLLMMode: datasetStringPtr("sometimes"),
+	})
+	if err == nil {
+		t.Fatalf("expected invalid llm mode error")
+	}
+	var invalid ErrInvalidArgument
+	if !errors.As(err, &invalid) {
+		t.Fatalf("expected ErrInvalidArgument, got %T", err)
 	}
 }
 
@@ -692,6 +819,112 @@ func TestCreateDatasetVersionEnqueuesEagerPrepareJobWhenWorkerConfigured(t *test
 	}
 	if version.PrepareURI == nil || *version.PrepareURI != "/tmp/issues.prepared.parquet" {
 		t.Fatalf("unexpected prepare uri: %+v", version.PrepareURI)
+	}
+}
+
+func TestCreateDatasetVersionAutoCreatesSentimentJobAfterPrepare(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-1", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-1",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	var mu sync.Mutex
+	requestPaths := make([]string, 0, 2)
+	sentimentDatasetName := ""
+	sentimentTextColumn := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("unexpected decode error: %v", err)
+		}
+
+		mu.Lock()
+		requestPaths = append(requestPaths, r.URL.Path)
+		mu.Unlock()
+
+		switch r.URL.Path {
+		case "/tasks/dataset_prepare":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"prepare_uri":          "/tmp/issues.prepared.parquet",
+					"prepared_ref":         "/tmp/issues.prepared.parquet",
+					"prepare_format":       "parquet",
+					"prepared_text_column": "normalized_text",
+					"summary": map[string]any{
+						"output_row_count": 3,
+					},
+				},
+			})
+		case "/tasks/sentiment_label":
+			mu.Lock()
+			sentimentDatasetName = stringValue(payload["dataset_name"])
+			sentimentTextColumn = stringValue(payload["text_column"])
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"sentiment_uri":               "/tmp/issues.prepared.parquet.sentiment.parquet",
+					"sentiment_ref":               "/tmp/issues.prepared.parquet.sentiment.parquet",
+					"sentiment_format":            "parquet",
+					"sentiment_label_column":      "sentiment_label",
+					"sentiment_confidence_column": "sentiment_confidence",
+					"sentiment_reason_column":     "sentiment_reason",
+				},
+			})
+		default:
+			t.Fatalf("unexpected worker path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI:        "/tmp/issues.csv",
+		DataType:          datasetStringPtr("unstructured"),
+		SentimentRequired: datasetBoolPtr(true),
+		PrepareRequired:   datasetBoolPtr(true),
+		SentimentModel:    datasetStringPtr("claude-haiku-test"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected create dataset version error: %v", err)
+	}
+
+	prepareJob := waitForDatasetBuildJobByType(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID, "prepare")
+	waitForDatasetBuildJobStatus(t, service, project.ProjectID, prepareJob.JobID, "completed")
+
+	sentimentJob := waitForDatasetBuildJobByType(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID, "sentiment")
+	waitForDatasetBuildJobStatus(t, service, project.ProjectID, sentimentJob.JobID, "completed")
+
+	version = waitForDatasetVersionSentimentReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requestPaths) != 2 {
+		t.Fatalf("expected prepare and sentiment worker calls, got %+v", requestPaths)
+	}
+	if requestPaths[0] != "/tasks/dataset_prepare" || requestPaths[1] != "/tasks/sentiment_label" {
+		t.Fatalf("unexpected worker call order: %+v", requestPaths)
+	}
+	if sentimentDatasetName != "/tmp/issues.prepared.parquet" {
+		t.Fatalf("expected sentiment to use prepared dataset, got %s", sentimentDatasetName)
+	}
+	if sentimentTextColumn != "normalized_text" {
+		t.Fatalf("expected sentiment to use prepared text column, got %s", sentimentTextColumn)
+	}
+	if version.SentimentURI == nil || *version.SentimentURI != "/tmp/issues.prepared.parquet.sentiment.parquet" {
+		t.Fatalf("unexpected sentiment uri: %+v", version.SentimentURI)
 	}
 }
 
@@ -1795,11 +2028,12 @@ func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 		Metadata: map[string]any{
 			"prepared_text_column": "normalized_text",
 		},
-		PrepareStatus:   "ready",
-		PrepareURI:      datasetStringPtr("/tmp/issues.prepared.parquet"),
-		SentimentStatus: "queued",
-		EmbeddingStatus: "not_requested",
-		CreatedAt:       time.Now().UTC(),
+		PrepareStatus:    "ready",
+		PrepareURI:       datasetStringPtr("/tmp/issues.prepared.parquet"),
+		SentimentStatus:  "queued",
+		SentimentLLMMode: "disabled",
+		EmbeddingStatus:  "not_requested",
+		CreatedAt:        time.Now().UTC(),
 	}
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
@@ -1809,6 +2043,7 @@ func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 	var requestedTextColumn string
 	var requestedPath string
 	var requestedOutputPath string
+	var requestedLLMMode string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -1818,6 +2053,7 @@ func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 		requestedDatasetName = payload["dataset_name"].(string)
 		requestedTextColumn = payload["text_column"].(string)
 		requestedOutputPath = payload["output_path"].(string)
+		requestedLLMMode = payload["llm_mode"].(string)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"notes": []string{"sentiment completed"},
 			"artifact": map[string]any{
@@ -1868,6 +2104,9 @@ func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 	if requestedTextColumn != "normalized_text" {
 		t.Fatalf("unexpected sentiment text column: %s", requestedTextColumn)
 	}
+	if requestedLLMMode != "disabled" {
+		t.Fatalf("unexpected sentiment llm mode: %s", requestedLLMMode)
+	}
 	if !strings.HasPrefix(requestedOutputPath, artifactRoot) {
 		t.Fatalf("unexpected sentiment output path: %s", requestedOutputPath)
 	}
@@ -1888,6 +2127,9 @@ func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 	}
 	if got := metadataString(result.Metadata, "sentiment_format", ""); got != "parquet" {
 		t.Fatalf("unexpected sentiment format: %s", got)
+	}
+	if result.SentimentLLMMode != "disabled" {
+		t.Fatalf("unexpected stored sentiment llm mode: %s", result.SentimentLLMMode)
 	}
 }
 

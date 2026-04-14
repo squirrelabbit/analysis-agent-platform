@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
+import python_ai_worker.skill_policy_registry as skill_policy_registry_module
 from python_ai_worker.skill_policy_registry import (
     load_cluster_label_policy,
     load_embedding_cluster_policy,
@@ -13,6 +17,22 @@ from python_ai_worker.tasks import run_cluster_label_candidates, run_issue_evide
 
 
 class SkillPolicyRegistryTests(unittest.TestCase):
+    def test_skill_policy_dir_resolves_container_style_layout(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "app"
+            policy_dir = root / "config" / "skill_policies"
+            policy_dir.mkdir(parents=True)
+
+            with patch.dict("os.environ", {}, clear=False):
+                with patch.object(
+                    skill_policy_registry_module,
+                    "__file__",
+                    str(root / "src" / "python_ai_worker" / "skill_policy_registry.py"),
+                ):
+                    resolved = skill_policy_registry_module._skill_policies_dir()
+
+        self.assertEqual(resolved, policy_dir.resolve())
+
     def test_default_skill_policies_are_valid(self) -> None:
         validation = validate_skill_policies()
         self.assertTrue(validation["valid"])

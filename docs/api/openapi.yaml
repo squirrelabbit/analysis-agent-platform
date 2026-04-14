@@ -65,6 +65,17 @@ paths:
                 items:
                   type: string
   /projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      operationId: listProjects
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectListResponse"
     post:
       tags: [Projects]
       summary: Create project
@@ -294,6 +305,7 @@ paths:
         - `file` 외의 form field는 문자열로 파싱된다.
         - `metadata`는 JSON 문자열이어야 한다.
         - `prepare_required`, `sentiment_required`, `embedding_required`는 `true` 또는 `false` 문자열이어야 한다.
+        - `prepare_llm_mode`, `sentiment_llm_mode`는 `default`, `enabled`, `disabled` 중 하나여야 한다.
       operationId: uploadDatasetVersion
       parameters:
         - $ref: "#/components/parameters/ProjectId"
@@ -1153,6 +1165,14 @@ components:
             - string
             - "null"
       required: [name]
+    ProjectListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+      required: [items]
     Scenario:
       type: object
       properties:
@@ -1569,6 +1589,9 @@ components:
             - type: "null"
         prepare_status:
           type: string
+        prepare_llm_mode:
+          type: string
+          enum: [default, enabled, disabled]
         prepare_model:
           type:
             - string
@@ -1588,6 +1611,9 @@ components:
           format: date-time
         sentiment_status:
           type: string
+        sentiment_llm_mode:
+          type: string
+          enum: [default, enabled, disabled]
         sentiment_model:
           type:
             - string
@@ -1658,6 +1684,11 @@ components:
           type:
             - boolean
             - "null"
+        prepare_llm_mode:
+          type:
+            - string
+            - "null"
+          enum: [default, enabled, disabled, null]
         prepare_model:
           type:
             - string
@@ -1666,6 +1697,11 @@ components:
           type:
             - boolean
             - "null"
+        sentiment_llm_mode:
+          type:
+            - string
+            - "null"
+          enum: [default, enabled, disabled, null]
         sentiment_model:
           type:
             - string
@@ -1697,9 +1733,15 @@ components:
         prepare_required:
           type: string
           enum: ["true", "false"]
+        prepare_llm_mode:
+          type: string
+          enum: [default, enabled, disabled]
         sentiment_required:
           type: string
           enum: ["true", "false"]
+        sentiment_llm_mode:
+          type: string
+          enum: [default, enabled, disabled]
         embedding_required:
           type: string
           enum: ["true", "false"]

@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .config_paths import resolve_config_dir
+
 DEFAULT_EMBEDDING_CLUSTER_POLICY_VERSION = "embedding-cluster-v1"
 DEFAULT_CLUSTER_LABEL_POLICY_VERSION = "cluster-label-candidates-v1"
 DEFAULT_ISSUE_EVIDENCE_SUMMARY_POLICY_VERSION = "issue-evidence-summary-v1"
@@ -21,10 +23,7 @@ _VALID_SELECTION_SOURCES = {"semantic_search", "cluster_membership", "document_s
 
 
 def _skill_policies_dir() -> Path:
-    override = os.getenv(SKILL_POLICIES_DIR_ENV, "").strip()
-    if override:
-        return Path(override).expanduser().resolve()
-    return Path(__file__).resolve().parents[4] / "config" / "skill_policies"
+    return resolve_config_dir(SKILL_POLICIES_DIR_ENV, __file__, "skill_policies")
 
 
 def available_skill_policy_versions() -> list[str]:

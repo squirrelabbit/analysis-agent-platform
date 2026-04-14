@@ -842,6 +842,12 @@ func TestUploadDatasetCreatesStoredVersion(t *testing.T) {
 	if err := writer.WriteField("prepare_required", "true"); err != nil {
 		t.Fatalf("unexpected write field error: %v", err)
 	}
+	if err := writer.WriteField("prepare_llm_mode", "disabled"); err != nil {
+		t.Fatalf("unexpected write field error: %v", err)
+	}
+	if err := writer.WriteField("sentiment_llm_mode", "enabled"); err != nil {
+		t.Fatalf("unexpected write field error: %v", err)
+	}
 	if err := writer.WriteField("metadata", `{"text_column":"text"}`); err != nil {
 		t.Fatalf("unexpected write field error: %v", err)
 	}
@@ -887,6 +893,12 @@ func TestUploadDatasetCreatesStoredVersion(t *testing.T) {
 	}
 	if got := filepath.Base(storageURI); got != "issues.csv" {
 		t.Fatalf("unexpected storage basename: %s", got)
+	}
+	if version["prepare_llm_mode"] != "disabled" {
+		t.Fatalf("unexpected prepare_llm_mode: %#v", version["prepare_llm_mode"])
+	}
+	if version["sentiment_llm_mode"] != "enabled" {
+		t.Fatalf("unexpected sentiment_llm_mode: %#v", version["sentiment_llm_mode"])
 	}
 }
 

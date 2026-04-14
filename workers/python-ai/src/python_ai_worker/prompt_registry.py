@@ -5,6 +5,8 @@ import os
 import re
 from pathlib import Path
 
+from .config_paths import resolve_config_dir
+
 DEFAULT_PREPARE_PROMPT_VERSION = "dataset-prepare-anthropic-v1"
 DEFAULT_PREPARE_BATCH_PROMPT_VERSION = "dataset-prepare-anthropic-batch-v1"
 DEFAULT_SENTIMENT_PROMPT_VERSION = "sentiment-anthropic-v1"
@@ -23,10 +25,7 @@ _PROMPT_DIR_EXCLUDE = {"README", "CHANGELOG"}
 
 
 def _prompt_templates_dir() -> Path:
-    override = os.getenv(PROMPTS_DIR_ENV, "").strip()
-    if override:
-        return Path(override).expanduser().resolve()
-    return Path(__file__).resolve().parents[4] / "config" / "prompts"
+    return resolve_config_dir(PROMPTS_DIR_ENV, __file__, "prompts")
 
 
 def _available_prompt_versions() -> list[str]:
