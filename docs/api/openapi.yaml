@@ -370,6 +370,55 @@ paths:
                 $ref: "#/components/schemas/DatasetVersion"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_preview:
+    get:
+      tags: [Datasets]
+      summary: Get structured prepare preview for a dataset version
+      operationId: getDatasetPreparePreview
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 10
+      responses:
+        "200":
+          description: Prepare preview detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetPreparePreviewResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_download:
+    get:
+      tags: [Datasets]
+      summary: Download prepared dataset as CSV for a dataset version
+      operationId: downloadPreparedDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Prepared CSV download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clusters/{cluster_id}/members:
     get:
       tags: [Datasets]
@@ -1609,6 +1658,10 @@ components:
             - string
             - "null"
           format: date-time
+        prepare_summary:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetPrepareSummary"
+            - type: "null"
         sentiment_status:
           type: string
         sentiment_llm_mode:
@@ -1715,6 +1768,89 @@ components:
             - string
             - "null"
       required: [storage_uri]
+    DatasetPrepareSummary:
+      type: object
+      properties:
+        input_row_count:
+          type: integer
+        output_row_count:
+          type: integer
+        kept_count:
+          type: integer
+        review_count:
+          type: integer
+        dropped_count:
+          type: integer
+        prepare_regex_rule_hits:
+          $ref: "#/components/schemas/IntegerMap"
+      required: [input_row_count, output_row_count, kept_count, review_count, dropped_count]
+    DatasetPrepareSample:
+      type: object
+      properties:
+        source_row_index:
+          type: integer
+        row_id:
+          type: string
+        raw_text:
+          type: string
+        normalized_text:
+          type: string
+        prepare_disposition:
+          type: string
+        prepare_reason:
+          type: string
+      required: [source_row_index, row_id, raw_text, normalized_text, prepare_disposition, prepare_reason]
+    DatasetPrepareWarningPanel:
+      type: object
+      properties:
+        review_count:
+          type: integer
+        samples:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetPrepareSample"
+      required: [review_count, samples]
+    DatasetPreparePreviewResponse:
+      type: object
+      properties:
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        prepare_status:
+          type: string
+        prepared_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        prepared_ref:
+          type: string
+        prepare_format:
+          type: string
+        raw_text_column:
+          type: string
+        prepared_text_column:
+          type: string
+        row_id_column:
+          type: string
+        summary:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetPrepareSummary"
+            - type: "null"
+        sample_limit:
+          type: integer
+        samples:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetPrepareSample"
+        warning_panel:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetPrepareWarningPanel"
+            - type: "null"
+      required: [project_id, dataset_id, dataset_version_id, prepare_status, prepared_ref, prepare_format, raw_text_column, prepared_text_column, row_id_column, sample_limit, samples]
     DatasetUploadRequest:
       type: object
       properties:
