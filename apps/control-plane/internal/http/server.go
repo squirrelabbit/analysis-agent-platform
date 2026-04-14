@@ -65,7 +65,7 @@ func NewServer(cfg config.Config) *Server {
 }
 
 func (s *Server) Handler() stdhttp.Handler {
-	return s.mux
+	return s.withCORS(s.mux)
 }
 
 func (s *Server) RunStartupReconciliation() error {
@@ -151,6 +151,58 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /projects/{project_id}/report_drafts/{draft_id}", s.handleGetReportDraft)
 }
 
+func (s *Server) withCORS(next stdhttp.Handler) stdhttp.Handler {
+	return stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		appendVary(w.Header(), "Origin")
+		appendVary(w.Header(), "Access-Control-Request-Method")
+		appendVary(w.Header(), "Access-Control-Request-Headers")
+
+		allowedOrigin, ok := s.allowedOrigin(r.Header.Get("Origin"))
+		if ok {
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Max-Age", "600")
+
+			allowedHeaders := strings.TrimSpace(r.Header.Get("Access-Control-Request-Headers"))
+			if allowedHeaders == "" {
+				allowedHeaders = "Accept, Authorization, Content-Type"
+			}
+			w.Header().Set("Access-Control-Allow-Headers", allowedHeaders)
+		}
+
+		if r.Method == stdhttp.MethodOptions && strings.TrimSpace(r.Header.Get("Access-Control-Request-Method")) != "" {
+			if ok {
+				w.WriteHeader(stdhttp.StatusNoContent)
+				return
+			}
+			w.WriteHeader(stdhttp.StatusForbidden)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) allowedOrigin(origin string) (string, bool) {
+	candidate := strings.TrimSpace(origin)
+	if candidate == "" {
+		return "", false
+	}
+	for _, allowed := range s.cfg.CORSAllowedOrigins {
+		value := strings.TrimSpace(allowed)
+		if value == "" {
+			continue
+		}
+		if value == "*" {
+			return "*", true
+		}
+		if strings.EqualFold(value, candidate) {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
 func writeJSON(w stdhttp.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -214,6 +266,20 @@ func (s *Server) handleSwaggerUI(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(stdhttp.StatusOK)
 	_, _ = io.WriteString(w, swaggerUIHTML(r))
+}
+
+func appendVary(header stdhttp.Header, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	for _, existing := range header.Values("Vary") {
+		for _, part := range strings.Split(existing, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), value) {
+				return
+			}
+		}
+	}
+	header.Add("Vary", value)
 }
 
 func (s *Server) handleGetProject(w stdhttp.ResponseWriter, r *stdhttp.Request) {
