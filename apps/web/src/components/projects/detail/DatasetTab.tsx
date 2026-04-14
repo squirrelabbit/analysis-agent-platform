@@ -3,6 +3,14 @@ import FileUpload from "@/components/common/FileUpload";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import {
   Select,
   SelectContent,
   SelectGroup,
@@ -12,8 +20,16 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { MOCK_DATASETS, type Dataset } from "@/mock/datasetMockData";
+import { FileText, Import, Trash2 } from "lucide-react";
+import { useState } from "react";
 
 export default function DatasetTab() {
+  const [datasets, setDatasets] = useState<Dataset[]>(MOCK_DATASETS);
+
+  function handleDelete(id: string) {
+    setDatasets((prev) => prev.filter((ds) => ds.id !== id));
+  }
   return (
     <div>
       <DialogForm btnText="+ 데이터셋 등록" title="데이터셋 등록">
@@ -65,6 +81,42 @@ export default function DatasetTab() {
           </TabsContent>
         </Tabs>
       </DialogForm>
+      <div className="flex flex-col gap-2 pt-2">
+        {datasets.length === 0 ? (
+          <p className="text-xs text-zinc-400 text-center py-6">
+            등록된 데이터셋이 없습니다
+          </p>
+        ) : (
+          datasets.map((ds) => (
+            <Item
+              variant={"muted"}
+              className="group border border-zinc-100 rounded-lg bg-zinc-50 hover:border-violet-200 hover:bg-violet-50"
+            >
+              <ItemMedia className="w-7 h-7 rounded-md bg-zinc-100 flex items-center justify-center shrink-0 group-hover:bg-violet-100">
+                <FileText className="w-3 h-3 text-zinc-500 group-hover:text-violet-600" />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle className="text-xs">{ds.name}</ItemTitle>
+                <ItemDescription className="text-[10px]">
+                  {ds.type.toUpperCase()} · {ds.size} · {ds.updatedAt}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions className="hover:text-gray-500 hover:bg-gray-50 p-1.5 rounded-lg">
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 border border-violet-200">
+                  v{ds.version}
+                </span>
+                {/* <Badge variant='outline'  className="bg-violet-100 text-violet-600 text-sm">v{ds.version}</Badge> */}
+              </ItemActions>
+              <ItemActions className="hover:text-gray-500 hover:bg-gray-50 p-1.5 rounded-lg">
+                <Import className="size-4" />
+              </ItemActions>
+              <ItemActions onClick={() =>handleDelete(ds.id)} className="hover:text-red-500 hover:bg-red-50 p-1.5 rounded-lg">
+                <Trash2 className="size-4" />
+              </ItemActions>
+            </Item>
+          ))
+        )}
+      </div>
     </div>
     // <Tabs defaultValue="registry">
     //     <TabsList >

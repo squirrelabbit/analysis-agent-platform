@@ -1,6 +1,7 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DatasetTab from "./DatasetTab";
 import ScenarioTab from "./ScenarioTab";
+import PromptTab from "./PromptTab";
 
 export default function DetailTabs() {
   return (
@@ -19,7 +20,7 @@ export default function DetailTabs() {
           <ScenarioTab />
         </TabsContent>
         <TabsContent value="prompt">
-          {/* <PromptTab /> */}
+          <PromptTab />
         </TabsContent>
       </Tabs>
   )
