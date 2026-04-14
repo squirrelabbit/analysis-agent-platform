@@ -36,6 +36,8 @@ const (
 	workerTaskTimeoutEmbedding = 45 * time.Minute
 	defaultClusterMembersLimit = 50
 	maxClusterMembersLimit     = 500
+	defaultPreparePreviewLimit = 10
+	maxPreparePreviewLimit     = 20
 )
 
 const (
@@ -333,6 +335,7 @@ func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionI
 	if version.DatasetID != datasetID {
 		return domain.DatasetVersion{}, ErrNotFound{Resource: "dataset version"}
 	}
+	enrichDatasetVersionView(&version)
 	return version, nil
 }
 
@@ -344,7 +347,114 @@ func (s *DatasetService) ListDatasetVersions(projectID, datasetID string) (domai
 	if err != nil {
 		return domain.DatasetVersionListResponse{}, err
 	}
+	for index := range items {
+		enrichDatasetVersionView(&items[index])
+	}
 	return domain.DatasetVersionListResponse{Items: items}, nil
+}
+
+func (s *DatasetService) GetPreparePreview(
+	projectID, datasetID, datasetVersionID string,
+	input domain.DatasetPreparePreviewQuery,
+) (domain.DatasetPreparePreviewResponse, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetPreparePreviewResponse{}, err
+	}
+
+	preparedRef, prepareFormat, err := resolvePrepareArtifact(version)
+	if err != nil {
+		return domain.DatasetPreparePreviewResponse{}, err
+	}
+	if prepareFormat != "parquet" {
+		return domain.DatasetPreparePreviewResponse{}, ErrInvalidArgument{Message: "prepare preview supports parquet artifact only"}
+	}
+
+	limit := defaultPreparePreviewLimit
+	if input.Limit != nil {
+		limit = *input.Limit
+	}
+	if limit <= 0 {
+		return domain.DatasetPreparePreviewResponse{}, ErrInvalidArgument{Message: "limit must be a positive integer"}
+	}
+	if limit > maxPreparePreviewLimit {
+		limit = maxPreparePreviewLimit
+	}
+
+	samples, err := loadPrepareSamplesFromParquet(preparedRef, limit, "")
+	if err != nil {
+		return domain.DatasetPreparePreviewResponse{}, err
+	}
+
+	response := domain.DatasetPreparePreviewResponse{
+		ProjectID:          projectID,
+		DatasetID:          datasetID,
+		DatasetVersionID:   datasetVersionID,
+		PrepareStatus:      version.PrepareStatus,
+		PreparedAt:         version.PreparedAt,
+		PreparedRef:        preparedRef,
+		PrepareFormat:      prepareFormat,
+		RawTextColumn:      metadataString(version.Metadata, "raw_text_column", metadataString(version.Metadata, "text_column", "text")),
+		PreparedTextColumn: metadataString(version.Metadata, "prepared_text_column", "normalized_text"),
+		RowIDColumn:        metadataString(version.Metadata, "row_id_column", "row_id"),
+		Summary:            clonePrepareSummary(version.PrepareSummary),
+		SampleLimit:        limit,
+		Samples:            samples,
+	}
+
+	if response.Summary != nil && response.Summary.ReviewCount > 0 {
+		reviewLimit := response.Summary.ReviewCount
+		if reviewLimit > limit {
+			reviewLimit = limit
+		}
+		reviewSamples, err := loadPrepareSamplesFromParquet(preparedRef, reviewLimit, "review")
+		if err != nil {
+			return domain.DatasetPreparePreviewResponse{}, err
+		}
+		response.WarningPanel = &domain.DatasetPrepareWarningPanel{
+			ReviewCount: response.Summary.ReviewCount,
+			Samples:     reviewSamples,
+		}
+	}
+
+	return response, nil
+}
+
+func (s *DatasetService) ResolvePrepareDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return "", "", err
+	}
+	preparedRef, prepareFormat, err := resolvePrepareArtifact(version)
+	if err != nil {
+		return "", "", err
+	}
+	if prepareFormat != "parquet" {
+		return "", "", ErrInvalidArgument{Message: "prepare download supports parquet artifact only"}
+	}
+	info, statErr := os.Stat(preparedRef)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return "", "", ErrNotFound{Resource: "prepare artifact"}
+		}
+		return "", "", statErr
+	}
+	if info.IsDir() {
+		return "", "", ErrInvalidArgument{Message: "prepare artifact must be a file"}
+	}
+	exportPath, err := exportPrepareCSVFromParquet(preparedRef)
+	if err != nil {
+		return "", "", err
+	}
+	filename := strings.TrimSpace(filepath.Base(preparedRef))
+	if filename == "" || filename == "." || filename == string(filepath.Separator) {
+		filename = "prepared.csv"
+	} else if strings.HasSuffix(strings.ToLower(filename), ".parquet") {
+		filename = filename[:len(filename)-len(".parquet")] + ".csv"
+	} else {
+		filename = filename + ".csv"
+	}
+	return exportPath, filename, nil
 }
 
 func (s *DatasetService) GetClusterMembers(
@@ -1128,7 +1238,9 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
-	return s.maybeRunEagerSentiment(projectID, datasetID, version), nil
+	result := s.maybeRunEagerSentiment(projectID, datasetID, version)
+	enrichDatasetVersionView(&result)
+	return result, nil
 }
 
 func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error) {
@@ -1892,6 +2004,42 @@ func trimStringPointer(value *string) *string {
 	return &trimmed
 }
 
+func enrichDatasetVersionView(version *domain.DatasetVersion) {
+	if version == nil {
+		return
+	}
+	version.PrepareSummary = buildPrepareSummary(version.Metadata)
+}
+
+func buildPrepareSummary(metadata map[string]any) *domain.DatasetPrepareSummary {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw, ok := metadata["prepare_summary"].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	return &domain.DatasetPrepareSummary{
+		InputRowCount:        intValueOrZero(raw["input_row_count"]),
+		OutputRowCount:       intValueOrZero(raw["output_row_count"]),
+		KeptCount:            intValueOrZero(raw["kept_count"]),
+		ReviewCount:          intValueOrZero(raw["review_count"]),
+		DroppedCount:         intValueOrZero(raw["dropped_count"]),
+		PrepareRegexRuleHits: intMapValue(raw["prepare_regex_rule_hits"]),
+	}
+}
+
+func clonePrepareSummary(summary *domain.DatasetPrepareSummary) *domain.DatasetPrepareSummary {
+	if summary == nil {
+		return nil
+	}
+	cloned := *summary
+	if len(summary.PrepareRegexRuleHits) > 0 {
+		cloned.PrepareRegexRuleHits = cloneStringIntMap(summary.PrepareRegexRuleHits)
+	}
+	return &cloned
+}
+
 func datasetSourceForUnstructured(version domain.DatasetVersion) string {
 	if isPrepareReady(version) && version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != "" {
 		return strings.TrimSpace(*version.PrepareURI)
@@ -1967,6 +2115,24 @@ func datasetClusterReady(version domain.DatasetVersion) bool {
 		return false
 	}
 	return strings.TrimSpace(metadataString(version.Metadata, "cluster_ref", "")) != ""
+}
+
+func resolvePrepareArtifact(version domain.DatasetVersion) (string, string, error) {
+	preparedRef := strings.TrimSpace(metadataString(version.Metadata, "prepared_ref", ""))
+	if preparedRef == "" && version.PrepareURI != nil {
+		preparedRef = strings.TrimSpace(*version.PrepareURI)
+	}
+	if version.PrepareStatus != "ready" || preparedRef == "" {
+		return "", "", ErrInvalidArgument{Message: "prepare artifact is not ready"}
+	}
+	prepareFormat := strings.TrimSpace(metadataString(version.Metadata, "prepared_format", ""))
+	if prepareFormat == "" {
+		prepareFormat = strings.TrimSpace(metadataString(version.Metadata, "prepare_format", ""))
+	}
+	if prepareFormat == "" {
+		prepareFormat = inferArtifactFormat(preparedRef, "parquet")
+	}
+	return preparedRef, prepareFormat, nil
 }
 
 func deriveClusterMembershipURI(summaryURI string) string {
@@ -2095,6 +2261,15 @@ type embeddingIndexParquetRecord struct {
 	EmbeddingDim      int
 	EmbeddingProvider string
 	TokenCountsJSON   string
+}
+
+type preparePreviewParquetRecord struct {
+	SourceRowIndex     int
+	RowID              string
+	RawText            string
+	NormalizedText     string
+	PrepareDisposition string
+	PrepareReason      string
 }
 
 func loadEmbeddingIndexChunks(datasetVersionID string, embeddingRef string, chunkRef string, embeddingModel string) ([]domain.EmbeddingIndexChunk, error) {
@@ -2326,6 +2501,155 @@ func loadClusterSummary(summaryRef string, clusterID string) (map[string]any, er
 	return nil, ErrNotFound{Resource: "cluster"}
 }
 
+func loadPrepareSamplesFromParquet(preparedRef string, limit int, disposition string) ([]domain.DatasetPrepareSample, error) {
+	preparedRef = strings.TrimSpace(preparedRef)
+	if preparedRef == "" {
+		return nil, ErrInvalidArgument{Message: "prepare artifact ref is required"}
+	}
+	if limit <= 0 {
+		return nil, ErrInvalidArgument{Message: "limit must be a positive integer"}
+	}
+	if _, err := os.Stat(preparedRef); err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNotFound{Resource: "prepare artifact"}
+		}
+		return nil, err
+	}
+	tempHandle, err := os.CreateTemp("", "prepare-preview-*.duckdb")
+	if err != nil {
+		return nil, err
+	}
+	dbPath := tempHandle.Name()
+	if err := tempHandle.Close(); err != nil {
+		return nil, err
+	}
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	defer os.Remove(dbPath)
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	filterClause := ""
+	disposition = strings.TrimSpace(disposition)
+	if disposition != "" {
+		filterClause = fmt.Sprintf("WHERE prepare_disposition = '%s'", escapeDuckDBLiteral(disposition))
+	}
+	query := fmt.Sprintf(
+		`SELECT
+			CAST(COALESCE(source_row_index, 0) AS INTEGER) AS source_row_index,
+			COALESCE(row_id, '') AS row_id,
+			COALESCE(raw_text, '') AS raw_text,
+			COALESCE(normalized_text, '') AS normalized_text,
+			COALESCE(prepare_disposition, '') AS prepare_disposition,
+			COALESCE(prepare_reason, '') AS prepare_reason
+		FROM read_parquet('%s')
+		%s
+		ORDER BY source_row_index, row_id
+		LIMIT %d`,
+		escapeDuckDBLiteral(preparedRef),
+		filterClause,
+		limit,
+	)
+	rows, err := db.Query(query)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no files found") {
+			return nil, ErrNotFound{Resource: "prepare artifact"}
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.DatasetPrepareSample, 0)
+	for rows.Next() {
+		var row preparePreviewParquetRecord
+		if err := rows.Scan(
+			&row.SourceRowIndex,
+			&row.RowID,
+			&row.RawText,
+			&row.NormalizedText,
+			&row.PrepareDisposition,
+			&row.PrepareReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, domain.DatasetPrepareSample{
+			SourceRowIndex:     row.SourceRowIndex,
+			RowID:              strings.TrimSpace(row.RowID),
+			RawText:            strings.TrimSpace(row.RawText),
+			NormalizedText:     strings.TrimSpace(row.NormalizedText),
+			PrepareDisposition: strings.TrimSpace(row.PrepareDisposition),
+			PrepareReason:      strings.TrimSpace(row.PrepareReason),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func exportPrepareCSVFromParquet(preparedRef string) (string, error) {
+	preparedRef = strings.TrimSpace(preparedRef)
+	if preparedRef == "" {
+		return "", ErrInvalidArgument{Message: "prepare artifact ref is required"}
+	}
+	if _, err := os.Stat(preparedRef); err != nil {
+		if os.IsNotExist(err) {
+			return "", ErrNotFound{Resource: "prepare artifact"}
+		}
+		return "", err
+	}
+
+	csvHandle, err := os.CreateTemp("", "prepare-export-*.csv")
+	if err != nil {
+		return "", err
+	}
+	csvPath := csvHandle.Name()
+	if err := csvHandle.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(csvPath); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+
+	tempHandle, err := os.CreateTemp("", "prepare-export-*.duckdb")
+	if err != nil {
+		return "", err
+	}
+	dbPath := tempHandle.Name()
+	if err := tempHandle.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	defer os.Remove(dbPath)
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+
+	query := fmt.Sprintf(
+		`COPY (
+			SELECT * FROM read_parquet('%s')
+			ORDER BY source_row_index, row_id
+		) TO '%s' (FORMAT CSV, HEADER)`,
+		escapeDuckDBLiteral(preparedRef),
+		escapeDuckDBLiteral(csvPath),
+	)
+	if _, err := db.Exec(query); err != nil {
+		_ = os.Remove(csvPath)
+		return "", err
+	}
+	return csvPath, nil
+}
+
 func loadClusterMembersFromParquet(clusterMembershipRef string, clusterID string, limit int, samplesOnly bool) ([]domain.ClusterMember, int, int, error) {
 	clusterMembershipRef = strings.TrimSpace(clusterMembershipRef)
 	if clusterMembershipRef == "" {
@@ -2508,6 +2832,41 @@ func anyToInt(value any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func intValueOrZero(value any) int {
+	if converted, ok := anyToInt(value); ok {
+		return converted
+	}
+	return 0
+}
+
+func intMapValue(value any) map[string]int {
+	source, ok := value.(map[string]any)
+	if !ok || len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]int, len(source))
+	for key, item := range source {
+		if count, ok := anyToInt(item); ok {
+			result[key] = count
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func cloneStringIntMap(source map[string]int) map[string]int {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]int, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }
 
 func mergeStringAny(base, overlay map[string]any) map[string]any {

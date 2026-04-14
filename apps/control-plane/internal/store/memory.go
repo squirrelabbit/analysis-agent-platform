@@ -148,7 +148,7 @@ func (s *MemoryStore) ListDatasets(projectID string) ([]domain.Dataset, error) {
 func (s *MemoryStore) SaveDatasetVersion(version domain.DatasetVersion) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.versions[version.DatasetVersionID] = version
+	s.versions[version.DatasetVersionID] = cloneDatasetVersion(version)
 	return nil
 }
 
@@ -159,7 +159,7 @@ func (s *MemoryStore) GetDatasetVersion(projectID, datasetVersionID string) (dom
 	if !ok || version.ProjectID != projectID {
 		return domain.DatasetVersion{}, ErrNotFound
 	}
-	return version, nil
+	return cloneDatasetVersion(version), nil
 }
 
 func (s *MemoryStore) ListDatasetVersions(projectID, datasetID string) ([]domain.DatasetVersion, error) {
@@ -173,7 +173,7 @@ func (s *MemoryStore) ListDatasetVersions(projectID, datasetID string) ([]domain
 		if datasetID != "" && version.DatasetID != datasetID {
 			continue
 		}
-		items = append(items, version)
+		items = append(items, cloneDatasetVersion(version))
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
@@ -182,6 +182,70 @@ func (s *MemoryStore) ListDatasetVersions(projectID, datasetID string) ([]domain
 		return items[i].CreatedAt.After(items[j].CreatedAt)
 	})
 	return items, nil
+}
+
+func cloneDatasetVersion(version domain.DatasetVersion) domain.DatasetVersion {
+	cloned := version
+	cloned.Metadata = cloneAnyMap(version.Metadata)
+	if version.Profile != nil {
+		profile := *version.Profile
+		profile.RegexRuleNames = append([]string(nil), version.Profile.RegexRuleNames...)
+		profile.GarbageRuleNames = append([]string(nil), version.Profile.GarbageRuleNames...)
+		cloned.Profile = &profile
+	}
+	if version.PrepareSummary != nil {
+		summary := *version.PrepareSummary
+		if len(version.PrepareSummary.PrepareRegexRuleHits) > 0 {
+			summary.PrepareRegexRuleHits = make(map[string]int, len(version.PrepareSummary.PrepareRegexRuleHits))
+			for key, value := range version.PrepareSummary.PrepareRegexRuleHits {
+				summary.PrepareRegexRuleHits[key] = value
+			}
+		}
+		cloned.PrepareSummary = &summary
+	}
+	return cloned
+}
+
+func cloneAnyMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make(map[string]any, len(input))
+	for key, value := range input {
+		output[key] = cloneAnyValue(value)
+	}
+	return output
+}
+
+func cloneAnyValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneAnyMap(typed)
+	case []any:
+		cloned := make([]any, len(typed))
+		for index, item := range typed {
+			cloned[index] = cloneAnyValue(item)
+		}
+		return cloned
+	case []string:
+		return append([]string(nil), typed...)
+	case []int:
+		return append([]int(nil), typed...)
+	case map[string]string:
+		cloned := make(map[string]string, len(typed))
+		for key, item := range typed {
+			cloned[key] = item
+		}
+		return cloned
+	case map[string]int:
+		cloned := make(map[string]int, len(typed))
+		for key, item := range typed {
+			cloned[key] = item
+		}
+		return cloned
+	default:
+		return value
+	}
 }
 
 func (s *MemoryStore) SaveDatasetBuildJob(job domain.DatasetBuildJob) error {
