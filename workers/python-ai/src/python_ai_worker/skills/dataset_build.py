@@ -264,6 +264,8 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                     model=normalized["model"],
                     batch_size=normalized["prepare_batch_size"],
                     prompt_version_override=normalized["prepare_prompt_version"],
+                    prompt_template_override=normalized["prepare_prompt_template"],
+                    batch_prompt_template_override=normalized["prepare_batch_prompt_template"],
                 )
                 usage_records.append(batch_usage)
                 kept_count, review_count, dropped_count = _write_prepared_rows(
@@ -286,6 +288,8 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 model=normalized["model"],
                 batch_size=normalized["prepare_batch_size"],
                 prompt_version_override=normalized["prepare_prompt_version"],
+                prompt_template_override=normalized["prepare_prompt_template"],
+                batch_prompt_template_override=normalized["prepare_batch_prompt_template"],
             )
             usage_records.append(batch_usage)
             kept_count, review_count, dropped_count = _write_prepared_rows(
@@ -774,6 +778,8 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
                 client=client,
                 batch_size=normalized["sentiment_batch_size"],
                 prompt_version_override=normalized["sentiment_prompt_version"],
+                prompt_template_override=normalized["sentiment_prompt_template"],
+                batch_prompt_template_override=normalized["sentiment_batch_prompt_template"],
             )
             usage_records.append(usage)
             labeled_count = _write_labeled_rows(
@@ -793,6 +799,8 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
                 client=client,
                 batch_size=normalized["sentiment_batch_size"],
                 prompt_version_override=normalized["sentiment_prompt_version"],
+                prompt_template_override=normalized["sentiment_prompt_template"],
+                batch_prompt_template_override=normalized["sentiment_batch_prompt_template"],
             )
             usage_records.append(usage)
             labeled_count = _write_labeled_rows(

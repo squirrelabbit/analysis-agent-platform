@@ -54,9 +54,11 @@
 
 ## prompt / rule / profile 연결
 
-- prompt template는 저장소 루트 [../../config/prompts](../../config/prompts) 아래 Markdown 파일로 관리한다.
+- global prompt template는 저장소 루트 [../../config/prompts](../../config/prompts) 아래 Markdown 파일로 관리한다.
 - prompt version 이름은 파일명과 1:1로 대응한다.
 - dataset profile 기본값은 [../../config/dataset_profiles.json](../../config/dataset_profiles.json) 에서 관리한다.
+- project prompt version은 control plane의 `POST /projects/{project_id}/prompts`로 추가하고, project 기본 prompt 선택은 `PUT /projects/{project_id}/prompt_defaults`로 관리한다.
+- 현재 project prompt override는 prepare/sentiment build payload의 inline template override로만 적용한다.
 - skill policy 기본값은 [../../config/skill_policies](../../config/skill_policies) 아래 JSON 파일로 관리한다.
 - rule config는 기본 상수 위에 `PYTHON_AI_RULE_CONFIG_PATH`, `PYTHON_AI_RULE_CONFIG_JSON`, request payload override를 순서대로 덮는다.
 

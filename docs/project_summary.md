@@ -37,7 +37,11 @@
 ## 저장과 실행 구조
 
 - dataset version은 생성 시 resolved profile을 저장한다.
-- prompt template는 `config/prompts/*.md`, 기본 dataset profile은 `config/dataset_profiles.json`에서 관리한다.
+- global prompt registry는 `config/prompts/*.md`, 기본 dataset profile은 `config/dataset_profiles.json`에서 관리한다.
+- project prompt version은 `GET/POST /projects/{project_id}/prompts`로 관리하고, project 기본 prompt 선택은 `GET/PUT /projects/{project_id}/prompt_defaults`로 관리한다.
+- dataset version이 prompt version을 직접 지정하면 그 값을 우선 사용하고, 지정하지 않으면 project `prompt_defaults`를 fallback으로 사용한다.
+- 동일한 prompt version이 project registry와 global registry에 모두 있으면 project prompt가 우선한다.
+- project prompt에 batch template가 없으면 row template만 사용하도록 build payload의 batch size를 `1`로 낮춘다.
 - 운영/프론트는 `GET /dataset_profiles`, `GET /prompt_catalog`, `GET /rule_catalog`, `GET /skill_policy_catalog`, `GET /dataset_profiles/validate`, `GET /skill_policies/validate`로 현재 registry와 catalog 상태를 조회할 수 있다.
 - `prepare`는 eager, `sentiment / embedding / cluster`는 lazy build를 기본 정책으로 둔다.
 - full-dataset `embedding_cluster`는 precomputed cluster artifact를 우선 읽고, subset 경로만 on-demand fallback을 허용한다.

@@ -3,10 +3,13 @@ package domain
 import "time"
 
 type Project struct {
-	ProjectID   string    `json:"project_id"`
-	Name        string    `json:"name"`
-	Description *string   `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ProjectID           string    `json:"project_id"`
+	Name                string    `json:"name"`
+	Description         *string   `json:"description,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	DatasetVersionCount int       `json:"dataset_version_count"`
+	ScenarioCount       int       `json:"scenario_count"`
+	PromptCount         int       `json:"prompt_count"`
 }
 
 type ProjectCreateRequest struct {
@@ -16,6 +19,41 @@ type ProjectCreateRequest struct {
 
 type ProjectListResponse struct {
 	Items []Project `json:"items"`
+}
+
+type ProjectPrompt struct {
+	ProjectID   string    `json:"project_id"`
+	Version     string    `json:"version"`
+	Operation   string    `json:"operation"`
+	Title       string    `json:"title"`
+	Status      string    `json:"status"`
+	Summary     string    `json:"summary,omitempty"`
+	Content     string    `json:"content"`
+	ContentHash string    `json:"content_hash"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type ProjectPromptUpsertRequest struct {
+	Version   string `json:"version"`
+	Operation string `json:"operation"`
+	Content   string `json:"content"`
+}
+
+type ProjectPromptListResponse struct {
+	Items []ProjectPrompt `json:"items"`
+}
+
+type ProjectPromptDefaults struct {
+	ProjectID              string     `json:"project_id"`
+	PreparePromptVersion   *string    `json:"prepare_prompt_version,omitempty"`
+	SentimentPromptVersion *string    `json:"sentiment_prompt_version,omitempty"`
+	UpdatedAt              *time.Time `json:"updated_at,omitempty"`
+}
+
+type ProjectPromptDefaultsUpdateRequest struct {
+	PreparePromptVersion   *string `json:"prepare_prompt_version"`
+	SentimentPromptVersion *string `json:"sentiment_prompt_version"`
 }
 
 type Scenario struct {
