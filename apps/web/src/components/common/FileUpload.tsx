@@ -18,7 +18,7 @@ import {
 } from "../ui/item";
 import { Button } from "../ui/button";
 
-export default function FileUpload() {
+export default function FileUpload({ title }: { title?: string }) {
   const [files, setFiles] = useState<File[]>([]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -43,20 +43,34 @@ export default function FileUpload() {
       {files.length === 0 ? (
         <Empty
           {...getRootProps()}
-          className={`border border-dashed ${isDragActive ? "border-blue-400 bg-blue-50" : "border-gray-300 hover:bg-gray-50"}`}
+          className={`group border border-dashed hover:bg-violet-50 hover:border-violet-600 ${isDragActive ? "hover:bg-violet-50 hover:border-violet-600" : "border-gray-300 "}`}
         >
           <Input {...getInputProps()} />
           <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <CloudUpload />
+            <EmptyMedia
+              variant="icon"
+              className="group-hover:bg-violet-100 transition-colors"
+            >
+              <CloudUpload className=" w-5 h-5 text-zinc-400" />
             </EmptyMedia>
-            <EmptyTitle>파일 업로드</EmptyTitle>
-            <EmptyDescription>
+            <EmptyTitle>{title || "파일 업로드"}</EmptyTitle>
+            <EmptyDescription className="text-xs">
               {isDragActive
                 ? "파일을 여기에 놓으세요"
-                : "클릭 또는 드래그로 업로드 (.csv, .json)"}
+                : "클릭 또는 드래그로 파일을 업로드하세요"}
             </EmptyDescription>
           </EmptyHeader>
+          {/* <EmptyContent>
+            <Button
+              size="sm"
+              variant="outline"
+              // onClick={() => onUpload(dataset)}
+              className="h-7 text-xs border-violet-200  hover:bg-violet-50"
+            >
+              <Upload className="w-3 h-3 mr-1.5" />
+              파일 업로드
+            </Button>
+          </EmptyContent> */}
         </Empty>
       ) : (
         <div className="flex flex-col gap-1.5">

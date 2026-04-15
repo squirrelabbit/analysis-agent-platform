@@ -2,8 +2,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DatasetTab from "./DatasetTab";
 import ScenarioTab from "./ScenarioTab";
 import PromptTab from "./PromptTab";
+import type { Project } from "@/types";
 
-export default function DetailTabs() {
+export default function DetailTabs(props: Project) {
   return (
     <Tabs defaultValue="dataset">
         <TabsList variant="line" >
@@ -14,10 +15,10 @@ export default function DetailTabs() {
           <TabsTrigger value="prompt">프롬프트</TabsTrigger>
         </TabsList>
         <TabsContent value="dataset">
-          <DatasetTab />
+          <DatasetTab {...props} />
         </TabsContent>
         <TabsContent value="scenario">
-          <ScenarioTab />
+          <ScenarioTab {...props} />
         </TabsContent>
         <TabsContent value="prompt">
           <PromptTab />

@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -27,7 +28,7 @@ export function EmptyForm({
         <EmptyTitle>{title}</EmptyTitle>
         <EmptyDescription className="text-xs">{description}</EmptyDescription>
       </EmptyHeader>
-      {children}
+      <EmptyContent>{children}</EmptyContent>
     </Empty>
   );
 }
