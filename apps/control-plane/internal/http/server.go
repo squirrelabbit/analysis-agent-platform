@@ -117,6 +117,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets", s.handleCreateDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets", s.handleListDatasets)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}", s.handleGetDataset)
+	s.mux.HandleFunc("PUT /projects/{project_id}/datasets/{dataset_id}/active_version", s.handleActivateDatasetVersion)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/active_version", s.handleDeactivateDatasetVersion)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/uploads", s.handleUploadDataset)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions", s.handleCreateDatasetVersion)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions", s.handleListDatasetVersions)
@@ -168,7 +170,7 @@ func (s *Server) withCORS(next stdhttp.Handler) stdhttp.Handler {
 		allowedOrigin, ok := s.allowedOrigin(r.Header.Get("Origin"))
 		if ok {
 			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Max-Age", "600")
 
 			allowedHeaders := strings.TrimSpace(r.Header.Get("Access-Control-Request-Headers"))
@@ -479,6 +481,36 @@ func (s *Server) handleListDatasets(w stdhttp.ResponseWriter, r *stdhttp.Request
 	writeJSON(w, stdhttp.StatusOK, response)
 }
 
+func (s *Server) handleActivateDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetActiveVersionUpdateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.ActivateDatasetVersion(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		payload.DatasetVersionID,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDeactivateDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.DeactivateDatasetVersion(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
 func (s *Server) handleUploadDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		writeError(w, stdhttp.StatusBadRequest, "invalid multipart form")
@@ -759,6 +791,11 @@ func datasetVersionCreateRequestFromMultipart(form *multipart.Form) (domain.Data
 			return payload, errors.New("profile must be a JSON object")
 		}
 		payload.Profile = &profile
+	}
+	if value, ok, err := optionalBoolFormValue(form, "activate_on_create"); err != nil {
+		return payload, err
+	} else if ok {
+		payload.ActivateOnCreate = &value
 	}
 	if value, ok, err := optionalBoolFormValue(form, "prepare_required"); err != nil {
 		return payload, err

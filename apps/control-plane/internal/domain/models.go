@@ -124,12 +124,14 @@ type ScenarioPlanCreateRequest struct {
 }
 
 type Dataset struct {
-	DatasetID   string    `json:"dataset_id"`
-	ProjectID   string    `json:"project_id"`
-	Name        string    `json:"name"`
-	Description *string   `json:"description,omitempty"`
-	DataType    string    `json:"data_type"`
-	CreatedAt   time.Time `json:"created_at"`
+	DatasetID              string     `json:"dataset_id"`
+	ProjectID              string     `json:"project_id"`
+	Name                   string     `json:"name"`
+	Description            *string    `json:"description,omitempty"`
+	DataType               string     `json:"data_type"`
+	ActiveDatasetVersionID *string    `json:"active_dataset_version_id,omitempty"`
+	ActiveVersionUpdatedAt *time.Time `json:"active_version_updated_at,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
 }
 
 type DatasetCreateRequest struct {
@@ -176,6 +178,7 @@ type DatasetVersion struct {
 	EmbeddingStatus    string                 `json:"embedding_status"`
 	EmbeddingModel     *string                `json:"embedding_model,omitempty"`
 	EmbeddingURI       *string                `json:"embedding_uri,omitempty"`
+	IsActive           bool                   `json:"is_active"`
 	CreatedAt          time.Time              `json:"created_at"`
 	ReadyAt            *time.Time             `json:"ready_at,omitempty"`
 }
@@ -186,6 +189,7 @@ type DatasetVersionCreateRequest struct {
 	RecordCount       *int            `json:"record_count,omitempty"`
 	Metadata          map[string]any  `json:"metadata,omitempty"`
 	Profile           *DatasetProfile `json:"profile,omitempty"`
+	ActivateOnCreate  *bool           `json:"activate_on_create,omitempty"`
 	PrepareRequired   *bool           `json:"prepare_required,omitempty"`
 	PrepareLLMMode    *string         `json:"prepare_llm_mode,omitempty"`
 	PrepareModel      *string         `json:"prepare_model,omitempty"`
@@ -198,6 +202,10 @@ type DatasetVersionCreateRequest struct {
 
 type DatasetVersionListResponse struct {
 	Items []DatasetVersion `json:"items"`
+}
+
+type DatasetActiveVersionUpdateRequest struct {
+	DatasetVersionID string `json:"dataset_version_id"`
 }
 
 type DatasetPrepareSummary struct {

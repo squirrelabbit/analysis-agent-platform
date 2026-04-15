@@ -581,6 +581,125 @@ func TestListDatasetsAndVersions(t *testing.T) {
 	}
 }
 
+func TestCreateDatasetVersionAutoActivatesLatestVersion(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-active-version", Name: "active", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-active-version",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	first, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI: "/tmp/issues-v1.csv",
+	})
+	if err != nil {
+		t.Fatalf("unexpected create first dataset version error: %v", err)
+	}
+	if !first.IsActive {
+		t.Fatalf("expected first version to be active: %+v", first)
+	}
+
+	second, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI: "/tmp/issues-v2.csv",
+	})
+	if err != nil {
+		t.Fatalf("unexpected create second dataset version error: %v", err)
+	}
+	if !second.IsActive {
+		t.Fatalf("expected second version to be active: %+v", second)
+	}
+
+	loadedDataset, err := service.GetDataset(project.ProjectID, dataset.DatasetID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset error: %v", err)
+	}
+	if loadedDataset.ActiveDatasetVersionID == nil || *loadedDataset.ActiveDatasetVersionID != second.DatasetVersionID {
+		t.Fatalf("unexpected active dataset version: %+v", loadedDataset)
+	}
+
+	loadedFirst, err := service.GetDatasetVersion(project.ProjectID, dataset.DatasetID, first.DatasetVersionID)
+	if err != nil {
+		t.Fatalf("unexpected get first version error: %v", err)
+	}
+	if loadedFirst.IsActive {
+		t.Fatalf("expected previous active version to be inactive: %+v", loadedFirst)
+	}
+}
+
+func TestDatasetVersionActivationCanBeUpdatedManually(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-manual-activate", Name: "manual", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-manual-activate",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	first, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI: "/tmp/issues-v1.csv",
+	})
+	if err != nil {
+		t.Fatalf("unexpected create first version error: %v", err)
+	}
+	second, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI:       "/tmp/issues-v2.csv",
+		ActivateOnCreate: datasetBoolPtr(false),
+	})
+	if err != nil {
+		t.Fatalf("unexpected create second version error: %v", err)
+	}
+	if second.IsActive {
+		t.Fatalf("expected second version to remain inactive when activate_on_create=false: %+v", second)
+	}
+
+	updatedDataset, err := service.ActivateDatasetVersion(project.ProjectID, dataset.DatasetID, first.DatasetVersionID)
+	if err != nil {
+		t.Fatalf("unexpected activate dataset version error: %v", err)
+	}
+	if updatedDataset.ActiveDatasetVersionID == nil || *updatedDataset.ActiveDatasetVersionID != first.DatasetVersionID {
+		t.Fatalf("unexpected active dataset version after manual activate: %+v", updatedDataset)
+	}
+
+	deactivatedDataset, err := service.DeactivateDatasetVersion(project.ProjectID, dataset.DatasetID)
+	if err != nil {
+		t.Fatalf("unexpected deactivate dataset version error: %v", err)
+	}
+	if deactivatedDataset.ActiveDatasetVersionID != nil {
+		t.Fatalf("expected dataset to have no active version: %+v", deactivatedDataset)
+	}
+
+	versions, err := service.ListDatasetVersions(project.ProjectID, dataset.DatasetID)
+	if err != nil {
+		t.Fatalf("unexpected list dataset versions error: %v", err)
+	}
+	for _, item := range versions.Items {
+		if item.IsActive {
+			t.Fatalf("expected all versions to be inactive after deactivation: %+v", versions.Items)
+		}
+	}
+}
+
 func TestValidateDatasetProfilesReportsMissingPrompt(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())

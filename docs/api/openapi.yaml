@@ -417,6 +417,47 @@ paths:
                 $ref: "#/components/schemas/Dataset"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/active_version:
+    put:
+      tags: [Datasets]
+      summary: Activate dataset version for a dataset
+      operationId: activateDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetActiveVersionUpdateRequest"
+      responses:
+        "200":
+          description: Dataset active version updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Datasets]
+      summary: Clear active dataset version for a dataset
+      operationId: deactivateDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: Dataset active version cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/uploads:
     post:
       tags: [Datasets]
@@ -428,6 +469,7 @@ paths:
         - `file` 외의 form field는 문자열로 파싱된다.
         - `metadata`는 JSON 문자열이어야 한다.
         - `prepare_required`, `sentiment_required`, `embedding_required`는 `true` 또는 `false` 문자열이어야 한다.
+        - `activate_on_create`는 optional이며 `true` 또는 `false` 문자열이다. 기본값은 `true`다.
         - `prepare_llm_mode`, `sentiment_llm_mode`는 `default`, `enabled`, `disabled` 중 하나여야 한다.
       operationId: uploadDatasetVersion
       parameters:
@@ -1660,6 +1702,15 @@ components:
             - "null"
         data_type:
           type: string
+        active_dataset_version_id:
+          type:
+            - string
+            - "null"
+        active_version_updated_at:
+          type:
+            - string
+            - "null"
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -1678,6 +1729,12 @@ components:
             - string
             - "null"
       required: [name]
+    DatasetActiveVersionUpdateRequest:
+      type: object
+      properties:
+        dataset_version_id:
+          type: string
+      required: [dataset_version_id]
     DatasetProfile:
       type: object
       properties:
@@ -1972,6 +2029,8 @@ components:
           type:
             - string
             - "null"
+        is_active:
+          type: boolean
         created_at:
           type: string
           format: date-time
@@ -1990,6 +2049,7 @@ components:
         - prepare_status
         - sentiment_status
         - embedding_status
+        - is_active
         - created_at
     DatasetVersionCreateRequest:
       type: object
@@ -2011,6 +2071,10 @@ components:
           anyOf:
             - $ref: "#/components/schemas/DatasetProfile"
             - type: "null"
+        activate_on_create:
+          type:
+            - boolean
+            - "null"
         prepare_required:
           type:
             - boolean
@@ -2214,6 +2278,9 @@ components:
           type: string
           description: JSON object string
           example: '{"text_column":"text"}'
+        activate_on_create:
+          type: string
+          enum: ["true", "false"]
         prepare_required:
           type: string
           enum: ["true", "false"]

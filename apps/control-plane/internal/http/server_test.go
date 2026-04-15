@@ -473,6 +473,10 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 	if items, ok := datasetList["items"].([]any); !ok || len(items) != 1 {
 		t.Fatalf("expected one dataset in list: %+v", datasetList)
 	}
+	datasetSummary := datasetList["items"].([]any)[0].(map[string]any)
+	if _, ok := datasetSummary["active_dataset_version_id"]; ok {
+		t.Fatalf("expected active_dataset_version_id to be omitted before version creation: %+v", datasetSummary)
+	}
 
 	version := map[string]any{}
 	readJSONResponse(
@@ -484,6 +488,10 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 		http.StatusCreated,
 		&version,
 	)
+	if version["is_active"] != true {
+		t.Fatalf("expected first version to be active: %+v", version)
+	}
+	firstVersionID := version["dataset_version_id"].(string)
 
 	readJSONResponse(
 		t,
@@ -494,6 +502,13 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 		http.StatusCreated,
 		&map[string]any{},
 	)
+
+	dataset = map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID, "", http.StatusOK, &dataset)
+	if dataset["active_dataset_version_id"] == nil || dataset["active_dataset_version_id"] == firstVersionID {
+		t.Fatalf("expected latest created version to become active: %+v", dataset)
+	}
+	activeVersionID := dataset["active_dataset_version_id"].(string)
 
 	versionList := map[string]any{}
 	readJSONResponse(
@@ -507,6 +522,20 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 	)
 	if items, ok := versionList["items"].([]any); !ok || len(items) != 2 {
 		t.Fatalf("expected two dataset versions in list: %+v", versionList)
+	} else {
+		activeCount := 0
+		for _, item := range items {
+			versionItem := item.(map[string]any)
+			if versionItem["is_active"] == true {
+				activeCount++
+				if versionItem["dataset_version_id"] != activeVersionID {
+					t.Fatalf("unexpected active version in list: %+v", versionItem)
+				}
+			}
+		}
+		if activeCount != 1 {
+			t.Fatalf("expected exactly one active version in list: %+v", versionList)
+		}
 	}
 
 	readJSONResponse(
@@ -1089,6 +1118,112 @@ func TestUploadDatasetCreatesStoredVersion(t *testing.T) {
 	}
 	if version["sentiment_llm_mode"] != "enabled" {
 		t.Fatalf("unexpected sentiment_llm_mode: %#v", version["sentiment_llm_mode"])
+	}
+	if version["is_active"] != true {
+		t.Fatalf("expected uploaded dataset version to be active: %+v", version)
+	}
+	if dataset["active_dataset_version_id"] != nil {
+		t.Fatalf("expected dataset create response to omit active version before upload: %+v", dataset)
+	}
+	loadedDataset := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID, "", http.StatusOK, &loadedDataset)
+	if loadedDataset["active_dataset_version_id"] != version["dataset_version_id"] {
+		t.Fatalf("expected uploaded version to become active: %+v", loadedDataset)
+	}
+}
+
+func TestDatasetActiveVersionEndpoints(t *testing.T) {
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"active-version-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	dataset := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects/"+projectID+"/datasets", `{"name":"active-version-dataset","data_type":"unstructured"}`, http.StatusCreated, &dataset)
+	datasetID := dataset["dataset_id"].(string)
+
+	firstVersion := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"issues-v1.csv","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&firstVersion,
+	)
+
+	secondVersion := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"issues-v2.csv","data_type":"unstructured","activate_on_create":false}`,
+		http.StatusCreated,
+		&secondVersion,
+	)
+	if secondVersion["is_active"] != false {
+		t.Fatalf("expected second version to stay inactive: %+v", secondVersion)
+	}
+
+	updatedDataset := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPut,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/active_version",
+		fmt.Sprintf(`{"dataset_version_id":"%s"}`, secondVersion["dataset_version_id"]),
+		http.StatusOK,
+		&updatedDataset,
+	)
+	if updatedDataset["active_dataset_version_id"] != secondVersion["dataset_version_id"] {
+		t.Fatalf("expected second version to become active: %+v", updatedDataset)
+	}
+
+	versionList := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		"",
+		http.StatusOK,
+		&versionList,
+	)
+	items := versionList["items"].([]any)
+	for _, item := range items {
+		versionItem := item.(map[string]any)
+		switch versionItem["dataset_version_id"] {
+		case firstVersion["dataset_version_id"]:
+			if versionItem["is_active"] != false {
+				t.Fatalf("expected first version to be inactive: %+v", versionItem)
+			}
+		case secondVersion["dataset_version_id"]:
+			if versionItem["is_active"] != true {
+				t.Fatalf("expected second version to be active: %+v", versionItem)
+			}
+		}
+	}
+
+	deactivatedDataset := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodDelete,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/active_version",
+		"",
+		http.StatusOK,
+		&deactivatedDataset,
+	)
+	if _, ok := deactivatedDataset["active_dataset_version_id"]; ok {
+		t.Fatalf("expected active_dataset_version_id to be omitted after deactivation: %+v", deactivatedDataset)
 	}
 }
 

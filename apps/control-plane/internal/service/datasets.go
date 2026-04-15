@@ -179,6 +179,29 @@ func (s *DatasetService) ListDatasets(projectID string) (domain.DatasetListRespo
 	return domain.DatasetListResponse{Items: items}, nil
 }
 
+func (s *DatasetService) ActivateDatasetVersion(projectID, datasetID, datasetVersionID string) (domain.Dataset, error) {
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
+		return domain.Dataset{}, err
+	}
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.Dataset{}, err
+	}
+	if version.DatasetID != dataset.DatasetID {
+		return domain.Dataset{}, ErrNotFound{Resource: "dataset version"}
+	}
+	return s.saveDatasetActiveVersion(dataset, &version.DatasetVersionID)
+}
+
+func (s *DatasetService) DeactivateDatasetVersion(projectID, datasetID string) (domain.Dataset, error) {
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
+		return domain.Dataset{}, err
+	}
+	return s.saveDatasetActiveVersion(dataset, nil)
+}
+
 func (s *DatasetService) SaveProjectPrompt(projectID string, input domain.ProjectPromptUpsertRequest) (domain.ProjectPrompt, error) {
 	if _, err := s.store.GetProject(projectID); err != nil {
 		if err == store.ErrNotFound {
@@ -311,7 +334,13 @@ func (s *DatasetService) CreateDatasetVersion(projectID, datasetID string, input
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
-	return s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version), nil
+	if shouldActivateDatasetVersionOnCreate(input.ActivateOnCreate) {
+		if _, err := s.saveDatasetActiveVersion(dataset, &version.DatasetVersionID); err != nil {
+			return domain.DatasetVersion{}, err
+		}
+	}
+	_ = s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version)
+	return s.GetDatasetVersion(projectID, dataset.DatasetID, version.DatasetVersionID)
 }
 
 func (s *DatasetService) UploadDatasetVersion(projectID, datasetID string, input domain.DatasetVersionCreateRequest, originalName string, contentType string, reader io.Reader) (domain.DatasetVersion, error) {
@@ -347,7 +376,13 @@ func (s *DatasetService) UploadDatasetVersion(projectID, datasetID string, input
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
-	return s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version), nil
+	if shouldActivateDatasetVersionOnCreate(input.ActivateOnCreate) {
+		if _, err := s.saveDatasetActiveVersion(dataset, &version.DatasetVersionID); err != nil {
+			return domain.DatasetVersion{}, err
+		}
+	}
+	_ = s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version)
+	return s.GetDatasetVersion(projectID, dataset.DatasetID, version.DatasetVersionID)
 }
 
 func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset domain.Dataset, storageURI string, input domain.DatasetVersionCreateRequest) (domain.DatasetVersion, error) {
@@ -467,6 +502,10 @@ func (s *DatasetService) maybeRunEagerSentiment(projectID, datasetID string, ver
 }
 
 func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionID string) (domain.DatasetVersion, error) {
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
 	version, err := s.store.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
 		if err == store.ErrNotFound {
@@ -478,11 +517,13 @@ func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionI
 		return domain.DatasetVersion{}, ErrNotFound{Resource: "dataset version"}
 	}
 	enrichDatasetVersionView(&version)
+	markDatasetVersionActive(&version, dataset)
 	return version, nil
 }
 
 func (s *DatasetService) ListDatasetVersions(projectID, datasetID string) (domain.DatasetVersionListResponse, error) {
-	if _, err := s.GetDataset(projectID, datasetID); err != nil {
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
 		return domain.DatasetVersionListResponse{}, err
 	}
 	items, err := s.store.ListDatasetVersions(projectID, datasetID)
@@ -491,6 +532,7 @@ func (s *DatasetService) ListDatasetVersions(projectID, datasetID string) (domai
 	}
 	for index := range items {
 		enrichDatasetVersionView(&items[index])
+		markDatasetVersionActive(&items[index], dataset)
 	}
 	return domain.DatasetVersionListResponse{Items: items}, nil
 }
@@ -2445,6 +2487,30 @@ func trimStringPointer(value *string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func shouldActivateDatasetVersionOnCreate(value *bool) bool {
+	if value == nil {
+		return true
+	}
+	return *value
+}
+
+func markDatasetVersionActive(version *domain.DatasetVersion, dataset domain.Dataset) {
+	if version == nil {
+		return
+	}
+	version.IsActive = dataset.ActiveDatasetVersionID != nil && *dataset.ActiveDatasetVersionID == version.DatasetVersionID
+}
+
+func (s *DatasetService) saveDatasetActiveVersion(dataset domain.Dataset, datasetVersionID *string) (domain.Dataset, error) {
+	dataset.ActiveDatasetVersionID = trimStringPointer(datasetVersionID)
+	now := time.Now().UTC()
+	dataset.ActiveVersionUpdatedAt = &now
+	if err := s.store.SaveDataset(dataset); err != nil {
+		return domain.Dataset{}, err
+	}
+	return dataset, nil
 }
 
 func enrichDatasetVersionView(version *domain.DatasetVersion) {
