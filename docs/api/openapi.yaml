@@ -1705,7 +1705,7 @@ components:
     ScenarioPlanCreateRequest:
       type: object
       properties:
-        dataset_version_id:
+        dataset_id:
           type: string
         goal:
           type:
@@ -1717,7 +1717,7 @@ components:
             type: string
         context:
           $ref: "#/components/schemas/AnyMap"
-      required: [dataset_version_id]
+      required: [dataset_id]
     Dataset:
       type: object
       properties:
@@ -2630,6 +2630,7 @@ components:
             - string
             - "null"
         dataset_version_id:
+          description: Resolved active dataset version used at request submission time.
           type:
             - string
             - "null"
@@ -2650,11 +2651,11 @@ components:
     AnalysisSubmitRequest:
       type: object
       properties:
-        dataset_name:
+        dataset_id:
           type:
             - string
             - "null"
-        dataset_version_id:
+        dataset_name:
           type:
             - string
             - "null"
@@ -2672,7 +2673,7 @@ components:
           oneOf:
             - $ref: "#/components/schemas/SkillPlan"
             - type: "null"
-      required: [goal]
+      required: [dataset_id, goal]
     PlanRecord:
       type: object
       properties:
@@ -2685,6 +2686,7 @@ components:
         dataset_name:
           type: string
         dataset_version_id:
+          description: Resolved active dataset version used when the plan was created.
           type:
             - string
             - "null"
@@ -2782,6 +2784,7 @@ components:
           description: Step artifact map. Values are JSON-serialized strings.
           $ref: "#/components/schemas/StringMap"
         dataset_version_id:
+          description: Resolved active dataset version used when the execution was created.
           type:
             - string
             - "null"

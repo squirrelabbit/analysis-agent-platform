@@ -240,9 +240,10 @@ func (s *ScenarioService) BuildAnalysisSubmitRequest(projectID, scenarioID strin
 		return domain.AnalysisSubmitRequest{}, err
 	}
 
+	datasetID := strings.TrimSpace(input.DatasetID)
 	datasetVersionID := strings.TrimSpace(input.DatasetVersionID)
-	if datasetVersionID == "" {
-		return domain.AnalysisSubmitRequest{}, ErrInvalidArgument{Message: "dataset_version_id is required"}
+	if datasetID == "" && datasetVersionID == "" {
+		return domain.AnalysisSubmitRequest{}, ErrInvalidArgument{Message: "dataset_id is required"}
 	}
 	if scenario.PlanningMode != scenarioPlanningModeStrict {
 		return domain.AnalysisSubmitRequest{}, ErrInvalidArgument{
@@ -275,13 +276,18 @@ func (s *ScenarioService) BuildAnalysisSubmitRequest(projectID, scenarioID strin
 	}
 
 	constraints := append([]string(nil), input.Constraints...)
-	return domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		Goal:             goal,
-		Constraints:      constraints,
-		Context:          context,
-		RequestedPlan:    &plan,
-	}, nil
+	submitRequest := domain.AnalysisSubmitRequest{
+		Goal:          goal,
+		Constraints:   constraints,
+		Context:       context,
+		RequestedPlan: &plan,
+	}
+	if datasetID != "" {
+		submitRequest.DatasetID = &datasetID
+	} else {
+		submitRequest.DatasetVersionID = &datasetVersionID
+	}
+	return submitRequest, nil
 }
 
 func buildScenarioPlan(scenario domain.Scenario, goal string) (domain.SkillPlan, error) {
