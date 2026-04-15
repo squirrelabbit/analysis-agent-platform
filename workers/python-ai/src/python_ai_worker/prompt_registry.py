@@ -101,6 +101,13 @@ def _resolve_prompt_version(version: str, *, batch: bool, operation: str) -> str
     return requested
 
 
+def _prompt_version_for_override(version: str, *, batch: bool, operation: str) -> str:
+    requested = version.strip()
+    if requested:
+        return requested
+    return _resolve_prompt_version("", batch=batch, operation=operation)
+
+
 def prompt_catalog() -> list[dict[str, object]]:
     catalog: list[dict[str, object]] = []
     for version in _available_prompt_versions():
@@ -123,7 +130,13 @@ def prompt_catalog() -> list[dict[str, object]]:
     return catalog
 
 
-def _load_prompt_template(version: str, kind: str) -> str:
+def _load_prompt_template(version: str, kind: str, template_override: str = "") -> str:
+    override = str(template_override or "").strip()
+    if override:
+        _, body = _parse_front_matter(override)
+        if body.strip():
+            return body.strip()
+        raise ValueError(f"{kind} prompt template override is empty")
     normalized_version = version.strip()
     template_path = _prompt_templates_dir() / f"{normalized_version}.md"
     if not template_path.is_file():
@@ -143,16 +156,22 @@ def _render_template(template: str, replacements: dict[str, str], version: str) 
     return rendered
 
 
-def render_prepare_prompt(raw_text: str, version: str = "") -> tuple[str, str]:
-    prompt_version = _resolve_prompt_version(version, batch=False, operation="prepare")
-    template = _load_prompt_template(prompt_version, "prepare")
+def render_prepare_prompt(raw_text: str, version: str = "", template_override: str = "") -> tuple[str, str]:
+    if str(template_override or "").strip():
+        prompt_version = _prompt_version_for_override(version, batch=False, operation="prepare")
+    else:
+        prompt_version = _resolve_prompt_version(version, batch=False, operation="prepare")
+    template = _load_prompt_template(prompt_version, "prepare", template_override=template_override)
     prompt = _render_template(template, {"raw_text": raw_text}, prompt_version)
     return prompt_version, prompt
 
 
-def render_prepare_batch_prompt(raw_texts: list[str], version: str = "") -> tuple[str, str]:
-    prompt_version = _resolve_prompt_version(version, batch=True, operation="prepare")
-    template = _load_prompt_template(prompt_version, "prepare batch")
+def render_prepare_batch_prompt(raw_texts: list[str], version: str = "", template_override: str = "") -> tuple[str, str]:
+    if str(template_override or "").strip():
+        prompt_version = _prompt_version_for_override(version, batch=True, operation="prepare")
+    else:
+        prompt_version = _resolve_prompt_version(version, batch=True, operation="prepare")
+    template = _load_prompt_template(prompt_version, "prepare batch", template_override=template_override)
     rows_json = json.dumps(
         [{"row_index": index, "raw_text": raw_text} for index, raw_text in enumerate(raw_texts)],
         ensure_ascii=False,
@@ -161,16 +180,22 @@ def render_prepare_batch_prompt(raw_texts: list[str], version: str = "") -> tupl
     return prompt_version, prompt
 
 
-def render_sentiment_prompt(text: str, version: str = "") -> tuple[str, str]:
-    prompt_version = _resolve_prompt_version(version, batch=False, operation="sentiment")
-    template = _load_prompt_template(prompt_version, "sentiment")
+def render_sentiment_prompt(text: str, version: str = "", template_override: str = "") -> tuple[str, str]:
+    if str(template_override or "").strip():
+        prompt_version = _prompt_version_for_override(version, batch=False, operation="sentiment")
+    else:
+        prompt_version = _resolve_prompt_version(version, batch=False, operation="sentiment")
+    template = _load_prompt_template(prompt_version, "sentiment", template_override=template_override)
     prompt = _render_template(template, {"text": text}, prompt_version)
     return prompt_version, prompt
 
 
-def render_sentiment_batch_prompt(texts: list[str], version: str = "") -> tuple[str, str]:
-    prompt_version = _resolve_prompt_version(version, batch=True, operation="sentiment")
-    template = _load_prompt_template(prompt_version, "sentiment batch")
+def render_sentiment_batch_prompt(texts: list[str], version: str = "", template_override: str = "") -> tuple[str, str]:
+    if str(template_override or "").strip():
+        prompt_version = _prompt_version_for_override(version, batch=True, operation="sentiment")
+    else:
+        prompt_version = _resolve_prompt_version(version, batch=True, operation="sentiment")
+    template = _load_prompt_template(prompt_version, "sentiment batch", template_override=template_override)
     rows_json = json.dumps(
         [{"row_index": index, "text": text} for index, text in enumerate(texts)],
         ensure_ascii=False,
@@ -186,9 +211,13 @@ def render_execution_final_answer_prompt(
     result_json: str,
     evidence_json: str,
     version: str = "",
+    template_override: str = "",
 ) -> tuple[str, str]:
-    prompt_version = version.strip() or DEFAULT_EXECUTION_FINAL_ANSWER_PROMPT_VERSION
-    template = _load_prompt_template(prompt_version, "execution final answer")
+    if str(template_override or "").strip():
+        prompt_version = version.strip() or DEFAULT_EXECUTION_FINAL_ANSWER_PROMPT_VERSION
+    else:
+        prompt_version = version.strip() or DEFAULT_EXECUTION_FINAL_ANSWER_PROMPT_VERSION
+    template = _load_prompt_template(prompt_version, "execution final answer", template_override=template_override)
     prompt = _render_template(
         template,
         {

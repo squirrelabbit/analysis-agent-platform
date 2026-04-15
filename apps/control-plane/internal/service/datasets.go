@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -41,6 +44,23 @@ const (
 	defaultSentimentPreviewLimit = 10
 	maxSentimentPreviewLimit     = 20
 )
+
+var promptPlaceholderPattern = regexp.MustCompile(`{{\s*([a-zA-Z0-9_]+)\s*}}`)
+
+var allowedProjectPromptOperations = map[string]map[string]struct{}{
+	"prepare": {
+		"raw_text": {},
+	},
+	"prepare_batch": {
+		"rows_json": {},
+	},
+	"sentiment": {
+		"text": {},
+	},
+	"sentiment_batch": {
+		"rows_json": {},
+	},
+}
 
 const (
 	datasetLLMModeDefault  = "default"
@@ -70,6 +90,12 @@ type workerCapabilitiesResponse struct {
 	RuleCatalog           domain.DatasetProfileRuleCatalog     `json:"rule_catalog"`
 	SkillPolicyCatalog    []domain.SkillPolicyMetadata         `json:"skill_policy_catalog"`
 	SkillPolicyValidation domain.SkillPolicyValidationResponse `json:"skill_policy_validation"`
+}
+
+type projectPromptTemplates struct {
+	RowTemplate     string
+	BatchTemplate   string
+	UsesProjectSlot bool
 }
 
 func NewDatasetService(repository store.Repository, pythonAIWorkerURL string, uploadRoot string, artifactRoot string) *DatasetService {
@@ -151,6 +177,120 @@ func (s *DatasetService) ListDatasets(projectID string) (domain.DatasetListRespo
 		return domain.DatasetListResponse{}, err
 	}
 	return domain.DatasetListResponse{Items: items}, nil
+}
+
+func (s *DatasetService) SaveProjectPrompt(projectID string, input domain.ProjectPromptUpsertRequest) (domain.ProjectPrompt, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.ProjectPrompt{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.ProjectPrompt{}, err
+	}
+
+	version := strings.TrimSpace(input.Version)
+	if version == "" {
+		return domain.ProjectPrompt{}, ErrInvalidArgument{Message: "version is required"}
+	}
+	operation, err := normalizeProjectPromptOperation(input.Operation)
+	if err != nil {
+		return domain.ProjectPrompt{}, err
+	}
+	content := strings.TrimSpace(input.Content)
+	if content == "" {
+		return domain.ProjectPrompt{}, ErrInvalidArgument{Message: "content is required"}
+	}
+
+	metadata := parsePromptFrontMatter(content)
+	if frontOperation := strings.TrimSpace(metadata["operation"]); frontOperation != "" && frontOperation != operation {
+		return domain.ProjectPrompt{}, ErrInvalidArgument{Message: "front matter operation does not match request operation"}
+	}
+	if err := validatePromptTemplatePlaceholders(content, operation); err != nil {
+		return domain.ProjectPrompt{}, err
+	}
+
+	if _, err := s.store.GetProjectPrompt(projectID, version, operation); err == nil {
+		return domain.ProjectPrompt{}, ErrConflict{Message: "project prompt version already exists for operation"}
+	} else if err != store.ErrNotFound {
+		return domain.ProjectPrompt{}, err
+	}
+
+	now := time.Now().UTC()
+	prompt := domain.ProjectPrompt{
+		ProjectID:   projectID,
+		Version:     version,
+		Operation:   operation,
+		Title:       defaultPromptMetaValue(metadata["title"], version),
+		Status:      defaultPromptMetaValue(metadata["status"], "active"),
+		Summary:     strings.TrimSpace(metadata["summary"]),
+		Content:     content,
+		ContentHash: sha256Hex(content),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := s.store.SaveProjectPrompt(prompt); err != nil {
+		return domain.ProjectPrompt{}, err
+	}
+	return prompt, nil
+}
+
+func (s *DatasetService) ListProjectPrompts(projectID string) (domain.ProjectPromptListResponse, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.ProjectPromptListResponse{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.ProjectPromptListResponse{}, err
+	}
+	items, err := s.store.ListProjectPrompts(projectID)
+	if err != nil {
+		return domain.ProjectPromptListResponse{}, err
+	}
+	return domain.ProjectPromptListResponse{Items: items}, nil
+}
+
+func (s *DatasetService) GetProjectPromptDefaults(projectID string) (domain.ProjectPromptDefaults, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.ProjectPromptDefaults{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.ProjectPromptDefaults{}, err
+	}
+
+	defaults, err := s.store.GetProjectPromptDefaults(projectID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return domain.ProjectPromptDefaults{ProjectID: projectID}, nil
+		}
+		return domain.ProjectPromptDefaults{}, err
+	}
+	return defaults, nil
+}
+
+func (s *DatasetService) UpdateProjectPromptDefaults(projectID string, input domain.ProjectPromptDefaultsUpdateRequest) (domain.ProjectPromptDefaults, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.ProjectPromptDefaults{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.ProjectPromptDefaults{}, err
+	}
+
+	defaults := domain.ProjectPromptDefaults{
+		ProjectID:              projectID,
+		PreparePromptVersion:   trimStringPointer(input.PreparePromptVersion),
+		SentimentPromptVersion: trimStringPointer(input.SentimentPromptVersion),
+	}
+	if defaults.PreparePromptVersion != nil && !s.projectHasPromptVersion(projectID, *defaults.PreparePromptVersion, "prepare") {
+		return domain.ProjectPromptDefaults{}, ErrInvalidArgument{Message: "prepare default prompt version must reference a project prepare prompt"}
+	}
+	if defaults.SentimentPromptVersion != nil && !s.projectHasPromptVersion(projectID, *defaults.SentimentPromptVersion, "sentiment") {
+		return domain.ProjectPromptDefaults{}, ErrInvalidArgument{Message: "sentiment default prompt version must reference a project sentiment prompt"}
+	}
+
+	now := time.Now().UTC()
+	defaults.UpdatedAt = &now
+	if err := s.store.SaveProjectPromptDefaults(defaults); err != nil {
+		return domain.ProjectPromptDefaults{}, err
+	}
+	return defaults, nil
 }
 
 func (s *DatasetService) CreateDatasetVersion(projectID, datasetID string, input domain.DatasetVersionCreateRequest) (domain.DatasetVersion, error) {
@@ -1002,22 +1142,7 @@ func (s *DatasetService) fetchWorkerCapabilities() (*workerCapabilitiesResponse,
 }
 
 func parsePromptFrontMatter(raw string) map[string]string {
-	trimmed := strings.TrimSpace(raw)
-	if !strings.HasPrefix(trimmed, "---\n") {
-		return map[string]string{}
-	}
-	lines := strings.Split(trimmed, "\n")
-	metadata := make(map[string]string)
-	for _, line := range lines[1:] {
-		if strings.TrimSpace(line) == "---" {
-			break
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		metadata[strings.TrimSpace(key)] = strings.TrimSpace(value)
-	}
+	metadata, _ := splitPromptFrontMatter(raw)
 	return metadata
 }
 
@@ -1060,6 +1185,78 @@ func defaultPromptMetaValue(value string, fallback string) string {
 	return trimmed
 }
 
+func normalizeProjectPromptOperation(value string) (string, error) {
+	operation := strings.TrimSpace(value)
+	if operation == "" {
+		return "", ErrInvalidArgument{Message: "operation is required"}
+	}
+	if _, ok := allowedProjectPromptOperations[operation]; !ok {
+		return "", ErrInvalidArgument{Message: "unsupported prompt operation"}
+	}
+	return operation, nil
+}
+
+func validatePromptTemplatePlaceholders(content string, operation string) error {
+	allowed, ok := allowedProjectPromptOperations[operation]
+	if !ok {
+		return ErrInvalidArgument{Message: "unsupported prompt operation"}
+	}
+	_, body := splitPromptFrontMatter(content)
+	found := make(map[string]struct{}, len(allowed))
+	for _, matches := range promptPlaceholderPattern.FindAllStringSubmatch(body, -1) {
+		if len(matches) < 2 {
+			continue
+		}
+		placeholder := strings.TrimSpace(matches[1])
+		if placeholder == "" {
+			continue
+		}
+		if _, ok := allowed[placeholder]; ok {
+			found[placeholder] = struct{}{}
+			continue
+		}
+		return ErrInvalidArgument{Message: fmt.Sprintf("unsupported placeholder %q for %s prompt", placeholder, operation)}
+	}
+	missing := make([]string, 0)
+	for placeholder := range allowed {
+		if _, ok := found[placeholder]; ok {
+			continue
+		}
+		missing = append(missing, placeholder)
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return ErrInvalidArgument{Message: fmt.Sprintf("missing placeholders for %s prompt: %s", operation, strings.Join(missing, ", "))}
+	}
+	return nil
+}
+
+func splitPromptFrontMatter(raw string) (map[string]string, string) {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "---\n") {
+		return map[string]string{}, trimmed
+	}
+	lines := strings.Split(trimmed, "\n")
+	metadata := make(map[string]string)
+	closingIndex := -1
+	for index, line := range lines[1:] {
+		if strings.TrimSpace(line) == "---" {
+			closingIndex = index + 1
+			break
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		metadata[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	if closingIndex < 0 {
+		return map[string]string{}, trimmed
+	}
+	body := strings.TrimSpace(strings.Join(lines[closingIndex+1:], "\n"))
+	return metadata, body
+}
+
 func (s *DatasetService) validateExistingDatasetVersions(
 	promptMetadata map[string]domain.PromptTemplateMetadata,
 	availablePrepareRules map[string]struct{},
@@ -1070,35 +1267,6 @@ func (s *DatasetService) validateExistingDatasetVersions(
 		return nil, err
 	}
 	issues := make([]domain.DatasetProfileValidationIssue, 0)
-	validatePromptVersion := func(owner, resourceRef, fieldName string, value *string, allowedOperations ...string) {
-		trimmed := strings.TrimSpace(optionalStringValue(value))
-		if trimmed == "" {
-			return
-		}
-		meta, ok := promptMetadata[trimmed]
-		if !ok {
-			issues = append(issues, domain.DatasetProfileValidationIssue{
-				Severity:    "error",
-				Code:        fieldName + "_missing",
-				Message:     fmt.Sprintf("%s 의 %s %q 가 현재 prompt registry에 없습니다.", owner, fieldName, trimmed),
-				Scope:       "dataset_version",
-				ResourceRef: resourceRef,
-			})
-			return
-		}
-		for _, allowed := range allowedOperations {
-			if strings.TrimSpace(meta.Operation) == allowed {
-				return
-			}
-		}
-		issues = append(issues, domain.DatasetProfileValidationIssue{
-			Severity:    "error",
-			Code:        fieldName + "_operation_mismatch",
-			Message:     fmt.Sprintf("%s 의 %s %q 는 %s 작업용 prompt가 아닙니다.", owner, fieldName, trimmed, strings.Join(allowedOperations, "/")),
-			Scope:       "dataset_version",
-			ResourceRef: resourceRef,
-		})
-	}
 	validateRuleNames := func(owner, resourceRef, fieldName string, values []string, available map[string]struct{}) {
 		if len(values) == 0 || len(available) == 0 {
 			return
@@ -1121,6 +1289,52 @@ func (s *DatasetService) validateExistingDatasetVersions(
 		}
 	}
 	for _, project := range projects {
+		validatePromptVersion := func(owner, resourceRef, fieldName string, value *string, allowedOperations ...string) {
+			trimmed := strings.TrimSpace(optionalStringValue(value))
+			if trimmed == "" {
+				return
+			}
+			requiredOperation := ""
+			if len(allowedOperations) > 0 {
+				requiredOperation = strings.TrimSpace(allowedOperations[0])
+			}
+			if s.projectHasPromptVersion(project.ProjectID, trimmed, allowedOperations...) {
+				if requiredOperation == "" || s.projectHasPromptVersion(project.ProjectID, trimmed, requiredOperation) {
+					return
+				}
+				issues = append(issues, domain.DatasetProfileValidationIssue{
+					Severity:    "error",
+					Code:        fieldName + "_missing",
+					Message:     fmt.Sprintf("%s 의 %s %q 는 프로젝트 prompt registry에 %s 템플릿이 없습니다.", owner, fieldName, trimmed, requiredOperation),
+					Scope:       "dataset_version",
+					ResourceRef: resourceRef,
+				})
+				return
+			}
+			meta, ok := promptMetadata[trimmed]
+			if !ok {
+				issues = append(issues, domain.DatasetProfileValidationIssue{
+					Severity:    "error",
+					Code:        fieldName + "_missing",
+					Message:     fmt.Sprintf("%s 의 %s %q 가 현재 prompt registry에 없습니다.", owner, fieldName, trimmed),
+					Scope:       "dataset_version",
+					ResourceRef: resourceRef,
+				})
+				return
+			}
+			for _, allowed := range allowedOperations {
+				if strings.TrimSpace(meta.Operation) == allowed {
+					return
+				}
+			}
+			issues = append(issues, domain.DatasetProfileValidationIssue{
+				Severity:    "error",
+				Code:        fieldName + "_operation_mismatch",
+				Message:     fmt.Sprintf("%s 의 %s %q 는 %s 작업용 prompt가 아닙니다.", owner, fieldName, trimmed, strings.Join(allowedOperations, "/")),
+				Scope:       "dataset_version",
+				ResourceRef: resourceRef,
+			})
+		}
 		datasets, err := s.store.ListDatasets(project.ProjectID)
 		if err != nil {
 			return nil, err
@@ -1155,6 +1369,94 @@ func (s *DatasetService) validateExistingDatasetVersions(
 		}
 	}
 	return issues, nil
+}
+
+func (s *DatasetService) projectHasPromptVersion(projectID, version string, allowedOperations ...string) bool {
+	for _, operation := range allowedOperations {
+		if _, err := s.store.GetProjectPrompt(projectID, version, operation); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *DatasetService) projectPromptDefaults(projectID string) (domain.ProjectPromptDefaults, error) {
+	defaults, err := s.store.GetProjectPromptDefaults(projectID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return domain.ProjectPromptDefaults{ProjectID: projectID}, nil
+		}
+		return domain.ProjectPromptDefaults{}, err
+	}
+	return defaults, nil
+}
+
+func (s *DatasetService) resolveEffectiveProjectPromptVersion(projectID string, explicit *string, operation string) (string, error) {
+	if value := trimStringPointer(explicit); value != nil {
+		return *value, nil
+	}
+
+	defaults, err := s.projectPromptDefaults(projectID)
+	if err != nil {
+		return "", err
+	}
+	switch operation {
+	case "prepare":
+		if defaults.PreparePromptVersion != nil {
+			return *defaults.PreparePromptVersion, nil
+		}
+	case "sentiment":
+		if defaults.SentimentPromptVersion != nil {
+			return *defaults.SentimentPromptVersion, nil
+		}
+	}
+	return "", nil
+}
+
+func (s *DatasetService) lookupProjectPromptContent(projectID, version, operation string) (string, bool, error) {
+	trimmedVersion := strings.TrimSpace(version)
+	if trimmedVersion == "" {
+		return "", false, nil
+	}
+	prompt, err := s.store.GetProjectPrompt(projectID, trimmedVersion, operation)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return strings.TrimSpace(prompt.Content), true, nil
+}
+
+func (s *DatasetService) resolveProjectPromptTemplates(projectID, version, rowOperation, batchOperation string) (projectPromptTemplates, error) {
+	rowTemplate, rowExists, err := s.lookupProjectPromptContent(projectID, version, rowOperation)
+	if err != nil {
+		return projectPromptTemplates{}, err
+	}
+	batchTemplate := ""
+	batchExists := false
+	if strings.TrimSpace(batchOperation) != "" {
+		batchTemplate, batchExists, err = s.lookupProjectPromptContent(projectID, version, batchOperation)
+		if err != nil {
+			return projectPromptTemplates{}, err
+		}
+	}
+	if !rowExists && !batchExists {
+		return projectPromptTemplates{}, nil
+	}
+	if !rowExists {
+		return projectPromptTemplates{}, ErrInvalidArgument{Message: fmt.Sprintf("project prompt version %q requires %s template", strings.TrimSpace(version), rowOperation)}
+	}
+	return projectPromptTemplates{
+		RowTemplate:     rowTemplate,
+		BatchTemplate:   batchTemplate,
+		UsesProjectSlot: true,
+	}, nil
+}
+
+func sha256Hex(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 func stringSet(values []string) map[string]struct{} {
@@ -1245,6 +1547,22 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 		return domain.DatasetVersion{}, err
 	}
 
+	var configuredPreparePromptVersion *string
+	if version.Profile != nil {
+		configuredPreparePromptVersion = version.Profile.PreparePromptVersion
+	}
+	preparePromptVersion, err := s.resolveEffectiveProjectPromptVersion(projectID, configuredPreparePromptVersion, "prepare")
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	projectPromptOverride, err := s.resolveProjectPromptTemplates(projectID, preparePromptVersion, "prepare", "prepare_batch")
+	if err != nil {
+		version.PrepareStatus = "failed"
+		version.Metadata["prepare_error"] = err.Error()
+		_ = s.store.SaveDatasetVersion(version)
+		return domain.DatasetVersion{}, err
+	}
+
 	payload := map[string]any{
 		"dataset_version_id": version.DatasetVersionID,
 		"dataset_name":       version.StorageURI,
@@ -1256,8 +1574,16 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 		if len(version.Profile.RegexRuleNames) > 0 {
 			payload["regex_rule_names"] = append([]string(nil), version.Profile.RegexRuleNames...)
 		}
-		if version.Profile.PreparePromptVersion != nil && strings.TrimSpace(*version.Profile.PreparePromptVersion) != "" {
-			payload["prepare_prompt_version"] = strings.TrimSpace(*version.Profile.PreparePromptVersion)
+	}
+	if preparePromptVersion != "" {
+		payload["prepare_prompt_version"] = preparePromptVersion
+	}
+	if projectPromptOverride.UsesProjectSlot {
+		payload["prepare_prompt_template"] = projectPromptOverride.RowTemplate
+		if projectPromptOverride.BatchTemplate != "" {
+			payload["prepare_batch_prompt_template"] = projectPromptOverride.BatchTemplate
+		} else {
+			payload["prepare_batch_size"] = 1
 		}
 	}
 	if version.PrepareModel != nil && strings.TrimSpace(*version.PrepareModel) != "" {
@@ -1720,6 +2046,22 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 		return domain.DatasetVersion{}, err
 	}
 
+	var configuredSentimentPromptVersion *string
+	if version.Profile != nil {
+		configuredSentimentPromptVersion = version.Profile.SentimentPromptVersion
+	}
+	sentimentPromptVersion, err := s.resolveEffectiveProjectPromptVersion(projectID, configuredSentimentPromptVersion, "sentiment")
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	projectPromptOverride, err := s.resolveProjectPromptTemplates(projectID, sentimentPromptVersion, "sentiment", "sentiment_batch")
+	if err != nil {
+		version.SentimentStatus = "failed"
+		version.Metadata["sentiment_error"] = err.Error()
+		_ = s.store.SaveDatasetVersion(version)
+		return domain.DatasetVersion{}, err
+	}
+
 	payload := map[string]any{
 		"dataset_version_id": version.DatasetVersionID,
 		"dataset_name":       datasetName,
@@ -1727,8 +2069,16 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 		"output_path":        outputPath,
 		"llm_mode":           version.SentimentLLMMode,
 	}
-	if version.Profile != nil && version.Profile.SentimentPromptVersion != nil && strings.TrimSpace(*version.Profile.SentimentPromptVersion) != "" {
-		payload["sentiment_prompt_version"] = strings.TrimSpace(*version.Profile.SentimentPromptVersion)
+	if sentimentPromptVersion != "" {
+		payload["sentiment_prompt_version"] = sentimentPromptVersion
+	}
+	if projectPromptOverride.UsesProjectSlot {
+		payload["sentiment_prompt_template"] = projectPromptOverride.RowTemplate
+		if projectPromptOverride.BatchTemplate != "" {
+			payload["sentiment_batch_prompt_template"] = projectPromptOverride.BatchTemplate
+		} else {
+			payload["sentiment_batch_size"] = 1
+		}
 	}
 	if version.SentimentModel != nil && strings.TrimSpace(*version.SentimentModel) != "" {
 		payload["model"] = strings.TrimSpace(*version.SentimentModel)

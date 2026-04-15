@@ -445,8 +445,15 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 
 	projectList := map[string]any{}
 	readJSONResponse(t, handler, http.MethodGet, "/projects", "", http.StatusOK, &projectList)
-	if items, ok := projectList["items"].([]any); !ok || len(items) != 1 {
+	items, ok := projectList["items"].([]any)
+	if !ok || len(items) != 1 {
 		t.Fatalf("expected one project in list: %+v", projectList)
+	}
+	projectSummary := items[0].(map[string]any)
+	if projectSummary["dataset_version_count"] != float64(0) ||
+		projectSummary["scenario_count"] != float64(0) ||
+		projectSummary["prompt_count"] != float64(0) {
+		t.Fatalf("expected empty project counts: %+v", projectSummary)
 	}
 
 	dataset := map[string]any{}
@@ -478,6 +485,16 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 		&version,
 	)
 
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"issues_v2.csv","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&map[string]any{},
+	)
+
 	versionList := map[string]any{}
 	readJSONResponse(
 		t,
@@ -488,8 +505,67 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 		http.StatusOK,
 		&versionList,
 	)
-	if items, ok := versionList["items"].([]any); !ok || len(items) != 1 {
-		t.Fatalf("expected one dataset version in list: %+v", versionList)
+	if items, ok := versionList["items"].([]any); !ok || len(items) != 2 {
+		t.Fatalf("expected two dataset versions in list: %+v", versionList)
+	}
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/scenarios",
+		`{
+		  "scenario_id":"S1",
+		  "user_query":"이번 벚꽃 축제 반응 어때?",
+		  "query_type":"여론 요약",
+		  "interpretation":"전체 여론 및 분위기 파악",
+		  "analysis_scope":"축제 기간",
+		  "steps":[
+		    {
+		      "step":1,
+		      "function_name":"가비지 필터링",
+		      "runtime_skill_name":"garbage_filter",
+		      "result_description":"분석 대상 정제"
+		    }
+		  ]
+		}`,
+		http.StatusCreated,
+		&map[string]any{},
+	)
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/prompts",
+		`{
+		  "version":"project-prepare-v1",
+		  "operation":"prepare",
+		  "content":"---\ntitle: 프로젝트 전처리\noperation: prepare\nstatus: experimental\nsummary: 프로젝트 전용 전처리\n---\n{{raw_text}}\n"
+		}`,
+		http.StatusCreated,
+		&map[string]any{},
+	)
+
+	projectList = map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/projects", "", http.StatusOK, &projectList)
+	items, ok = projectList["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one project in list after resource creation: %+v", projectList)
+	}
+	projectSummary = items[0].(map[string]any)
+	if projectSummary["dataset_version_count"] != float64(2) ||
+		projectSummary["scenario_count"] != float64(1) ||
+		projectSummary["prompt_count"] != float64(1) {
+		t.Fatalf("unexpected aggregated project counts: %+v", projectSummary)
+	}
+
+	projectDetail := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/projects/"+projectID, "", http.StatusOK, &projectDetail)
+	if projectDetail["dataset_version_count"] != float64(2) ||
+		projectDetail["scenario_count"] != float64(1) ||
+		projectDetail["prompt_count"] != float64(1) {
+		t.Fatalf("unexpected aggregated project detail counts: %+v", projectDetail)
 	}
 
 	validation := map[string]any{}
@@ -533,6 +609,116 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 	}
 	if ruleCatalog, ok := ruleCatalogResponse["catalog"].(map[string]any); !ok || len(ruleCatalog) == 0 {
 		t.Fatalf("expected rule catalog body: %+v", ruleCatalogResponse)
+	}
+}
+
+func TestProjectPromptEndpoints(t *testing.T) {
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"prompt-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	created := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/prompts",
+		`{
+		  "version":"project-prepare-v1",
+		  "operation":"prepare",
+		  "content":"---\ntitle: 프로젝트 전처리\noperation: prepare\nstatus: experimental\nsummary: 프로젝트 전용 전처리\n---\n{{raw_text}}\n"
+		}`,
+		http.StatusCreated,
+		&created,
+	)
+	if created["version"] != "project-prepare-v1" || created["operation"] != "prepare" {
+		t.Fatalf("unexpected created project prompt: %+v", created)
+	}
+	if created["title"] != "프로젝트 전처리" || created["status"] != "experimental" {
+		t.Fatalf("expected front matter metadata in response: %+v", created)
+	}
+
+	duplicateError := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/prompts",
+		`{
+		  "version":"project-prepare-v1",
+		  "operation":"prepare",
+		  "content":"---\ntitle: 프로젝트 전처리 2\noperation: prepare\nstatus: experimental\nsummary: 덮어쓰기 시도\n---\n{{raw_text}}\n"
+		}`,
+		http.StatusConflict,
+		&duplicateError,
+	)
+	if duplicateError["detail"] == "" {
+		t.Fatalf("expected duplicate prompt error body: %+v", duplicateError)
+	}
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/prompts",
+		`{
+		  "version":"project-sentiment-v1",
+		  "operation":"sentiment",
+		  "content":"---\ntitle: 프로젝트 감성 분석\noperation: sentiment\nstatus: active\nsummary: 프로젝트 전용 감성 분석\n---\n{{text}}\n"
+		}`,
+		http.StatusCreated,
+		&map[string]any{},
+	)
+
+	list := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/projects/"+projectID+"/prompts", "", http.StatusOK, &list)
+	items, ok := list["items"].([]any)
+	if !ok || len(items) != 2 {
+		t.Fatalf("expected two project prompts: %+v", list)
+	}
+	item := items[0].(map[string]any)
+	if item["content_hash"] == "" {
+		t.Fatalf("expected prompt content hash: %+v", item)
+	}
+
+	defaults := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/projects/"+projectID+"/prompt_defaults", "", http.StatusOK, &defaults)
+	if defaults["project_id"] != projectID {
+		t.Fatalf("unexpected prompt defaults response: %+v", defaults)
+	}
+	if _, ok := defaults["prepare_prompt_version"]; ok {
+		t.Fatalf("expected empty defaults before update: %+v", defaults)
+	}
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPut,
+		"/projects/"+projectID+"/prompt_defaults",
+		`{
+		  "prepare_prompt_version":"project-prepare-v1",
+		  "sentiment_prompt_version":"project-sentiment-v1"
+		}`,
+		http.StatusOK,
+		&defaults,
+	)
+	if defaults["prepare_prompt_version"] != "project-prepare-v1" ||
+		defaults["sentiment_prompt_version"] != "project-sentiment-v1" {
+		t.Fatalf("unexpected updated prompt defaults: %+v", defaults)
+	}
+
+	defaults = map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/projects/"+projectID+"/prompt_defaults", "", http.StatusOK, &defaults)
+	if defaults["prepare_prompt_version"] != "project-prepare-v1" ||
+		defaults["sentiment_prompt_version"] != "project-sentiment-v1" {
+		t.Fatalf("unexpected loaded prompt defaults: %+v", defaults)
 	}
 }
 

@@ -146,6 +146,29 @@ class PromptRegistryTests(unittest.TestCase):
         self.assertNotIn("title:", prompt)
         self.assertEqual(version, "custom-prepare-v1")
 
+    def test_render_prepare_prompt_uses_inline_template_override(self) -> None:
+        version, prompt = render_prepare_prompt(
+            "프로젝트 전용 테스트",
+            version="project-prepare-v1",
+            template_override="---\ntitle: Project prepare\noperation: prepare\n---\n프로젝트 전용 전처리\n{{raw_text}}\n",
+        )
+
+        self.assertEqual(version, "project-prepare-v1")
+        self.assertIn("프로젝트 전용 전처리", prompt)
+        self.assertIn("프로젝트 전용 테스트", prompt)
+        self.assertNotIn("title:", prompt)
+
+    def test_render_sentiment_batch_prompt_uses_inline_template_override_without_version_remap(self) -> None:
+        version, prompt = render_sentiment_batch_prompt(
+            ["결제 오류가 반복 발생했습니다", "문의 접수 후 확인 중입니다"],
+            version="project-sentiment-v1",
+            template_override="---\ntitle: Project sentiment batch\noperation: sentiment_batch\n---\n프로젝트 감성 배치\n{{rows_json}}\n",
+        )
+
+        self.assertEqual(version, "project-sentiment-v1")
+        self.assertIn("프로젝트 감성 배치", prompt)
+        self.assertIn("결제 오류가 반복 발생했습니다", prompt)
+
     def test_prepare_row_with_llm_uses_configured_prompt_version(self) -> None:
         client = _RecordingClient(
             {

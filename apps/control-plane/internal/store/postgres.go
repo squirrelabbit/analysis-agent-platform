@@ -119,6 +119,154 @@ func (s *PostgresStore) ListProjects() ([]domain.Project, error) {
 	return items, nil
 }
 
+func (s *PostgresStore) SaveProjectPrompt(prompt domain.ProjectPrompt) error {
+	_, err := s.db.Exec(
+		`INSERT INTO project_prompts (
+			project_id, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10
+		)
+		ON CONFLICT (project_id, version, operation) DO UPDATE
+		SET title = EXCLUDED.title,
+		    status = EXCLUDED.status,
+		    summary = EXCLUDED.summary,
+		    content = EXCLUDED.content,
+		    content_hash = EXCLUDED.content_hash,
+		    updated_at = EXCLUDED.updated_at`,
+		prompt.ProjectID,
+		prompt.Version,
+		prompt.Operation,
+		prompt.Title,
+		prompt.Status,
+		prompt.Summary,
+		prompt.Content,
+		prompt.ContentHash,
+		prompt.CreatedAt,
+		prompt.UpdatedAt,
+	)
+	return err
+}
+
+func (s *PostgresStore) GetProjectPrompt(projectID, version, operation string) (domain.ProjectPrompt, error) {
+	row := s.db.QueryRow(
+		`SELECT project_id::text, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+		 FROM project_prompts
+		 WHERE project_id = $1::uuid AND version = $2 AND operation = $3`,
+		projectID,
+		version,
+		operation,
+	)
+
+	var prompt domain.ProjectPrompt
+	if err := row.Scan(
+		&prompt.ProjectID,
+		&prompt.Version,
+		&prompt.Operation,
+		&prompt.Title,
+		&prompt.Status,
+		&prompt.Summary,
+		&prompt.Content,
+		&prompt.ContentHash,
+		&prompt.CreatedAt,
+		&prompt.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ProjectPrompt{}, ErrNotFound
+		}
+		return domain.ProjectPrompt{}, err
+	}
+	return prompt, nil
+}
+
+func (s *PostgresStore) ListProjectPrompts(projectID string) ([]domain.ProjectPrompt, error) {
+	rows, err := s.db.Query(
+		`SELECT project_id::text, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+		 FROM project_prompts
+		 WHERE project_id = $1::uuid
+		 ORDER BY version ASC, operation ASC, updated_at DESC`,
+		projectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.ProjectPrompt, 0)
+	for rows.Next() {
+		var prompt domain.ProjectPrompt
+		if err := rows.Scan(
+			&prompt.ProjectID,
+			&prompt.Version,
+			&prompt.Operation,
+			&prompt.Title,
+			&prompt.Status,
+			&prompt.Summary,
+			&prompt.Content,
+			&prompt.ContentHash,
+			&prompt.CreatedAt,
+			&prompt.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, prompt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *PostgresStore) SaveProjectPromptDefaults(defaults domain.ProjectPromptDefaults) error {
+	var updatedAt any
+	if defaults.UpdatedAt != nil {
+		updatedAt = *defaults.UpdatedAt
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO project_prompt_defaults (
+			project_id, prepare_prompt_version, sentiment_prompt_version, updated_at
+		) VALUES (
+			$1::uuid, $2, $3, $4
+		)
+		ON CONFLICT (project_id) DO UPDATE
+		SET prepare_prompt_version = EXCLUDED.prepare_prompt_version,
+		    sentiment_prompt_version = EXCLUDED.sentiment_prompt_version,
+		    updated_at = EXCLUDED.updated_at`,
+		defaults.ProjectID,
+		nullableString(defaults.PreparePromptVersion),
+		nullableString(defaults.SentimentPromptVersion),
+		updatedAt,
+	)
+	return err
+}
+
+func (s *PostgresStore) GetProjectPromptDefaults(projectID string) (domain.ProjectPromptDefaults, error) {
+	row := s.db.QueryRow(
+		`SELECT project_id::text, prepare_prompt_version, sentiment_prompt_version, updated_at
+		 FROM project_prompt_defaults
+		 WHERE project_id = $1::uuid`,
+		projectID,
+	)
+
+	var defaults domain.ProjectPromptDefaults
+	var preparePromptVersion sql.NullString
+	var sentimentPromptVersion sql.NullString
+	var updatedAt time.Time
+	if err := row.Scan(&defaults.ProjectID, &preparePromptVersion, &sentimentPromptVersion, &updatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ProjectPromptDefaults{}, ErrNotFound
+		}
+		return domain.ProjectPromptDefaults{}, err
+	}
+	if preparePromptVersion.Valid {
+		defaults.PreparePromptVersion = &preparePromptVersion.String
+	}
+	if sentimentPromptVersion.Valid {
+		defaults.SentimentPromptVersion = &sentimentPromptVersion.String
+	}
+	defaults.UpdatedAt = &updatedAt
+	return defaults, nil
+}
+
 func (s *PostgresStore) SaveScenario(scenario domain.Scenario) error {
 	stepsJSON, err := marshalJSON(scenario.Steps)
 	if err != nil {
@@ -1340,6 +1488,35 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			description TEXT,
 			created_at TIMESTAMPTZ NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS project_prompts (
+			project_id UUID NOT NULL REFERENCES projects(project_id),
+			version TEXT NOT NULL,
+			operation TEXT NOT NULL,
+			title TEXT NOT NULL,
+			status TEXT NOT NULL,
+			summary TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL,
+			content_hash TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			PRIMARY KEY (project_id, version, operation)
+		)`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS content TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`CREATE TABLE IF NOT EXISTS project_prompt_defaults (
+			project_id UUID PRIMARY KEY REFERENCES projects(project_id),
+			prepare_prompt_version TEXT,
+			sentiment_prompt_version TEXT,
+			updated_at TIMESTAMPTZ NOT NULL
+		)`,
+		`ALTER TABLE project_prompt_defaults ADD COLUMN IF NOT EXISTS prepare_prompt_version TEXT`,
+		`ALTER TABLE project_prompt_defaults ADD COLUMN IF NOT EXISTS sentiment_prompt_version TEXT`,
+		`ALTER TABLE project_prompt_defaults ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 		`CREATE TABLE IF NOT EXISTS scenarios (
 			project_id UUID NOT NULL REFERENCES projects(project_id),
 			scenario_id TEXT NOT NULL,
@@ -1519,6 +1696,9 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 func (s *PostgresStore) promoteTimestampColumnsToTimestamptz(ctx context.Context) error {
 	columns := []timestampColumn{
 		{tableName: "projects", columnName: "created_at"},
+		{tableName: "project_prompts", columnName: "created_at"},
+		{tableName: "project_prompts", columnName: "updated_at"},
+		{tableName: "project_prompt_defaults", columnName: "updated_at"},
 		{tableName: "scenarios", columnName: "created_at"},
 		{tableName: "datasets", columnName: "created_at"},
 		{tableName: "dataset_versions", columnName: "prepared_at"},

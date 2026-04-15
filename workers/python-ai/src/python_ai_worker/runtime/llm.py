@@ -696,10 +696,16 @@ def _prepare_row(
     client: AnthropicClient | None,
     model: str,
     prompt_version_override: str = "",
+    prompt_template_override: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if client and client.is_enabled():
         try:
-            return _prepare_row_with_llm(client, raw_text, prompt_version_override=prompt_version_override)
+            return _prepare_row_with_llm(
+                client,
+                raw_text,
+                prompt_version_override=prompt_version_override,
+                prompt_template_override=prompt_template_override,
+            )
         except Exception as exc:
             fallback = _prepare_row_fallback(raw_text)
             fallback["quality_flags"] = list(fallback["quality_flags"]) + [f"llm_fallback:{exc}"]
@@ -734,6 +740,8 @@ def _prepare_rows(
     model: str,
     batch_size: int = 1,
     prompt_version_override: str = "",
+    prompt_template_override: str = "",
+    batch_prompt_template_override: str = "",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if not raw_texts:
         return [], {}
@@ -748,6 +756,7 @@ def _prepare_rows(
                     client,
                     batch,
                     prompt_version_override=prompt_version_override,
+                    prompt_template_override=batch_prompt_template_override,
                 )
                 prepared_rows.extend(batch_rows)
                 usage_records.append(batch_usage)
@@ -764,6 +773,7 @@ def _prepare_rows(
             client=client,
             model=model,
             prompt_version_override=prompt_version_override,
+            prompt_template_override=prompt_template_override,
         )
         prepared_rows.append(prepared)
         usage_records.append(usage)
@@ -775,11 +785,13 @@ def _prepare_row_with_llm(
     raw_text: str,
     *,
     prompt_version_override: str = "",
+    prompt_template_override: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     config = load_config()
     prompt_version, prompt = render_prepare_prompt(
         raw_text,
         version=prompt_version_override or config.anthropic_prepare_prompt_version,
+        template_override=prompt_template_override,
     )
     response = client.create_json_response(prompt=prompt, schema=_prepare_schema(), max_tokens=600)
     return (
@@ -797,11 +809,13 @@ def _prepare_rows_with_llm(
     raw_texts: list[str],
     *,
     prompt_version_override: str = "",
+    prompt_template_override: str = "",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     config = load_config()
     prompt_version, prompt = render_prepare_batch_prompt(
         raw_texts,
         version=prompt_version_override or config.anthropic_prepare_batch_prompt_version,
+        template_override=prompt_template_override,
     )
     response = client.create_json_response(prompt=prompt, schema=_prepare_batch_schema(), max_tokens=max(800, 280 * len(raw_texts)))
     prepared_rows = response.body.get("rows")
@@ -865,10 +879,21 @@ def _prepare_row_fallback(raw_text: str) -> dict[str, Any]:
     }
 
 
-def _label_sentiment(text: str, *, client: AnthropicClient | None, prompt_version_override: str = "") -> dict[str, Any]:
+def _label_sentiment(
+    text: str,
+    *,
+    client: AnthropicClient | None,
+    prompt_version_override: str = "",
+    prompt_template_override: str = "",
+) -> dict[str, Any]:
     if client and client.is_enabled():
         try:
-            return _label_sentiment_with_llm(client, text, prompt_version_override=prompt_version_override)
+            return _label_sentiment_with_llm(
+                client,
+                text,
+                prompt_version_override=prompt_version_override,
+                prompt_template_override=prompt_template_override,
+            )
         except Exception as exc:
             fallback = _label_sentiment_fallback(text)
             fallback["reason"] = f"{fallback['reason']} (llm_fallback: {exc})"
@@ -882,6 +907,8 @@ def _label_sentiments(
     client: AnthropicClient | None,
     batch_size: int = 1,
     prompt_version_override: str = "",
+    prompt_template_override: str = "",
+    batch_prompt_template_override: str = "",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     normalized_texts = [str(text or "") for text in texts]
     if not normalized_texts:
@@ -901,6 +928,8 @@ def _label_sentiments(
                 normalized_texts,
                 batch_size=effective_batch_size,
                 prompt_version_override=prompt_version_override,
+                prompt_template_override=prompt_template_override,
+                batch_prompt_template_override=batch_prompt_template_override,
             )
         except Exception as exc:
             labeled_rows = [_label_sentiment_fallback(text) for text in normalized_texts]
@@ -919,11 +948,13 @@ def _label_sentiment_with_llm(
     text: str,
     *,
     prompt_version_override: str = "",
+    prompt_template_override: str = "",
 ) -> dict[str, Any]:
     config = load_config()
     prompt_version, prompt = render_sentiment_prompt(
         text,
         version=prompt_version_override or config.anthropic_sentiment_prompt_version,
+        template_override=prompt_template_override,
     )
     response = client.create_json_response(prompt=prompt, schema=_sentiment_schema(), max_tokens=400)
     label = str(response.body.get("label") or "unknown").strip().lower()
@@ -950,6 +981,8 @@ def _label_sentiments_with_llm(
     *,
     batch_size: int = 1,
     prompt_version_override: str = "",
+    prompt_template_override: str = "",
+    batch_prompt_template_override: str = "",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if not texts:
         return [], _free_usage_metadata(
@@ -973,6 +1006,7 @@ def _label_sentiments_with_llm(
                 client,
                 batch[0],
                 prompt_version_override=prompt_version_override,
+                prompt_template_override=prompt_template_override,
             )
             labeled_rows.append(labeled)
             usage_records.append(labeled.get("usage") or {})
@@ -981,6 +1015,7 @@ def _label_sentiments_with_llm(
         prompt_version, prompt = render_sentiment_batch_prompt(
             batch,
             version=prompt_version_override or config.anthropic_sentiment_batch_prompt_version,
+            template_override=batch_prompt_template_override,
         )
         response = client.create_json_response(prompt=prompt, schema=_sentiment_batch_schema(), max_tokens=800)
         rows = list(response.body.get("rows") or [])

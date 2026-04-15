@@ -9,29 +9,33 @@ import (
 )
 
 type MemoryStore struct {
-	mu         sync.RWMutex
-	projects   map[string]domain.Project
-	scenarios  map[string]domain.Scenario
-	datasets   map[string]domain.Dataset
-	versions   map[string]domain.DatasetVersion
-	buildJobs  map[string]domain.DatasetBuildJob
-	requests   map[string]domain.AnalysisRequest
-	plans      map[string]domain.PlanRecord
-	executions map[string]domain.ExecutionSummary
-	reports    map[string]domain.ReportDraft
+	mu             sync.RWMutex
+	projects       map[string]domain.Project
+	projectPrompts map[string]domain.ProjectPrompt
+	promptDefaults map[string]domain.ProjectPromptDefaults
+	scenarios      map[string]domain.Scenario
+	datasets       map[string]domain.Dataset
+	versions       map[string]domain.DatasetVersion
+	buildJobs      map[string]domain.DatasetBuildJob
+	requests       map[string]domain.AnalysisRequest
+	plans          map[string]domain.PlanRecord
+	executions     map[string]domain.ExecutionSummary
+	reports        map[string]domain.ReportDraft
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		projects:   make(map[string]domain.Project),
-		scenarios:  make(map[string]domain.Scenario),
-		datasets:   make(map[string]domain.Dataset),
-		versions:   make(map[string]domain.DatasetVersion),
-		buildJobs:  make(map[string]domain.DatasetBuildJob),
-		requests:   make(map[string]domain.AnalysisRequest),
-		plans:      make(map[string]domain.PlanRecord),
-		executions: make(map[string]domain.ExecutionSummary),
-		reports:    make(map[string]domain.ReportDraft),
+		projects:       make(map[string]domain.Project),
+		projectPrompts: make(map[string]domain.ProjectPrompt),
+		promptDefaults: make(map[string]domain.ProjectPromptDefaults),
+		scenarios:      make(map[string]domain.Scenario),
+		datasets:       make(map[string]domain.Dataset),
+		versions:       make(map[string]domain.DatasetVersion),
+		buildJobs:      make(map[string]domain.DatasetBuildJob),
+		requests:       make(map[string]domain.AnalysisRequest),
+		plans:          make(map[string]domain.PlanRecord),
+		executions:     make(map[string]domain.ExecutionSummary),
+		reports:        make(map[string]domain.ReportDraft),
 	}
 }
 
@@ -71,6 +75,66 @@ func (s *MemoryStore) ListProjects() ([]domain.Project, error) {
 		return items[i].CreatedAt.Before(items[j].CreatedAt)
 	})
 	return items, nil
+}
+
+func projectPromptKey(projectID, version, operation string) string {
+	return projectID + "::" + version + "::" + operation
+}
+
+func (s *MemoryStore) SaveProjectPrompt(prompt domain.ProjectPrompt) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.projectPrompts[projectPromptKey(prompt.ProjectID, prompt.Version, prompt.Operation)] = prompt
+	return nil
+}
+
+func (s *MemoryStore) GetProjectPrompt(projectID, version, operation string) (domain.ProjectPrompt, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	prompt, ok := s.projectPrompts[projectPromptKey(projectID, version, operation)]
+	if !ok {
+		return domain.ProjectPrompt{}, ErrNotFound
+	}
+	return prompt, nil
+}
+
+func (s *MemoryStore) ListProjectPrompts(projectID string) ([]domain.ProjectPrompt, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.ProjectPrompt, 0)
+	for _, prompt := range s.projectPrompts {
+		if prompt.ProjectID != projectID {
+			continue
+		}
+		items = append(items, prompt)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Version == items[j].Version {
+			if items[i].Operation == items[j].Operation {
+				return items[i].UpdatedAt.After(items[j].UpdatedAt)
+			}
+			return items[i].Operation < items[j].Operation
+		}
+		return items[i].Version < items[j].Version
+	})
+	return items, nil
+}
+
+func (s *MemoryStore) SaveProjectPromptDefaults(defaults domain.ProjectPromptDefaults) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.promptDefaults[defaults.ProjectID] = defaults
+	return nil
+}
+
+func (s *MemoryStore) GetProjectPromptDefaults(projectID string) (domain.ProjectPromptDefaults, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	defaults, ok := s.promptDefaults[projectID]
+	if !ok {
+		return domain.ProjectPromptDefaults{}, ErrNotFound
+	}
+	return defaults, nil
 }
 
 func (s *MemoryStore) SaveScenario(scenario domain.Scenario) error {

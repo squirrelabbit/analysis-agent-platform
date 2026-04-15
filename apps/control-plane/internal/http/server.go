@@ -104,6 +104,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /projects", s.handleListProjects)
 	s.mux.HandleFunc("GET /projects/{project_id}", s.handleGetProject)
+	s.mux.HandleFunc("GET /projects/{project_id}/prompts", s.handleListProjectPrompts)
+	s.mux.HandleFunc("POST /projects/{project_id}/prompts", s.handleSaveProjectPrompt)
+	s.mux.HandleFunc("GET /projects/{project_id}/prompt_defaults", s.handleGetProjectPromptDefaults)
+	s.mux.HandleFunc("PUT /projects/{project_id}/prompt_defaults", s.handleUpdateProjectPromptDefaults)
 	s.mux.HandleFunc("POST /projects/{project_id}/scenarios", s.handleCreateScenario)
 	s.mux.HandleFunc("POST /projects/{project_id}/scenarios/import", s.handleImportScenarios)
 	s.mux.HandleFunc("GET /projects/{project_id}/scenarios", s.handleListScenarios)
@@ -164,7 +168,7 @@ func (s *Server) withCORS(next stdhttp.Handler) stdhttp.Handler {
 		allowedOrigin, ok := s.allowedOrigin(r.Header.Get("Origin"))
 		if ok {
 			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 			w.Header().Set("Access-Control-Max-Age", "600")
 
 			allowedHeaders := strings.TrimSpace(r.Header.Get("Access-Control-Request-Headers"))
@@ -298,6 +302,52 @@ func (s *Server) handleGetProject(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 
 func (s *Server) handleListProjects(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 	response, err := s.projectService.ListProjects()
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleListProjectPrompts(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.ListProjectPrompts(r.PathValue("project_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleSaveProjectPrompt(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ProjectPromptUpsertRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.SaveProjectPrompt(r.PathValue("project_id"), payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+func (s *Server) handleGetProjectPromptDefaults(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.GetProjectPromptDefaults(r.PathValue("project_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleUpdateProjectPromptDefaults(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ProjectPromptDefaultsUpdateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.UpdateProjectPromptDefaults(r.PathValue("project_id"), payload)
 	if err != nil {
 		s.writeServiceError(w, err)
 		return
@@ -1125,10 +1175,13 @@ func writeError(w stdhttp.ResponseWriter, status int, message string) {
 
 func (s *Server) writeServiceError(w stdhttp.ResponseWriter, err error) {
 	var invalid service.ErrInvalidArgument
+	var conflict service.ErrConflict
 	var missing service.ErrNotFound
 	switch {
 	case errors.As(err, &invalid):
 		writeError(w, stdhttp.StatusBadRequest, invalid.Error())
+	case errors.As(err, &conflict):
+		writeError(w, stdhttp.StatusConflict, conflict.Error())
 	case errors.As(err, &missing):
 		writeError(w, stdhttp.StatusNotFound, missing.Error())
 	default:
