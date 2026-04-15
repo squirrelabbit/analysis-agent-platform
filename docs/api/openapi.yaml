@@ -400,6 +400,21 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+    get:
+      tags: [Datasets]
+      summary: List datasets
+      operationId: listDatasets
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Dataset list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}:
     get:
       tags: [Datasets]
@@ -515,6 +530,22 @@ paths:
                 $ref: "#/components/schemas/DatasetVersion"
         "400":
           $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      tags: [Datasets]
+      summary: List dataset versions
+      operationId: listDatasetVersions
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: Dataset version list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersionListResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}:
@@ -1729,6 +1760,14 @@ components:
             - string
             - "null"
       required: [name]
+    DatasetListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Dataset"
+      required: [items]
     DatasetActiveVersionUpdateRequest:
       type: object
       properties:
@@ -2110,6 +2149,14 @@ components:
             - string
             - "null"
       required: [storage_uri]
+    DatasetVersionListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetVersion"
+      required: [items]
     DatasetPrepareSummary:
       type: object
       properties:
