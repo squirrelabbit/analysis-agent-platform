@@ -47,9 +47,9 @@ function App() {
     <BrowserRouter>
       <AppLayout>
         <Routes>
-          <Route path="/"  element={<Navigate to="/chats" replace />}/>
-          <Route path="/chats" element={<ChatPage />} />
-          <Route path="/projects" element={<ProjectPage />} />
+          <Route path="/"  element={<Navigate to="/chat" replace />}/>
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/project" element={<ProjectPage />} />
         </Routes>
       </AppLayout>
     </BrowserRouter>

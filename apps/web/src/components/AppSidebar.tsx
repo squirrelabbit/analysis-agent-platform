@@ -11,12 +11,14 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import { useProjects } from "@/hooks/useProject";
 import { FolderOpen, MessageCircle, Settings, Sparkle } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 export function AppSidebar() {
+  const { projects } = useProjects()
   const menus = [
-    { label: "채팅", icon: MessageCircle, href: "/chats" },
-    { label: "프로젝트", icon: FolderOpen, badge: "6", href: "/projects" },
+    { label: "채팅", icon: MessageCircle, href: "/chat" },
+    { label: "프로젝트", icon: FolderOpen, badge: projects.length, href: "/project" },
   ];
   const location = useLocation();
   return (

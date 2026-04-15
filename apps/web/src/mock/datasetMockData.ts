@@ -58,3 +58,26 @@ export const MOCK_HISTORY: Record<string, { ver: string; desc: string; date: str
     { ver: 'v1', desc: '최초 업로드', date: '2025.01.05', isCurrent: false },
   ],
 }
+
+
+type FileStatus = "active" | "processing" | "error";
+export const STATUS_CONFIG: Record<
+  FileStatus,
+  { label: string; className: string; icon?: React.ReactNode }
+> = {
+  active: {
+    label: "활성",
+    className: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    // icon: <CheckCircle2 className="w-3 h-3" />,
+  },
+  processing: {
+    label: "처리중",
+    className: "bg-amber-50 text-amber-700 border-amber-200",
+    // icon: <Clock className="w-3 h-3 animate-spin" />,
+  },
+  error: {
+    label: "오류",
+    className: "bg-red-50 text-red-600 border-red-200",
+    // icon: <AlertCircle className="w-3 h-3" />,
+  },
+};
