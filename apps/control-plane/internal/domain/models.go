@@ -117,7 +117,8 @@ type ScenarioImportResponse struct {
 }
 
 type ScenarioPlanCreateRequest struct {
-	DatasetVersionID string         `json:"dataset_version_id"`
+	DatasetID        string         `json:"dataset_id,omitempty"`
+	DatasetVersionID string         `json:"dataset_version_id,omitempty"`
 	Goal             *string        `json:"goal,omitempty"`
 	Constraints      []string       `json:"constraints,omitempty"`
 	Context          map[string]any `json:"context,omitempty"`
@@ -512,6 +513,7 @@ type AnalysisRequest struct {
 }
 
 type AnalysisSubmitRequest struct {
+	DatasetID        *string        `json:"dataset_id,omitempty"`
 	DatasetName      *string        `json:"dataset_name,omitempty"`
 	DatasetVersionID *string        `json:"dataset_version_id,omitempty"`
 	DataType         *string        `json:"data_type,omitempty"`

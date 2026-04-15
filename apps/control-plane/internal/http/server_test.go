@@ -64,11 +64,9 @@ func TestControlPlaneFlow(t *testing.T) {
 		http.StatusCreated,
 		&version,
 	)
-	versionID := version["dataset_version_id"].(string)
-
 	analysis := map[string]any{}
 	submitBody := `{
-	  "dataset_version_id":"` + versionID + `",
+	  "dataset_id":"` + datasetID + `",
 	  "data_type":"structured",
 	  "goal":"Why did sales drop?",
 	  "constraints":["compare recent trend"],
@@ -83,6 +81,9 @@ func TestControlPlaneFlow(t *testing.T) {
 		http.StatusCreated,
 		&analysis,
 	)
+	if analysis["request"].(map[string]any)["dataset_version_id"] != version["dataset_version_id"] {
+		t.Fatalf("expected resolved active dataset version in analysis request: %+v", analysis)
+	}
 	plan := analysis["plan"].(map[string]any)
 	planID := plan["plan_id"].(string)
 
@@ -189,18 +190,19 @@ func TestExecutionListAndReportDraftEndpoints(t *testing.T) {
 		http.StatusCreated,
 		&version,
 	)
-	versionID := version["dataset_version_id"].(string)
-
 	analysis := map[string]any{}
 	readJSONResponse(
 		t,
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/analysis_requests",
-		`{"dataset_version_id":"`+versionID+`","data_type":"structured","goal":"이슈를 정리해줘"}`,
+		`{"dataset_id":"`+datasetID+`","data_type":"structured","goal":"이슈를 정리해줘"}`,
 		http.StatusCreated,
 		&analysis,
 	)
+	if analysis["request"].(map[string]any)["dataset_version_id"] != version["dataset_version_id"] {
+		t.Fatalf("expected resolved active dataset version in analysis request: %+v", analysis)
+	}
 	planID := analysis["plan"].(map[string]any)["plan_id"].(string)
 
 	executionResponse := map[string]any{}
@@ -814,21 +816,22 @@ func TestScenarioPlanEndpoint(t *testing.T) {
 		http.StatusCreated,
 		&version,
 	)
-	versionID := version["dataset_version_id"].(string)
-
 	response := map[string]any{}
 	readJSONResponse(
 		t,
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/scenarios/S1/plans",
-		`{"dataset_version_id":"`+versionID+`"}`,
+		`{"dataset_id":"`+datasetID+`"}`,
 		http.StatusCreated,
 		&response,
 	)
 
 	request := response["request"].(map[string]any)
 	plan := response["plan"].(map[string]any)
+	if request["dataset_version_id"] != version["dataset_version_id"] {
+		t.Fatalf("expected scenario plan request to resolve active dataset version: %+v", request)
+	}
 	steps := plan["plan"].(map[string]any)["steps"].([]any)
 	if len(steps) != 2 {
 		t.Fatalf("unexpected scenario plan steps: %+v", steps)
@@ -975,15 +978,13 @@ func TestScenarioExecuteEndpoint(t *testing.T) {
 		http.StatusCreated,
 		&version,
 	)
-	versionID := version["dataset_version_id"].(string)
-
 	response := map[string]any{}
 	readJSONResponse(
 		t,
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/scenarios/S1/execute",
-		`{"dataset_version_id":"`+versionID+`"}`,
+		`{"dataset_id":"`+datasetID+`"}`,
 		http.StatusAccepted,
 		&response,
 	)
@@ -994,6 +995,9 @@ func TestScenarioExecuteEndpoint(t *testing.T) {
 	request := response["request"].(map[string]any)
 	plan := response["plan"].(map[string]any)
 	execution := response["execution"].(map[string]any)
+	if request["dataset_version_id"] != version["dataset_version_id"] {
+		t.Fatalf("expected scenario execute request to resolve active dataset version: %+v", request)
+	}
 	if request["goal"] != "이번 벚꽃 축제 반응 어때?" {
 		t.Fatalf("unexpected request payload: %+v", request)
 	}
