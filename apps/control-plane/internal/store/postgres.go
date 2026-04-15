@@ -373,19 +373,27 @@ func (s *PostgresStore) ListScenarios(projectID string) ([]domain.Scenario, erro
 
 func (s *PostgresStore) SaveDataset(dataset domain.Dataset) error {
 	_, err := s.db.Exec(
-		`INSERT INTO datasets (dataset_id, project_id, name, description, data_type, created_at)
-		 VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)
+		`INSERT INTO datasets (
+		     dataset_id, project_id, name, description, data_type,
+		     active_dataset_version_id, active_version_updated_at, created_at
+		 ) VALUES (
+		     $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8
+		 )
 		 ON CONFLICT (dataset_id) DO UPDATE
 		 SET project_id = EXCLUDED.project_id,
 		     name = EXCLUDED.name,
 		     description = EXCLUDED.description,
 		     data_type = EXCLUDED.data_type,
+		     active_dataset_version_id = EXCLUDED.active_dataset_version_id,
+		     active_version_updated_at = EXCLUDED.active_version_updated_at,
 		     created_at = EXCLUDED.created_at`,
 		dataset.DatasetID,
 		dataset.ProjectID,
 		dataset.Name,
 		nullableString(dataset.Description),
 		dataset.DataType,
+		nullableString(dataset.ActiveDatasetVersionID),
+		nullableTime(dataset.ActiveVersionUpdatedAt),
 		dataset.CreatedAt,
 	)
 	return err
@@ -393,7 +401,8 @@ func (s *PostgresStore) SaveDataset(dataset domain.Dataset) error {
 
 func (s *PostgresStore) GetDataset(projectID, datasetID string) (domain.Dataset, error) {
 	row := s.db.QueryRow(
-		`SELECT dataset_id::text, project_id::text, name, description, data_type, created_at
+		`SELECT dataset_id::text, project_id::text, name, description, data_type,
+		        active_dataset_version_id, active_version_updated_at, created_at
 		 FROM datasets
 		 WHERE project_id = $1::uuid AND dataset_id = $2::uuid`,
 		projectID,
@@ -402,12 +411,15 @@ func (s *PostgresStore) GetDataset(projectID, datasetID string) (domain.Dataset,
 
 	var dataset domain.Dataset
 	var description sql.NullString
+	var activeDatasetVersionID sql.NullString
 	if err := row.Scan(
 		&dataset.DatasetID,
 		&dataset.ProjectID,
 		&dataset.Name,
 		&description,
 		&dataset.DataType,
+		&activeDatasetVersionID,
+		&dataset.ActiveVersionUpdatedAt,
 		&dataset.CreatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -418,12 +430,16 @@ func (s *PostgresStore) GetDataset(projectID, datasetID string) (domain.Dataset,
 	if description.Valid {
 		dataset.Description = &description.String
 	}
+	if activeDatasetVersionID.Valid {
+		dataset.ActiveDatasetVersionID = &activeDatasetVersionID.String
+	}
 	return dataset, nil
 }
 
 func (s *PostgresStore) ListDatasets(projectID string) ([]domain.Dataset, error) {
 	rows, err := s.db.Query(
-		`SELECT dataset_id::text, project_id::text, name, description, data_type, created_at
+		`SELECT dataset_id::text, project_id::text, name, description, data_type,
+		        active_dataset_version_id, active_version_updated_at, created_at
 		 FROM datasets
 		 WHERE project_id = $1::uuid
 		 ORDER BY created_at ASC, dataset_id ASC`,
@@ -438,18 +454,24 @@ func (s *PostgresStore) ListDatasets(projectID string) ([]domain.Dataset, error)
 	for rows.Next() {
 		var dataset domain.Dataset
 		var description sql.NullString
+		var activeDatasetVersionID sql.NullString
 		if err := rows.Scan(
 			&dataset.DatasetID,
 			&dataset.ProjectID,
 			&dataset.Name,
 			&description,
 			&dataset.DataType,
+			&activeDatasetVersionID,
+			&dataset.ActiveVersionUpdatedAt,
 			&dataset.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
 		if description.Valid {
 			dataset.Description = &description.String
+		}
+		if activeDatasetVersionID.Valid {
+			dataset.ActiveDatasetVersionID = &activeDatasetVersionID.String
 		}
 		items = append(items, dataset)
 	}
@@ -1531,13 +1553,17 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		)`,
 		`ALTER TABLE scenarios ADD COLUMN IF NOT EXISTS planning_mode TEXT NOT NULL DEFAULT 'strict'`,
 		`CREATE TABLE IF NOT EXISTS datasets (
-			dataset_id UUID PRIMARY KEY,
-			project_id UUID NOT NULL REFERENCES projects(project_id),
-			name TEXT NOT NULL,
-			description TEXT,
-			data_type TEXT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL
-		)`,
+				dataset_id UUID PRIMARY KEY,
+				project_id UUID NOT NULL REFERENCES projects(project_id),
+				name TEXT NOT NULL,
+				description TEXT,
+				data_type TEXT NOT NULL,
+				active_dataset_version_id TEXT,
+				active_version_updated_at TIMESTAMPTZ,
+				created_at TIMESTAMPTZ NOT NULL
+			)`,
+		`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS active_dataset_version_id TEXT`,
+		`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS active_version_updated_at TIMESTAMPTZ`,
 		`CREATE TABLE IF NOT EXISTS dataset_versions (
 			dataset_version_id TEXT PRIMARY KEY,
 			dataset_id UUID NOT NULL REFERENCES datasets(dataset_id),
