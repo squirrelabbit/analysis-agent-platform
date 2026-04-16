@@ -1814,15 +1814,20 @@ func TestSentimentPreviewAndDownloadEndpoints(t *testing.T) {
 func TestOpenAPIDocumentAndSwaggerUI(t *testing.T) {
 	openapiDir := t.TempDir()
 	openapiPath := filepath.Join(openapiDir, "openapi.yaml")
+	frontendOpenAPIPath := filepath.Join(openapiDir, "openapi.frontend.yaml")
 	if err := os.WriteFile(openapiPath, []byte("openapi: 3.1.0\ninfo:\n  title: test\n  version: 0.1.0\n"), 0o644); err != nil {
 		t.Fatalf("unexpected openapi write error: %v", err)
 	}
+	if err := os.WriteFile(frontendOpenAPIPath, []byte("openapi: 3.1.0\ninfo:\n  title: frontend-test\n  version: 0.1.0\n"), 0o644); err != nil {
+		t.Fatalf("unexpected frontend openapi write error: %v", err)
+	}
 
 	server := NewServer(config.Config{
-		BindAddr:       ":0",
-		StoreBackend:   "memory",
-		WorkflowEngine: "noop",
-		OpenAPIPath:    openapiPath,
+		BindAddr:            ":0",
+		StoreBackend:        "memory",
+		WorkflowEngine:      "noop",
+		OpenAPIPath:         openapiPath,
+		FrontendOpenAPIPath: frontendOpenAPIPath,
 	})
 	handler := server.Handler()
 
@@ -1837,6 +1842,16 @@ func TestOpenAPIDocumentAndSwaggerUI(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/openapi.frontend.yaml", nil)
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected frontend openapi status: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "frontend-test") {
+		t.Fatalf("unexpected frontend openapi body: %s", recorder.Body.String())
+	}
+
+	recorder = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/swagger", nil)
 	handler.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusOK {
@@ -1848,6 +1863,20 @@ func TestOpenAPIDocumentAndSwaggerUI(t *testing.T) {
 	}
 	if !strings.Contains(body, "/openapi.yaml") {
 		t.Fatalf("swagger html missing openapi url")
+	}
+
+	recorder = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/swagger/frontend", nil)
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected frontend swagger status: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	body = recorder.Body.String()
+	if !strings.Contains(body, "SwaggerUIBundle") {
+		t.Fatalf("frontend swagger html missing bundle bootstrap")
+	}
+	if !strings.Contains(body, "/openapi.frontend.yaml") {
+		t.Fatalf("frontend swagger html missing frontend openapi url")
 	}
 }
 

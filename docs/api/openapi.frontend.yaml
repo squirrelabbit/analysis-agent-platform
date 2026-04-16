@@ -1,0 +1,746 @@
+openapi: 3.1.0
+info:
+  title: Analysis Support Platform Frontend API
+  version: 0.1.0
+  summary: 프론트 화면 연동에 필요한 필수 API subset
+  description: |
+    현재 프론트 화면 연동 기준으로 필요한 API만 추린 OpenAPI 문서다.
+
+    포함 범위:
+    1. 글로벌 프롬프트 CRUD
+    2. 프로젝트 CRUD
+    3. 데이터셋 CRUD
+    4. 데이터셋 활성 버전 전환
+    5. 업로드 기반 dataset version 생성 및 조회
+
+    확인 필요:
+    - analysis/scenario/report 관련 API는 이후 프론트 범위 확정 시 이 문서에 단계적으로 포함한다.
+servers:
+  - url: http://127.0.0.1:18080
+    description: Local development
+tags:
+  - name: System
+  - name: Prompts
+  - name: Projects
+  - name: Datasets
+paths:
+  /runtime_status:
+    get:
+      tags: [System]
+      summary: Runtime status
+      operationId: getRuntimeStatus
+      responses:
+        "200":
+          description: Runtime status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeStatusResponse"
+  /prompts:
+    get:
+      tags: [Prompts]
+      summary: List global prompts
+      operationId: listPrompts
+      parameters:
+        - name: operation
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [prepare, prepare_batch, sentiment, sentiment_batch]
+      responses:
+        "200":
+          description: Global prompt list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptListResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Prompts]
+      summary: Create global prompt
+      operationId: createPrompt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromptCreateRequest"
+      responses:
+        "201":
+          description: Global prompt created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Prompt"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+  /prompts/{prompt_id}:
+    get:
+      tags: [Prompts]
+      summary: Get global prompt
+      operationId: getPrompt
+      parameters:
+        - $ref: "#/components/parameters/PromptId"
+      responses:
+        "200":
+          description: Global prompt detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Prompt"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    patch:
+      tags: [Prompts]
+      summary: Update global prompt
+      operationId: updatePrompt
+      parameters:
+        - $ref: "#/components/parameters/PromptId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromptUpdateRequest"
+      responses:
+        "200":
+          description: Global prompt updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Prompt"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Prompts]
+      summary: Delete global prompt
+      operationId: deletePrompt
+      parameters:
+        - $ref: "#/components/parameters/PromptId"
+      responses:
+        "204":
+          description: Global prompt deleted
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      operationId: listProjects
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectListResponse"
+    post:
+      tags: [Projects]
+      summary: Create project
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreateRequest"
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}:
+    get:
+      tags: [Projects]
+      summary: Get project
+      operationId: getProject
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Project detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Projects]
+      summary: Delete project
+      operationId: deleteProject
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "204":
+          description: Project deleted
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets:
+    get:
+      tags: [Datasets]
+      summary: List datasets
+      operationId: listDatasets
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Dataset list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Datasets]
+      summary: Create dataset
+      operationId: createDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetCreateRequest"
+      responses:
+        "201":
+          description: Dataset created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}:
+    get:
+      tags: [Datasets]
+      summary: Get dataset
+      operationId: getDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: Dataset detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Datasets]
+      summary: Delete dataset
+      operationId: deleteDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "204":
+          description: Dataset deleted
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/active_version:
+    put:
+      tags: [Datasets]
+      summary: Activate dataset version
+      operationId: activateDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetActiveVersionUpdateRequest"
+      responses:
+        "200":
+          description: Dataset active version updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Datasets]
+      summary: Deactivate dataset version
+      operationId: deactivateDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: Dataset active version cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/uploads:
+    post:
+      tags: [Datasets]
+      summary: Upload dataset file and create dataset version
+      operationId: uploadDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DatasetUploadRequest"
+      responses:
+        "201":
+          description: Dataset version created from upload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions:
+    get:
+      tags: [Datasets]
+      summary: List dataset versions
+      operationId: listDatasetVersions
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: Dataset version list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersionListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}:
+    get:
+      tags: [Datasets]
+      summary: Get dataset version
+      operationId: getDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Dataset version detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+components:
+  responses:
+    ErrorResponse:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  parameters:
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    DatasetId:
+      name: dataset_id
+      in: path
+      required: true
+      schema:
+        type: string
+    VersionId:
+      name: version_id
+      in: path
+      required: true
+      schema:
+        type: string
+    PromptId:
+      name: prompt_id
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+      required: [detail]
+    AnyMap:
+      type: object
+      additionalProperties: true
+    StringList:
+      type: array
+      items:
+        type: string
+    RuntimeStatusTemporal:
+      type: object
+      properties:
+        address:
+          type: string
+        namespace:
+          type: string
+        task_queue:
+          type: string
+        build_task_queue:
+          type: string
+        persistence_mode:
+          type: string
+        retention_mode:
+          type: string
+        recovery_mode:
+          type: string
+    RuntimeStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        stack:
+          type: string
+        workflow_engine:
+          type: string
+        store_backend:
+          type: string
+        planner_backend:
+          type: string
+        temporal:
+          anyOf:
+            - $ref: "#/components/schemas/RuntimeStatusTemporal"
+            - type: "null"
+      required: [status, stack]
+    Prompt:
+      type: object
+      properties:
+        prompt_id:
+          type: string
+        version:
+          type: string
+        operation:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        summary:
+          type: string
+        content:
+          type: string
+        content_hash:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [prompt_id, version, operation, title, status, content, content_hash, created_at, updated_at]
+    PromptCreateRequest:
+      type: object
+      properties:
+        version:
+          type: string
+        operation:
+          type: string
+          enum: [prepare, prepare_batch, sentiment, sentiment_batch]
+        content:
+          type: string
+      required: [version, operation, content]
+    PromptUpdateRequest:
+      type: object
+      properties:
+        version:
+          type:
+            - string
+            - "null"
+        operation:
+          type:
+            - string
+            - "null"
+          enum: [prepare, prepare_batch, sentiment, sentiment_batch, null]
+        content:
+          type:
+            - string
+            - "null"
+    PromptListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Prompt"
+      required: [items]
+    Project:
+      type: object
+      properties:
+        project_id:
+          type: string
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        created_at:
+          type: string
+          format: date-time
+        dataset_version_count:
+          type: integer
+        scenario_count:
+          type: integer
+        prompt_count:
+          type: integer
+      required: [project_id, name, created_at, dataset_version_count, scenario_count, prompt_count]
+    ProjectCreateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+      required: [name]
+    ProjectListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+      required: [items]
+    Dataset:
+      type: object
+      properties:
+        dataset_id:
+          type: string
+        project_id:
+          type: string
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        data_type:
+          type: string
+        active_dataset_version_id:
+          type:
+            - string
+            - "null"
+        active_version_updated_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+      required: [dataset_id, project_id, name, data_type, created_at]
+    DatasetCreateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        data_type:
+          type:
+            - string
+            - "null"
+      required: [name]
+    DatasetListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Dataset"
+      required: [items]
+    DatasetActiveVersionUpdateRequest:
+      type: object
+      properties:
+        dataset_version_id:
+          type: string
+      required: [dataset_version_id]
+    DatasetProfile:
+      type: object
+      properties:
+        profile_id:
+          type: string
+        prepare_prompt_version:
+          type:
+            - string
+            - "null"
+        sentiment_prompt_version:
+          type:
+            - string
+            - "null"
+        regex_rule_names:
+          $ref: "#/components/schemas/StringList"
+        garbage_rule_names:
+          $ref: "#/components/schemas/StringList"
+        embedding_model:
+          type:
+            - string
+            - "null"
+    DatasetVersion:
+      type: object
+      properties:
+        dataset_version_id:
+          type: string
+        dataset_id:
+          type: string
+        project_id:
+          type: string
+        storage_uri:
+          type: string
+        data_type:
+          type: string
+        record_count:
+          type:
+            - integer
+            - "null"
+        metadata:
+          $ref: "#/components/schemas/AnyMap"
+        profile:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetProfile"
+            - type: "null"
+        prepare_status:
+          type: string
+        prepare_llm_mode:
+          type: string
+          enum: [default, enabled, disabled]
+        prepare_model:
+          type:
+            - string
+            - "null"
+        prepare_prompt_version:
+          type:
+            - string
+            - "null"
+        prepare_uri:
+          type:
+            - string
+            - "null"
+        prepared_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        sentiment_status:
+          type: string
+        sentiment_llm_mode:
+          type: string
+          enum: [default, enabled, disabled]
+        sentiment_model:
+          type:
+            - string
+            - "null"
+        sentiment_uri:
+          type:
+            - string
+            - "null"
+        sentiment_labeled_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        sentiment_prompt_version:
+          type:
+            - string
+            - "null"
+        embedding_status:
+          type: string
+        embedding_model:
+          type:
+            - string
+            - "null"
+        embedding_uri:
+          type:
+            - string
+            - "null"
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        ready_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required:
+        - dataset_version_id
+        - dataset_id
+        - project_id
+        - storage_uri
+        - data_type
+        - metadata
+        - prepare_status
+        - sentiment_status
+        - embedding_status
+        - is_active
+        - created_at
+    DatasetUploadRequest:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+        data_type:
+          type:
+            - string
+            - "null"
+        activate_on_create:
+          type:
+            - boolean
+            - "null"
+        prepare_required:
+          type:
+            - boolean
+            - "null"
+        sentiment_required:
+          type:
+            - boolean
+            - "null"
+      required: [file]
+    DatasetVersionListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetVersion"
+      required: [items]

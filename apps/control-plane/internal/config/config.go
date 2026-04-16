@@ -13,6 +13,7 @@ type Config struct {
 	DatabaseURL                             string
 	CORSAllowedOrigins                      []string
 	OpenAPIPath                             string
+	FrontendOpenAPIPath                     string
 	DatasetProfilesPath                     string
 	PromptTemplatesDir                      string
 	DataRoot                                string
@@ -52,6 +53,7 @@ func Load() Config {
 	)
 	workspaceRoot := detectWorkspaceRoot()
 	openAPIPath := resolvePath(os.Getenv("OPENAPI_PATH"), filepath.Join(workspaceRoot, "docs", "api", "openapi.yaml"), workspaceRoot)
+	frontendOpenAPIPath := resolvePath(os.Getenv("FRONTEND_OPENAPI_PATH"), filepath.Join(workspaceRoot, "docs", "api", "openapi.frontend.yaml"), workspaceRoot)
 	datasetProfilesPath := resolvePath(os.Getenv("DATASET_PROFILES_PATH"), filepath.Join(workspaceRoot, "config", "dataset_profiles.json"), workspaceRoot)
 	promptTemplatesDir := resolvePath(os.Getenv("PYTHON_AI_PROMPTS_DIR"), filepath.Join(workspaceRoot, "config", "prompts"), workspaceRoot)
 	dataRoot := resolvePath(os.Getenv("DATA_ROOT"), filepath.Join(workspaceRoot, "data"), workspaceRoot)
@@ -114,6 +116,7 @@ func Load() Config {
 		DatabaseURL:                             os.Getenv("DATABASE_URL"),
 		CORSAllowedOrigins:                      corsAllowedOrigins,
 		OpenAPIPath:                             openAPIPath,
+		FrontendOpenAPIPath:                     frontendOpenAPIPath,
 		DatasetProfilesPath:                     datasetProfilesPath,
 		PromptTemplatesDir:                      promptTemplatesDir,
 		DataRoot:                                dataRoot,

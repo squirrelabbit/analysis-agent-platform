@@ -96,8 +96,11 @@ func (s *Server) routes() {
 	})
 	s.mux.HandleFunc("GET /runtime_status", s.handleRuntimeStatus)
 	s.mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPI)
+	s.mux.HandleFunc("GET /openapi.frontend.yaml", s.handleFrontendOpenAPI)
 	s.mux.HandleFunc("GET /swagger", s.handleSwaggerUI)
 	s.mux.HandleFunc("GET /swagger/", s.handleSwaggerUI)
+	s.mux.HandleFunc("GET /swagger/frontend", s.handleFrontendSwaggerUI)
+	s.mux.HandleFunc("GET /swagger/frontend/", s.handleFrontendSwaggerUI)
 	s.mux.HandleFunc("GET /prompts", s.handleListPrompts)
 	s.mux.HandleFunc("POST /prompts", s.handleCreatePrompt)
 	s.mux.HandleFunc("GET /prompts/{prompt_id}", s.handleGetPrompt)
@@ -264,7 +267,14 @@ func (s *Server) handleCreateProject(w stdhttp.ResponseWriter, r *stdhttp.Reques
 }
 
 func (s *Server) handleOpenAPI(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
-	path := strings.TrimSpace(s.cfg.OpenAPIPath)
+	s.handleOpenAPIFile(w, strings.TrimSpace(s.cfg.OpenAPIPath))
+}
+
+func (s *Server) handleFrontendOpenAPI(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	s.handleOpenAPIFile(w, strings.TrimSpace(s.cfg.FrontendOpenAPIPath))
+}
+
+func (s *Server) handleOpenAPIFile(w stdhttp.ResponseWriter, path string) {
 	if path == "" {
 		writeError(w, stdhttp.StatusInternalServerError, "openapi path is not configured")
 		return
@@ -282,7 +292,13 @@ func (s *Server) handleOpenAPI(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 func (s *Server) handleSwaggerUI(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(stdhttp.StatusOK)
-	_, _ = io.WriteString(w, swaggerUIHTML(r))
+	_, _ = io.WriteString(w, swaggerUIHTML("/openapi.yaml"))
+}
+
+func (s *Server) handleFrontendSwaggerUI(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(stdhttp.StatusOK)
+	_, _ = io.WriteString(w, swaggerUIHTML("/openapi.frontend.yaml"))
 }
 
 func appendVary(header stdhttp.Header, value string) {
@@ -1334,10 +1350,9 @@ func stringPtr(value string) *string {
 	return &trimmed
 }
 
-func swaggerUIHTML(r *stdhttp.Request) string {
-	specURL := "/openapi.yaml"
-	if r != nil && r.URL != nil && strings.HasPrefix(r.URL.Path, "/swagger/") {
-		specURL = "../openapi.yaml"
+func swaggerUIHTML(specURL string) string {
+	if strings.TrimSpace(specURL) == "" {
+		specURL = "/openapi.yaml"
 	}
 	return `<!doctype html>
 <html lang="ko">
