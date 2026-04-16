@@ -23,14 +23,14 @@ export default function ProjectPage() {
     <div className="flex gap-3">
       <div className="flex-1">
         <ProjectHead
-          total={projects.length}
-          filteredCount={filtered.length}
+          total={projects?.length || 0}
+          filteredCount={filtered?.length || 0}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
         />
         <ProjectList
           filtered={filtered}
-          isExist={projects.length == 0}
+          isExist={projects?.length == 0}
           selectedId={selectedId}
           onClick={(p) => selectProject(p)}
         />

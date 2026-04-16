@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { projectsApi } from "@/api/project";
 import type { Project } from "@/types";
 import type {
@@ -8,16 +8,24 @@ import type {
 
 export function useProjects() {
   const [projects, setProjects] = useState<ProjectResponse[]>([]);
-  const [filtered, setFiltered] = useState<ProjectResponse[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const selectedProject =
-    projects.find((p) => p.project_id === selectedId) ?? null;
+  const selectedProject = 
+    projects?.find((p) => p.project_id === selectedId) ?? null;
 
-  // 프로젝트 목록 조회 
+  const filtered = useMemo(() => {
+    if (!projects) return []
+    return projects.filter(
+      ({ name, description }) =>
+        name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        description?.toLowerCase().includes(searchQuery.toLowerCase()),
+    );
+  }, [projects, searchQuery]);
+
+  // 프로젝트 목록 조회
   async function fetchProjects() {
     setIsLoading(true);
     setError(null);
@@ -47,15 +55,15 @@ export function useProjects() {
   }
 
   // 검색어 바뀔 때마다 재조회
-  useEffect(() => {
-    setFiltered(
-      projects.filter(
-        ({ name, description }) =>
-          name.toLowerCase().includes(searchQuery.toLocaleLowerCase()) ||
-          description.toLowerCase().includes(searchQuery.toLocaleLowerCase()),
-      ),
-    );
-  }, [projects, searchQuery]);
+  // useEffect(() => {
+  //   setFiltered(
+  //     projects.filter(
+  //       ({ name, description }) =>
+  //         name.toLowerCase().includes(searchQuery.toLocaleLowerCase()) ||
+  //         description.toLowerCase().includes(searchQuery.toLocaleLowerCase()),
+  //     ),
+  //   );
+  // }, [projects, searchQuery]);
 
   // 최초 마운트
   useEffect(() => {
