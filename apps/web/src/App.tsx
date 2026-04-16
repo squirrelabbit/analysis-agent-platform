@@ -1,4 +1,7 @@
-import './App.css'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import AppLayout from './layout/AppLayout'
+import { ChatPage } from './pages/ChatPage'
+import ProjectPage from './pages/ProjectPage'
 
 const workflowSteps = [
   {
@@ -41,83 +44,15 @@ function App() {
     import.meta.env.VITE_API_BASE_URL?.trim() || 'http://127.0.0.1:18080'
 
   return (
-    <main className="shell">
-      <section className="hero">
-        <div className="hero-copy">
-          <p className="eyebrow">Analysis Support Platform</p>
-          <h1>운영 콘솔 프론트엔드 시작점</h1>
-          <p className="lede">
-            현재 백엔드는 dataset build, strict scenario, execution result
-            snapshot까지 준비돼 있습니다. 이 앱은 그 흐름을 Dataset,
-            Scenario, Execution 화면으로 묶는 첫 번째 진입점입니다.
-          </p>
-          <div className="hero-actions">
-            <a className="primary" href={apiBaseUrl} target="_blank" rel="noreferrer">
-              Control Plane 열기
-            </a>
-            <a
-              className="secondary"
-              href={`${apiBaseUrl}/swagger`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Swagger 보기
-            </a>
-          </div>
-        </div>
-
-        <aside className="hero-panel">
-          <p className="panel-label">기본 연결</p>
-          <code>{apiBaseUrl}</code>
-          <ul>
-            {todayFocus.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </aside>
-      </section>
-
-      <section className="grid-section">
-        <header className="section-header">
-          <p className="eyebrow">Build Plan</p>
-          <h2>추천 구현 순서</h2>
-        </header>
-        <div className="card-grid">
-          {workflowSteps.map((step, index) => (
-            <article key={step.title} className="card">
-              <p className="card-index">0{index + 1}</p>
-              <h3>{step.title}</h3>
-              <p>{step.description}</p>
-              <span className="status-chip">{step.status}</span>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="split-section">
-        <article className="detail-card">
-          <p className="eyebrow">API Surface</p>
-          <h2>먼저 붙일 엔드포인트</h2>
-          <ul className="endpoint-list">
-            {apiSurface.map((endpoint) => (
-              <li key={endpoint}>
-                <code>{endpoint}</code>
-              </li>
-            ))}
-          </ul>
-        </article>
-
-        <article className="detail-card accent">
-          <p className="eyebrow">Next UI</p>
-          <h2>첫 화면 권장 구성</h2>
-          <ol className="ordered-list">
-            <li>Dataset version 목록과 build job 상태</li>
-            <li>Scenario 목록과 one-shot execute 버튼</li>
-            <li>Execution result_v1와 warnings 패널</li>
-          </ol>
-        </article>
-      </section>
-    </main>
+    <BrowserRouter>
+      <AppLayout>
+        <Routes>
+          <Route path="/"  element={<Navigate to="/chat" replace />}/>
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/project" element={<ProjectPage />} />
+        </Routes>
+      </AppLayout>
+    </BrowserRouter>
   )
 }
 
