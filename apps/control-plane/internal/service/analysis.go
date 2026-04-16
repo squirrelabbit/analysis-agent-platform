@@ -53,9 +53,6 @@ func (s *AnalysisService) SubmitAnalysis(projectID string, input domain.Analysis
 		return domain.AnalysisPlanResponse{}, err
 	}
 
-	if input.DatasetVersionID == nil || strings.TrimSpace(*input.DatasetVersionID) == "" {
-		return domain.AnalysisPlanResponse{}, ErrInvalidArgument{Message: "dataset_version_id is required"}
-	}
 	if strings.TrimSpace(input.Goal) == "" {
 		return domain.AnalysisPlanResponse{}, ErrInvalidArgument{Message: "goal is required"}
 	}
@@ -65,11 +62,8 @@ func (s *AnalysisService) SubmitAnalysis(projectID string, input domain.Analysis
 	if input.Context == nil {
 		input.Context = map[string]any{}
 	}
-	version, err := s.store.GetDatasetVersion(projectID, strings.TrimSpace(*input.DatasetVersionID))
+	dataset, version, resolvedVersionID, err := s.resolveDatasetVersionForSubmit(projectID, input)
 	if err != nil {
-		if err == store.ErrNotFound {
-			return domain.AnalysisPlanResponse{}, ErrNotFound{Resource: "dataset version"}
-		}
 		return domain.AnalysisPlanResponse{}, err
 	}
 	if input.DatasetName == nil || strings.TrimSpace(*input.DatasetName) == "" {
@@ -78,12 +72,14 @@ func (s *AnalysisService) SubmitAnalysis(projectID string, input domain.Analysis
 	if input.DataType == nil || strings.TrimSpace(*input.DataType) == "" {
 		input.DataType = &version.DataType
 	}
+	input.DatasetID = stringPointer(dataset.DatasetID)
+	input.DatasetVersionID = resolvedVersionID
 
 	request := domain.AnalysisRequest{
 		RequestID:        id.New(),
 		ProjectID:        projectID,
 		DatasetName:      input.DatasetName,
-		DatasetVersionID: input.DatasetVersionID,
+		DatasetVersionID: resolvedVersionID,
 		Goal:             strings.TrimSpace(input.Goal),
 		Constraints:      input.Constraints,
 		Context:          input.Context,
@@ -128,7 +124,7 @@ func (s *AnalysisService) SubmitAnalysis(projectID string, input domain.Analysis
 		RequestID:            request.RequestID,
 		ProjectID:            projectID,
 		DatasetName:          datasetName,
-		DatasetVersionID:     input.DatasetVersionID,
+		DatasetVersionID:     resolvedVersionID,
 		Plan:                 normalizedPlan,
 		Status:               "draft",
 		PlannerType:          &plannerType,
@@ -145,6 +141,55 @@ func (s *AnalysisService) SubmitAnalysis(projectID string, input domain.Analysis
 		Request: request,
 		Plan:    planRecord,
 	}, nil
+}
+
+func (s *AnalysisService) resolveDatasetVersionForSubmit(projectID string, input domain.AnalysisSubmitRequest) (domain.Dataset, domain.DatasetVersion, *string, error) {
+	if input.DatasetID != nil && strings.TrimSpace(*input.DatasetID) != "" {
+		datasetID := strings.TrimSpace(*input.DatasetID)
+		dataset, err := s.store.GetDataset(projectID, datasetID)
+		if err != nil {
+			if err == store.ErrNotFound {
+				return domain.Dataset{}, domain.DatasetVersion{}, nil, ErrNotFound{Resource: "dataset"}
+			}
+			return domain.Dataset{}, domain.DatasetVersion{}, nil, err
+		}
+		if dataset.ActiveDatasetVersionID == nil || strings.TrimSpace(*dataset.ActiveDatasetVersionID) == "" {
+			return domain.Dataset{}, domain.DatasetVersion{}, nil, ErrInvalidArgument{Message: "active dataset version is not set"}
+		}
+		versionID := strings.TrimSpace(*dataset.ActiveDatasetVersionID)
+		version, err := s.store.GetDatasetVersion(projectID, versionID)
+		if err != nil {
+			if err == store.ErrNotFound {
+				return domain.Dataset{}, domain.DatasetVersion{}, nil, ErrNotFound{Resource: "dataset version"}
+			}
+			return domain.Dataset{}, domain.DatasetVersion{}, nil, err
+		}
+		if version.DatasetID != dataset.DatasetID {
+			return domain.Dataset{}, domain.DatasetVersion{}, nil, ErrNotFound{Resource: "dataset version"}
+		}
+		return dataset, version, stringPointer(version.DatasetVersionID), nil
+	}
+
+	if input.DatasetVersionID != nil && strings.TrimSpace(*input.DatasetVersionID) != "" {
+		versionID := strings.TrimSpace(*input.DatasetVersionID)
+		version, err := s.store.GetDatasetVersion(projectID, versionID)
+		if err != nil {
+			if err == store.ErrNotFound {
+				return domain.Dataset{}, domain.DatasetVersion{}, nil, ErrNotFound{Resource: "dataset version"}
+			}
+			return domain.Dataset{}, domain.DatasetVersion{}, nil, err
+		}
+		dataset, err := s.store.GetDataset(projectID, version.DatasetID)
+		if err != nil {
+			if err == store.ErrNotFound {
+				return domain.Dataset{}, domain.DatasetVersion{}, nil, ErrNotFound{Resource: "dataset"}
+			}
+			return domain.Dataset{}, domain.DatasetVersion{}, nil, err
+		}
+		return dataset, version, stringPointer(version.DatasetVersionID), nil
+	}
+
+	return domain.Dataset{}, domain.DatasetVersion{}, nil, ErrInvalidArgument{Message: "dataset_id is required"}
 }
 
 func (s *AnalysisService) GetRequest(projectID, requestID string) (domain.AnalysisRequest, error) {

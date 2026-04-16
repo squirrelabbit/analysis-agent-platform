@@ -43,7 +43,7 @@ func (s *ProjectService) GetProject(projectID string) (domain.Project, error) {
 		}
 		return domain.Project{}, err
 	}
-	return project, nil
+	return s.withProjectCounts(project)
 }
 
 func (s *ProjectService) ListProjects() (domain.ProjectListResponse, error) {
@@ -51,5 +51,40 @@ func (s *ProjectService) ListProjects() (domain.ProjectListResponse, error) {
 	if err != nil {
 		return domain.ProjectListResponse{}, err
 	}
+	for i := range items {
+		items[i], err = s.withProjectCounts(items[i])
+		if err != nil {
+			return domain.ProjectListResponse{}, err
+		}
+	}
 	return domain.ProjectListResponse{Items: items}, nil
+}
+
+func (s *ProjectService) withProjectCounts(project domain.Project) (domain.Project, error) {
+	scenarios, err := s.store.ListScenarios(project.ProjectID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	prompts, err := s.store.ListProjectPrompts(project.ProjectID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	datasets, err := s.store.ListDatasets(project.ProjectID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+
+	datasetVersionCount := 0
+	for _, dataset := range datasets {
+		versions, err := s.store.ListDatasetVersions(project.ProjectID, dataset.DatasetID)
+		if err != nil {
+			return domain.Project{}, err
+		}
+		datasetVersionCount += len(versions)
+	}
+
+	project.DatasetVersionCount = datasetVersionCount
+	project.ScenarioCount = len(scenarios)
+	project.PromptCount = len(prompts)
+	return project, nil
 }

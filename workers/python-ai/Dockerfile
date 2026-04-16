@@ -13,6 +13,8 @@ WORKDIR /app
 
 COPY workers/python-ai/src /app/src
 COPY config/skill_bundle.json /app/config/skill_bundle.json
+COPY config/prompts /app/config/prompts
+COPY config/skill_policies /app/config/skill_policies
 
 EXPOSE 8090
 

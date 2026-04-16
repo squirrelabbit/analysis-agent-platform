@@ -119,6 +119,154 @@ func (s *PostgresStore) ListProjects() ([]domain.Project, error) {
 	return items, nil
 }
 
+func (s *PostgresStore) SaveProjectPrompt(prompt domain.ProjectPrompt) error {
+	_, err := s.db.Exec(
+		`INSERT INTO project_prompts (
+			project_id, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10
+		)
+		ON CONFLICT (project_id, version, operation) DO UPDATE
+		SET title = EXCLUDED.title,
+		    status = EXCLUDED.status,
+		    summary = EXCLUDED.summary,
+		    content = EXCLUDED.content,
+		    content_hash = EXCLUDED.content_hash,
+		    updated_at = EXCLUDED.updated_at`,
+		prompt.ProjectID,
+		prompt.Version,
+		prompt.Operation,
+		prompt.Title,
+		prompt.Status,
+		prompt.Summary,
+		prompt.Content,
+		prompt.ContentHash,
+		prompt.CreatedAt,
+		prompt.UpdatedAt,
+	)
+	return err
+}
+
+func (s *PostgresStore) GetProjectPrompt(projectID, version, operation string) (domain.ProjectPrompt, error) {
+	row := s.db.QueryRow(
+		`SELECT project_id::text, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+		 FROM project_prompts
+		 WHERE project_id = $1::uuid AND version = $2 AND operation = $3`,
+		projectID,
+		version,
+		operation,
+	)
+
+	var prompt domain.ProjectPrompt
+	if err := row.Scan(
+		&prompt.ProjectID,
+		&prompt.Version,
+		&prompt.Operation,
+		&prompt.Title,
+		&prompt.Status,
+		&prompt.Summary,
+		&prompt.Content,
+		&prompt.ContentHash,
+		&prompt.CreatedAt,
+		&prompt.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ProjectPrompt{}, ErrNotFound
+		}
+		return domain.ProjectPrompt{}, err
+	}
+	return prompt, nil
+}
+
+func (s *PostgresStore) ListProjectPrompts(projectID string) ([]domain.ProjectPrompt, error) {
+	rows, err := s.db.Query(
+		`SELECT project_id::text, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+		 FROM project_prompts
+		 WHERE project_id = $1::uuid
+		 ORDER BY version ASC, operation ASC, updated_at DESC`,
+		projectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.ProjectPrompt, 0)
+	for rows.Next() {
+		var prompt domain.ProjectPrompt
+		if err := rows.Scan(
+			&prompt.ProjectID,
+			&prompt.Version,
+			&prompt.Operation,
+			&prompt.Title,
+			&prompt.Status,
+			&prompt.Summary,
+			&prompt.Content,
+			&prompt.ContentHash,
+			&prompt.CreatedAt,
+			&prompt.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, prompt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *PostgresStore) SaveProjectPromptDefaults(defaults domain.ProjectPromptDefaults) error {
+	var updatedAt any
+	if defaults.UpdatedAt != nil {
+		updatedAt = *defaults.UpdatedAt
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO project_prompt_defaults (
+			project_id, prepare_prompt_version, sentiment_prompt_version, updated_at
+		) VALUES (
+			$1::uuid, $2, $3, $4
+		)
+		ON CONFLICT (project_id) DO UPDATE
+		SET prepare_prompt_version = EXCLUDED.prepare_prompt_version,
+		    sentiment_prompt_version = EXCLUDED.sentiment_prompt_version,
+		    updated_at = EXCLUDED.updated_at`,
+		defaults.ProjectID,
+		nullableString(defaults.PreparePromptVersion),
+		nullableString(defaults.SentimentPromptVersion),
+		updatedAt,
+	)
+	return err
+}
+
+func (s *PostgresStore) GetProjectPromptDefaults(projectID string) (domain.ProjectPromptDefaults, error) {
+	row := s.db.QueryRow(
+		`SELECT project_id::text, prepare_prompt_version, sentiment_prompt_version, updated_at
+		 FROM project_prompt_defaults
+		 WHERE project_id = $1::uuid`,
+		projectID,
+	)
+
+	var defaults domain.ProjectPromptDefaults
+	var preparePromptVersion sql.NullString
+	var sentimentPromptVersion sql.NullString
+	var updatedAt time.Time
+	if err := row.Scan(&defaults.ProjectID, &preparePromptVersion, &sentimentPromptVersion, &updatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ProjectPromptDefaults{}, ErrNotFound
+		}
+		return domain.ProjectPromptDefaults{}, err
+	}
+	if preparePromptVersion.Valid {
+		defaults.PreparePromptVersion = &preparePromptVersion.String
+	}
+	if sentimentPromptVersion.Valid {
+		defaults.SentimentPromptVersion = &sentimentPromptVersion.String
+	}
+	defaults.UpdatedAt = &updatedAt
+	return defaults, nil
+}
+
 func (s *PostgresStore) SaveScenario(scenario domain.Scenario) error {
 	stepsJSON, err := marshalJSON(scenario.Steps)
 	if err != nil {
@@ -225,19 +373,27 @@ func (s *PostgresStore) ListScenarios(projectID string) ([]domain.Scenario, erro
 
 func (s *PostgresStore) SaveDataset(dataset domain.Dataset) error {
 	_, err := s.db.Exec(
-		`INSERT INTO datasets (dataset_id, project_id, name, description, data_type, created_at)
-		 VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)
+		`INSERT INTO datasets (
+		     dataset_id, project_id, name, description, data_type,
+		     active_dataset_version_id, active_version_updated_at, created_at
+		 ) VALUES (
+		     $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8
+		 )
 		 ON CONFLICT (dataset_id) DO UPDATE
 		 SET project_id = EXCLUDED.project_id,
 		     name = EXCLUDED.name,
 		     description = EXCLUDED.description,
 		     data_type = EXCLUDED.data_type,
+		     active_dataset_version_id = EXCLUDED.active_dataset_version_id,
+		     active_version_updated_at = EXCLUDED.active_version_updated_at,
 		     created_at = EXCLUDED.created_at`,
 		dataset.DatasetID,
 		dataset.ProjectID,
 		dataset.Name,
 		nullableString(dataset.Description),
 		dataset.DataType,
+		nullableString(dataset.ActiveDatasetVersionID),
+		nullableTime(dataset.ActiveVersionUpdatedAt),
 		dataset.CreatedAt,
 	)
 	return err
@@ -245,7 +401,8 @@ func (s *PostgresStore) SaveDataset(dataset domain.Dataset) error {
 
 func (s *PostgresStore) GetDataset(projectID, datasetID string) (domain.Dataset, error) {
 	row := s.db.QueryRow(
-		`SELECT dataset_id::text, project_id::text, name, description, data_type, created_at
+		`SELECT dataset_id::text, project_id::text, name, description, data_type,
+		        active_dataset_version_id, active_version_updated_at, created_at
 		 FROM datasets
 		 WHERE project_id = $1::uuid AND dataset_id = $2::uuid`,
 		projectID,
@@ -254,12 +411,15 @@ func (s *PostgresStore) GetDataset(projectID, datasetID string) (domain.Dataset,
 
 	var dataset domain.Dataset
 	var description sql.NullString
+	var activeDatasetVersionID sql.NullString
 	if err := row.Scan(
 		&dataset.DatasetID,
 		&dataset.ProjectID,
 		&dataset.Name,
 		&description,
 		&dataset.DataType,
+		&activeDatasetVersionID,
+		&dataset.ActiveVersionUpdatedAt,
 		&dataset.CreatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -270,12 +430,16 @@ func (s *PostgresStore) GetDataset(projectID, datasetID string) (domain.Dataset,
 	if description.Valid {
 		dataset.Description = &description.String
 	}
+	if activeDatasetVersionID.Valid {
+		dataset.ActiveDatasetVersionID = &activeDatasetVersionID.String
+	}
 	return dataset, nil
 }
 
 func (s *PostgresStore) ListDatasets(projectID string) ([]domain.Dataset, error) {
 	rows, err := s.db.Query(
-		`SELECT dataset_id::text, project_id::text, name, description, data_type, created_at
+		`SELECT dataset_id::text, project_id::text, name, description, data_type,
+		        active_dataset_version_id, active_version_updated_at, created_at
 		 FROM datasets
 		 WHERE project_id = $1::uuid
 		 ORDER BY created_at ASC, dataset_id ASC`,
@@ -290,18 +454,24 @@ func (s *PostgresStore) ListDatasets(projectID string) ([]domain.Dataset, error)
 	for rows.Next() {
 		var dataset domain.Dataset
 		var description sql.NullString
+		var activeDatasetVersionID sql.NullString
 		if err := rows.Scan(
 			&dataset.DatasetID,
 			&dataset.ProjectID,
 			&dataset.Name,
 			&description,
 			&dataset.DataType,
+			&activeDatasetVersionID,
+			&dataset.ActiveVersionUpdatedAt,
 			&dataset.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
 		if description.Valid {
 			dataset.Description = &description.String
+		}
+		if activeDatasetVersionID.Valid {
+			dataset.ActiveDatasetVersionID = &activeDatasetVersionID.String
 		}
 		items = append(items, dataset)
 	}
@@ -324,11 +494,11 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 	_, err = s.db.Exec(
 		`INSERT INTO dataset_versions (
 		     dataset_version_id, dataset_id, project_id, storage_uri, data_type, record_count,
-		     metadata, profile, prepare_status, prepare_model, prepare_prompt_version, prepare_uri, prepared_at,
-		     sentiment_status, sentiment_model, sentiment_uri, sentiment_labeled_at, sentiment_prompt_version,
+		     metadata, profile, prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version, prepare_uri, prepared_at,
+		     sentiment_status, sentiment_llm_mode, sentiment_model, sentiment_uri, sentiment_labeled_at, sentiment_prompt_version,
 		     embedding_status, embedding_model, embedding_uri, created_at, ready_at
 		 ) VALUES (
-		     $1, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+		     $1, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
 		 )
 		 ON CONFLICT (dataset_version_id) DO UPDATE
 		 SET dataset_id = EXCLUDED.dataset_id,
@@ -339,11 +509,13 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 		     metadata = EXCLUDED.metadata,
 		     profile = EXCLUDED.profile,
 		     prepare_status = EXCLUDED.prepare_status,
+		     prepare_llm_mode = EXCLUDED.prepare_llm_mode,
 		     prepare_model = EXCLUDED.prepare_model,
 		     prepare_prompt_version = EXCLUDED.prepare_prompt_version,
 		     prepare_uri = EXCLUDED.prepare_uri,
 		     prepared_at = EXCLUDED.prepared_at,
 		     sentiment_status = EXCLUDED.sentiment_status,
+		     sentiment_llm_mode = EXCLUDED.sentiment_llm_mode,
 		     sentiment_model = EXCLUDED.sentiment_model,
 		     sentiment_uri = EXCLUDED.sentiment_uri,
 		     sentiment_labeled_at = EXCLUDED.sentiment_labeled_at,
@@ -362,11 +534,13 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 		metadataJSON,
 		profileJSON,
 		version.PrepareStatus,
+		version.PrepareLLMMode,
 		nullableString(version.PrepareModel),
 		nullableString(version.PreparePromptVer),
 		nullableString(version.PrepareURI),
 		nullableTime(version.PreparedAt),
 		version.SentimentStatus,
+		version.SentimentLLMMode,
 		nullableString(version.SentimentModel),
 		nullableString(version.SentimentURI),
 		nullableTime(version.SentimentLabeledAt),
@@ -383,8 +557,8 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (domain.DatasetVersion, error) {
 	row := s.db.QueryRow(
 		`SELECT dataset_version_id, dataset_id::text, project_id::text, storage_uri, data_type,
-		        record_count, metadata, profile, prepare_status, prepare_model, prepare_prompt_version,
-		        prepare_uri, prepared_at, sentiment_status, sentiment_model, sentiment_uri,
+		        record_count, metadata, profile, prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version,
+		        prepare_uri, prepared_at, sentiment_status, sentiment_llm_mode, sentiment_model, sentiment_uri,
 		        sentiment_labeled_at, sentiment_prompt_version, embedding_status, embedding_model,
 		        embedding_uri, created_at, ready_at
 		 FROM dataset_versions
@@ -415,11 +589,13 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 		&metadataRaw,
 		&profileRaw,
 		&version.PrepareStatus,
+		&version.PrepareLLMMode,
 		&prepareModel,
 		&preparePromptVersion,
 		&prepareURI,
 		&version.PreparedAt,
 		&version.SentimentStatus,
+		&version.SentimentLLMMode,
 		&sentimentModel,
 		&sentimentURI,
 		&version.SentimentLabeledAt,
@@ -475,8 +651,8 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]domain.DatasetVersion, error) {
 	rows, err := s.db.Query(
 		`SELECT dataset_version_id, dataset_id::text, project_id::text, storage_uri, data_type,
-		        record_count, metadata, profile, prepare_status, prepare_model, prepare_prompt_version,
-		        prepare_uri, prepared_at, sentiment_status, sentiment_model, sentiment_uri,
+		        record_count, metadata, profile, prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version,
+		        prepare_uri, prepared_at, sentiment_status, sentiment_llm_mode, sentiment_model, sentiment_uri,
 		        sentiment_labeled_at, sentiment_prompt_version, embedding_status, embedding_model,
 		        embedding_uri, created_at, ready_at
 		 FROM dataset_versions
@@ -514,11 +690,13 @@ func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]doma
 			&metadataRaw,
 			&profileRaw,
 			&version.PrepareStatus,
+			&version.PrepareLLMMode,
 			&prepareModel,
 			&preparePromptVersion,
 			&prepareURI,
 			&version.PreparedAt,
 			&version.SentimentStatus,
+			&version.SentimentLLMMode,
 			&sentimentModel,
 			&sentimentURI,
 			&version.SentimentLabeledAt,
@@ -1332,6 +1510,35 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			description TEXT,
 			created_at TIMESTAMPTZ NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS project_prompts (
+			project_id UUID NOT NULL REFERENCES projects(project_id),
+			version TEXT NOT NULL,
+			operation TEXT NOT NULL,
+			title TEXT NOT NULL,
+			status TEXT NOT NULL,
+			summary TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL,
+			content_hash TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			PRIMARY KEY (project_id, version, operation)
+		)`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS content TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`ALTER TABLE project_prompts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`CREATE TABLE IF NOT EXISTS project_prompt_defaults (
+			project_id UUID PRIMARY KEY REFERENCES projects(project_id),
+			prepare_prompt_version TEXT,
+			sentiment_prompt_version TEXT,
+			updated_at TIMESTAMPTZ NOT NULL
+		)`,
+		`ALTER TABLE project_prompt_defaults ADD COLUMN IF NOT EXISTS prepare_prompt_version TEXT`,
+		`ALTER TABLE project_prompt_defaults ADD COLUMN IF NOT EXISTS sentiment_prompt_version TEXT`,
+		`ALTER TABLE project_prompt_defaults ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 		`CREATE TABLE IF NOT EXISTS scenarios (
 			project_id UUID NOT NULL REFERENCES projects(project_id),
 			scenario_id TEXT NOT NULL,
@@ -1346,13 +1553,17 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		)`,
 		`ALTER TABLE scenarios ADD COLUMN IF NOT EXISTS planning_mode TEXT NOT NULL DEFAULT 'strict'`,
 		`CREATE TABLE IF NOT EXISTS datasets (
-			dataset_id UUID PRIMARY KEY,
-			project_id UUID NOT NULL REFERENCES projects(project_id),
-			name TEXT NOT NULL,
-			description TEXT,
-			data_type TEXT NOT NULL,
-			created_at TIMESTAMPTZ NOT NULL
-		)`,
+				dataset_id UUID PRIMARY KEY,
+				project_id UUID NOT NULL REFERENCES projects(project_id),
+				name TEXT NOT NULL,
+				description TEXT,
+				data_type TEXT NOT NULL,
+				active_dataset_version_id TEXT,
+				active_version_updated_at TIMESTAMPTZ,
+				created_at TIMESTAMPTZ NOT NULL
+			)`,
+		`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS active_dataset_version_id TEXT`,
+		`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS active_version_updated_at TIMESTAMPTZ`,
 		`CREATE TABLE IF NOT EXISTS dataset_versions (
 			dataset_version_id TEXT PRIMARY KEY,
 			dataset_id UUID NOT NULL REFERENCES datasets(dataset_id),
@@ -1363,11 +1574,13 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			metadata JSONB NOT NULL,
 			profile JSONB,
 			prepare_status TEXT NOT NULL DEFAULT 'not_requested',
+			prepare_llm_mode TEXT NOT NULL DEFAULT 'default',
 			prepare_model TEXT,
 			prepare_prompt_version TEXT,
 			prepare_uri TEXT,
 			prepared_at TIMESTAMPTZ,
 			sentiment_status TEXT NOT NULL DEFAULT 'not_requested',
+			sentiment_llm_mode TEXT NOT NULL DEFAULT 'default',
 			sentiment_model TEXT,
 			sentiment_uri TEXT,
 			sentiment_labeled_at TIMESTAMPTZ,
@@ -1380,11 +1593,13 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		)`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS profile JSONB`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_status TEXT NOT NULL DEFAULT 'not_requested'`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_llm_mode TEXT NOT NULL DEFAULT 'default'`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_model TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_prompt_version TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_uri TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepared_at TIMESTAMPTZ`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_status TEXT NOT NULL DEFAULT 'not_requested'`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_llm_mode TEXT NOT NULL DEFAULT 'default'`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_model TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_uri TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_labeled_at TIMESTAMPTZ`,
@@ -1507,6 +1722,9 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 func (s *PostgresStore) promoteTimestampColumnsToTimestamptz(ctx context.Context) error {
 	columns := []timestampColumn{
 		{tableName: "projects", columnName: "created_at"},
+		{tableName: "project_prompts", columnName: "created_at"},
+		{tableName: "project_prompts", columnName: "updated_at"},
+		{tableName: "project_prompt_defaults", columnName: "updated_at"},
 		{tableName: "scenarios", columnName: "created_at"},
 		{tableName: "datasets", columnName: "created_at"},
 		{tableName: "dataset_versions", columnName: "prepared_at"},

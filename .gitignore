@@ -14,3 +14,4 @@ data/
 *.sqlite3
 *.db
 docs/chat-notes/*
+docs/devlog/*

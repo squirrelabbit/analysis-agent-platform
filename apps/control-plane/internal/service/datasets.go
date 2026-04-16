@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -31,11 +34,38 @@ const DefaultEmbeddingModel = "intfloat/multilingual-e5-small"
 const tokenProjectionVectorDim = 64
 
 const (
-	workerTaskTimeoutPrepare   = 10 * time.Minute
-	workerTaskTimeoutSentiment = 30 * time.Minute
-	workerTaskTimeoutEmbedding = 45 * time.Minute
-	defaultClusterMembersLimit = 50
-	maxClusterMembersLimit     = 500
+	workerTaskTimeoutPrepare     = 10 * time.Minute
+	workerTaskTimeoutSentiment   = 30 * time.Minute
+	workerTaskTimeoutEmbedding   = 45 * time.Minute
+	defaultClusterMembersLimit   = 50
+	maxClusterMembersLimit       = 500
+	defaultPreparePreviewLimit   = 10
+	maxPreparePreviewLimit       = 20
+	defaultSentimentPreviewLimit = 10
+	maxSentimentPreviewLimit     = 20
+)
+
+var promptPlaceholderPattern = regexp.MustCompile(`{{\s*([a-zA-Z0-9_]+)\s*}}`)
+
+var allowedProjectPromptOperations = map[string]map[string]struct{}{
+	"prepare": {
+		"raw_text": {},
+	},
+	"prepare_batch": {
+		"rows_json": {},
+	},
+	"sentiment": {
+		"text": {},
+	},
+	"sentiment_batch": {
+		"rows_json": {},
+	},
+}
+
+const (
+	datasetLLMModeDefault  = "default"
+	datasetLLMModeEnabled  = "enabled"
+	datasetLLMModeDisabled = "disabled"
 )
 
 type DatasetService struct {
@@ -56,8 +86,16 @@ type workerTaskResponse struct {
 }
 
 type workerCapabilitiesResponse struct {
-	PromptCatalog []domain.PromptTemplateMetadata  `json:"prompt_catalog"`
-	RuleCatalog   domain.DatasetProfileRuleCatalog `json:"rule_catalog"`
+	PromptCatalog         []domain.PromptTemplateMetadata      `json:"prompt_catalog"`
+	RuleCatalog           domain.DatasetProfileRuleCatalog     `json:"rule_catalog"`
+	SkillPolicyCatalog    []domain.SkillPolicyMetadata         `json:"skill_policy_catalog"`
+	SkillPolicyValidation domain.SkillPolicyValidationResponse `json:"skill_policy_validation"`
+}
+
+type projectPromptTemplates struct {
+	RowTemplate     string
+	BatchTemplate   string
+	UsesProjectSlot bool
 }
 
 func NewDatasetService(repository store.Repository, pythonAIWorkerURL string, uploadRoot string, artifactRoot string) *DatasetService {
@@ -141,6 +179,143 @@ func (s *DatasetService) ListDatasets(projectID string) (domain.DatasetListRespo
 	return domain.DatasetListResponse{Items: items}, nil
 }
 
+func (s *DatasetService) ActivateDatasetVersion(projectID, datasetID, datasetVersionID string) (domain.Dataset, error) {
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
+		return domain.Dataset{}, err
+	}
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.Dataset{}, err
+	}
+	if version.DatasetID != dataset.DatasetID {
+		return domain.Dataset{}, ErrNotFound{Resource: "dataset version"}
+	}
+	return s.saveDatasetActiveVersion(dataset, &version.DatasetVersionID)
+}
+
+func (s *DatasetService) DeactivateDatasetVersion(projectID, datasetID string) (domain.Dataset, error) {
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
+		return domain.Dataset{}, err
+	}
+	return s.saveDatasetActiveVersion(dataset, nil)
+}
+
+func (s *DatasetService) SaveProjectPrompt(projectID string, input domain.ProjectPromptUpsertRequest) (domain.ProjectPrompt, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.ProjectPrompt{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.ProjectPrompt{}, err
+	}
+
+	version := strings.TrimSpace(input.Version)
+	if version == "" {
+		return domain.ProjectPrompt{}, ErrInvalidArgument{Message: "version is required"}
+	}
+	operation, err := normalizeProjectPromptOperation(input.Operation)
+	if err != nil {
+		return domain.ProjectPrompt{}, err
+	}
+	content := strings.TrimSpace(input.Content)
+	if content == "" {
+		return domain.ProjectPrompt{}, ErrInvalidArgument{Message: "content is required"}
+	}
+
+	metadata := parsePromptFrontMatter(content)
+	if frontOperation := strings.TrimSpace(metadata["operation"]); frontOperation != "" && frontOperation != operation {
+		return domain.ProjectPrompt{}, ErrInvalidArgument{Message: "front matter operation does not match request operation"}
+	}
+	if err := validatePromptTemplatePlaceholders(content, operation); err != nil {
+		return domain.ProjectPrompt{}, err
+	}
+
+	if _, err := s.store.GetProjectPrompt(projectID, version, operation); err == nil {
+		return domain.ProjectPrompt{}, ErrConflict{Message: "project prompt version already exists for operation"}
+	} else if err != store.ErrNotFound {
+		return domain.ProjectPrompt{}, err
+	}
+
+	now := time.Now().UTC()
+	prompt := domain.ProjectPrompt{
+		ProjectID:   projectID,
+		Version:     version,
+		Operation:   operation,
+		Title:       defaultPromptMetaValue(metadata["title"], version),
+		Status:      defaultPromptMetaValue(metadata["status"], "active"),
+		Summary:     strings.TrimSpace(metadata["summary"]),
+		Content:     content,
+		ContentHash: sha256Hex(content),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := s.store.SaveProjectPrompt(prompt); err != nil {
+		return domain.ProjectPrompt{}, err
+	}
+	return prompt, nil
+}
+
+func (s *DatasetService) ListProjectPrompts(projectID string) (domain.ProjectPromptListResponse, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.ProjectPromptListResponse{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.ProjectPromptListResponse{}, err
+	}
+	items, err := s.store.ListProjectPrompts(projectID)
+	if err != nil {
+		return domain.ProjectPromptListResponse{}, err
+	}
+	return domain.ProjectPromptListResponse{Items: items}, nil
+}
+
+func (s *DatasetService) GetProjectPromptDefaults(projectID string) (domain.ProjectPromptDefaults, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.ProjectPromptDefaults{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.ProjectPromptDefaults{}, err
+	}
+
+	defaults, err := s.store.GetProjectPromptDefaults(projectID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return domain.ProjectPromptDefaults{ProjectID: projectID}, nil
+		}
+		return domain.ProjectPromptDefaults{}, err
+	}
+	return defaults, nil
+}
+
+func (s *DatasetService) UpdateProjectPromptDefaults(projectID string, input domain.ProjectPromptDefaultsUpdateRequest) (domain.ProjectPromptDefaults, error) {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return domain.ProjectPromptDefaults{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.ProjectPromptDefaults{}, err
+	}
+
+	defaults := domain.ProjectPromptDefaults{
+		ProjectID:              projectID,
+		PreparePromptVersion:   trimStringPointer(input.PreparePromptVersion),
+		SentimentPromptVersion: trimStringPointer(input.SentimentPromptVersion),
+	}
+	if defaults.PreparePromptVersion != nil && !s.projectHasPromptVersion(projectID, *defaults.PreparePromptVersion, "prepare") {
+		return domain.ProjectPromptDefaults{}, ErrInvalidArgument{Message: "prepare default prompt version must reference a project prepare prompt"}
+	}
+	if defaults.SentimentPromptVersion != nil && !s.projectHasPromptVersion(projectID, *defaults.SentimentPromptVersion, "sentiment") {
+		return domain.ProjectPromptDefaults{}, ErrInvalidArgument{Message: "sentiment default prompt version must reference a project sentiment prompt"}
+	}
+
+	now := time.Now().UTC()
+	defaults.UpdatedAt = &now
+	if err := s.store.SaveProjectPromptDefaults(defaults); err != nil {
+		return domain.ProjectPromptDefaults{}, err
+	}
+	return defaults, nil
+}
+
 func (s *DatasetService) CreateDatasetVersion(projectID, datasetID string, input domain.DatasetVersionCreateRequest) (domain.DatasetVersion, error) {
 	dataset, err := s.GetDataset(projectID, datasetID)
 	if err != nil {
@@ -152,11 +327,20 @@ func (s *DatasetService) CreateDatasetVersion(projectID, datasetID string, input
 		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "storage_uri is required"}
 	}
 
-	version := s.buildDatasetVersionRecord(projectID, dataset, storageURI, input)
+	version, err := s.buildDatasetVersionRecord(projectID, dataset, storageURI, input)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
-	return s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version), nil
+	if shouldActivateDatasetVersionOnCreate(input.ActivateOnCreate) {
+		if _, err := s.saveDatasetActiveVersion(dataset, &version.DatasetVersionID); err != nil {
+			return domain.DatasetVersion{}, err
+		}
+	}
+	_ = s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version)
+	return s.GetDatasetVersion(projectID, dataset.DatasetID, version.DatasetVersionID)
 }
 
 func (s *DatasetService) UploadDatasetVersion(projectID, datasetID string, input domain.DatasetVersionCreateRequest, originalName string, contentType string, reader io.Reader) (domain.DatasetVersion, error) {
@@ -184,15 +368,24 @@ func (s *DatasetService) UploadDatasetVersion(projectID, datasetID string, input
 	})
 	input.StorageURI = storedPath
 
-	version := s.buildDatasetVersionRecord(projectID, dataset, storedPath, input)
+	version, err := s.buildDatasetVersionRecord(projectID, dataset, storedPath, input)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
 	version.DatasetVersionID = versionID
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
-	return s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version), nil
+	if shouldActivateDatasetVersionOnCreate(input.ActivateOnCreate) {
+		if _, err := s.saveDatasetActiveVersion(dataset, &version.DatasetVersionID); err != nil {
+			return domain.DatasetVersion{}, err
+		}
+	}
+	_ = s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version)
+	return s.GetDatasetVersion(projectID, dataset.DatasetID, version.DatasetVersionID)
 }
 
-func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset domain.Dataset, storageURI string, input domain.DatasetVersionCreateRequest) domain.DatasetVersion {
+func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset domain.Dataset, storageURI string, input domain.DatasetVersionCreateRequest) (domain.DatasetVersion, error) {
 	dataType := normalizeDatasetDataType(input.DataType, dataset.DataType)
 	metadata := input.Metadata
 	if metadata == nil {
@@ -201,6 +394,14 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 	profile := s.resolveDatasetProfile(dataType, input.Profile)
 	if profile != nil && strings.TrimSpace(profile.ProfileID) != "" {
 		metadata["profile_id"] = profile.ProfileID
+	}
+	prepareLLMMode, err := normalizeDatasetLLMMode(input.PrepareLLMMode, "prepare_llm_mode")
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	sentimentLLMMode, err := normalizeDatasetLLMMode(input.SentimentLLMMode, "sentiment_llm_mode")
+	if err != nil {
+		return domain.DatasetVersion{}, err
 	}
 
 	prepareRequired := defaultPrepareRequired(dataType, input.PrepareRequired)
@@ -237,8 +438,10 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 		Metadata:         metadata,
 		Profile:          profile,
 		PrepareStatus:    prepareStatus,
+		PrepareLLMMode:   prepareLLMMode,
 		PrepareModel:     input.PrepareModel,
 		SentimentStatus:  sentimentStatus,
+		SentimentLLMMode: sentimentLLMMode,
 		SentimentModel:   input.SentimentModel,
 		EmbeddingStatus:  embeddingStatus,
 		EmbeddingModel:   input.EmbeddingModel,
@@ -259,7 +462,7 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 	if sentimentRequired {
 		version.Metadata["sentiment_required"] = true
 	}
-	return version
+	return version, nil
 }
 
 func (s *DatasetService) resolveDatasetProfile(dataType string, explicit *domain.DatasetProfile) *domain.DatasetProfile {
@@ -282,7 +485,27 @@ func (s *DatasetService) maybeRunEagerPrepare(projectID, datasetID string, versi
 	return version
 }
 
+func (s *DatasetService) maybeRunEagerSentiment(projectID, datasetID string, version domain.DatasetVersion) domain.DatasetVersion {
+	if strings.TrimSpace(s.pythonAIWorkerURL) == "" {
+		return version
+	}
+	if !requiresSentiment(version) || !isPrepareReady(version) {
+		return version
+	}
+	if _, err := s.CreateSentimentJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}, "dataset_prepare_complete"); err == nil {
+		latest, getErr := s.GetDatasetVersion(projectID, datasetID, version.DatasetVersionID)
+		if getErr == nil {
+			return latest
+		}
+	}
+	return version
+}
+
 func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionID string) (domain.DatasetVersion, error) {
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
 	version, err := s.store.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
 		if err == store.ErrNotFound {
@@ -293,18 +516,220 @@ func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionI
 	if version.DatasetID != datasetID {
 		return domain.DatasetVersion{}, ErrNotFound{Resource: "dataset version"}
 	}
+	enrichDatasetVersionView(&version)
+	markDatasetVersionActive(&version, dataset)
 	return version, nil
 }
 
 func (s *DatasetService) ListDatasetVersions(projectID, datasetID string) (domain.DatasetVersionListResponse, error) {
-	if _, err := s.GetDataset(projectID, datasetID); err != nil {
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
 		return domain.DatasetVersionListResponse{}, err
 	}
 	items, err := s.store.ListDatasetVersions(projectID, datasetID)
 	if err != nil {
 		return domain.DatasetVersionListResponse{}, err
 	}
+	for index := range items {
+		enrichDatasetVersionView(&items[index])
+		markDatasetVersionActive(&items[index], dataset)
+	}
 	return domain.DatasetVersionListResponse{Items: items}, nil
+}
+
+func (s *DatasetService) GetPreparePreview(
+	projectID, datasetID, datasetVersionID string,
+	input domain.DatasetPreparePreviewQuery,
+) (domain.DatasetPreparePreviewResponse, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetPreparePreviewResponse{}, err
+	}
+
+	preparedRef, prepareFormat, err := resolvePrepareArtifact(version)
+	if err != nil {
+		return domain.DatasetPreparePreviewResponse{}, err
+	}
+	if prepareFormat != "parquet" {
+		return domain.DatasetPreparePreviewResponse{}, ErrInvalidArgument{Message: "prepare preview supports parquet artifact only"}
+	}
+
+	limit := defaultPreparePreviewLimit
+	if input.Limit != nil {
+		limit = *input.Limit
+	}
+	if limit <= 0 {
+		return domain.DatasetPreparePreviewResponse{}, ErrInvalidArgument{Message: "limit must be a positive integer"}
+	}
+	if limit > maxPreparePreviewLimit {
+		limit = maxPreparePreviewLimit
+	}
+
+	samples, err := loadPrepareSamplesFromParquet(preparedRef, limit, "")
+	if err != nil {
+		return domain.DatasetPreparePreviewResponse{}, err
+	}
+
+	response := domain.DatasetPreparePreviewResponse{
+		ProjectID:          projectID,
+		DatasetID:          datasetID,
+		DatasetVersionID:   datasetVersionID,
+		PrepareStatus:      version.PrepareStatus,
+		PreparedAt:         version.PreparedAt,
+		PreparedRef:        preparedRef,
+		PrepareFormat:      prepareFormat,
+		RawTextColumn:      metadataString(version.Metadata, "raw_text_column", metadataString(version.Metadata, "text_column", "text")),
+		PreparedTextColumn: metadataString(version.Metadata, "prepared_text_column", "normalized_text"),
+		RowIDColumn:        metadataString(version.Metadata, "row_id_column", "row_id"),
+		Summary:            clonePrepareSummary(version.PrepareSummary),
+		SampleLimit:        limit,
+		Samples:            samples,
+	}
+
+	if response.Summary != nil && response.Summary.ReviewCount > 0 {
+		reviewLimit := response.Summary.ReviewCount
+		if reviewLimit > limit {
+			reviewLimit = limit
+		}
+		reviewSamples, err := loadPrepareSamplesFromParquet(preparedRef, reviewLimit, "review")
+		if err != nil {
+			return domain.DatasetPreparePreviewResponse{}, err
+		}
+		response.WarningPanel = &domain.DatasetPrepareWarningPanel{
+			ReviewCount: response.Summary.ReviewCount,
+			Samples:     reviewSamples,
+		}
+	}
+
+	return response, nil
+}
+
+func (s *DatasetService) ResolvePrepareDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return "", "", err
+	}
+	preparedRef, prepareFormat, err := resolvePrepareArtifact(version)
+	if err != nil {
+		return "", "", err
+	}
+	if prepareFormat != "parquet" {
+		return "", "", ErrInvalidArgument{Message: "prepare download supports parquet artifact only"}
+	}
+	info, statErr := os.Stat(preparedRef)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return "", "", ErrNotFound{Resource: "prepare artifact"}
+		}
+		return "", "", statErr
+	}
+	if info.IsDir() {
+		return "", "", ErrInvalidArgument{Message: "prepare artifact must be a file"}
+	}
+	exportPath, err := exportPrepareCSVFromParquet(preparedRef)
+	if err != nil {
+		return "", "", err
+	}
+	filename := strings.TrimSpace(filepath.Base(preparedRef))
+	if filename == "" || filename == "." || filename == string(filepath.Separator) {
+		filename = "prepared.csv"
+	} else if strings.HasSuffix(strings.ToLower(filename), ".parquet") {
+		filename = filename[:len(filename)-len(".parquet")] + ".csv"
+	} else {
+		filename = filename + ".csv"
+	}
+	return exportPath, filename, nil
+}
+
+func (s *DatasetService) GetSentimentPreview(
+	projectID, datasetID, datasetVersionID string,
+	input domain.DatasetSentimentPreviewQuery,
+) (domain.DatasetSentimentPreviewResponse, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetSentimentPreviewResponse{}, err
+	}
+
+	sentimentRef, sentimentFormat, err := resolveSentimentArtifact(version)
+	if err != nil {
+		return domain.DatasetSentimentPreviewResponse{}, err
+	}
+	if sentimentFormat != "parquet" {
+		return domain.DatasetSentimentPreviewResponse{}, ErrInvalidArgument{Message: "sentiment preview supports parquet artifact only"}
+	}
+
+	limit := defaultSentimentPreviewLimit
+	if input.Limit != nil {
+		limit = *input.Limit
+	}
+	if limit <= 0 {
+		return domain.DatasetSentimentPreviewResponse{}, ErrInvalidArgument{Message: "limit must be a positive integer"}
+	}
+	if limit > maxSentimentPreviewLimit {
+		limit = maxSentimentPreviewLimit
+	}
+
+	samples, err := loadSentimentSamplesFromParquet(sentimentRef, limit)
+	if err != nil {
+		return domain.DatasetSentimentPreviewResponse{}, err
+	}
+
+	response := domain.DatasetSentimentPreviewResponse{
+		ProjectID:                 projectID,
+		DatasetID:                 datasetID,
+		DatasetVersionID:          datasetVersionID,
+		SentimentStatus:           version.SentimentStatus,
+		SentimentLabeledAt:        version.SentimentLabeledAt,
+		SentimentRef:              sentimentRef,
+		SentimentFormat:           sentimentFormat,
+		SentimentTextColumn:       metadataString(version.Metadata, "sentiment_text_column", defaultPreparedTextColumn(version)),
+		SentimentLabelColumn:      metadataString(version.Metadata, "sentiment_label_column", "sentiment_label"),
+		SentimentConfidenceColumn: metadataString(version.Metadata, "sentiment_confidence_column", "sentiment_confidence"),
+		SentimentReasonColumn:     metadataString(version.Metadata, "sentiment_reason_column", "sentiment_reason"),
+		RowIDColumn:               metadataString(version.Metadata, "row_id_column", "row_id"),
+		Summary:                   cloneSentimentSummary(buildSentimentSummary(version.Metadata)),
+		SampleLimit:               limit,
+		Samples:                   samples,
+	}
+
+	return response, nil
+}
+
+func (s *DatasetService) ResolveSentimentDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return "", "", err
+	}
+	sentimentRef, sentimentFormat, err := resolveSentimentArtifact(version)
+	if err != nil {
+		return "", "", err
+	}
+	if sentimentFormat != "parquet" {
+		return "", "", ErrInvalidArgument{Message: "sentiment download supports parquet artifact only"}
+	}
+	info, statErr := os.Stat(sentimentRef)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return "", "", ErrNotFound{Resource: "sentiment artifact"}
+		}
+		return "", "", statErr
+	}
+	if info.IsDir() {
+		return "", "", ErrInvalidArgument{Message: "sentiment artifact must be a file"}
+	}
+	exportPath, err := exportSentimentCSVFromParquet(sentimentRef)
+	if err != nil {
+		return "", "", err
+	}
+	filename := strings.TrimSpace(filepath.Base(sentimentRef))
+	if filename == "" || filename == "." || filename == string(filepath.Separator) {
+		filename = "sentiment.csv"
+	} else if strings.HasSuffix(strings.ToLower(filename), ".parquet") {
+		filename = filename[:len(filename)-len(".parquet")] + ".csv"
+	} else {
+		filename = filename + ".csv"
+	}
+	return exportPath, filename, nil
 }
 
 func (s *DatasetService) GetClusterMembers(
@@ -618,6 +1043,55 @@ func (s *DatasetService) GetRuleCatalog() (domain.RuleCatalogResponse, error) {
 	}, nil
 }
 
+func (s *DatasetService) GetSkillPolicyCatalog() (domain.SkillPolicyCatalogResponse, error) {
+	capabilities, err := s.fetchWorkerCapabilities()
+	if err != nil {
+		return domain.SkillPolicyCatalogResponse{
+			Available: false,
+			Source:    "worker_capabilities",
+			Warning:   fmt.Sprintf("python-ai worker capability 조회에 실패했습니다: %v", err),
+		}, nil
+	}
+	if capabilities == nil {
+		return domain.SkillPolicyCatalogResponse{
+			Available: false,
+			Source:    "worker_capabilities",
+			Warning:   "python-ai worker URL이 설정되지 않아 skill policy catalog를 조회하지 못했습니다.",
+		}, nil
+	}
+	return domain.SkillPolicyCatalogResponse{
+		Available: true,
+		Source:    "worker_capabilities",
+		Items:     append([]domain.SkillPolicyMetadata(nil), capabilities.SkillPolicyCatalog...),
+	}, nil
+}
+
+func (s *DatasetService) ValidateSkillPolicies() (domain.SkillPolicyValidationResponse, error) {
+	capabilities, err := s.fetchWorkerCapabilities()
+	if err != nil {
+		return domain.SkillPolicyValidationResponse{
+			Available: false,
+			Source:    "worker_capabilities",
+			Valid:     false,
+			Warning:   fmt.Sprintf("python-ai worker capability 조회에 실패했습니다: %v", err),
+		}, nil
+	}
+	if capabilities == nil {
+		return domain.SkillPolicyValidationResponse{
+			Available: false,
+			Source:    "worker_capabilities",
+			Valid:     false,
+			Warning:   "python-ai worker URL이 설정되지 않아 skill policy validation을 조회하지 못했습니다.",
+		}, nil
+	}
+	response := capabilities.SkillPolicyValidation
+	response.Available = true
+	if strings.TrimSpace(response.Source) == "" {
+		response.Source = "worker_capabilities"
+	}
+	return response, nil
+}
+
 func (s *DatasetService) availablePromptVersions() ([]string, error) {
 	catalog, err := s.promptCatalog()
 	if err != nil {
@@ -710,22 +1184,7 @@ func (s *DatasetService) fetchWorkerCapabilities() (*workerCapabilitiesResponse,
 }
 
 func parsePromptFrontMatter(raw string) map[string]string {
-	trimmed := strings.TrimSpace(raw)
-	if !strings.HasPrefix(trimmed, "---\n") {
-		return map[string]string{}
-	}
-	lines := strings.Split(trimmed, "\n")
-	metadata := make(map[string]string)
-	for _, line := range lines[1:] {
-		if strings.TrimSpace(line) == "---" {
-			break
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		metadata[strings.TrimSpace(key)] = strings.TrimSpace(value)
-	}
+	metadata, _ := splitPromptFrontMatter(raw)
 	return metadata
 }
 
@@ -768,6 +1227,78 @@ func defaultPromptMetaValue(value string, fallback string) string {
 	return trimmed
 }
 
+func normalizeProjectPromptOperation(value string) (string, error) {
+	operation := strings.TrimSpace(value)
+	if operation == "" {
+		return "", ErrInvalidArgument{Message: "operation is required"}
+	}
+	if _, ok := allowedProjectPromptOperations[operation]; !ok {
+		return "", ErrInvalidArgument{Message: "unsupported prompt operation"}
+	}
+	return operation, nil
+}
+
+func validatePromptTemplatePlaceholders(content string, operation string) error {
+	allowed, ok := allowedProjectPromptOperations[operation]
+	if !ok {
+		return ErrInvalidArgument{Message: "unsupported prompt operation"}
+	}
+	_, body := splitPromptFrontMatter(content)
+	found := make(map[string]struct{}, len(allowed))
+	for _, matches := range promptPlaceholderPattern.FindAllStringSubmatch(body, -1) {
+		if len(matches) < 2 {
+			continue
+		}
+		placeholder := strings.TrimSpace(matches[1])
+		if placeholder == "" {
+			continue
+		}
+		if _, ok := allowed[placeholder]; ok {
+			found[placeholder] = struct{}{}
+			continue
+		}
+		return ErrInvalidArgument{Message: fmt.Sprintf("unsupported placeholder %q for %s prompt", placeholder, operation)}
+	}
+	missing := make([]string, 0)
+	for placeholder := range allowed {
+		if _, ok := found[placeholder]; ok {
+			continue
+		}
+		missing = append(missing, placeholder)
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return ErrInvalidArgument{Message: fmt.Sprintf("missing placeholders for %s prompt: %s", operation, strings.Join(missing, ", "))}
+	}
+	return nil
+}
+
+func splitPromptFrontMatter(raw string) (map[string]string, string) {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "---\n") {
+		return map[string]string{}, trimmed
+	}
+	lines := strings.Split(trimmed, "\n")
+	metadata := make(map[string]string)
+	closingIndex := -1
+	for index, line := range lines[1:] {
+		if strings.TrimSpace(line) == "---" {
+			closingIndex = index + 1
+			break
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		metadata[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	if closingIndex < 0 {
+		return map[string]string{}, trimmed
+	}
+	body := strings.TrimSpace(strings.Join(lines[closingIndex+1:], "\n"))
+	return metadata, body
+}
+
 func (s *DatasetService) validateExistingDatasetVersions(
 	promptMetadata map[string]domain.PromptTemplateMetadata,
 	availablePrepareRules map[string]struct{},
@@ -778,35 +1309,6 @@ func (s *DatasetService) validateExistingDatasetVersions(
 		return nil, err
 	}
 	issues := make([]domain.DatasetProfileValidationIssue, 0)
-	validatePromptVersion := func(owner, resourceRef, fieldName string, value *string, allowedOperations ...string) {
-		trimmed := strings.TrimSpace(optionalStringValue(value))
-		if trimmed == "" {
-			return
-		}
-		meta, ok := promptMetadata[trimmed]
-		if !ok {
-			issues = append(issues, domain.DatasetProfileValidationIssue{
-				Severity:    "error",
-				Code:        fieldName + "_missing",
-				Message:     fmt.Sprintf("%s 의 %s %q 가 현재 prompt registry에 없습니다.", owner, fieldName, trimmed),
-				Scope:       "dataset_version",
-				ResourceRef: resourceRef,
-			})
-			return
-		}
-		for _, allowed := range allowedOperations {
-			if strings.TrimSpace(meta.Operation) == allowed {
-				return
-			}
-		}
-		issues = append(issues, domain.DatasetProfileValidationIssue{
-			Severity:    "error",
-			Code:        fieldName + "_operation_mismatch",
-			Message:     fmt.Sprintf("%s 의 %s %q 는 %s 작업용 prompt가 아닙니다.", owner, fieldName, trimmed, strings.Join(allowedOperations, "/")),
-			Scope:       "dataset_version",
-			ResourceRef: resourceRef,
-		})
-	}
 	validateRuleNames := func(owner, resourceRef, fieldName string, values []string, available map[string]struct{}) {
 		if len(values) == 0 || len(available) == 0 {
 			return
@@ -829,6 +1331,52 @@ func (s *DatasetService) validateExistingDatasetVersions(
 		}
 	}
 	for _, project := range projects {
+		validatePromptVersion := func(owner, resourceRef, fieldName string, value *string, allowedOperations ...string) {
+			trimmed := strings.TrimSpace(optionalStringValue(value))
+			if trimmed == "" {
+				return
+			}
+			requiredOperation := ""
+			if len(allowedOperations) > 0 {
+				requiredOperation = strings.TrimSpace(allowedOperations[0])
+			}
+			if s.projectHasPromptVersion(project.ProjectID, trimmed, allowedOperations...) {
+				if requiredOperation == "" || s.projectHasPromptVersion(project.ProjectID, trimmed, requiredOperation) {
+					return
+				}
+				issues = append(issues, domain.DatasetProfileValidationIssue{
+					Severity:    "error",
+					Code:        fieldName + "_missing",
+					Message:     fmt.Sprintf("%s 의 %s %q 는 프로젝트 prompt registry에 %s 템플릿이 없습니다.", owner, fieldName, trimmed, requiredOperation),
+					Scope:       "dataset_version",
+					ResourceRef: resourceRef,
+				})
+				return
+			}
+			meta, ok := promptMetadata[trimmed]
+			if !ok {
+				issues = append(issues, domain.DatasetProfileValidationIssue{
+					Severity:    "error",
+					Code:        fieldName + "_missing",
+					Message:     fmt.Sprintf("%s 의 %s %q 가 현재 prompt registry에 없습니다.", owner, fieldName, trimmed),
+					Scope:       "dataset_version",
+					ResourceRef: resourceRef,
+				})
+				return
+			}
+			for _, allowed := range allowedOperations {
+				if strings.TrimSpace(meta.Operation) == allowed {
+					return
+				}
+			}
+			issues = append(issues, domain.DatasetProfileValidationIssue{
+				Severity:    "error",
+				Code:        fieldName + "_operation_mismatch",
+				Message:     fmt.Sprintf("%s 의 %s %q 는 %s 작업용 prompt가 아닙니다.", owner, fieldName, trimmed, strings.Join(allowedOperations, "/")),
+				Scope:       "dataset_version",
+				ResourceRef: resourceRef,
+			})
+		}
 		datasets, err := s.store.ListDatasets(project.ProjectID)
 		if err != nil {
 			return nil, err
@@ -863,6 +1411,94 @@ func (s *DatasetService) validateExistingDatasetVersions(
 		}
 	}
 	return issues, nil
+}
+
+func (s *DatasetService) projectHasPromptVersion(projectID, version string, allowedOperations ...string) bool {
+	for _, operation := range allowedOperations {
+		if _, err := s.store.GetProjectPrompt(projectID, version, operation); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *DatasetService) projectPromptDefaults(projectID string) (domain.ProjectPromptDefaults, error) {
+	defaults, err := s.store.GetProjectPromptDefaults(projectID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return domain.ProjectPromptDefaults{ProjectID: projectID}, nil
+		}
+		return domain.ProjectPromptDefaults{}, err
+	}
+	return defaults, nil
+}
+
+func (s *DatasetService) resolveEffectiveProjectPromptVersion(projectID string, explicit *string, operation string) (string, error) {
+	if value := trimStringPointer(explicit); value != nil {
+		return *value, nil
+	}
+
+	defaults, err := s.projectPromptDefaults(projectID)
+	if err != nil {
+		return "", err
+	}
+	switch operation {
+	case "prepare":
+		if defaults.PreparePromptVersion != nil {
+			return *defaults.PreparePromptVersion, nil
+		}
+	case "sentiment":
+		if defaults.SentimentPromptVersion != nil {
+			return *defaults.SentimentPromptVersion, nil
+		}
+	}
+	return "", nil
+}
+
+func (s *DatasetService) lookupProjectPromptContent(projectID, version, operation string) (string, bool, error) {
+	trimmedVersion := strings.TrimSpace(version)
+	if trimmedVersion == "" {
+		return "", false, nil
+	}
+	prompt, err := s.store.GetProjectPrompt(projectID, trimmedVersion, operation)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return strings.TrimSpace(prompt.Content), true, nil
+}
+
+func (s *DatasetService) resolveProjectPromptTemplates(projectID, version, rowOperation, batchOperation string) (projectPromptTemplates, error) {
+	rowTemplate, rowExists, err := s.lookupProjectPromptContent(projectID, version, rowOperation)
+	if err != nil {
+		return projectPromptTemplates{}, err
+	}
+	batchTemplate := ""
+	batchExists := false
+	if strings.TrimSpace(batchOperation) != "" {
+		batchTemplate, batchExists, err = s.lookupProjectPromptContent(projectID, version, batchOperation)
+		if err != nil {
+			return projectPromptTemplates{}, err
+		}
+	}
+	if !rowExists && !batchExists {
+		return projectPromptTemplates{}, nil
+	}
+	if !rowExists {
+		return projectPromptTemplates{}, ErrInvalidArgument{Message: fmt.Sprintf("project prompt version %q requires %s template", strings.TrimSpace(version), rowOperation)}
+	}
+	return projectPromptTemplates{
+		RowTemplate:     rowTemplate,
+		BatchTemplate:   batchTemplate,
+		UsesProjectSlot: true,
+	}, nil
+}
+
+func sha256Hex(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 func stringSet(values []string) map[string]struct{} {
@@ -953,18 +1589,43 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 		return domain.DatasetVersion{}, err
 	}
 
+	var configuredPreparePromptVersion *string
+	if version.Profile != nil {
+		configuredPreparePromptVersion = version.Profile.PreparePromptVersion
+	}
+	preparePromptVersion, err := s.resolveEffectiveProjectPromptVersion(projectID, configuredPreparePromptVersion, "prepare")
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	projectPromptOverride, err := s.resolveProjectPromptTemplates(projectID, preparePromptVersion, "prepare", "prepare_batch")
+	if err != nil {
+		version.PrepareStatus = "failed"
+		version.Metadata["prepare_error"] = err.Error()
+		_ = s.store.SaveDatasetVersion(version)
+		return domain.DatasetVersion{}, err
+	}
+
 	payload := map[string]any{
 		"dataset_version_id": version.DatasetVersionID,
 		"dataset_name":       version.StorageURI,
 		"text_column":        textColumn,
 		"output_path":        outputPath,
+		"llm_mode":           version.PrepareLLMMode,
 	}
 	if version.Profile != nil {
 		if len(version.Profile.RegexRuleNames) > 0 {
 			payload["regex_rule_names"] = append([]string(nil), version.Profile.RegexRuleNames...)
 		}
-		if version.Profile.PreparePromptVersion != nil && strings.TrimSpace(*version.Profile.PreparePromptVersion) != "" {
-			payload["prepare_prompt_version"] = strings.TrimSpace(*version.Profile.PreparePromptVersion)
+	}
+	if preparePromptVersion != "" {
+		payload["prepare_prompt_version"] = preparePromptVersion
+	}
+	if projectPromptOverride.UsesProjectSlot {
+		payload["prepare_prompt_template"] = projectPromptOverride.RowTemplate
+		if projectPromptOverride.BatchTemplate != "" {
+			payload["prepare_batch_prompt_template"] = projectPromptOverride.BatchTemplate
+		} else {
+			payload["prepare_batch_size"] = 1
 		}
 	}
 	if version.PrepareModel != nil && strings.TrimSpace(*version.PrepareModel) != "" {
@@ -1038,7 +1699,9 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
-	return version, nil
+	result := s.maybeRunEagerSentiment(projectID, datasetID, version)
+	enrichDatasetVersionView(&result)
+	return result, nil
 }
 
 func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error) {
@@ -1425,14 +2088,39 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 		return domain.DatasetVersion{}, err
 	}
 
+	var configuredSentimentPromptVersion *string
+	if version.Profile != nil {
+		configuredSentimentPromptVersion = version.Profile.SentimentPromptVersion
+	}
+	sentimentPromptVersion, err := s.resolveEffectiveProjectPromptVersion(projectID, configuredSentimentPromptVersion, "sentiment")
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	projectPromptOverride, err := s.resolveProjectPromptTemplates(projectID, sentimentPromptVersion, "sentiment", "sentiment_batch")
+	if err != nil {
+		version.SentimentStatus = "failed"
+		version.Metadata["sentiment_error"] = err.Error()
+		_ = s.store.SaveDatasetVersion(version)
+		return domain.DatasetVersion{}, err
+	}
+
 	payload := map[string]any{
 		"dataset_version_id": version.DatasetVersionID,
 		"dataset_name":       datasetName,
 		"text_column":        textColumn,
 		"output_path":        outputPath,
+		"llm_mode":           version.SentimentLLMMode,
 	}
-	if version.Profile != nil && version.Profile.SentimentPromptVersion != nil && strings.TrimSpace(*version.Profile.SentimentPromptVersion) != "" {
-		payload["sentiment_prompt_version"] = strings.TrimSpace(*version.Profile.SentimentPromptVersion)
+	if sentimentPromptVersion != "" {
+		payload["sentiment_prompt_version"] = sentimentPromptVersion
+	}
+	if projectPromptOverride.UsesProjectSlot {
+		payload["sentiment_prompt_template"] = projectPromptOverride.RowTemplate
+		if projectPromptOverride.BatchTemplate != "" {
+			payload["sentiment_batch_prompt_template"] = projectPromptOverride.BatchTemplate
+		} else {
+			payload["sentiment_batch_size"] = 1
+		}
 	}
 	if version.SentimentModel != nil && strings.TrimSpace(*version.SentimentModel) != "" {
 		payload["model"] = strings.TrimSpace(*version.SentimentModel)
@@ -1625,6 +2313,22 @@ func normalizeDatasetDataType(value *string, fallback string) string {
 	return dataType
 }
 
+func normalizeDatasetLLMMode(value *string, fieldName string) (string, error) {
+	if value == nil {
+		return datasetLLMModeDefault, nil
+	}
+	mode := strings.ToLower(strings.TrimSpace(*value))
+	if mode == "" {
+		return datasetLLMModeDefault, nil
+	}
+	switch mode {
+	case datasetLLMModeDefault, datasetLLMModeEnabled, datasetLLMModeDisabled:
+		return mode, nil
+	default:
+		return "", ErrInvalidArgument{Message: fmt.Sprintf("%s must be one of default, enabled, disabled", fieldName)}
+	}
+}
+
 func (s *DatasetService) deriveEmbeddingURI(version domain.DatasetVersion) string {
 	if version.EmbeddingURI != nil && strings.TrimSpace(*version.EmbeddingURI) != "" {
 		return strings.TrimSpace(*version.EmbeddingURI)
@@ -1785,6 +2489,94 @@ func trimStringPointer(value *string) *string {
 	return &trimmed
 }
 
+func shouldActivateDatasetVersionOnCreate(value *bool) bool {
+	if value == nil {
+		return true
+	}
+	return *value
+}
+
+func markDatasetVersionActive(version *domain.DatasetVersion, dataset domain.Dataset) {
+	if version == nil {
+		return
+	}
+	version.IsActive = dataset.ActiveDatasetVersionID != nil && *dataset.ActiveDatasetVersionID == version.DatasetVersionID
+}
+
+func (s *DatasetService) saveDatasetActiveVersion(dataset domain.Dataset, datasetVersionID *string) (domain.Dataset, error) {
+	dataset.ActiveDatasetVersionID = trimStringPointer(datasetVersionID)
+	now := time.Now().UTC()
+	dataset.ActiveVersionUpdatedAt = &now
+	if err := s.store.SaveDataset(dataset); err != nil {
+		return domain.Dataset{}, err
+	}
+	return dataset, nil
+}
+
+func enrichDatasetVersionView(version *domain.DatasetVersion) {
+	if version == nil {
+		return
+	}
+	version.PrepareSummary = buildPrepareSummary(version.Metadata)
+}
+
+func buildSentimentSummary(metadata map[string]any) *domain.DatasetSentimentSummary {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw, ok := metadata["sentiment_summary"].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	return &domain.DatasetSentimentSummary{
+		InputRowCount:      intValueOrZero(raw["input_row_count"]),
+		LabeledRowCount:    intValueOrZero(raw["labeled_row_count"]),
+		TextColumn:         strings.TrimSpace(anyStringValue(raw["text_column"])),
+		SentimentBatchSize: intValueOrZero(raw["sentiment_batch_size"]),
+		LabelCounts:        intMapValue(raw["label_counts"]),
+	}
+}
+
+func buildPrepareSummary(metadata map[string]any) *domain.DatasetPrepareSummary {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw, ok := metadata["prepare_summary"].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	return &domain.DatasetPrepareSummary{
+		InputRowCount:        intValueOrZero(raw["input_row_count"]),
+		OutputRowCount:       intValueOrZero(raw["output_row_count"]),
+		KeptCount:            intValueOrZero(raw["kept_count"]),
+		ReviewCount:          intValueOrZero(raw["review_count"]),
+		DroppedCount:         intValueOrZero(raw["dropped_count"]),
+		PrepareRegexRuleHits: intMapValue(raw["prepare_regex_rule_hits"]),
+	}
+}
+
+func cloneSentimentSummary(summary *domain.DatasetSentimentSummary) *domain.DatasetSentimentSummary {
+	if summary == nil {
+		return nil
+	}
+	cloned := *summary
+	if len(summary.LabelCounts) > 0 {
+		cloned.LabelCounts = cloneStringIntMap(summary.LabelCounts)
+	}
+	return &cloned
+}
+
+func clonePrepareSummary(summary *domain.DatasetPrepareSummary) *domain.DatasetPrepareSummary {
+	if summary == nil {
+		return nil
+	}
+	cloned := *summary
+	if len(summary.PrepareRegexRuleHits) > 0 {
+		cloned.PrepareRegexRuleHits = cloneStringIntMap(summary.PrepareRegexRuleHits)
+	}
+	return &cloned
+}
+
 func datasetSourceForUnstructured(version domain.DatasetVersion) string {
 	if isPrepareReady(version) && version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != "" {
 		return strings.TrimSpace(*version.PrepareURI)
@@ -1822,6 +2614,15 @@ func requiresPrepare(version domain.DatasetVersion) bool {
 	}
 }
 
+func requiresSentiment(version domain.DatasetVersion) bool {
+	switch version.DataType {
+	case "unstructured", "mixed", "both":
+		return version.SentimentStatus != "" && version.SentimentStatus != "not_requested" && version.SentimentStatus != "not_applicable"
+	default:
+		return false
+	}
+}
+
 func isPrepareReady(version domain.DatasetVersion) bool {
 	return version.PrepareStatus == "ready" && version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != ""
 }
@@ -1851,6 +2652,39 @@ func datasetClusterReady(version domain.DatasetVersion) bool {
 		return false
 	}
 	return strings.TrimSpace(metadataString(version.Metadata, "cluster_ref", "")) != ""
+}
+
+func resolvePrepareArtifact(version domain.DatasetVersion) (string, string, error) {
+	preparedRef := strings.TrimSpace(metadataString(version.Metadata, "prepared_ref", ""))
+	if preparedRef == "" && version.PrepareURI != nil {
+		preparedRef = strings.TrimSpace(*version.PrepareURI)
+	}
+	if version.PrepareStatus != "ready" || preparedRef == "" {
+		return "", "", ErrInvalidArgument{Message: "prepare artifact is not ready"}
+	}
+	prepareFormat := strings.TrimSpace(metadataString(version.Metadata, "prepared_format", ""))
+	if prepareFormat == "" {
+		prepareFormat = strings.TrimSpace(metadataString(version.Metadata, "prepare_format", ""))
+	}
+	if prepareFormat == "" {
+		prepareFormat = inferArtifactFormat(preparedRef, "parquet")
+	}
+	return preparedRef, prepareFormat, nil
+}
+
+func resolveSentimentArtifact(version domain.DatasetVersion) (string, string, error) {
+	sentimentRef := strings.TrimSpace(metadataString(version.Metadata, "sentiment_ref", ""))
+	if sentimentRef == "" && version.SentimentURI != nil {
+		sentimentRef = strings.TrimSpace(*version.SentimentURI)
+	}
+	if version.SentimentStatus != "ready" || sentimentRef == "" {
+		return "", "", ErrInvalidArgument{Message: "sentiment artifact is not ready"}
+	}
+	sentimentFormat := strings.TrimSpace(metadataString(version.Metadata, "sentiment_format", ""))
+	if sentimentFormat == "" {
+		sentimentFormat = inferArtifactFormat(sentimentRef, "parquet")
+	}
+	return sentimentRef, sentimentFormat, nil
 }
 
 func deriveClusterMembershipURI(summaryURI string) string {
@@ -1979,6 +2813,23 @@ type embeddingIndexParquetRecord struct {
 	EmbeddingDim      int
 	EmbeddingProvider string
 	TokenCountsJSON   string
+}
+
+type preparePreviewParquetRecord struct {
+	SourceRowIndex     int
+	RowID              string
+	RawText            string
+	NormalizedText     string
+	PrepareDisposition string
+	PrepareReason      string
+}
+
+type sentimentPreviewParquetRecord struct {
+	SourceRowIndex      int
+	RowID               string
+	SentimentLabel      string
+	SentimentConfidence float64
+	SentimentReason     string
 }
 
 func loadEmbeddingIndexChunks(datasetVersionID string, embeddingRef string, chunkRef string, embeddingModel string) ([]domain.EmbeddingIndexChunk, error) {
@@ -2210,6 +3061,294 @@ func loadClusterSummary(summaryRef string, clusterID string) (map[string]any, er
 	return nil, ErrNotFound{Resource: "cluster"}
 }
 
+func loadPrepareSamplesFromParquet(preparedRef string, limit int, disposition string) ([]domain.DatasetPrepareSample, error) {
+	preparedRef = strings.TrimSpace(preparedRef)
+	if preparedRef == "" {
+		return nil, ErrInvalidArgument{Message: "prepare artifact ref is required"}
+	}
+	if limit <= 0 {
+		return nil, ErrInvalidArgument{Message: "limit must be a positive integer"}
+	}
+	if _, err := os.Stat(preparedRef); err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNotFound{Resource: "prepare artifact"}
+		}
+		return nil, err
+	}
+	tempHandle, err := os.CreateTemp("", "prepare-preview-*.duckdb")
+	if err != nil {
+		return nil, err
+	}
+	dbPath := tempHandle.Name()
+	if err := tempHandle.Close(); err != nil {
+		return nil, err
+	}
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	defer os.Remove(dbPath)
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	filterClause := ""
+	disposition = strings.TrimSpace(disposition)
+	if disposition != "" {
+		filterClause = fmt.Sprintf("WHERE prepare_disposition = '%s'", escapeDuckDBLiteral(disposition))
+	}
+	query := fmt.Sprintf(
+		`SELECT
+			CAST(COALESCE(source_row_index, 0) AS INTEGER) AS source_row_index,
+			COALESCE(row_id, '') AS row_id,
+			COALESCE(raw_text, '') AS raw_text,
+			COALESCE(normalized_text, '') AS normalized_text,
+			COALESCE(prepare_disposition, '') AS prepare_disposition,
+			COALESCE(prepare_reason, '') AS prepare_reason
+		FROM read_parquet('%s')
+		%s
+		ORDER BY source_row_index, row_id
+		LIMIT %d`,
+		escapeDuckDBLiteral(preparedRef),
+		filterClause,
+		limit,
+	)
+	rows, err := db.Query(query)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no files found") {
+			return nil, ErrNotFound{Resource: "prepare artifact"}
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.DatasetPrepareSample, 0)
+	for rows.Next() {
+		var row preparePreviewParquetRecord
+		if err := rows.Scan(
+			&row.SourceRowIndex,
+			&row.RowID,
+			&row.RawText,
+			&row.NormalizedText,
+			&row.PrepareDisposition,
+			&row.PrepareReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, domain.DatasetPrepareSample{
+			SourceRowIndex:     row.SourceRowIndex,
+			RowID:              strings.TrimSpace(row.RowID),
+			RawText:            strings.TrimSpace(row.RawText),
+			NormalizedText:     strings.TrimSpace(row.NormalizedText),
+			PrepareDisposition: strings.TrimSpace(row.PrepareDisposition),
+			PrepareReason:      strings.TrimSpace(row.PrepareReason),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func loadSentimentSamplesFromParquet(sentimentRef string, limit int) ([]domain.DatasetSentimentSample, error) {
+	sentimentRef = strings.TrimSpace(sentimentRef)
+	if sentimentRef == "" {
+		return nil, ErrInvalidArgument{Message: "sentiment artifact ref is required"}
+	}
+	if limit <= 0 {
+		return nil, ErrInvalidArgument{Message: "limit must be a positive integer"}
+	}
+	if _, err := os.Stat(sentimentRef); err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNotFound{Resource: "sentiment artifact"}
+		}
+		return nil, err
+	}
+	tempHandle, err := os.CreateTemp("", "sentiment-preview-*.duckdb")
+	if err != nil {
+		return nil, err
+	}
+	dbPath := tempHandle.Name()
+	if err := tempHandle.Close(); err != nil {
+		return nil, err
+	}
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	defer os.Remove(dbPath)
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	query := fmt.Sprintf(
+		`SELECT
+			CAST(COALESCE(source_row_index, 0) AS INTEGER) AS source_row_index,
+			COALESCE(row_id, '') AS row_id,
+			COALESCE(sentiment_label, '') AS sentiment_label,
+			CAST(COALESCE(sentiment_confidence, 0) AS DOUBLE) AS sentiment_confidence,
+			COALESCE(sentiment_reason, '') AS sentiment_reason
+		FROM read_parquet('%s')
+		ORDER BY source_row_index, row_id
+		LIMIT %d`,
+		escapeDuckDBLiteral(sentimentRef),
+		limit,
+	)
+	rows, err := db.Query(query)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no files found") {
+			return nil, ErrNotFound{Resource: "sentiment artifact"}
+		}
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.DatasetSentimentSample, 0)
+	for rows.Next() {
+		var row sentimentPreviewParquetRecord
+		if err := rows.Scan(
+			&row.SourceRowIndex,
+			&row.RowID,
+			&row.SentimentLabel,
+			&row.SentimentConfidence,
+			&row.SentimentReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, domain.DatasetSentimentSample{
+			SourceRowIndex:      row.SourceRowIndex,
+			RowID:               strings.TrimSpace(row.RowID),
+			SentimentLabel:      strings.TrimSpace(row.SentimentLabel),
+			SentimentConfidence: row.SentimentConfidence,
+			SentimentReason:     strings.TrimSpace(row.SentimentReason),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func exportPrepareCSVFromParquet(preparedRef string) (string, error) {
+	preparedRef = strings.TrimSpace(preparedRef)
+	if preparedRef == "" {
+		return "", ErrInvalidArgument{Message: "prepare artifact ref is required"}
+	}
+	if _, err := os.Stat(preparedRef); err != nil {
+		if os.IsNotExist(err) {
+			return "", ErrNotFound{Resource: "prepare artifact"}
+		}
+		return "", err
+	}
+
+	csvHandle, err := os.CreateTemp("", "prepare-export-*.csv")
+	if err != nil {
+		return "", err
+	}
+	csvPath := csvHandle.Name()
+	if err := csvHandle.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(csvPath); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+
+	tempHandle, err := os.CreateTemp("", "prepare-export-*.duckdb")
+	if err != nil {
+		return "", err
+	}
+	dbPath := tempHandle.Name()
+	if err := tempHandle.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	defer os.Remove(dbPath)
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+
+	query := fmt.Sprintf(
+		`COPY (
+			SELECT * FROM read_parquet('%s')
+			ORDER BY source_row_index, row_id
+		) TO '%s' (FORMAT CSV, HEADER)`,
+		escapeDuckDBLiteral(preparedRef),
+		escapeDuckDBLiteral(csvPath),
+	)
+	if _, err := db.Exec(query); err != nil {
+		_ = os.Remove(csvPath)
+		return "", err
+	}
+	return csvPath, nil
+}
+
+func exportSentimentCSVFromParquet(sentimentRef string) (string, error) {
+	sentimentRef = strings.TrimSpace(sentimentRef)
+	if sentimentRef == "" {
+		return "", ErrInvalidArgument{Message: "sentiment artifact ref is required"}
+	}
+	if _, err := os.Stat(sentimentRef); err != nil {
+		if os.IsNotExist(err) {
+			return "", ErrNotFound{Resource: "sentiment artifact"}
+		}
+		return "", err
+	}
+
+	csvHandle, err := os.CreateTemp("", "sentiment-export-*.csv")
+	if err != nil {
+		return "", err
+	}
+	csvPath := csvHandle.Name()
+	if err := csvHandle.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(csvPath); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+
+	tempHandle, err := os.CreateTemp("", "sentiment-export-*.duckdb")
+	if err != nil {
+		return "", err
+	}
+	dbPath := tempHandle.Name()
+	if err := tempHandle.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	defer os.Remove(dbPath)
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+
+	query := fmt.Sprintf(
+		`COPY (
+			SELECT * FROM read_parquet('%s')
+			ORDER BY source_row_index, row_id
+		) TO '%s' (FORMAT CSV, HEADER)`,
+		escapeDuckDBLiteral(sentimentRef),
+		escapeDuckDBLiteral(csvPath),
+	)
+	if _, err := db.Exec(query); err != nil {
+		_ = os.Remove(csvPath)
+		return "", err
+	}
+	return csvPath, nil
+}
+
 func loadClusterMembersFromParquet(clusterMembershipRef string, clusterID string, limit int, samplesOnly bool) ([]domain.ClusterMember, int, int, error) {
 	clusterMembershipRef = strings.TrimSpace(clusterMembershipRef)
 	if clusterMembershipRef == "" {
@@ -2392,6 +3531,41 @@ func anyToInt(value any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func intValueOrZero(value any) int {
+	if converted, ok := anyToInt(value); ok {
+		return converted
+	}
+	return 0
+}
+
+func intMapValue(value any) map[string]int {
+	source, ok := value.(map[string]any)
+	if !ok || len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]int, len(source))
+	for key, item := range source {
+		if count, ok := anyToInt(item); ok {
+			result[key] = count
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func cloneStringIntMap(source map[string]int) map[string]int {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]int, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }
 
 func mergeStringAny(base, overlay map[string]any) map[string]any {

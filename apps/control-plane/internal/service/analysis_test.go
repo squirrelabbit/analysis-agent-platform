@@ -215,13 +215,14 @@ func TestSubmitAnalysisUsesPlannerWhenConfigured(t *testing.T) {
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
 
 	dataType := "unstructured"
-	datasetVersionID := version.DatasetVersionID
+	datasetID := dataset.DatasetID
 	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		DataType:         &dataType,
-		Goal:             "이슈를 요약해줘",
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "이슈를 요약해줘",
 	})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
@@ -262,13 +263,14 @@ func TestSubmitAnalysisBuildsDefaultUnstructuredPlanWithIssueEvidenceSummary(t *
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
 
 	dataType := "unstructured"
-	datasetVersionID := version.DatasetVersionID
+	datasetID := dataset.DatasetID
 	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		DataType:         &dataType,
-		Goal:             "VOC 이슈를 요약해줘",
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "VOC 이슈를 요약해줘",
 	})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
@@ -285,6 +287,32 @@ func TestSubmitAnalysisBuildsDefaultUnstructuredPlanWithIssueEvidenceSummary(t *
 	}
 	if response.Plan.Plan.Steps[1].Inputs["query"] != "VOC 이슈를 요약해줘" {
 		t.Fatalf("unexpected evidence inputs: %+v", response.Plan.Plan.Steps[1].Inputs)
+	}
+}
+
+func TestSubmitAnalysisRejectsDatasetWithoutActiveVersion(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	datasetID := dataset.DatasetID
+	_, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
+		DatasetID: &datasetID,
+		Goal:      "이슈를 요약해줘",
+	})
+	if err == nil {
+		t.Fatal("expected active dataset version error")
+	}
+	if err.Error() != "active dataset version is not set" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -953,13 +981,14 @@ func TestSubmitAnalysisEnrichesEmbeddingClusterInputs(t *testing.T) {
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
 
 	dataType := "unstructured"
-	datasetVersionID := version.DatasetVersionID
+	datasetID := dataset.DatasetID
 	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		DataType:         &dataType,
-		Goal:             "주요 이슈 군집을 보여줘",
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "주요 이슈 군집을 보여줘",
 	})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
@@ -1031,13 +1060,14 @@ func TestSubmitAnalysisEnrichesSemanticSearchChunkInputs(t *testing.T) {
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
 
 	dataType := "unstructured"
-	datasetVersionID := version.DatasetVersionID
+	datasetID := dataset.DatasetID
 	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		DataType:         &dataType,
-		Goal:             "결제 오류 관련 근거를 찾아줘",
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "결제 오류 관련 근거를 찾아줘",
 	})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
@@ -1107,13 +1137,14 @@ func TestSubmitAnalysisEnrichesGarbageFilterFromDatasetProfile(t *testing.T) {
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
 
 	dataType := "unstructured"
-	datasetVersionID := version.DatasetVersionID
+	datasetID := dataset.DatasetID
 	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		DataType:         &dataType,
-		Goal:             "광고 문서를 제거해줘",
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "광고 문서를 제거해줘",
 	})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
@@ -2280,13 +2311,14 @@ func TestSubmitAnalysisEnrichesIssueSentimentSummaryInputs(t *testing.T) {
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
 
 	dataType := "unstructured"
-	datasetVersionID := version.DatasetVersionID
+	datasetID := dataset.DatasetID
 	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		DataType:         &dataType,
-		Goal:             "감성 분포를 보여줘",
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "감성 분포를 보여줘",
 	})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
@@ -2333,6 +2365,16 @@ func TestResolvedTextColumnForSkillTreatsDefaultTextAsPlaceholderWhenRawColumnDi
 
 func stringPtr(value string) *string {
 	return &value
+}
+
+func setDatasetActiveVersion(t *testing.T, repository store.Repository, dataset domain.Dataset, versionID string) {
+	t.Helper()
+	dataset.ActiveDatasetVersionID = stringPtr(versionID)
+	now := time.Now().UTC()
+	dataset.ActiveVersionUpdatedAt = &now
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset activation error: %v", err)
+	}
 }
 
 func timePointer(value time.Time) *time.Time {

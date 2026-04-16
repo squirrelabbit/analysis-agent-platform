@@ -65,7 +65,7 @@ func NewServer(cfg config.Config) *Server {
 }
 
 func (s *Server) Handler() stdhttp.Handler {
-	return s.mux
+	return s.withCORS(s.mux)
 }
 
 func (s *Server) RunStartupReconciliation() error {
@@ -104,6 +104,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /projects", s.handleListProjects)
 	s.mux.HandleFunc("GET /projects/{project_id}", s.handleGetProject)
+	s.mux.HandleFunc("GET /projects/{project_id}/prompts", s.handleListProjectPrompts)
+	s.mux.HandleFunc("POST /projects/{project_id}/prompts", s.handleSaveProjectPrompt)
+	s.mux.HandleFunc("GET /projects/{project_id}/prompt_defaults", s.handleGetProjectPromptDefaults)
+	s.mux.HandleFunc("PUT /projects/{project_id}/prompt_defaults", s.handleUpdateProjectPromptDefaults)
 	s.mux.HandleFunc("POST /projects/{project_id}/scenarios", s.handleCreateScenario)
 	s.mux.HandleFunc("POST /projects/{project_id}/scenarios/import", s.handleImportScenarios)
 	s.mux.HandleFunc("GET /projects/{project_id}/scenarios", s.handleListScenarios)
@@ -113,10 +117,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets", s.handleCreateDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets", s.handleListDatasets)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}", s.handleGetDataset)
+	s.mux.HandleFunc("PUT /projects/{project_id}/datasets/{dataset_id}/active_version", s.handleActivateDatasetVersion)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/active_version", s.handleDeactivateDatasetVersion)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/uploads", s.handleUploadDataset)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions", s.handleCreateDatasetVersion)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions", s.handleListDatasetVersions)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}", s.handleGetDatasetVersion)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_preview", s.handleGetPreparePreview)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_download", s.handleDownloadPreparedDataset)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_preview", s.handleGetSentimentPreview)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_download", s.handleDownloadSentimentDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clusters/{cluster_id}/members", s.handleGetClusterMembers)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare", s.handleBuildPrepare)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs", s.handleCreatePrepareJob)
@@ -129,8 +139,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /projects/{project_id}/dataset_build_jobs/{job_id}", s.handleGetDatasetBuildJob)
 	s.mux.HandleFunc("GET /dataset_profiles", s.handleGetDatasetProfileRegistry)
 	s.mux.HandleFunc("GET /prompt_catalog", s.handleGetPromptCatalog)
+	s.mux.HandleFunc("GET /skill_policy_catalog", s.handleGetSkillPolicyCatalog)
 	s.mux.HandleFunc("GET /rule_catalog", s.handleGetRuleCatalog)
 	s.mux.HandleFunc("GET /dataset_profiles/validate", s.handleValidateDatasetProfiles)
+	s.mux.HandleFunc("GET /skill_policies/validate", s.handleValidateSkillPolicies)
 	s.mux.HandleFunc("POST /projects/{project_id}/analysis_requests", s.handleSubmitAnalysis)
 	s.mux.HandleFunc("GET /projects/{project_id}/analysis_requests/{request_id}", s.handleGetRequest)
 	s.mux.HandleFunc("GET /projects/{project_id}/plans/{plan_id}", s.handleGetPlan)
@@ -147,6 +159,58 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /projects/{project_id}/executions/diff", s.handleDiffExecutions)
 	s.mux.HandleFunc("POST /projects/{project_id}/report_drafts", s.handleCreateReportDraft)
 	s.mux.HandleFunc("GET /projects/{project_id}/report_drafts/{draft_id}", s.handleGetReportDraft)
+}
+
+func (s *Server) withCORS(next stdhttp.Handler) stdhttp.Handler {
+	return stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		appendVary(w.Header(), "Origin")
+		appendVary(w.Header(), "Access-Control-Request-Method")
+		appendVary(w.Header(), "Access-Control-Request-Headers")
+
+		allowedOrigin, ok := s.allowedOrigin(r.Header.Get("Origin"))
+		if ok {
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Max-Age", "600")
+
+			allowedHeaders := strings.TrimSpace(r.Header.Get("Access-Control-Request-Headers"))
+			if allowedHeaders == "" {
+				allowedHeaders = "Accept, Authorization, Content-Type"
+			}
+			w.Header().Set("Access-Control-Allow-Headers", allowedHeaders)
+		}
+
+		if r.Method == stdhttp.MethodOptions && strings.TrimSpace(r.Header.Get("Access-Control-Request-Method")) != "" {
+			if ok {
+				w.WriteHeader(stdhttp.StatusNoContent)
+				return
+			}
+			w.WriteHeader(stdhttp.StatusForbidden)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) allowedOrigin(origin string) (string, bool) {
+	candidate := strings.TrimSpace(origin)
+	if candidate == "" {
+		return "", false
+	}
+	for _, allowed := range s.cfg.CORSAllowedOrigins {
+		value := strings.TrimSpace(allowed)
+		if value == "" {
+			continue
+		}
+		if value == "*" {
+			return "*", true
+		}
+		if strings.EqualFold(value, candidate) {
+			return candidate, true
+		}
+	}
+	return "", false
 }
 
 func writeJSON(w stdhttp.ResponseWriter, status int, payload any) {
@@ -214,6 +278,20 @@ func (s *Server) handleSwaggerUI(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	_, _ = io.WriteString(w, swaggerUIHTML(r))
 }
 
+func appendVary(header stdhttp.Header, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	for _, existing := range header.Values("Vary") {
+		for _, part := range strings.Split(existing, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), value) {
+				return
+			}
+		}
+	}
+	header.Add("Vary", value)
+}
+
 func (s *Server) handleGetProject(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	projectID := r.PathValue("project_id")
 	project, err := s.projectService.GetProject(projectID)
@@ -226,6 +304,52 @@ func (s *Server) handleGetProject(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 
 func (s *Server) handleListProjects(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 	response, err := s.projectService.ListProjects()
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleListProjectPrompts(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.ListProjectPrompts(r.PathValue("project_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleSaveProjectPrompt(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ProjectPromptUpsertRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.SaveProjectPrompt(r.PathValue("project_id"), payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+func (s *Server) handleGetProjectPromptDefaults(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.GetProjectPromptDefaults(r.PathValue("project_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleUpdateProjectPromptDefaults(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ProjectPromptDefaultsUpdateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.UpdateProjectPromptDefaults(r.PathValue("project_id"), payload)
 	if err != nil {
 		s.writeServiceError(w, err)
 		return
@@ -357,6 +481,36 @@ func (s *Server) handleListDatasets(w stdhttp.ResponseWriter, r *stdhttp.Request
 	writeJSON(w, stdhttp.StatusOK, response)
 }
 
+func (s *Server) handleActivateDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetActiveVersionUpdateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.ActivateDatasetVersion(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		payload.DatasetVersionID,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDeactivateDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.DeactivateDatasetVersion(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
 func (s *Server) handleUploadDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		writeError(w, stdhttp.StatusBadRequest, "invalid multipart form")
@@ -415,6 +569,114 @@ func (s *Server) handleGetDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp.Re
 		return
 	}
 	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleGetPreparePreview(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	query := domain.DatasetPreparePreviewQuery{}
+	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			writeError(w, stdhttp.StatusBadRequest, "limit must be an integer")
+			return
+		}
+		query.Limit = &parsed
+	}
+	response, err := s.datasetService.GetPreparePreview(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		query,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDownloadPreparedDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	artifactPath, filename, err := s.datasetService.ResolvePrepareDownload(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	defer os.Remove(artifactPath)
+	handle, err := os.Open(artifactPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.writeServiceError(w, service.ErrNotFound{Resource: "prepare artifact"})
+			return
+		}
+		s.writeServiceError(w, err)
+		return
+	}
+	defer handle.Close()
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
+	w.WriteHeader(stdhttp.StatusOK)
+	if _, err := w.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
+		return
+	}
+	_, _ = io.Copy(w, handle)
+}
+
+func (s *Server) handleGetSentimentPreview(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	query := domain.DatasetSentimentPreviewQuery{}
+	if value := strings.TrimSpace(r.URL.Query().Get("limit")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			writeError(w, stdhttp.StatusBadRequest, "limit must be an integer")
+			return
+		}
+		query.Limit = &parsed
+	}
+	response, err := s.datasetService.GetSentimentPreview(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		query,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDownloadSentimentDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	artifactPath, filename, err := s.datasetService.ResolveSentimentDownload(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	defer os.Remove(artifactPath)
+	handle, err := os.Open(artifactPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.writeServiceError(w, service.ErrNotFound{Resource: "sentiment artifact"})
+			return
+		}
+		s.writeServiceError(w, err)
+		return
+	}
+	defer handle.Close()
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
+	w.WriteHeader(stdhttp.StatusOK)
+	if _, err := w.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
+		return
+	}
+	_, _ = io.Copy(w, handle)
 }
 
 func (s *Server) handleListDatasetVersions(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -530,15 +792,26 @@ func datasetVersionCreateRequestFromMultipart(form *multipart.Form) (domain.Data
 		}
 		payload.Profile = &profile
 	}
+	if value, ok, err := optionalBoolFormValue(form, "activate_on_create"); err != nil {
+		return payload, err
+	} else if ok {
+		payload.ActivateOnCreate = &value
+	}
 	if value, ok, err := optionalBoolFormValue(form, "prepare_required"); err != nil {
 		return payload, err
 	} else if ok {
 		payload.PrepareRequired = &value
 	}
+	if value := firstFormValue(form, "prepare_llm_mode"); value != "" {
+		payload.PrepareLLMMode = stringPtr(value)
+	}
 	if value, ok, err := optionalBoolFormValue(form, "sentiment_required"); err != nil {
 		return payload, err
 	} else if ok {
 		payload.SentimentRequired = &value
+	}
+	if value := firstFormValue(form, "sentiment_llm_mode"); value != "" {
+		payload.SentimentLLMMode = stringPtr(value)
 	}
 	if value, ok, err := optionalBoolFormValue(form, "embedding_required"); err != nil {
 		return payload, err
@@ -689,6 +962,15 @@ func (s *Server) handleValidateDatasetProfiles(w stdhttp.ResponseWriter, _ *stdh
 	writeJSON(w, stdhttp.StatusOK, response)
 }
 
+func (s *Server) handleValidateSkillPolicies(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	response, err := s.datasetService.ValidateSkillPolicies()
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
 func (s *Server) handleGetDatasetProfileRegistry(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 	response, err := s.datasetService.GetDatasetProfileRegistry()
 	if err != nil {
@@ -700,6 +982,15 @@ func (s *Server) handleGetDatasetProfileRegistry(w stdhttp.ResponseWriter, _ *st
 
 func (s *Server) handleGetPromptCatalog(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 	response, err := s.datasetService.GetPromptCatalog()
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleGetSkillPolicyCatalog(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	response, err := s.datasetService.GetSkillPolicyCatalog()
 	if err != nil {
 		s.writeServiceError(w, err)
 		return
@@ -921,10 +1212,13 @@ func writeError(w stdhttp.ResponseWriter, status int, message string) {
 
 func (s *Server) writeServiceError(w stdhttp.ResponseWriter, err error) {
 	var invalid service.ErrInvalidArgument
+	var conflict service.ErrConflict
 	var missing service.ErrNotFound
 	switch {
 	case errors.As(err, &invalid):
 		writeError(w, stdhttp.StatusBadRequest, invalid.Error())
+	case errors.As(err, &conflict):
+		writeError(w, stdhttp.StatusConflict, conflict.Error())
 	case errors.As(err, &missing):
 		writeError(w, stdhttp.StatusNotFound, missing.Error())
 	default:

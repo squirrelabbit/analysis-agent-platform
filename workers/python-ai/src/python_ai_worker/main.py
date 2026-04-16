@@ -8,6 +8,7 @@ from typing import Any
 
 from .config import load_config
 from .runtime.rule_config import rule_config_status
+from .skill_policy_registry import skill_policy_status, validate_skill_policies
 from .skill_bundle import bundle_version
 from .task_router import capability_names, capability_payload, run_task
 
@@ -22,10 +23,13 @@ def describe() -> None:
         "llm_provider": config.llm_provider,
         "anthropic_model": config.anthropic_model,
         "anthropic_prepare_model": config.anthropic_prepare_model,
+        "anthropic_sentiment_model": config.anthropic_sentiment_model,
         "openai_embedding_model": config.openai_embedding_model,
         "openai_embedding_dimensions": config.openai_embedding_dimensions,
         "local_embedding_model": config.local_embedding_model,
         "rule_config": rule_config_status(),
+        "skill_policy": skill_policy_status(),
+        "skill_policy_validation": validate_skill_policies(),
         "skill_bundle_version": bundle_version(),
         "capabilities": capability_names(),
     }
@@ -45,10 +49,13 @@ def make_handler(config: Any) -> type[BaseHTTPRequestHandler]:
                         "llm_provider": config.llm_provider,
                         "anthropic_model": config.anthropic_model,
                         "anthropic_prepare_model": config.anthropic_prepare_model,
+                        "anthropic_sentiment_model": config.anthropic_sentiment_model,
                         "openai_embedding_model": config.openai_embedding_model,
                         "openai_embedding_dimensions": config.openai_embedding_dimensions,
                         "local_embedding_model": config.local_embedding_model,
                         "rule_config": rule_config_status(),
+                        "skill_policy": skill_policy_status(),
+                        "skill_policy_validation": validate_skill_policies(),
                         "skill_bundle_version": bundle_version(),
                         "capabilities": capability_names(),
                     },
@@ -105,10 +112,13 @@ def serve() -> None:
                 "llm_provider": config.llm_provider,
                 "anthropic_model": config.anthropic_model,
                 "anthropic_prepare_model": config.anthropic_prepare_model,
+                "anthropic_sentiment_model": config.anthropic_sentiment_model,
                 "openai_embedding_model": config.openai_embedding_model,
                 "openai_embedding_dimensions": config.openai_embedding_dimensions,
                 "local_embedding_model": config.local_embedding_model,
                 "rule_config": rule_config_status(),
+                "skill_policy": skill_policy_status(),
+                "skill_policy_validation": validate_skill_policies(),
                 "skill_bundle_version": bundle_version(),
                 "capabilities": capability_names(),
             },
