@@ -14,6 +14,11 @@ type Repository interface {
 	SaveProject(project domain.Project) error
 	GetProject(projectID string) (domain.Project, error)
 	ListProjects() ([]domain.Project, error)
+	SaveProjectPrompt(prompt domain.ProjectPrompt) error
+	GetProjectPrompt(projectID, version, operation string) (domain.ProjectPrompt, error)
+	ListProjectPrompts(projectID string) ([]domain.ProjectPrompt, error)
+	SaveProjectPromptDefaults(defaults domain.ProjectPromptDefaults) error
+	GetProjectPromptDefaults(projectID string) (domain.ProjectPromptDefaults, error)
 	SaveScenario(scenario domain.Scenario) error
 	GetScenario(projectID, scenarioID string) (domain.Scenario, error)
 	ListScenarios(projectID string) ([]domain.Scenario, error)

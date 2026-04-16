@@ -18,3 +18,11 @@ func (e ErrNotFound) Error() string {
 	}
 	return e.Resource + " not found"
 }
+
+type ErrConflict struct {
+	Message string
+}
+
+func (e ErrConflict) Error() string {
+	return e.Message
+}

@@ -11,6 +11,7 @@ type Config struct {
 	BindAddr                                string
 	StoreBackend                            string
 	DatabaseURL                             string
+	CORSAllowedOrigins                      []string
 	OpenAPIPath                             string
 	DatasetProfilesPath                     string
 	PromptTemplatesDir                      string
@@ -25,6 +26,9 @@ type Config struct {
 	TemporalNamespace                       string
 	TemporalTaskQueue                       string
 	TemporalBuildTaskQueue                  string
+	TemporalPersistenceMode                 string
+	TemporalRetentionMode                   string
+	TemporalRecoveryMode                    string
 	TemporalAnalysisMaxConcurrentActivities int
 	TemporalBuildMaxConcurrentActivities    int
 	DatasetBuildPrepareMaxConcurrent        int
@@ -42,6 +46,10 @@ func Load() Config {
 	if storeBackend == "" {
 		storeBackend = "memory"
 	}
+	corsAllowedOrigins := splitCommaSeparated(
+		os.Getenv("CORS_ALLOWED_ORIGINS"),
+		defaultCORSAllowedOrigins(),
+	)
 	workspaceRoot := detectWorkspaceRoot()
 	openAPIPath := resolvePath(os.Getenv("OPENAPI_PATH"), filepath.Join(workspaceRoot, "docs", "api", "openapi.yaml"), workspaceRoot)
 	datasetProfilesPath := resolvePath(os.Getenv("DATASET_PROFILES_PATH"), filepath.Join(workspaceRoot, "config", "dataset_profiles.json"), workspaceRoot)
@@ -82,6 +90,18 @@ func Load() Config {
 	if temporalBuildTaskQueue == "" {
 		temporalBuildTaskQueue = temporalTaskQueue + "-build"
 	}
+	temporalPersistenceMode := os.Getenv("TEMPORAL_PERSISTENCE_MODE")
+	if temporalPersistenceMode == "" {
+		temporalPersistenceMode = "dev_ephemeral"
+	}
+	temporalRetentionMode := os.Getenv("TEMPORAL_RETENTION_MODE")
+	if temporalRetentionMode == "" {
+		temporalRetentionMode = "temporal_dev_default"
+	}
+	temporalRecoveryMode := os.Getenv("TEMPORAL_RECOVERY_MODE")
+	if temporalRecoveryMode == "" {
+		temporalRecoveryMode = "startup_reconciliation"
+	}
 	analysisMaxConcurrentActivities := envPositiveInt("TEMPORAL_ANALYSIS_MAX_CONCURRENT_ACTIVITIES", 8)
 	buildMaxConcurrentActivities := envPositiveInt("TEMPORAL_BUILD_MAX_CONCURRENT_ACTIVITIES", 4)
 	prepareMaxConcurrent := envPositiveInt("DATASET_BUILD_PREPARE_MAX_CONCURRENT", 3)
@@ -92,6 +112,7 @@ func Load() Config {
 		BindAddr:                                addr,
 		StoreBackend:                            storeBackend,
 		DatabaseURL:                             os.Getenv("DATABASE_URL"),
+		CORSAllowedOrigins:                      corsAllowedOrigins,
 		OpenAPIPath:                             openAPIPath,
 		DatasetProfilesPath:                     datasetProfilesPath,
 		PromptTemplatesDir:                      promptTemplatesDir,
@@ -106,6 +127,9 @@ func Load() Config {
 		TemporalNamespace:                       temporalNamespace,
 		TemporalTaskQueue:                       temporalTaskQueue,
 		TemporalBuildTaskQueue:                  temporalBuildTaskQueue,
+		TemporalPersistenceMode:                 temporalPersistenceMode,
+		TemporalRetentionMode:                   temporalRetentionMode,
+		TemporalRecoveryMode:                    temporalRecoveryMode,
 		TemporalAnalysisMaxConcurrentActivities: analysisMaxConcurrentActivities,
 		TemporalBuildMaxConcurrentActivities:    buildMaxConcurrentActivities,
 		DatasetBuildPrepareMaxConcurrent:        prepareMaxConcurrent,
@@ -162,4 +186,39 @@ func envPositiveInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func splitCommaSeparated(value string, fallback []string) []string {
+	resolved := strings.TrimSpace(value)
+	if resolved == "" {
+		return append([]string(nil), fallback...)
+	}
+
+	parts := strings.Split(resolved, ",")
+	items := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		return append([]string(nil), fallback...)
+	}
+	return items
+}
+
+func defaultCORSAllowedOrigins() []string {
+	return []string{
+		"http://127.0.0.1:4173",
+		"http://localhost:4173",
+		"http://127.0.0.1:5173",
+		"http://localhost:5173",
+	}
 }

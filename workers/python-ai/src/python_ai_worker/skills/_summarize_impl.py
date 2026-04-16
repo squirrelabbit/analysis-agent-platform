@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-"""Core analysis and evidence skill handlers."""
+"""Private summarize-layer skill implementations."""
 
 from collections import Counter
 from typing import Any
 
 from .. import runtime as rt
-
 
 def _cluster_membership_ref(*artifacts: dict[str, Any] | None) -> str:
     for artifact in artifacts:
@@ -16,6 +15,30 @@ def _cluster_membership_ref(*artifacts: dict[str, Any] | None) -> str:
         if value:
             return value
     return ""
+
+
+def _cluster_execution_meta(*artifacts: dict[str, Any] | None) -> dict[str, Any]:
+    meta = {
+        "cluster_execution_mode": "",
+        "cluster_materialization_scope": "",
+        "cluster_materialized_ref_used": False,
+        "cluster_fallback_reason": "",
+    }
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        execution_mode = str(artifact.get("cluster_execution_mode") or "").strip()
+        if execution_mode and not meta["cluster_execution_mode"]:
+            meta["cluster_execution_mode"] = execution_mode
+        scope = str(artifact.get("cluster_materialization_scope") or "").strip()
+        if scope and not meta["cluster_materialization_scope"]:
+            meta["cluster_materialization_scope"] = scope
+        if bool(artifact.get("cluster_materialized_ref_used")):
+            meta["cluster_materialized_ref_used"] = True
+        fallback_reason = str(artifact.get("cluster_fallback_reason") or "").strip()
+        if fallback_reason and not meta["cluster_fallback_reason"]:
+            meta["cluster_fallback_reason"] = fallback_reason
+    return meta
 
 
 def _cluster_samples_from_membership(cluster_membership_ref: str, cluster_id: str, sample_n: int) -> list[dict[str, Any]]:
@@ -92,6 +115,7 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
     labeled_clusters = rt._find_prior_artifact(payload.get("prior_artifacts"), "cluster_label_candidates")
     embedded_clusters = rt._find_prior_artifact(payload.get("prior_artifacts"), "embedding_cluster")
     cluster_membership_ref = _cluster_membership_ref(labeled_clusters, embedded_clusters)
+    cluster_execution_meta = _cluster_execution_meta(labeled_clusters, embedded_clusters)
 
     clusters: list[dict[str, Any]] = []
     if labeled_clusters:
@@ -181,6 +205,10 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
             "cluster_membership_ref": cluster_membership_ref,
+            "cluster_execution_mode": cluster_execution_meta["cluster_execution_mode"],
+            "cluster_materialization_scope": cluster_execution_meta["cluster_materialization_scope"],
+            "cluster_materialized_ref_used": cluster_execution_meta["cluster_materialized_ref_used"],
+            "cluster_fallback_reason": cluster_execution_meta["cluster_fallback_reason"],
             "summary": summary,
             "clusters": ranked_clusters,
         },
@@ -510,15 +538,3 @@ def run_unstructured_issue_summary(payload: dict[str, Any]) -> dict[str, Any]:
         },
     }
 
-
-__all__ = [
-    "run_evidence_pack",
-    "run_issue_breakdown_summary",
-    "run_issue_cluster_summary",
-    "run_issue_evidence_summary",
-    "run_issue_period_compare",
-    "run_issue_sentiment_summary",
-    "run_issue_taxonomy_summary",
-    "run_issue_trend_summary",
-    "run_unstructured_issue_summary",
-]

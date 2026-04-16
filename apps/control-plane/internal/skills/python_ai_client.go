@@ -84,6 +84,7 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 			PriorArtifacts: priorArtifacts,
 		})
 		if err != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
 			return ExecutionRunResult{}, err
 		}
 
@@ -94,12 +95,14 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 			bytes.NewReader(payload),
 		)
 		if err != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
 			return ExecutionRunResult{}, err
 		}
 		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
 			return ExecutionRunResult{}, err
 		}
 
@@ -107,26 +110,33 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 		decodeErr := json.NewDecoder(resp.Body).Decode(&taskResponse)
 		closeErr := resp.Body.Close()
 		if decodeErr != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, decodeErr)
 			return ExecutionRunResult{}, decodeErr
 		}
 		if closeErr != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, closeErr)
 			return ExecutionRunResult{}, closeErr
 		}
 		if resp.StatusCode >= 300 {
-			return ExecutionRunResult{}, fmt.Errorf("python ai worker returned %d", resp.StatusCode)
+			err = fmt.Errorf("python ai worker returned %d", resp.StatusCode)
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
+			return ExecutionRunResult{}, err
 		}
 
 		runtimeArtifact, err := compactPythonArtifactForRuntime(step, taskResponse.Artifact)
 		if err != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
 			return ExecutionRunResult{}, err
 		}
 		artifactJSON, err := json.Marshal(runtimeArtifact)
 		if err != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
 			return ExecutionRunResult{}, err
 		}
 		runtimeArtifacts[artifactKey(step)] = json.RawMessage(artifactJSON)
 		storedArtifact, err := compactPythonArtifactForStorage(step, taskResponse.Artifact)
 		if err != nil {
+			result.StepHooks = appendFailedStepHooks(ctx, result.StepHooks, c.Hooks, execution, requestStep, err)
 			return ExecutionRunResult{}, err
 		}
 		result.Artifacts[artifactKey(step)] = storedArtifact
@@ -141,10 +151,11 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 			execution,
 			requestStep,
 			StepHookOutcome{
-				Status:        "completed",
-				ArtifactBytes: len(storedArtifact),
-				ArtifactRef:   stringValue(taskResponse.Artifact["artifact_ref"]),
-				UsageSummary:  extractUsageSummary(taskResponse),
+				Status:         "completed",
+				ArtifactBytes:  len(storedArtifact),
+				ArtifactRef:    stringValue(taskResponse.Artifact["artifact_ref"]),
+				UsageSummary:   extractUsageSummary(taskResponse),
+				StoredArtifact: storedArtifact,
 			},
 		)
 		if err != nil {
@@ -198,90 +209,7 @@ func (c PythonAIClient) prepareStep(execution domain.ExecutionSummary, step doma
 }
 
 func compactPythonArtifactForStorage(step domain.SkillPlanStep, artifact map[string]any) (string, error) {
-	ref := strings.TrimSpace(stringValue(artifact["artifact_ref"]))
-	if ref != "" {
-		var compacted map[string]any
-		switch step.SkillName {
-		case "garbage_filter":
-			compacted = map[string]any{
-				"skill_name":            artifact["skill_name"],
-				"step_id":               artifact["step_id"],
-				"dataset_name":          artifact["dataset_name"],
-				"garbage_rule_names":    artifact["garbage_rule_names"],
-				"artifact_storage_mode": artifact["artifact_storage_mode"],
-				"artifact_ref":          ref,
-				"artifact_format":       artifact["artifact_format"],
-				"row_id_column":         artifact["row_id_column"],
-				"source_index_column":   artifact["source_index_column"],
-				"status_column":         artifact["status_column"],
-				"matched_rules_column":  artifact["matched_rules_column"],
-				"summary":               artifact["summary"],
-				"removed_samples":       artifact["removed_samples"],
-			}
-		case "document_filter":
-			compacted = map[string]any{
-				"skill_name":            artifact["skill_name"],
-				"step_id":               artifact["step_id"],
-				"dataset_name":          artifact["dataset_name"],
-				"query":                 artifact["query"],
-				"artifact_storage_mode": artifact["artifact_storage_mode"],
-				"artifact_ref":          ref,
-				"artifact_format":       artifact["artifact_format"],
-				"row_id_column":         artifact["row_id_column"],
-				"source_index_column":   artifact["source_index_column"],
-				"rank_column":           artifact["rank_column"],
-				"score_column":          artifact["score_column"],
-				"summary":               artifact["summary"],
-				"matches":               artifact["matches"],
-			}
-		case "deduplicate_documents":
-			compacted = map[string]any{
-				"skill_name":                    artifact["skill_name"],
-				"step_id":                       artifact["step_id"],
-				"dataset_name":                  artifact["dataset_name"],
-				"artifact_storage_mode":         artifact["artifact_storage_mode"],
-				"artifact_ref":                  ref,
-				"artifact_format":               artifact["artifact_format"],
-				"row_id_column":                 artifact["row_id_column"],
-				"source_index_column":           artifact["source_index_column"],
-				"canonical_row_id_column":       artifact["canonical_row_id_column"],
-				"canonical_source_index_column": artifact["canonical_source_index_column"],
-				"group_id_column":               artifact["group_id_column"],
-				"status_column":                 artifact["status_column"],
-				"similarity_column":             artifact["similarity_column"],
-				"member_count_column":           artifact["member_count_column"],
-				"summary":                       artifact["summary"],
-				"duplicate_records":             artifact["duplicate_records"],
-				"duplicate_groups_preview":      compactDuplicateGroupsPreview(artifact["duplicate_groups"]),
-			}
-		case "sentence_split":
-			compacted = map[string]any{
-				"skill_name":            artifact["skill_name"],
-				"step_id":               artifact["step_id"],
-				"dataset_name":          artifact["dataset_name"],
-				"language":              artifact["language"],
-				"artifact_storage_mode": artifact["artifact_storage_mode"],
-				"artifact_ref":          ref,
-				"artifact_format":       artifact["artifact_format"],
-				"row_id_column":         artifact["row_id_column"],
-				"source_index_column":   artifact["source_index_column"],
-				"sentence_index_column": artifact["sentence_index_column"],
-				"sentence_text_column":  artifact["sentence_text_column"],
-				"char_start_column":     artifact["char_start_column"],
-				"char_end_column":       artifact["char_end_column"],
-				"summary":               artifact["summary"],
-				"sample_documents":      artifact["sample_documents"],
-			}
-		}
-		if compacted != nil {
-			payload, err := json.Marshal(compacted)
-			if err != nil {
-				return "", err
-			}
-			return string(payload), nil
-		}
-	}
-	payload, err := json.Marshal(artifact)
+	payload, err := json.Marshal(compactExecutionArtifactMap(step, artifact))
 	if err != nil {
 		return "", err
 	}

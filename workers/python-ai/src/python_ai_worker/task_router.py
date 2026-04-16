@@ -5,6 +5,7 @@ from typing import Any
 
 from .planner import run_planner
 from .prompt_registry import prompt_catalog
+from .skill_policy_registry import skill_policy_catalog, validate_skill_policies
 from .runtime.rule_config import (
     resolve_default_garbage_rule_names,
     resolve_default_prepare_regex_rule_names,
@@ -12,7 +13,28 @@ from .runtime.rule_config import (
     resolve_prepare_regex_rules,
 )
 from .skill_bundle import bundle_version, capability_skills
-from .skills.core import (
+from .skills.aggregate import (
+    run_dictionary_tagging,
+    run_keyword_frequency,
+    run_meta_group_count,
+    run_noun_frequency,
+    run_time_bucket_count,
+)
+from .skills.dataset_build import run_dataset_cluster_build, run_dataset_prepare, run_embedding, run_sentiment_label
+from .skills.preprocess import (
+    run_deduplicate_documents,
+    run_document_filter,
+    run_document_sample,
+    run_garbage_filter,
+    run_sentence_split,
+)
+from .skills.presentation import run_execution_final_answer
+from .skills.retrieve import (
+    run_cluster_label_candidates,
+    run_embedding_cluster,
+    run_semantic_search,
+)
+from .skills.summarize import (
     run_evidence_pack,
     run_issue_breakdown_summary,
     run_issue_cluster_summary,
@@ -22,23 +44,6 @@ from .skills.core import (
     run_issue_taxonomy_summary,
     run_issue_trend_summary,
     run_unstructured_issue_summary,
-)
-from .skills.dataset_build import run_dataset_cluster_build, run_dataset_prepare, run_embedding, run_sentiment_label
-from .skills.presentation import run_execution_final_answer
-from .skills.support import (
-    run_cluster_label_candidates,
-    run_deduplicate_documents,
-    run_dictionary_tagging,
-    run_document_filter,
-    run_document_sample,
-    run_embedding_cluster,
-    run_garbage_filter,
-    run_keyword_frequency,
-    run_meta_group_count,
-    run_noun_frequency,
-    run_semantic_search,
-    run_sentence_split,
-    run_time_bucket_count,
 )
 
 
@@ -52,6 +57,10 @@ PLANNER_CAPABILITY = TaskCapability(name="planner", description="Generate replay
 FINAL_ANSWER_CAPABILITY = TaskCapability(
     name="execution_final_answer",
     description="Generate grounded final answers from completed execution results.",
+)
+DATASET_CLUSTER_BUILD_CAPABILITY = TaskCapability(
+    name="dataset_cluster_build",
+    description="Materialize dataset-level cluster summary and membership artifacts.",
 )
 
 
@@ -67,6 +76,8 @@ def capability_payload() -> dict[str, Any]:
             for item in supported_capabilities()
         ],
         "prompt_catalog": prompt_catalog(),
+        "skill_policy_catalog": skill_policy_catalog(),
+        "skill_policy_validation": validate_skill_policies(),
         "rule_catalog": {
             "available_prepare_regex_rule_names": sorted(resolve_prepare_regex_rules().keys()),
             "default_prepare_regex_rule_names": resolve_default_prepare_regex_rule_names(),
@@ -77,11 +88,13 @@ def capability_payload() -> dict[str, Any]:
 
 
 def supported_capabilities() -> list[TaskCapability]:
-    capabilities = [PLANNER_CAPABILITY, FINAL_ANSWER_CAPABILITY]
+    handlers = task_handlers()
+    capabilities = [PLANNER_CAPABILITY, FINAL_ANSWER_CAPABILITY, DATASET_CLUSTER_BUILD_CAPABILITY]
     for skill in capability_skills():
         name = str(skill.get("name") or "").strip()
         description = str(skill.get("description") or "").strip()
-        if not name:
+        engine = str(skill.get("engine") or "").strip()
+        if not name or engine != "python-ai" or name not in handlers:
             continue
         capabilities.append(TaskCapability(name=name, description=description))
     return capabilities

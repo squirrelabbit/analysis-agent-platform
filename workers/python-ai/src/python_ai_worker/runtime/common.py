@@ -443,6 +443,34 @@ def _looks_cluster_goal(goal: str) -> bool:
     return any(keyword in goal for keyword in keywords)
 
 
+def _looks_cluster_subset_goal(goal: str) -> bool:
+    keywords = (
+        "filter",
+        "filtered",
+        "subset",
+        "within",
+        "among",
+        "only",
+        "specific",
+        "recent",
+        "channel",
+        "product",
+        "region",
+        "기간",
+        "필터",
+        "조건",
+        "일부",
+        "특정",
+        "최근",
+        "중에서",
+        "만",
+        "채널",
+        "제품",
+        "지역",
+    )
+    return any(keyword in goal for keyword in keywords)
+
+
 def _looks_taxonomy_goal(goal: str) -> bool:
     keywords = ("taxonomy", "tag", "category", "categorize", "분류", "분류체계", "카테고리", "태그")
     return any(keyword in goal for keyword in keywords)
@@ -806,6 +834,7 @@ __all__ = [
     "_load_cluster_membership_rows",
     "_looks_breakdown_goal",
     "_looks_cluster_goal",
+    "_looks_cluster_subset_goal",
     "_looks_compare_goal",
     "_looks_duplicate_goal",
     "_looks_noun_frequency_goal",

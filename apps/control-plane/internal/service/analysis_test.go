@@ -215,13 +215,14 @@ func TestSubmitAnalysisUsesPlannerWhenConfigured(t *testing.T) {
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
 
 	dataType := "unstructured"
-	datasetVersionID := version.DatasetVersionID
+	datasetID := dataset.DatasetID
 	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		DataType:         &dataType,
-		Goal:             "이슈를 요약해줘",
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "이슈를 요약해줘",
 	})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
@@ -262,13 +263,14 @@ func TestSubmitAnalysisBuildsDefaultUnstructuredPlanWithIssueEvidenceSummary(t *
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
 
 	dataType := "unstructured"
-	datasetVersionID := version.DatasetVersionID
+	datasetID := dataset.DatasetID
 	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		DataType:         &dataType,
-		Goal:             "VOC 이슈를 요약해줘",
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "VOC 이슈를 요약해줘",
 	})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
@@ -285,6 +287,32 @@ func TestSubmitAnalysisBuildsDefaultUnstructuredPlanWithIssueEvidenceSummary(t *
 	}
 	if response.Plan.Plan.Steps[1].Inputs["query"] != "VOC 이슈를 요약해줘" {
 		t.Fatalf("unexpected evidence inputs: %+v", response.Plan.Plan.Steps[1].Inputs)
+	}
+}
+
+func TestSubmitAnalysisRejectsDatasetWithoutActiveVersion(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	datasetID := dataset.DatasetID
+	_, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
+		DatasetID: &datasetID,
+		Goal:      "이슈를 요약해줘",
+	})
+	if err == nil {
+		t.Fatal("expected active dataset version error")
+	}
+	if err.Error() != "active dataset version is not set" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -953,13 +981,14 @@ func TestSubmitAnalysisEnrichesEmbeddingClusterInputs(t *testing.T) {
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
 
 	dataType := "unstructured"
-	datasetVersionID := version.DatasetVersionID
+	datasetID := dataset.DatasetID
 	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		DataType:         &dataType,
-		Goal:             "주요 이슈 군집을 보여줘",
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "주요 이슈 군집을 보여줘",
 	})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
@@ -1031,13 +1060,14 @@ func TestSubmitAnalysisEnrichesSemanticSearchChunkInputs(t *testing.T) {
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
 
 	dataType := "unstructured"
-	datasetVersionID := version.DatasetVersionID
+	datasetID := dataset.DatasetID
 	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		DataType:         &dataType,
-		Goal:             "결제 오류 관련 근거를 찾아줘",
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "결제 오류 관련 근거를 찾아줘",
 	})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
@@ -1107,13 +1137,14 @@ func TestSubmitAnalysisEnrichesGarbageFilterFromDatasetProfile(t *testing.T) {
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
 
 	dataType := "unstructured"
-	datasetVersionID := version.DatasetVersionID
+	datasetID := dataset.DatasetID
 	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		DataType:         &dataType,
-		Goal:             "광고 문서를 제거해줘",
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "광고 문서를 제거해줘",
 	})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
@@ -1324,6 +1355,357 @@ func TestBuildExecutionResultClearsStaleWaitingDiagnosticsAfterCompletion(t *tes
 	}
 }
 
+func TestBuildExecutionProgressReportsRunningStepAndPreview(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-progress",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-1",
+		Status:      "running",
+		Artifacts: map[string]string{
+			"step:step-1:issue_evidence_summary": `{"skill_name":"issue_evidence_summary","step_id":"step-1","summary":"partial summary","selection_source":"semantic_search","citation_mode":"chunk","key_findings":["finding-a"]}`,
+		},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-progress",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "issue_evidence_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+				{StepID: "step-2", SkillName: "issue_cluster_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		Events: []domain.ExecutionEvent{
+			{
+				ExecutionID: "exec-progress",
+				TS:          now,
+				Level:       "info",
+				EventType:   "WORKFLOW_STARTED",
+				Message:     "execution started",
+			},
+			{
+				ExecutionID: "exec-progress",
+				TS:          now.Add(time.Second),
+				Level:       "info",
+				EventType:   "STEP_STARTED",
+				Message:     "step started",
+				Payload: map[string]any{
+					"step_id":    "step-1",
+					"skill_name": "issue_evidence_summary",
+				},
+			},
+			{
+				ExecutionID: "exec-progress",
+				TS:          now.Add(2 * time.Second),
+				Level:       "info",
+				EventType:   "STEP_COMPLETED",
+				Message:     "step completed",
+				Payload: map[string]any{
+					"step_id":      "step-1",
+					"skill_name":   "issue_evidence_summary",
+					"artifact_key": "step:step-1:issue_evidence_summary",
+				},
+			},
+			{
+				ExecutionID: "exec-progress",
+				TS:          now.Add(3 * time.Second),
+				Level:       "info",
+				EventType:   "STEP_STARTED",
+				Message:     "step started",
+				Payload: map[string]any{
+					"step_id":    "step-2",
+					"skill_name": "issue_cluster_summary",
+				},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	progress, err := service.BuildExecutionProgress(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution progress error: %v", err)
+	}
+
+	if progress.TotalSteps != 2 || progress.CompletedSteps != 1 || progress.FailedSteps != 0 {
+		t.Fatalf("unexpected progress counters: %+v", progress)
+	}
+	if progress.RunningStep == nil || progress.RunningStep.StepID != "step-2" {
+		t.Fatalf("unexpected running step: %+v", progress.RunningStep)
+	}
+	if progress.RunningStep.StartedAt == nil || !progress.RunningStep.StartedAt.Equal(now.Add(3*time.Second)) {
+		t.Fatalf("unexpected running step start time: %+v", progress.RunningStep)
+	}
+	if progress.LastEventAt == nil || !progress.LastEventAt.Equal(now.Add(3*time.Second)) {
+		t.Fatalf("unexpected last_event_at: %+v", progress)
+	}
+	if len(progress.Steps) != 2 || progress.Steps[0].Status != "completed" || progress.Steps[1].Status != "running" {
+		t.Fatalf("unexpected step progress: %+v", progress.Steps)
+	}
+	if progress.Steps[0].CompletedAt == nil || !progress.Steps[0].CompletedAt.Equal(now.Add(2*time.Second)) {
+		t.Fatalf("unexpected completed step timestamps: %+v", progress.Steps[0])
+	}
+	if progress.ResultPreview == nil || progress.ResultPreview.Summary != "partial summary" {
+		t.Fatalf("unexpected result preview: %+v", progress.ResultPreview)
+	}
+}
+
+func TestBuildExecutionProgressIncludesBuildDependencies(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-1",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		PrepareStatus:    "ready",
+		PrepareURI:       stringPointer("prepared.parquet"),
+		EmbeddingStatus:  "queued",
+		CreatedAt:        time.Now().UTC(),
+		Metadata:         map[string]any{},
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	startedAt := time.Now().UTC()
+	buildJob := domain.DatasetBuildJob{
+		JobID:            "job-embedding-1",
+		ProjectID:        project.ProjectID,
+		DatasetID:        dataset.DatasetID,
+		DatasetVersionID: version.DatasetVersionID,
+		BuildType:        "embedding",
+		Status:           "running",
+		TriggeredBy:      "analysis_execute",
+		CreatedAt:        startedAt.Add(-time.Minute),
+		StartedAt:        &startedAt,
+		Attempt:          1,
+	}
+	if err := repository.SaveDatasetBuildJob(buildJob); err != nil {
+		t.Fatalf("unexpected save dataset build job error: %v", err)
+	}
+
+	execution := domain.ExecutionSummary{
+		ExecutionID:      "exec-waiting-progress",
+		ProjectID:        project.ProjectID,
+		RequestID:        "request-1",
+		Status:           "waiting",
+		DatasetVersionID: stringPointer(version.DatasetVersionID),
+		Artifacts:        map[string]string{},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-waiting-progress",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "semantic_search", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		Events: []domain.ExecutionEvent{
+			{
+				ExecutionID: "exec-waiting-progress",
+				TS:          startedAt,
+				Level:       "info",
+				EventType:   "WORKFLOW_WAITING",
+				Message:     "execution is waiting for dependency",
+				Payload: map[string]any{
+					"waiting_for": "embeddings",
+					"reason":      "dataset version embeddings are not ready",
+				},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	progress, err := service.BuildExecutionProgress(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution progress error: %v", err)
+	}
+
+	if len(progress.BuildDependencies) != 2 {
+		t.Fatalf("expected prepare+embedding dependencies, got %+v", progress.BuildDependencies)
+	}
+	if progress.BuildDependencies[0].BuildType != "prepare" || !progress.BuildDependencies[0].Ready || progress.BuildDependencies[0].Status != "ready" {
+		t.Fatalf("unexpected prepare dependency: %+v", progress.BuildDependencies[0])
+	}
+	if progress.BuildDependencies[1].BuildType != "embedding" || progress.BuildDependencies[1].Ready {
+		t.Fatalf("unexpected embedding dependency readiness: %+v", progress.BuildDependencies[1])
+	}
+	if !progress.BuildDependencies[1].WaitingFor || progress.BuildDependencies[1].LatestJob == nil || progress.BuildDependencies[1].LatestJob.JobID != "job-embedding-1" {
+		t.Fatalf("expected waiting embedding job in progress response: %+v", progress.BuildDependencies[1])
+	}
+}
+
+func TestBuildExecutionEventsReturnsTimeline(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-events",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-1",
+		Status:      "running",
+		Artifacts:   map[string]string{},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-events",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "issue_evidence_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		Events: []domain.ExecutionEvent{
+			{
+				ExecutionID: "exec-events",
+				TS:          now,
+				Level:       "info",
+				EventType:   "WORKFLOW_STARTED",
+				Message:     "execution started",
+			},
+			{
+				ExecutionID: "exec-events",
+				TS:          now.Add(time.Second),
+				Level:       "info",
+				EventType:   "STEP_STARTED",
+				Message:     "step started",
+				Payload: map[string]any{
+					"step_id":    "step-1",
+					"skill_name": "issue_evidence_summary",
+				},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	response, err := service.BuildExecutionEvents(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution events error: %v", err)
+	}
+
+	if response.ExecutionID != execution.ExecutionID || response.Status != "running" {
+		t.Fatalf("unexpected execution events response: %+v", response)
+	}
+	if response.EventCount != 2 || len(response.Events) != 2 {
+		t.Fatalf("unexpected event count: %+v", response)
+	}
+	if response.Events[1].EventType != "STEP_STARTED" {
+		t.Fatalf("unexpected latest event: %+v", response.Events[1])
+	}
+}
+
+func TestBuildExecutionStepPreviewReturnsArtifactPreview(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-step-preview",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-1",
+		Status:      "running",
+		Artifacts: map[string]string{
+			"step:step-1:issue_cluster_summary": `{"skill_name":"issue_cluster_summary","step_id":"step-1","summary":{"dominant_cluster_label":"결제 오류","dominant_cluster_count":12,"cluster_count":3},"clusters":[{"label":"결제 오류","document_count":12},{"label":"로그인 실패","document_count":5}],"selection_source":"cluster_membership","cluster_execution_mode":"on_demand_subset_fallback","cluster_materialization_scope":"subset_selection","cluster_fallback_reason":"prior_artifacts_present","warnings":["sample warning"],"usage":{"input_tokens":120}}`,
+		},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-step-preview",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "issue_cluster_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+		Events: []domain.ExecutionEvent{
+			{
+				ExecutionID: "exec-step-preview",
+				TS:          now,
+				Level:       "info",
+				EventType:   "STEP_STARTED",
+				Message:     "step started",
+				Payload: map[string]any{
+					"step_id":    "step-1",
+					"skill_name": "issue_cluster_summary",
+				},
+			},
+			{
+				ExecutionID: "exec-step-preview",
+				TS:          now.Add(time.Second),
+				Level:       "info",
+				EventType:   "STEP_COMPLETED",
+				Message:     "step completed",
+				Payload: map[string]any{
+					"step_id":      "step-1",
+					"skill_name":   "issue_cluster_summary",
+					"artifact_key": "step:step-1:issue_cluster_summary",
+				},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	preview, err := service.BuildExecutionStepPreview(project.ProjectID, execution.ExecutionID, "step-1")
+	if err != nil {
+		t.Fatalf("unexpected build execution step preview error: %v", err)
+	}
+
+	if preview.SkillName != "issue_cluster_summary" || preview.Status != "completed" {
+		t.Fatalf("unexpected step preview status: %+v", preview)
+	}
+	if preview.ArtifactKey == nil || *preview.ArtifactKey != "step:step-1:issue_cluster_summary" {
+		t.Fatalf("unexpected artifact key: %+v", preview)
+	}
+	if preview.EventCount != 2 || len(preview.Events) != 2 {
+		t.Fatalf("unexpected step events: %+v", preview)
+	}
+	if preview.Preview == nil {
+		t.Fatalf("expected artifact preview: %+v", preview)
+	}
+	if preview.Preview["selection_source"] != "cluster_membership" {
+		t.Fatalf("unexpected preview selection source: %+v", preview.Preview)
+	}
+	if preview.Preview["cluster_execution_mode"] != "on_demand_subset_fallback" {
+		t.Fatalf("unexpected cluster execution mode in preview: %+v", preview.Preview)
+	}
+	clusters, ok := preview.Preview["clusters"].([]map[string]any)
+	if !ok || len(clusters) != 2 {
+		t.Fatalf("unexpected cluster preview: %+v", preview.Preview)
+	}
+	if preview.Summary == "" {
+		t.Fatalf("expected summary in step preview: %+v", preview)
+	}
+}
+
 func TestBuildExecutionResultUsesStoredSnapshotWhenPresent(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
@@ -1413,6 +1795,65 @@ func TestBuildExecutionResultBuildsFallbackFinalAnswer(t *testing.T) {
 	}
 	if result.FinalAnswer.AnswerText != "근거 기반 요약" {
 		t.Fatalf("unexpected final answer text: %+v", result.FinalAnswer)
+	}
+}
+
+func TestBuildExecutionProgressIncludesArtifactStorageDiagnostics(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-storage",
+		ProjectID:   project.ProjectID,
+		RequestID:   "request-storage",
+		Status:      "running",
+		Artifacts: map[string]string{
+			"step-1": `{"summary":"cluster summary","clusters":[{"cluster_id":"cluster-1"}]}`,
+			"step-2": `{"summary":"evidence","evidence":[{"snippet":"short"}]}`,
+		},
+		Plan: domain.SkillPlan{
+			PlanID: "plan-storage",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "issue_cluster_summary", DatasetName: "issues.csv", Inputs: map[string]any{"query": "top issues"}},
+			},
+		},
+		Events: []domain.ExecutionEvent{
+			{
+				EventType: "STEP_STARTED",
+				Payload: map[string]any{
+					"step_id":    "step-1",
+					"skill_name": "issue_cluster_summary",
+				},
+			},
+		},
+	}
+	if err := repository.SaveExecution(execution); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	progress, err := service.BuildExecutionProgress(project.ProjectID, execution.ExecutionID)
+	if err != nil {
+		t.Fatalf("unexpected build execution progress error: %v", err)
+	}
+	if progress.Diagnostics == nil {
+		t.Fatalf("expected diagnostics: %+v", progress)
+	}
+	if progress.Diagnostics.ArtifactCount != 2 {
+		t.Fatalf("unexpected artifact count diagnostics: %+v", progress.Diagnostics)
+	}
+	if progress.Diagnostics.ArtifactStorageMode != "compact" {
+		t.Fatalf("unexpected artifact storage mode: %+v", progress.Diagnostics)
+	}
+	if progress.Diagnostics.ArtifactPayloadBytes <= 0 {
+		t.Fatalf("unexpected artifact payload bytes: %+v", progress.Diagnostics)
+	}
+	if progress.Diagnostics.LargestArtifactBytes <= 0 || progress.Diagnostics.LargestArtifactKey == "" {
+		t.Fatalf("unexpected largest artifact diagnostics: %+v", progress.Diagnostics)
 	}
 }
 
@@ -1563,6 +2004,149 @@ func TestListExecutionsBuildsSnapshotPreview(t *testing.T) {
 	}
 	if response.Items[1].WarningCount != 1 {
 		t.Fatalf("unexpected warning count: %+v", response.Items[1])
+	}
+}
+
+func TestGetOperationsSummaryAggregatesExecutionsAndBuildJobs(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-ops", Name: "ops"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	failedMessage := "python worker timeout"
+	lastErrorType := "worker_timeout"
+	for _, execution := range []domain.ExecutionSummary{
+		{
+			ExecutionID: "exec-running",
+			ProjectID:   project.ProjectID,
+			RequestID:   "request-1",
+			Status:      "running",
+			CreatedAt:   now.Add(-5 * time.Minute),
+			Plan:        domain.SkillPlan{PlanID: "plan-1"},
+			Artifacts:   map[string]string{},
+			Events: []domain.ExecutionEvent{
+				{ExecutionID: "exec-running", TS: now.Add(-4 * time.Minute), EventType: "WORKFLOW_STARTED", Message: "started"},
+			},
+		},
+		{
+			ExecutionID:      "exec-waiting",
+			ProjectID:        project.ProjectID,
+			RequestID:        "request-2",
+			Status:           "waiting",
+			CreatedAt:        now.Add(-4 * time.Minute),
+			DatasetVersionID: stringPointer("version-1"),
+			Plan:             domain.SkillPlan{PlanID: "plan-2"},
+			Artifacts:        map[string]string{},
+			Events: []domain.ExecutionEvent{
+				{ExecutionID: "exec-waiting", TS: now.Add(-3 * time.Minute), EventType: "WORKFLOW_WAITING", Message: "waiting", Payload: map[string]any{"waiting_for": "embeddings", "reason": "not ready"}},
+			},
+		},
+		{
+			ExecutionID: "exec-failed",
+			ProjectID:   project.ProjectID,
+			RequestID:   "request-3",
+			Status:      "failed",
+			CreatedAt:   now.Add(-3 * time.Minute),
+			EndedAt:     timePointer(now.Add(-2 * time.Minute)),
+			Plan:        domain.SkillPlan{PlanID: "plan-3"},
+			Artifacts:   map[string]string{},
+			Events: []domain.ExecutionEvent{
+				{ExecutionID: "exec-failed", TS: now.Add(-2 * time.Minute), EventType: "WORKFLOW_FAILED", Message: "worker failed", Payload: map[string]any{"error": "llm failure"}},
+			},
+		},
+		{
+			ExecutionID: "exec-completed",
+			ProjectID:   project.ProjectID,
+			RequestID:   "request-4",
+			Status:      "completed",
+			CreatedAt:   now.Add(-2 * time.Minute),
+			EndedAt:     timePointer(now.Add(-time.Minute)),
+			Plan:        domain.SkillPlan{PlanID: "plan-4"},
+			Artifacts:   map[string]string{},
+			FinalAnswerSnapshot: &domain.ExecutionFinalAnswer{
+				Status: "ready",
+			},
+			Events: []domain.ExecutionEvent{
+				{ExecutionID: "exec-completed", TS: now.Add(-time.Minute), EventType: "WORKFLOW_COMPLETED", Message: "completed"},
+			},
+		},
+	} {
+		if err := repository.SaveExecution(execution); err != nil {
+			t.Fatalf("unexpected save execution error: %v", err)
+		}
+	}
+
+	for _, job := range []domain.DatasetBuildJob{
+		{
+			JobID:            "job-prepare",
+			ProjectID:        project.ProjectID,
+			DatasetID:        "dataset-1",
+			DatasetVersionID: "version-1",
+			BuildType:        "prepare",
+			Status:           "completed",
+			Attempt:          1,
+			CreatedAt:        now.Add(-10 * time.Minute),
+			CompletedAt:      timePointer(now.Add(-9 * time.Minute)),
+		},
+		{
+			JobID:            "job-embedding",
+			ProjectID:        project.ProjectID,
+			DatasetID:        "dataset-1",
+			DatasetVersionID: "version-1",
+			BuildType:        "embedding",
+			Status:           "running",
+			Attempt:          2,
+			CreatedAt:        now.Add(-6 * time.Minute),
+			StartedAt:        timePointer(now.Add(-5 * time.Minute)),
+		},
+		{
+			JobID:            "job-cluster",
+			ProjectID:        project.ProjectID,
+			DatasetID:        "dataset-1",
+			DatasetVersionID: "version-1",
+			BuildType:        "cluster",
+			Status:           "failed",
+			Attempt:          3,
+			LastErrorType:    &lastErrorType,
+			ErrorMessage:     &failedMessage,
+			CreatedAt:        now.Add(-4 * time.Minute),
+			CompletedAt:      timePointer(now.Add(-3 * time.Minute)),
+		},
+	} {
+		if err := repository.SaveDatasetBuildJob(job); err != nil {
+			t.Fatalf("unexpected save build job error: %v", err)
+		}
+	}
+
+	summary, err := service.GetOperationsSummary(project.ProjectID)
+	if err != nil {
+		t.Fatalf("unexpected operations summary error: %v", err)
+	}
+
+	if summary.Executions.Total != 4 || summary.Executions.ByStatus["failed"] != 1 || summary.Executions.ByStatus["waiting"] != 1 {
+		t.Fatalf("unexpected execution summary: %+v", summary.Executions)
+	}
+	if summary.Executions.WaitingByDependency["embeddings"] != 1 {
+		t.Fatalf("unexpected waiting summary: %+v", summary.Executions.WaitingByDependency)
+	}
+	if summary.Executions.FinalAnswerByStatus["ready"] != 1 {
+		t.Fatalf("unexpected final answer summary: %+v", summary.Executions.FinalAnswerByStatus)
+	}
+	if len(summary.Executions.RecentFailures) != 1 || summary.Executions.RecentFailures[0].ID != "exec-failed" {
+		t.Fatalf("unexpected execution failures: %+v", summary.Executions.RecentFailures)
+	}
+	if summary.BuildJobs.Total != 3 || summary.BuildJobs.ByStatus["failed"] != 1 || summary.BuildJobs.ByType["cluster"]["failed"] != 1 {
+		t.Fatalf("unexpected build job summary: %+v", summary.BuildJobs)
+	}
+	if summary.BuildJobs.RetryingJobs != 2 {
+		t.Fatalf("unexpected retrying jobs count: %+v", summary.BuildJobs)
+	}
+	if len(summary.BuildJobs.RecentFailures) != 1 || summary.BuildJobs.RecentFailures[0].ID != "job-cluster" {
+		t.Fatalf("unexpected build job failures: %+v", summary.BuildJobs.RecentFailures)
 	}
 }
 
@@ -1727,13 +2311,14 @@ func TestSubmitAnalysisEnrichesIssueSentimentSummaryInputs(t *testing.T) {
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
 
 	dataType := "unstructured"
-	datasetVersionID := version.DatasetVersionID
+	datasetID := dataset.DatasetID
 	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
-		DatasetVersionID: &datasetVersionID,
-		DataType:         &dataType,
-		Goal:             "감성 분포를 보여줘",
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "감성 분포를 보여줘",
 	})
 	if err != nil {
 		t.Fatalf("unexpected submit error: %v", err)
@@ -1779,6 +2364,20 @@ func TestResolvedTextColumnForSkillTreatsDefaultTextAsPlaceholderWhenRawColumnDi
 }
 
 func stringPtr(value string) *string {
+	return &value
+}
+
+func setDatasetActiveVersion(t *testing.T, repository store.Repository, dataset domain.Dataset, versionID string) {
+	t.Helper()
+	dataset.ActiveDatasetVersionID = stringPtr(versionID)
+	now := time.Now().UTC()
+	dataset.ActiveVersionUpdatedAt = &now
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset activation error: %v", err)
+	}
+}
+
+func timePointer(value time.Time) *time.Time {
 	return &value
 }
 

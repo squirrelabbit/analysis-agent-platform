@@ -20,10 +20,13 @@ from python_ai_worker.runtime.common import _match_taxonomies
 from python_ai_worker.runtime.constants import DEFAULT_TAXONOMY_RULES
 from python_ai_worker.runtime.embeddings import _generate_dense_embeddings, _generate_query_embedding
 from python_ai_worker.runtime.llm import (
+    _anthropic_prepare_client,
+    _anthropic_sentiment_client,
     _compact_analysis_context,
     _compact_evidence_documents_for_prompt,
     _normalize_planner_response,
 )
+from python_ai_worker.config import load_config
 from python_ai_worker.runtime.common import (
     _apply_prepare_regex_rules,
     _match_garbage_rules,
@@ -35,6 +38,81 @@ from python_ai_worker.runtime.payloads import _normalize_dictionary_tagging_payl
 
 
 class RuntimeHelperTests(unittest.TestCase):
+    def test_load_config_uses_sentiment_model_override_when_set(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "ANTHROPIC_PREPARE_MODEL": "claude-prepare-test",
+                "ANTHROPIC_SENTIMENT_MODEL": "claude-sentiment-test",
+            },
+            clear=False,
+        ):
+            config = load_config()
+
+        self.assertEqual(config.anthropic_prepare_model, "claude-prepare-test")
+        self.assertEqual(config.anthropic_sentiment_model, "claude-sentiment-test")
+
+    def test_load_config_falls_back_to_prepare_model_for_sentiment(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "ANTHROPIC_PREPARE_MODEL": "claude-prepare-test",
+            },
+            clear=False,
+        ):
+            previous = os.environ.pop("ANTHROPIC_SENTIMENT_MODEL", None)
+            try:
+                config = load_config()
+            finally:
+                if previous is not None:
+                    os.environ["ANTHROPIC_SENTIMENT_MODEL"] = previous
+
+        self.assertEqual(config.anthropic_sentiment_model, "claude-prepare-test")
+
+    def test_anthropic_sentiment_client_uses_sentiment_model(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PYTHON_AI_LLM_PROVIDER": "anthropic",
+                "ANTHROPIC_API_KEY": "test-key",
+                "ANTHROPIC_PREPARE_MODEL": "claude-prepare-test",
+                "ANTHROPIC_SENTIMENT_MODEL": "claude-sentiment-test",
+            },
+            clear=False,
+        ):
+            client = _anthropic_sentiment_client()
+
+        self.assertIsNotNone(client)
+        self.assertEqual(client._config.model, "claude-sentiment-test")
+
+    def test_anthropic_prepare_client_disabled_mode_forces_fallback(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PYTHON_AI_LLM_PROVIDER": "anthropic",
+                "ANTHROPIC_API_KEY": "test-key",
+                "ANTHROPIC_PREPARE_MODEL": "claude-prepare-test",
+            },
+            clear=False,
+        ):
+            client = _anthropic_prepare_client(llm_mode="disabled")
+
+        self.assertIsNone(client)
+
+    def test_anthropic_sentiment_client_disabled_mode_forces_fallback(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PYTHON_AI_LLM_PROVIDER": "anthropic",
+                "ANTHROPIC_API_KEY": "test-key",
+                "ANTHROPIC_SENTIMENT_MODEL": "claude-sentiment-test",
+            },
+            clear=False,
+        ):
+            client = _anthropic_sentiment_client(llm_mode="disabled")
+
+        self.assertIsNone(client)
+
     def test_selected_source_indices_intersects_filter_and_dedup(self) -> None:
         prior_artifacts = {
             "filter": {

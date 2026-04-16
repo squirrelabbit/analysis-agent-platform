@@ -15,7 +15,8 @@
 | chunk dataset | `chunks.parquet` | `chunk_id`, `row_id`, `chunk_index` |
 | embedding index source | `embeddings.index.parquet` | `chunk_id` |
 | retrieval index | `pgvector` | `chunk_id` |
-| cluster artifact | `clusters.json` | `cluster_id`, `member chunk_id` |
+| cluster summary artifact | `clusters.json` | `cluster_id`, `document_count` |
+| cluster membership artifact | `clusters.memberships.parquet` | `cluster_id`, `chunk_id`, `row_id` |
 
 ## 현재 실행 흐름
 
@@ -29,16 +30,19 @@ flowchart LR
     F --> G["pgvector"]
     G --> H["Cluster Build"]
     H --> I["clusters.json"]
+    H --> I2["clusters.memberships.parquet"]
     G --> J["semantic_search"]
     I --> K["embedding_cluster (read path)"]
+    I2 --> K
 ```
 
 ## 현재 계약
 
-- dataset version metadata는 `prepared_ref`, `sentiment_ref`, `chunk_ref`, `embedding_index_ref`, `cluster_ref` 같은 logical ref를 저장한다.
+- dataset version metadata는 `prepared_ref`, `sentiment_ref`, `chunk_ref`, `embedding_index_ref`, `cluster_ref`, `cluster_summary_ref`, `cluster_membership_ref` 같은 logical ref를 저장한다.
 - `prepare_uri`, `sentiment_uri`, `embedding_uri` 같은 기존 URI 필드는 호환을 위해 유지하지만, 내부 실행은 ref와 format을 우선 본다.
 - `semantic_search`는 `pgvector`와 `chunk_ref`를 우선 사용한다.
 - full-dataset `embedding_cluster`는 precomputed `cluster_ref`를 우선 사용하고, subset 경로만 on-demand fallback을 허용한다.
+- `issue_cluster_summary`와 `issue_evidence_summary`는 필요할 때 `cluster_membership_ref`를 사용해 sample / evidence를 보강한다.
 
 ## 왜 이렇게 바꿨나
 
@@ -49,8 +53,8 @@ flowchart LR
 
 ## 남은 과제
 
-1. `cluster_membership`을 summary와 별도 artifact/table로 분리할지 결정
-2. subset cluster 전략을 명확히 정리
+1. subset cluster 전략을 명확히 정리
+2. `cluster_membership`를 sidecar parquet로 계속 둘지, 조회량이 늘면 DB로 승격할지 판단
 3. `embedding_cluster` on-demand fallback을 얼마나 오래 유지할지 판단
 4. `확인 필요:` 대용량 dataset 기준 메모리 회귀 테스트와 운영 한계치 고정
 5. `확인 필요:` OpenAI dense embedding end-to-end 운영 검증
@@ -59,4 +63,4 @@ flowchart LR
 
 - 현재 제품 요약: [../project_summary.md](../project_summary.md)
 - 목표 스택: [target_stack.md](target_stack.md)
-- 개발용 Postgres 재초기화: [dev_postgres_reset.md](dev_postgres_reset.md)
+- 개발용 Postgres 재초기화: [../operations/dev_postgres_reset.md](../operations/dev_postgres_reset.md)

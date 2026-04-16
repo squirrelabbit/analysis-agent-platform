@@ -237,7 +237,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     output_format = _prepare_output_format(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    client = rt._anthropic_prepare_client(normalized["model"])
+    client = rt._anthropic_prepare_client(normalized["model"], llm_mode=normalized["llm_mode"])
     kept_count = 0
     review_count = 0
     dropped_count = 0
@@ -264,6 +264,8 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                     model=normalized["model"],
                     batch_size=normalized["prepare_batch_size"],
                     prompt_version_override=normalized["prepare_prompt_version"],
+                    prompt_template_override=normalized["prepare_prompt_template"],
+                    batch_prompt_template_override=normalized["prepare_batch_prompt_template"],
                 )
                 usage_records.append(batch_usage)
                 kept_count, review_count, dropped_count = _write_prepared_rows(
@@ -286,6 +288,8 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 model=normalized["model"],
                 batch_size=normalized["prepare_batch_size"],
                 prompt_version_override=normalized["prepare_prompt_version"],
+                prompt_template_override=normalized["prepare_prompt_template"],
+                batch_prompt_template_override=normalized["prepare_batch_prompt_template"],
             )
             usage_records.append(batch_usage)
             kept_count, review_count, dropped_count = _write_prepared_rows(
@@ -536,6 +540,10 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
         "dataset_name": normalized["dataset_name"],
         "embedding_source_backend": "embedding-index-parquet",
         "embedding_index_ref": normalized["embedding_index_source_ref"],
+        "cluster_execution_mode": "materialized_full_dataset",
+        "cluster_materialization_scope": "full_dataset",
+        "cluster_materialized_ref_used": True,
+        "cluster_fallback_reason": "",
         "cluster_ref": str(summary_path),
         "cluster_format": "json",
         "cluster_summary_ref": str(summary_path),
@@ -572,6 +580,8 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
         "artifact": {
             "skill_name": "dataset_cluster_build",
             "dataset_version_id": normalized["dataset_version_id"],
+            "cluster_execution_mode": "materialized_build",
+            "cluster_materialization_scope": "full_dataset",
             "cluster_ref": str(summary_path),
             "cluster_format": "json",
             "cluster_summary_ref": str(summary_path),
@@ -745,7 +755,7 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     output_format = _artifact_output_format(output_path, "sentiment")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    client = rt._anthropic_prepare_client(normalized["model"])
+    client = rt._anthropic_sentiment_client(normalized["model"], llm_mode=normalized["llm_mode"])
     label_counts: Counter[str] = Counter()
     skipped_rows = 0
     labeled_count = 0
@@ -768,6 +778,8 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
                 client=client,
                 batch_size=normalized["sentiment_batch_size"],
                 prompt_version_override=normalized["sentiment_prompt_version"],
+                prompt_template_override=normalized["sentiment_prompt_template"],
+                batch_prompt_template_override=normalized["sentiment_batch_prompt_template"],
             )
             usage_records.append(usage)
             labeled_count = _write_labeled_rows(
@@ -787,6 +799,8 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
                 client=client,
                 batch_size=normalized["sentiment_batch_size"],
                 prompt_version_override=normalized["sentiment_prompt_version"],
+                prompt_template_override=normalized["sentiment_prompt_template"],
+                batch_prompt_template_override=normalized["sentiment_batch_prompt_template"],
             )
             usage_records.append(usage)
             labeled_count = _write_labeled_rows(

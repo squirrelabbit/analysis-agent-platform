@@ -140,7 +140,7 @@ func TestBuildScenarioAnalysisSubmitRequestMapsFunctionNames(t *testing.T) {
 	}
 
 	submitRequest, err := service.BuildAnalysisSubmitRequest(project.ProjectID, scenario.ScenarioID, domain.ScenarioPlanCreateRequest{
-		DatasetVersionID: "version-1",
+		DatasetID: "dataset-1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected build analysis submit request error: %v", err)
@@ -150,6 +150,9 @@ func TestBuildScenarioAnalysisSubmitRequestMapsFunctionNames(t *testing.T) {
 	}
 	if submitRequest.Goal != scenario.UserQuery {
 		t.Fatalf("unexpected goal: %+v", submitRequest)
+	}
+	if submitRequest.DatasetID == nil || *submitRequest.DatasetID != "dataset-1" {
+		t.Fatalf("expected dataset_id in submit request: %+v", submitRequest)
 	}
 	if submitRequest.RequestedPlan.Steps[0].SkillName != "garbage_filter" {
 		t.Fatalf("expected garbage_filter first, got %+v", submitRequest.RequestedPlan.Steps)
@@ -199,7 +202,7 @@ func TestBuildScenarioAnalysisSubmitRequestRejectsUnsupportedFunctionName(t *tes
 	}
 
 	_, err := service.BuildAnalysisSubmitRequest(project.ProjectID, "S2", domain.ScenarioPlanCreateRequest{
-		DatasetVersionID: "version-1",
+		DatasetID: "dataset-1",
 	})
 	if err == nil {
 		t.Fatal("expected unsupported function_name error")

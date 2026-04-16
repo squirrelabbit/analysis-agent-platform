@@ -34,7 +34,10 @@ def _run_rule_based_planner(payload: dict[str, Any]) -> dict[str, Any]:
     elif data_type == "unstructured" and rt._looks_noun_frequency_goal(goal):
         sequence_name = "unstructured_noun_frequency"
     elif data_type == "unstructured" and rt._looks_cluster_goal(goal):
-        sequence_name = "unstructured_cluster"
+        if rt._looks_cluster_subset_goal(goal):
+            sequence_name = "unstructured_cluster_subset"
+        else:
+            sequence_name = "unstructured_cluster_materialized"
     elif data_type == "unstructured" and rt._looks_taxonomy_goal(goal):
         sequence_name = "unstructured_taxonomy"
     elif data_type == "unstructured" and rt._looks_duplicate_goal(goal):

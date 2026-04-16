@@ -10,6 +10,11 @@ from .prompt_registry import (
     DEFAULT_SENTIMENT_BATCH_PROMPT_VERSION,
     DEFAULT_SENTIMENT_PROMPT_VERSION,
 )
+from .skill_policy_registry import (
+    DEFAULT_CLUSTER_LABEL_POLICY_VERSION,
+    DEFAULT_EMBEDDING_CLUSTER_POLICY_VERSION,
+    DEFAULT_ISSUE_EVIDENCE_SUMMARY_POLICY_VERSION,
+)
 
 
 @dataclass(frozen=True)
@@ -23,6 +28,7 @@ class WorkerConfig:
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-4-6"
     anthropic_prepare_model: str = "claude-3-5-haiku-latest"
+    anthropic_sentiment_model: str = "claude-3-5-haiku-latest"
     anthropic_api_url: str = "https://api.anthropic.com/v1/messages"
     anthropic_version: str = "2023-06-01"
     anthropic_max_tokens: int = 2048
@@ -49,6 +55,10 @@ class WorkerConfig:
     evidence_document_max_chars: int = 320
     rule_config_path: str = ""
     rule_config_json: str = ""
+    skill_policies_dir: str = ""
+    embedding_cluster_policy_version: str = DEFAULT_EMBEDDING_CLUSTER_POLICY_VERSION
+    cluster_label_policy_version: str = DEFAULT_CLUSTER_LABEL_POLICY_VERSION
+    issue_evidence_summary_policy_version: str = DEFAULT_ISSUE_EVIDENCE_SUMMARY_POLICY_VERSION
 
 
 def load_config() -> WorkerConfig:
@@ -62,6 +72,10 @@ def load_config() -> WorkerConfig:
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
         anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
         anthropic_prepare_model=os.getenv("ANTHROPIC_PREPARE_MODEL", "claude-3-5-haiku-latest"),
+        anthropic_sentiment_model=os.getenv(
+            "ANTHROPIC_SENTIMENT_MODEL",
+            os.getenv("ANTHROPIC_PREPARE_MODEL", "claude-3-5-haiku-latest"),
+        ),
         anthropic_api_url=os.getenv("ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"),
         anthropic_version=os.getenv("ANTHROPIC_VERSION", "2023-06-01"),
         anthropic_max_tokens=int(os.getenv("ANTHROPIC_MAX_TOKENS", "2048")),
@@ -94,4 +108,17 @@ def load_config() -> WorkerConfig:
         evidence_document_max_chars=max(40, int(os.getenv("EVIDENCE_DOCUMENT_MAX_CHARS", "320"))),
         rule_config_path=os.getenv("PYTHON_AI_RULE_CONFIG_PATH", "").strip(),
         rule_config_json=os.getenv("PYTHON_AI_RULE_CONFIG_JSON", "").strip(),
+        skill_policies_dir=os.getenv("PYTHON_AI_SKILL_POLICIES_DIR", "").strip(),
+        embedding_cluster_policy_version=os.getenv(
+            "PYTHON_AI_EMBEDDING_CLUSTER_POLICY_VERSION",
+            DEFAULT_EMBEDDING_CLUSTER_POLICY_VERSION,
+        ).strip(),
+        cluster_label_policy_version=os.getenv(
+            "PYTHON_AI_CLUSTER_LABEL_POLICY_VERSION",
+            DEFAULT_CLUSTER_LABEL_POLICY_VERSION,
+        ).strip(),
+        issue_evidence_summary_policy_version=os.getenv(
+            "PYTHON_AI_ISSUE_EVIDENCE_SUMMARY_POLICY_VERSION",
+            DEFAULT_ISSUE_EVIDENCE_SUMMARY_POLICY_VERSION,
+        ).strip(),
     )

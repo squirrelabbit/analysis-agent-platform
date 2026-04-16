@@ -4,8 +4,10 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/store"
 )
 
 type StepHook interface {
@@ -14,10 +16,12 @@ type StepHook interface {
 }
 
 type StepHookOutcome struct {
-	Status        string         `json:"status"`
-	ArtifactBytes int            `json:"artifact_bytes,omitempty"`
-	ArtifactRef   string         `json:"artifact_ref,omitempty"`
-	UsageSummary  map[string]any `json:"usage_summary,omitempty"`
+	Status         string         `json:"status"`
+	ArtifactBytes  int            `json:"artifact_bytes,omitempty"`
+	ArtifactRef    string         `json:"artifact_ref,omitempty"`
+	UsageSummary   map[string]any `json:"usage_summary,omitempty"`
+	StoredArtifact string         `json:"-"`
+	ErrorMessage   string         `json:"error_message,omitempty"`
 }
 
 type StepHookRecord struct {
@@ -55,6 +59,9 @@ func (RuntimeStepHook) AfterStep(_ context.Context, _ domain.ExecutionSummary, s
 	if usagePreview := compactUsagePreview(outcome.UsageSummary); len(usagePreview) > 0 {
 		payload["usage"] = usagePreview
 	}
+	if message := strings.TrimSpace(outcome.ErrorMessage); message != "" {
+		payload["error"] = message
+	}
 	return StepHookRecord{
 		Phase:       "after",
 		StepID:      step.StepID,
@@ -62,6 +69,113 @@ func (RuntimeStepHook) AfterStep(_ context.Context, _ domain.ExecutionSummary, s
 		DatasetName: step.DatasetName,
 		Payload:     payload,
 	}, nil
+}
+
+type ExecutionProgressHook struct {
+	Repo store.Repository
+	Now  func() time.Time
+}
+
+func (h ExecutionProgressHook) BeforeStep(_ context.Context, execution domain.ExecutionSummary, step domain.SkillPlanStep) (StepHookRecord, error) {
+	record := StepHookRecord{
+		Phase:       "before",
+		StepID:      step.StepID,
+		SkillName:   step.SkillName,
+		DatasetName: step.DatasetName,
+		Payload: map[string]any{
+			"status": "running",
+		},
+	}
+	if h.Repo == nil {
+		return record, nil
+	}
+	current, err := h.Repo.GetExecution(execution.ProjectID, execution.ExecutionID)
+	if err != nil {
+		return StepHookRecord{}, err
+	}
+	current.Events = append(current.Events, domain.ExecutionEvent{
+		ExecutionID: execution.ExecutionID,
+		TS:          hookNow(h.Now),
+		Level:       "info",
+		EventType:   "STEP_STARTED",
+		Message:     "step started",
+		Payload: map[string]any{
+			"step_id":    step.StepID,
+			"skill_name": step.SkillName,
+		},
+	})
+	if err := h.Repo.SaveExecution(current); err != nil {
+		return StepHookRecord{}, err
+	}
+	return record, nil
+}
+
+func (h ExecutionProgressHook) AfterStep(_ context.Context, execution domain.ExecutionSummary, step domain.SkillPlanStep, outcome StepHookOutcome) (StepHookRecord, error) {
+	record := StepHookRecord{
+		Phase:       "after",
+		StepID:      step.StepID,
+		SkillName:   step.SkillName,
+		DatasetName: step.DatasetName,
+		Payload: map[string]any{
+			"status": outcomeStatus(outcome.Status),
+		},
+	}
+	if h.Repo == nil {
+		return record, nil
+	}
+	current, err := h.Repo.GetExecution(execution.ProjectID, execution.ExecutionID)
+	if err != nil {
+		return StepHookRecord{}, err
+	}
+	if current.Artifacts == nil {
+		current.Artifacts = map[string]string{}
+	}
+	payload := map[string]any{
+		"step_id":    step.StepID,
+		"skill_name": step.SkillName,
+		"status":     outcomeStatus(outcome.Status),
+	}
+	if outcome.ArtifactBytes > 0 {
+		payload["artifact_bytes"] = outcome.ArtifactBytes
+	}
+	if ref := strings.TrimSpace(outcome.ArtifactRef); ref != "" {
+		payload["artifact_ref"] = ref
+	}
+	if usagePreview := compactUsagePreview(outcome.UsageSummary); len(usagePreview) > 0 {
+		payload["usage"] = usagePreview
+	}
+	if message := strings.TrimSpace(outcome.ErrorMessage); message != "" {
+		payload["error"] = message
+	}
+	storedArtifact := strings.TrimSpace(outcome.StoredArtifact)
+	if outcomeStatus(outcome.Status) == "completed" && storedArtifact != "" {
+		compactedArtifact, err := compactExecutionArtifactForStorage(step, storedArtifact)
+		if err != nil {
+			return StepHookRecord{}, err
+		}
+		key := artifactKey(step)
+		current.Artifacts[key] = compactedArtifact
+		payload["artifact_bytes"] = len(compactedArtifact)
+		payload["artifact_key"] = key
+	}
+	eventType := "STEP_COMPLETED"
+	message := "step completed"
+	if outcomeStatus(outcome.Status) == "failed" {
+		eventType = "STEP_FAILED"
+		message = "step failed"
+	}
+	current.Events = append(current.Events, domain.ExecutionEvent{
+		ExecutionID: execution.ExecutionID,
+		TS:          hookNow(h.Now),
+		Level:       "info",
+		EventType:   eventType,
+		Message:     message,
+		Payload:     payload,
+	})
+	if err := h.Repo.SaveExecution(current); err != nil {
+		return StepHookRecord{}, err
+	}
+	return record, nil
 }
 
 func activeStepHooks(hooks []StepHook) []StepHook {
@@ -106,6 +220,33 @@ func executeAfterStepHooks(
 		records = append(records, record)
 	}
 	return records, nil
+}
+
+func appendFailedStepHooks(
+	ctx context.Context,
+	existing []StepHookRecord,
+	hooks []StepHook,
+	execution domain.ExecutionSummary,
+	step domain.SkillPlanStep,
+	err error,
+) []StepHookRecord {
+	if err == nil {
+		return existing
+	}
+	records, hookErr := executeAfterStepHooks(
+		ctx,
+		hooks,
+		execution,
+		step,
+		StepHookOutcome{
+			Status:       "failed",
+			ErrorMessage: err.Error(),
+		},
+	)
+	if hookErr != nil {
+		return existing
+	}
+	return append(existing, records...)
 }
 
 func sortedStepInputKeys(inputs map[string]any) []string {
@@ -156,4 +297,11 @@ func outcomeStatus(status string) string {
 		return "completed"
 	}
 	return normalized
+}
+
+func hookNow(nowFn func() time.Time) time.Time {
+	if nowFn != nil {
+		return nowFn().UTC()
+	}
+	return time.Now().UTC()
 }

@@ -17,6 +17,17 @@ import (
 func main() {
 	displaytime.UseKSTAsLocal()
 	cfg := config.Load()
+	log.Printf(
+		"temporal runtime mode: persistence=%s retention=%s recovery=%s address=%s namespace=%s",
+		cfg.TemporalPersistenceMode,
+		cfg.TemporalRetentionMode,
+		cfg.TemporalRecoveryMode,
+		cfg.TemporalAddress,
+		cfg.TemporalNamespace,
+	)
+	if cfg.TemporalPersistenceMode == "dev_ephemeral" || cfg.TemporalRetentionMode == "temporal_dev_default" {
+		log.Printf("warning: Temporal history durability is limited in the current runtime; worker relies on startup reconciliation and persisted app metadata for recovery")
+	}
 	repository, err := store.NewRepository(cfg)
 	if err != nil {
 		log.Fatal(err)
@@ -46,13 +57,18 @@ func main() {
 	defer temporalClient.Close()
 
 	registerAnalysisWorker := func(w worker.Worker) {
+		stepHooks := []skills.StepHook{
+			skills.RuntimeStepHook{},
+			skills.ExecutionProgressHook{Repo: repository},
+		}
 		workflows.RegisterAnalysisRuntime(w, workflows.AnalysisActivities{
 			Repo: repository,
 			Runner: skills.CompositeRunner{
-				Structured: skills.DuckDBRunner{Path: cfg.DuckDBPath},
+				Structured: skills.DuckDBRunner{Path: cfg.DuckDBPath, Hooks: stepHooks},
 				Unstructured: skills.PythonAIClient{
 					BaseURL:      cfg.PythonAIWorkerURL,
 					ArtifactRoot: cfg.ArtifactRoot,
+					Hooks:        stepHooks,
 				},
 			},
 			AnswerGenerator: answerGenerator,

@@ -11,6 +11,10 @@ Rules:
 - Do not invent counts, ratios, causes, predictions, recommendations, or policy judgments.
 - Keep the answer grounded in the execution result. If evidence is weak or warnings exist, move that into caveats.
 - Prefer concise Korean.
+- `answer_text` should be 1-2 short paragraphs or a few short sentences, not a report.
+- If `warning_count > 0` or `evidence_candidate_count <= 1`, include at least one explicit caveat.
+- Do not hide uncertainty. When evidence is thin, say the scope is limited instead of sounding certain.
+- `key_points` must restate supported findings only and should not introduce new claims.
 - When choosing evidence, select only from the provided evidence candidates by their `evidence_id`.
 
 question:

@@ -121,9 +121,42 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(answer["generation_mode"], "fallback")
         self.assertEqual(answer["answer_text"], "결제 오류 이슈가 반복되고 있습니다.")
         self.assertEqual(answer["key_points"], ["결제 오류 VOC가 반복된다."])
+        self.assertIn("확인 필요: 샘플 수가 제한적입니다.", answer["caveats"])
         artifact = result["artifact"]
         self.assertEqual(artifact["skill_name"], "execution_final_answer")
         self.assertEqual(artifact["answer_text"], "결제 오류 이슈가 반복되고 있습니다.")
+
+    def test_run_execution_final_answer_fallback_derives_limits_from_sparse_evidence(self) -> None:
+        result = run_execution_final_answer(
+            {
+                "execution_id": "exec-2",
+                "project_id": "project-1",
+                "question": "로그인 오류 핵심을 알려줘",
+                "result_v1": {
+                    "status": "completed",
+                    "primary_skill_name": "issue_cluster_summary",
+                    "answer": {
+                        "summary": "로그인 오류 군집이 가장 크게 나타났습니다.",
+                        "evidence": [{"snippet": "로그인이 자주 실패합니다."}],
+                    },
+                    "warnings": [],
+                    "step_results": [
+                        {
+                            "step_id": "step-1",
+                            "skill_name": "issue_cluster_summary",
+                            "status": "completed",
+                            "summary": "로그인 오류 군집이 12건으로 가장 큽니다.",
+                        }
+                    ],
+                },
+            }
+        )
+
+        answer = result["answer"]
+        self.assertEqual(answer["generation_mode"], "fallback")
+        self.assertEqual(answer["key_points"], ["로그인 오류 군집이 12건으로 가장 큽니다."])
+        self.assertIn("확인 필요: 현재 final_answer 근거 후보가 1건뿐이라 해석 범위가 제한적입니다.", answer["caveats"])
+        self.assertTrue(answer["follow_up_questions"])
 
     def test_dataset_cluster_build_materializes_cluster_artifact_and_embedding_cluster_reads_it(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
@@ -167,6 +200,10 @@ class TaskTests(unittest.TestCase):
         self.assertTrue(membership_path.exists())
         materialized = json.loads(cluster_path.read_text(encoding="utf-8"))
         self.assertEqual(materialized["skill_name"], "embedding_cluster")
+        self.assertEqual(materialized["cluster_execution_mode"], "materialized_full_dataset")
+        self.assertEqual(materialized["cluster_materialization_scope"], "full_dataset")
+        self.assertTrue(materialized["cluster_materialized_ref_used"])
+        self.assertEqual(materialized["cluster_fallback_reason"], "")
         self.assertGreaterEqual(materialized["summary"]["cluster_count"], 1)
         self.assertEqual(materialized["summary"]["cluster_similarity_threshold"], 0.2)
         self.assertEqual(materialized["summary"]["top_n"], 3)
@@ -189,6 +226,10 @@ class TaskTests(unittest.TestCase):
 
         self.assertEqual(cluster_result["artifact"]["cluster_ref"], str(cluster_path))
         self.assertEqual(cluster_result["artifact"]["cluster_membership_ref"], str(membership_path))
+        self.assertEqual(cluster_result["artifact"]["cluster_execution_mode"], "materialized_full_dataset")
+        self.assertEqual(cluster_result["artifact"]["cluster_materialization_scope"], "full_dataset")
+        self.assertTrue(cluster_result["artifact"]["cluster_materialized_ref_used"])
+        self.assertEqual(cluster_result["artifact"]["cluster_fallback_reason"], "")
         self.assertEqual(cluster_result["artifact"]["summary"], materialized["summary"])
         self.assertEqual(cluster_result["artifact"]["clusters"], materialized["clusters"])
         self.assertIn("precomputed cluster artifact", cluster_result["notes"][0])
@@ -206,6 +247,72 @@ class TaskTests(unittest.TestCase):
         )
 
         self.assertNotIn("precomputed cluster artifact", fallback_cluster_result["notes"][0])
+        self.assertEqual(fallback_cluster_result["artifact"]["cluster_execution_mode"], "on_demand_full_dataset")
+        self.assertEqual(fallback_cluster_result["artifact"]["cluster_materialization_scope"], "full_dataset")
+        self.assertFalse(fallback_cluster_result["artifact"]["cluster_materialized_ref_used"])
+        self.assertEqual(fallback_cluster_result["artifact"]["cluster_fallback_reason"], "cluster_request_mismatch")
+
+    def test_embedding_cluster_subset_fallback_exposes_reason_and_scope(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_cluster_subset.csv"
+        self._write_csv_rows(
+            csv_path,
+            [
+                "결제 오류가 반복 발생했습니다",
+                "결제 승인 오류가 다시 발생했습니다",
+                "로그인이 자주 실패합니다",
+                "로그인 인증 오류가 반복됩니다",
+                "배송 문의가 계속 들어옵니다",
+            ],
+        )
+
+        embedding_result = run_embedding(
+            {
+                "dataset_version_id": "version-cluster-subset",
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "output_path": str(temp_dir / "issues_cluster_subset.embeddings.jsonl"),
+            }
+        )
+        cluster_build_result = run_dataset_cluster_build(
+            {
+                "dataset_version_id": "version-cluster-subset",
+                "dataset_name": str(csv_path),
+                "embedding_index_source_ref": embedding_result["artifact"]["embedding_index_source_ref"],
+                "chunk_ref": embedding_result["artifact"]["chunk_ref"],
+                "output_path": str(temp_dir / "issues_cluster_subset.clusters.json"),
+                "cluster_similarity_threshold": 0.2,
+                "sample_n": 2,
+                "top_n": 3,
+            }
+        )
+
+        subset_cluster_result = run_embedding_cluster(
+            {
+                "dataset_name": str(csv_path),
+                "embedding_uri": embedding_result["artifact"]["embedding_uri"],
+                "embedding_index_ref": embedding_result["artifact"]["embedding_index_source_ref"],
+                "chunk_ref": embedding_result["artifact"]["chunk_ref"],
+                "chunk_format": embedding_result["artifact"]["chunk_format"],
+                "cluster_ref": cluster_build_result["artifact"]["cluster_ref"],
+                "cluster_format": "json",
+                "cluster_similarity_threshold": 0.2,
+                "sample_n": 2,
+                "top_n": 3,
+                "prior_artifacts": {
+                    "step:document_filter": {
+                        "skill_name": "document_filter",
+                        "matched_indices": [0, 1],
+                    }
+                },
+            }
+        )
+
+        self.assertEqual(subset_cluster_result["artifact"]["cluster_execution_mode"], "on_demand_subset_fallback")
+        self.assertEqual(subset_cluster_result["artifact"]["cluster_materialization_scope"], "subset_selection")
+        self.assertFalse(subset_cluster_result["artifact"]["cluster_materialized_ref_used"])
+        self.assertEqual(subset_cluster_result["artifact"]["cluster_fallback_reason"], "prior_artifacts_present")
+        self.assertEqual(subset_cluster_result["artifact"]["summary"]["clustered_document_count"], 2)
 
     def test_rule_based_planner_without_key(self) -> None:
         with patch.dict(
@@ -373,6 +480,27 @@ class TaskTests(unittest.TestCase):
                     "dataset_name": "issues_cluster.csv",
                     "data_type": "unstructured",
                     "goal": "주요 이슈 군집을 묶어서 보여줘",
+                }
+            )
+
+        self.assertEqual(
+            [step["skill_name"] for step in result["plan"]["steps"]],
+            ["embedding_cluster", "cluster_label_candidates", "issue_cluster_summary", "issue_evidence_summary"],
+        )
+
+    def test_rule_based_planner_builds_issue_cluster_summary_subset_sequence(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "PYTHON_AI_LLM_PROVIDER": "anthropic",
+            },
+            clear=False,
+        ):
+            result = run_planner(
+                {
+                    "dataset_name": "issues_cluster.csv",
+                    "data_type": "unstructured",
+                    "goal": "최근 문의 중에서 주요 이슈 군집을 묶어서 보여줘",
                 }
             )
 
@@ -964,6 +1092,75 @@ class TaskTests(unittest.TestCase):
         prepared_rows = self._read_parquet_rows(prepared_path)
         self.assertEqual(prepared_rows[0]["prepare_prompt_version"], "dataset-prepare-anthropic-v2")
 
+    def test_dataset_prepare_passes_project_prompt_templates(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_raw.csv"
+        prepared_path = temp_dir / "issues_raw.prepared.parquet"
+        self._write_csv_rows(csv_path, ["결제 오류가 반복 발생했습니다"])
+
+        with patch(
+            "python_ai_worker.skills.dataset_build.rt._anthropic_prepare_client",
+            return_value=self._DummyEnabledClient(),
+        ), patch(
+            "python_ai_worker.skills.dataset_build.rt._prepare_rows",
+            return_value=(
+                [
+                    {
+                        "disposition": "keep",
+                        "normalized_text": "결제 오류가 반복 발생했습니다.",
+                        "reason": "normalized",
+                        "quality_flags": [],
+                        "prompt_version": "project-prepare-v1",
+                    }
+                ],
+                {
+                    "provider": "anthropic",
+                    "model": "claude-test",
+                    "operation": "dataset_prepare",
+                    "request_count": 1,
+                    "input_tokens": 12,
+                    "output_tokens": 4,
+                    "total_tokens": 16,
+                },
+            ),
+        ) as prepare_mock:
+            result = run_dataset_prepare(
+                {
+                    "dataset_version_id": "version-prepare-project-prompt",
+                    "dataset_name": str(csv_path),
+                    "text_column": "text",
+                    "output_path": str(prepared_path),
+                    "prepare_batch_size": 1,
+                    "prepare_prompt_version": "project-prepare-v1",
+                    "prepare_prompt_template": "---\noperation: prepare\n---\n{{raw_text}}\n",
+                    "prepare_batch_prompt_template": "---\noperation: prepare_batch\n---\n{{rows_json}}\n",
+                }
+            )
+
+        _, kwargs = prepare_mock.call_args
+        self.assertEqual(kwargs["prompt_template_override"], "---\noperation: prepare\n---\n{{raw_text}}")
+        self.assertEqual(kwargs["batch_prompt_template_override"], "---\noperation: prepare_batch\n---\n{{rows_json}}")
+        self.assertEqual(result["artifact"]["prepare_prompt_version"], "project-prepare-v1")
+
+    def test_dataset_prepare_passes_llm_mode_to_client_builder(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_raw.csv"
+        prepared_path = temp_dir / "issues_raw.prepared.parquet"
+        self._write_csv_rows(csv_path, ["결제 오류가 반복 발생했습니다"])
+
+        with patch("python_ai_worker.skills.dataset_build.rt._anthropic_prepare_client", return_value=None) as mock_client:
+            run_dataset_prepare(
+                {
+                    "dataset_version_id": "version-prepare-default",
+                    "dataset_name": str(csv_path),
+                    "text_column": "text",
+                    "output_path": str(prepared_path),
+                    "llm_mode": "disabled",
+                }
+            )
+
+        mock_client.assert_called_once_with("", llm_mode="disabled")
+
     def test_sentiment_label_fallback(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         prepared_path = temp_dir / "issues.prepared.parquet"
@@ -1008,7 +1205,7 @@ class TaskTests(unittest.TestCase):
         pq.write_table(table, prepared_path)
 
         with patch(
-            "python_ai_worker.skills.dataset_build.rt._anthropic_prepare_client",
+            "python_ai_worker.skills.dataset_build.rt._anthropic_sentiment_client",
             return_value=self._DummyEnabledClient(),
         ), patch(
             "python_ai_worker.skills.dataset_build.rt._label_sentiments",
@@ -1078,6 +1275,89 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(labeled_rows[0]["sentiment_label"], "negative")
         self.assertEqual(labeled_rows[1]["sentiment_label"], "neutral")
         self.assertNotIn("normalized_text", labeled_rows[0])
+
+    def test_sentiment_label_passes_project_prompt_templates(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        prepared_path = temp_dir / "issues.prepared.parquet"
+        sentiment_path = temp_dir / "issues.sentiment.parquet"
+        table = pa.Table.from_pylist(
+            [
+                {"normalized_text": "결제 오류가 반복 발생했습니다", "channel": "app"},
+            ]
+        )
+        pq.write_table(table, prepared_path)
+
+        with patch(
+            "python_ai_worker.skills.dataset_build.rt._anthropic_sentiment_client",
+            return_value=self._DummyEnabledClient(),
+        ), patch(
+            "python_ai_worker.skills.dataset_build.rt._label_sentiments",
+            return_value=(
+                [
+                    {
+                        "label": "negative",
+                        "confidence": 0.82,
+                        "reason": "negative markers detected",
+                        "prompt_version": "project-sentiment-v1",
+                        "usage": {
+                            "provider": "anthropic",
+                            "model": "claude-test",
+                            "operation": "sentiment_label",
+                            "request_count": 1,
+                            "input_tokens": 12,
+                            "output_tokens": 4,
+                            "total_tokens": 16,
+                        },
+                    }
+                ],
+                {
+                    "provider": "anthropic",
+                    "model": "claude-test",
+                    "operation": "sentiment_label",
+                    "request_count": 1,
+                    "input_tokens": 12,
+                    "output_tokens": 4,
+                    "total_tokens": 16,
+                },
+            ),
+        ) as label_mock:
+            result = run_sentiment_label(
+                {
+                    "dataset_version_id": "version-sentiment-project-prompt",
+                    "dataset_name": str(prepared_path),
+                    "text_column": "normalized_text",
+                    "output_path": str(sentiment_path),
+                    "sentiment_prompt_version": "project-sentiment-v1",
+                    "sentiment_batch_size": 1,
+                    "sentiment_prompt_template": "---\noperation: sentiment\n---\n{{text}}\n",
+                    "sentiment_batch_prompt_template": "---\noperation: sentiment_batch\n---\n{{rows_json}}\n",
+                }
+            )
+
+        _, kwargs = label_mock.call_args
+        self.assertEqual(kwargs["prompt_template_override"], "---\noperation: sentiment\n---\n{{text}}")
+        self.assertEqual(kwargs["batch_prompt_template_override"], "---\noperation: sentiment_batch\n---\n{{rows_json}}")
+        self.assertEqual(result["artifact"]["sentiment_prompt_version"], "project-sentiment-v1")
+
+    def test_sentiment_label_passes_llm_mode_to_client_builder(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        prepared_path = temp_dir / "issues.prepared.parquet"
+        sentiment_path = temp_dir / "issues.sentiment.parquet"
+        table = pa.Table.from_pylist([{"normalized_text": "결제 오류가 반복 발생했습니다", "channel": "app"}])
+        pq.write_table(table, prepared_path)
+
+        with patch("python_ai_worker.skills.dataset_build.rt._anthropic_sentiment_client", return_value=None) as mock_client:
+            run_sentiment_label(
+                {
+                    "dataset_version_id": "version-sentiment-default",
+                    "dataset_name": str(prepared_path),
+                    "text_column": "normalized_text",
+                    "output_path": str(sentiment_path),
+                    "llm_mode": "disabled",
+                }
+            )
+
+        mock_client.assert_called_once_with("", llm_mode="disabled")
 
     def test_issue_sentiment_summary(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
@@ -1747,15 +2027,15 @@ class TaskTests(unittest.TestCase):
 
         with (
             patch(
-                "python_ai_worker.skills.support._lookup_pgvector_index_metadata",
+                "python_ai_worker.skills.retrieve._lookup_pgvector_index_metadata",
                 return_value={"embedding_model": "intfloat/multilingual-e5-small", "vector_dim": 2},
             ),
             patch(
-                "python_ai_worker.skills.support.rt._generate_query_embedding",
+                "python_ai_worker.skills.retrieve.rt._generate_query_embedding",
                 return_value=[1.0, 0.0],
             ),
             patch(
-                "python_ai_worker.skills.support._query_pgvector_rows",
+                "python_ai_worker.skills.retrieve._query_pgvector_rows",
                 side_effect=fake_query_pgvector_rows,
             ),
         ):
@@ -1821,7 +2101,7 @@ class TaskTests(unittest.TestCase):
         pq.write_table(pa.Table.from_pylist(chunk_rows), chunk_path)
 
         with patch(
-            "python_ai_worker.skills.support._query_pgvector_cluster_rows",
+            "python_ai_worker.skills.retrieve._query_pgvector_cluster_rows",
             return_value=[
                 {
                     "chunk_id": "version-pgvector:row:0:chunk:0",
@@ -2402,11 +2682,11 @@ class TaskTests(unittest.TestCase):
 
         with (
             patch(
-                "python_ai_worker.skills.support._lookup_pgvector_index_metadata",
+                "python_ai_worker.skills.retrieve._lookup_pgvector_index_metadata",
                 return_value={"embedding_model": "token-overlap-v1", "vector_dim": 64},
             ),
             patch(
-                "python_ai_worker.skills.support._query_pgvector_rows",
+                "python_ai_worker.skills.retrieve._query_pgvector_rows",
                 return_value=[
                     {
                         "chunk_id": "version-1:row:0:chunk:0",
@@ -2448,11 +2728,11 @@ class TaskTests(unittest.TestCase):
 
         with (
             patch(
-                "python_ai_worker.skills.support._lookup_pgvector_index_metadata",
+                "python_ai_worker.skills.retrieve._lookup_pgvector_index_metadata",
                 return_value={"embedding_model": "token-overlap-v1", "vector_dim": 64},
             ),
             patch(
-                "python_ai_worker.skills.support._query_pgvector_rows",
+                "python_ai_worker.skills.retrieve._query_pgvector_rows",
                 return_value=[],
             ),
         ):
@@ -2574,15 +2854,15 @@ class TaskTests(unittest.TestCase):
 
         with (
             patch(
-                "python_ai_worker.skills.support._lookup_pgvector_index_metadata",
+                "python_ai_worker.skills.retrieve._lookup_pgvector_index_metadata",
                 return_value={"embedding_model": "text-embedding-3-small", "vector_dim": 3},
             ),
             patch(
-                "python_ai_worker.skills.support.rt._generate_query_embedding",
+                "python_ai_worker.skills.retrieve.rt._generate_query_embedding",
                 return_value=[0.9, 0.1, 0.4],
             ) as generate_query_embedding,
             patch(
-                "python_ai_worker.skills.support._query_pgvector_rows",
+                "python_ai_worker.skills.retrieve._query_pgvector_rows",
                 side_effect=_capture_query,
             ),
         ):
