@@ -57,14 +57,6 @@ export function DatasetDialog({ open, onClose, dataset, versions }: DatasetDialo
                     {versions.map((v, idx) =>
                       <FileRow key={idx} file={v.metadata.upload} isLatest={v.is_active} />
                     )}
-                    {/* {files.map((file, idx) => (
-                      <FileRow
-                        key={idx}
-                        file={file}
-                        isLatest={idx === 0}
-                      />
-                    ))} */}
-                    {}
                   </div>
                 )}
               </TabsContent>
