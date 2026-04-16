@@ -47,7 +47,7 @@ const (
 
 var promptPlaceholderPattern = regexp.MustCompile(`{{\s*([a-zA-Z0-9_]+)\s*}}`)
 
-var allowedProjectPromptOperations = map[string]map[string]struct{}{
+var allowedPromptOperations = map[string]map[string]struct{}{
 	"prepare": {
 		"raw_text": {},
 	},
@@ -230,7 +230,7 @@ func (s *DatasetService) SaveProjectPrompt(projectID string, input domain.Projec
 	if version == "" {
 		return domain.ProjectPrompt{}, ErrInvalidArgument{Message: "version is required"}
 	}
-	operation, err := normalizeProjectPromptOperation(input.Operation)
+	operation, err := normalizePromptOperation(input.Operation)
 	if err != nil {
 		return domain.ProjectPrompt{}, err
 	}
@@ -284,6 +284,152 @@ func (s *DatasetService) ListProjectPrompts(projectID string) (domain.ProjectPro
 		return domain.ProjectPromptListResponse{}, err
 	}
 	return domain.ProjectPromptListResponse{Items: items}, nil
+}
+
+func (s *DatasetService) CreatePrompt(input domain.PromptCreateRequest) (domain.Prompt, error) {
+	version := strings.TrimSpace(input.Version)
+	if version == "" {
+		return domain.Prompt{}, ErrInvalidArgument{Message: "version is required"}
+	}
+	operation, err := normalizePromptOperation(input.Operation)
+	if err != nil {
+		return domain.Prompt{}, err
+	}
+	content := strings.TrimSpace(input.Content)
+	if content == "" {
+		return domain.Prompt{}, ErrInvalidArgument{Message: "content is required"}
+	}
+
+	metadata := parsePromptFrontMatter(content)
+	if frontOperation := strings.TrimSpace(metadata["operation"]); frontOperation != "" && frontOperation != operation {
+		return domain.Prompt{}, ErrInvalidArgument{Message: "front matter operation does not match request operation"}
+	}
+	if err := validatePromptTemplatePlaceholders(content, operation); err != nil {
+		return domain.Prompt{}, err
+	}
+	if _, err := s.store.GetPromptByVersion(version, operation); err == nil {
+		return domain.Prompt{}, ErrConflict{Message: "prompt version already exists for operation"}
+	} else if err != store.ErrNotFound {
+		return domain.Prompt{}, err
+	}
+
+	now := time.Now().UTC()
+	prompt := domain.Prompt{
+		PromptID:    id.New(),
+		Version:     version,
+		Operation:   operation,
+		Title:       defaultPromptMetaValue(metadata["title"], version),
+		Status:      defaultPromptMetaValue(metadata["status"], "active"),
+		Summary:     strings.TrimSpace(metadata["summary"]),
+		Content:     content,
+		ContentHash: sha256Hex(content),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := s.store.SavePrompt(prompt); err != nil {
+		return domain.Prompt{}, err
+	}
+	return prompt, nil
+}
+
+func (s *DatasetService) GetPrompt(promptID string) (domain.Prompt, error) {
+	prompt, err := s.store.GetPrompt(promptID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return domain.Prompt{}, ErrNotFound{Resource: "prompt"}
+		}
+		return domain.Prompt{}, err
+	}
+	return prompt, nil
+}
+
+func (s *DatasetService) ListPrompts(operation string) (domain.PromptListResponse, error) {
+	filter := strings.TrimSpace(operation)
+	if filter != "" {
+		normalized, err := normalizePromptOperation(filter)
+		if err != nil {
+			return domain.PromptListResponse{}, err
+		}
+		filter = normalized
+	}
+	items, err := s.store.ListPrompts(filter)
+	if err != nil {
+		return domain.PromptListResponse{}, err
+	}
+	return domain.PromptListResponse{Items: items}, nil
+}
+
+func (s *DatasetService) UpdatePrompt(promptID string, input domain.PromptUpdateRequest) (domain.Prompt, error) {
+	prompt, err := s.store.GetPrompt(promptID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return domain.Prompt{}, ErrNotFound{Resource: "prompt"}
+		}
+		return domain.Prompt{}, err
+	}
+
+	version := prompt.Version
+	if input.Version != nil {
+		version = strings.TrimSpace(*input.Version)
+	}
+	if version == "" {
+		return domain.Prompt{}, ErrInvalidArgument{Message: "version is required"}
+	}
+
+	operation := prompt.Operation
+	if input.Operation != nil {
+		operation, err = normalizePromptOperation(*input.Operation)
+		if err != nil {
+			return domain.Prompt{}, err
+		}
+	}
+
+	content := prompt.Content
+	if input.Content != nil {
+		content = strings.TrimSpace(*input.Content)
+	}
+	if content == "" {
+		return domain.Prompt{}, ErrInvalidArgument{Message: "content is required"}
+	}
+	if input.Version == nil && input.Operation == nil && input.Content == nil {
+		return domain.Prompt{}, ErrInvalidArgument{Message: "at least one field must be provided"}
+	}
+
+	metadata := parsePromptFrontMatter(content)
+	if frontOperation := strings.TrimSpace(metadata["operation"]); frontOperation != "" && frontOperation != operation {
+		return domain.Prompt{}, ErrInvalidArgument{Message: "front matter operation does not match request operation"}
+	}
+	if err := validatePromptTemplatePlaceholders(content, operation); err != nil {
+		return domain.Prompt{}, err
+	}
+	if existing, err := s.store.GetPromptByVersion(version, operation); err == nil && existing.PromptID != promptID {
+		return domain.Prompt{}, ErrConflict{Message: "prompt version already exists for operation"}
+	} else if err != nil && err != store.ErrNotFound {
+		return domain.Prompt{}, err
+	}
+
+	prompt.Version = version
+	prompt.Operation = operation
+	prompt.Title = defaultPromptMetaValue(metadata["title"], version)
+	prompt.Status = defaultPromptMetaValue(metadata["status"], "active")
+	prompt.Summary = strings.TrimSpace(metadata["summary"])
+	prompt.Content = content
+	prompt.ContentHash = sha256Hex(content)
+	prompt.UpdatedAt = time.Now().UTC()
+	if err := s.store.SavePrompt(prompt); err != nil {
+		return domain.Prompt{}, err
+	}
+	return prompt, nil
+}
+
+func (s *DatasetService) DeletePrompt(promptID string) error {
+	if err := s.store.DeletePrompt(promptID); err != nil {
+		if err == store.ErrNotFound {
+			return ErrNotFound{Resource: "prompt"}
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *DatasetService) GetProjectPromptDefaults(projectID string) (domain.ProjectPromptDefaults, error) {
@@ -1125,6 +1271,45 @@ func (s *DatasetService) availablePromptVersions() ([]string, error) {
 }
 
 func (s *DatasetService) promptCatalog() ([]domain.PromptTemplateMetadata, error) {
+	fileCatalog, err := s.filePromptCatalog()
+	if err != nil {
+		return nil, err
+	}
+	storedCatalog, err := s.storedPromptCatalog()
+	if err != nil {
+		return nil, err
+	}
+	if len(fileCatalog) == 0 {
+		return storedCatalog, nil
+	}
+	if len(storedCatalog) == 0 {
+		return fileCatalog, nil
+	}
+
+	merged := make(map[string]domain.PromptTemplateMetadata, len(fileCatalog)+len(storedCatalog))
+	for _, item := range fileCatalog {
+		key := promptMetadataKey(item.Version, item.Operation)
+		merged[key] = item
+	}
+	for _, item := range storedCatalog {
+		key := promptMetadataKey(item.Version, item.Operation)
+		merged[key] = item
+	}
+
+	items := make([]domain.PromptTemplateMetadata, 0, len(merged))
+	for _, item := range merged {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Operation == items[j].Operation {
+			return items[i].Version < items[j].Version
+		}
+		return items[i].Operation < items[j].Operation
+	})
+	return items, nil
+}
+
+func (s *DatasetService) filePromptCatalog() ([]domain.PromptTemplateMetadata, error) {
 	dir := strings.TrimSpace(s.promptTemplatesDir)
 	if dir == "" {
 		return nil, nil
@@ -1166,6 +1351,25 @@ func (s *DatasetService) promptCatalog() ([]domain.PromptTemplateMetadata, error
 	sort.Slice(catalog, func(i, j int) bool {
 		return catalog[i].Version < catalog[j].Version
 	})
+	return catalog, nil
+}
+
+func (s *DatasetService) storedPromptCatalog() ([]domain.PromptTemplateMetadata, error) {
+	items, err := s.store.ListPrompts("")
+	if err != nil {
+		return nil, err
+	}
+	catalog := make([]domain.PromptTemplateMetadata, 0, len(items))
+	for _, item := range items {
+		catalog = append(catalog, domain.PromptTemplateMetadata{
+			Version:       item.Version,
+			Title:         item.Title,
+			Operation:     item.Operation,
+			Status:        item.Status,
+			Summary:       item.Summary,
+			DefaultGroups: inferPromptDefaultGroups(item.Version),
+		})
+	}
 	return catalog, nil
 }
 
@@ -1243,19 +1447,19 @@ func defaultPromptMetaValue(value string, fallback string) string {
 	return trimmed
 }
 
-func normalizeProjectPromptOperation(value string) (string, error) {
+func normalizePromptOperation(value string) (string, error) {
 	operation := strings.TrimSpace(value)
 	if operation == "" {
 		return "", ErrInvalidArgument{Message: "operation is required"}
 	}
-	if _, ok := allowedProjectPromptOperations[operation]; !ok {
+	if _, ok := allowedPromptOperations[operation]; !ok {
 		return "", ErrInvalidArgument{Message: "unsupported prompt operation"}
 	}
 	return operation, nil
 }
 
 func validatePromptTemplatePlaceholders(content string, operation string) error {
-	allowed, ok := allowedProjectPromptOperations[operation]
+	allowed, ok := allowedPromptOperations[operation]
 	if !ok {
 		return ErrInvalidArgument{Message: "unsupported prompt operation"}
 	}
@@ -1486,6 +1690,21 @@ func (s *DatasetService) lookupProjectPromptContent(projectID, version, operatio
 	return strings.TrimSpace(prompt.Content), true, nil
 }
 
+func (s *DatasetService) lookupGlobalPromptContent(version, operation string) (string, bool, error) {
+	trimmedVersion := strings.TrimSpace(version)
+	if trimmedVersion == "" {
+		return "", false, nil
+	}
+	prompt, err := s.store.GetPromptByVersion(trimmedVersion, operation)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return strings.TrimSpace(prompt.Content), true, nil
+}
+
 func (s *DatasetService) resolveProjectPromptTemplates(projectID, version, rowOperation, batchOperation string) (projectPromptTemplates, error) {
 	rowTemplate, rowExists, err := s.lookupProjectPromptContent(projectID, version, rowOperation)
 	if err != nil {
@@ -1497,6 +1716,18 @@ func (s *DatasetService) resolveProjectPromptTemplates(projectID, version, rowOp
 		batchTemplate, batchExists, err = s.lookupProjectPromptContent(projectID, version, batchOperation)
 		if err != nil {
 			return projectPromptTemplates{}, err
+		}
+	}
+	if !rowExists && !batchExists {
+		rowTemplate, rowExists, err = s.lookupGlobalPromptContent(version, rowOperation)
+		if err != nil {
+			return projectPromptTemplates{}, err
+		}
+		if strings.TrimSpace(batchOperation) != "" {
+			batchTemplate, batchExists, err = s.lookupGlobalPromptContent(version, batchOperation)
+			if err != nil {
+				return projectPromptTemplates{}, err
+			}
 		}
 	}
 	if !rowExists && !batchExists {
@@ -1515,6 +1746,10 @@ func (s *DatasetService) resolveProjectPromptTemplates(projectID, version, rowOp
 func sha256Hex(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+func promptMetadataKey(version, operation string) string {
+	return strings.TrimSpace(version) + "::" + strings.TrimSpace(operation)
 }
 
 func stringSet(values []string) map[string]struct{} {

@@ -174,6 +174,151 @@ func (s *PostgresStore) DeleteProject(projectID string) error {
 	return tx.Commit()
 }
 
+func (s *PostgresStore) SavePrompt(prompt domain.Prompt) error {
+	_, err := s.db.Exec(
+		`INSERT INTO prompts (
+			prompt_id, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10
+		)
+		ON CONFLICT (prompt_id) DO UPDATE
+		SET version = EXCLUDED.version,
+		    operation = EXCLUDED.operation,
+		    title = EXCLUDED.title,
+		    status = EXCLUDED.status,
+		    summary = EXCLUDED.summary,
+		    content = EXCLUDED.content,
+		    content_hash = EXCLUDED.content_hash,
+		    updated_at = EXCLUDED.updated_at`,
+		prompt.PromptID,
+		prompt.Version,
+		prompt.Operation,
+		prompt.Title,
+		prompt.Status,
+		prompt.Summary,
+		prompt.Content,
+		prompt.ContentHash,
+		prompt.CreatedAt,
+		prompt.UpdatedAt,
+	)
+	return err
+}
+
+func (s *PostgresStore) GetPrompt(promptID string) (domain.Prompt, error) {
+	row := s.db.QueryRow(
+		`SELECT prompt_id::text, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+		 FROM prompts
+		 WHERE prompt_id = $1::uuid`,
+		promptID,
+	)
+
+	var prompt domain.Prompt
+	if err := row.Scan(
+		&prompt.PromptID,
+		&prompt.Version,
+		&prompt.Operation,
+		&prompt.Title,
+		&prompt.Status,
+		&prompt.Summary,
+		&prompt.Content,
+		&prompt.ContentHash,
+		&prompt.CreatedAt,
+		&prompt.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Prompt{}, ErrNotFound
+		}
+		return domain.Prompt{}, err
+	}
+	return prompt, nil
+}
+
+func (s *PostgresStore) GetPromptByVersion(version, operation string) (domain.Prompt, error) {
+	row := s.db.QueryRow(
+		`SELECT prompt_id::text, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+		 FROM prompts
+		 WHERE version = $1 AND operation = $2`,
+		version,
+		operation,
+	)
+
+	var prompt domain.Prompt
+	if err := row.Scan(
+		&prompt.PromptID,
+		&prompt.Version,
+		&prompt.Operation,
+		&prompt.Title,
+		&prompt.Status,
+		&prompt.Summary,
+		&prompt.Content,
+		&prompt.ContentHash,
+		&prompt.CreatedAt,
+		&prompt.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Prompt{}, ErrNotFound
+		}
+		return domain.Prompt{}, err
+	}
+	return prompt, nil
+}
+
+func (s *PostgresStore) ListPrompts(operation string) ([]domain.Prompt, error) {
+	query := `SELECT prompt_id::text, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+	          FROM prompts`
+	args := []any{}
+	if strings.TrimSpace(operation) != "" {
+		query += ` WHERE operation = $1`
+		args = append(args, strings.TrimSpace(operation))
+	}
+	query += ` ORDER BY operation ASC, version ASC, updated_at DESC`
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.Prompt, 0)
+	for rows.Next() {
+		var prompt domain.Prompt
+		if err := rows.Scan(
+			&prompt.PromptID,
+			&prompt.Version,
+			&prompt.Operation,
+			&prompt.Title,
+			&prompt.Status,
+			&prompt.Summary,
+			&prompt.Content,
+			&prompt.ContentHash,
+			&prompt.CreatedAt,
+			&prompt.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, prompt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *PostgresStore) DeletePrompt(promptID string) error {
+	result, err := s.db.Exec(`DELETE FROM prompts WHERE prompt_id = $1::uuid`, promptID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgresStore) SaveProjectPrompt(prompt domain.ProjectPrompt) error {
 	_, err := s.db.Exec(
 		`INSERT INTO project_prompts (
@@ -1625,6 +1770,26 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			description TEXT,
 			created_at TIMESTAMPTZ NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS prompts (
+			prompt_id UUID PRIMARY KEY,
+			version TEXT NOT NULL,
+			operation TEXT NOT NULL,
+			title TEXT NOT NULL,
+			status TEXT NOT NULL,
+			summary TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL,
+			content_hash TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			UNIQUE (version, operation)
+		)`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS content TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 		`CREATE TABLE IF NOT EXISTS project_prompts (
 			project_id UUID NOT NULL REFERENCES projects(project_id),
 			version TEXT NOT NULL,
@@ -1837,6 +2002,8 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 func (s *PostgresStore) promoteTimestampColumnsToTimestamptz(ctx context.Context) error {
 	columns := []timestampColumn{
 		{tableName: "projects", columnName: "created_at"},
+		{tableName: "prompts", columnName: "created_at"},
+		{tableName: "prompts", columnName: "updated_at"},
 		{tableName: "project_prompts", columnName: "created_at"},
 		{tableName: "project_prompts", columnName: "updated_at"},
 		{tableName: "project_prompt_defaults", columnName: "updated_at"},

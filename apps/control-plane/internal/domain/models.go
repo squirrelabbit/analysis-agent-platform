@@ -44,6 +44,35 @@ type ProjectPromptListResponse struct {
 	Items []ProjectPrompt `json:"items"`
 }
 
+type Prompt struct {
+	PromptID    string    `json:"prompt_id"`
+	Version     string    `json:"version"`
+	Operation   string    `json:"operation"`
+	Title       string    `json:"title"`
+	Status      string    `json:"status"`
+	Summary     string    `json:"summary,omitempty"`
+	Content     string    `json:"content"`
+	ContentHash string    `json:"content_hash"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type PromptCreateRequest struct {
+	Version   string `json:"version"`
+	Operation string `json:"operation"`
+	Content   string `json:"content"`
+}
+
+type PromptUpdateRequest struct {
+	Version   *string `json:"version,omitempty"`
+	Operation *string `json:"operation,omitempty"`
+	Content   *string `json:"content,omitempty"`
+}
+
+type PromptListResponse struct {
+	Items []Prompt `json:"items"`
+}
+
 type ProjectPromptDefaults struct {
 	ProjectID              string     `json:"project_id"`
 	PreparePromptVersion   *string    `json:"prepare_prompt_version,omitempty"`

@@ -1724,6 +1724,94 @@ func TestBuildPrepareUsesProjectPromptTemplateOverride(t *testing.T) {
 	}
 }
 
+func TestBuildPrepareUsesGlobalPromptTemplateOverride(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-prepare-global", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-prepare-global",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	if err := repository.SavePrompt(domain.Prompt{
+		PromptID:    "global-prepare-prompt",
+		Version:     "global-prepare-v1",
+		Operation:   "prepare",
+		Title:       "Global prepare",
+		Status:      "active",
+		Content:     "---\ntitle: Global prepare\noperation: prepare\n---\n글로벌 전처리\n{{raw_text}}\n",
+		ContentHash: "hash",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("unexpected save global prompt error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-prepare-global",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata:         map[string]any{},
+		Profile: &domain.DatasetProfile{
+			PreparePromptVersion: datasetStringPtr("global-prepare-v1"),
+		},
+		PrepareStatus: "queued",
+		CreatedAt:     time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	var requestedPromptVersion string
+	var requestedPromptTemplate string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("unexpected decode error: %v", err)
+		}
+		requestedPromptVersion = payload["prepare_prompt_version"].(string)
+		requestedPromptTemplate = payload["prepare_prompt_template"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"artifact": map[string]any{
+				"prepare_uri":            "/tmp/issues.prepared.parquet",
+				"prepared_ref":           "/tmp/issues.prepared.parquet",
+				"prepare_format":         "parquet",
+				"prepare_prompt_version": "global-prepare-v1",
+				"prepared_text_column":   "normalized_text",
+				"summary": map[string]any{
+					"output_row_count": 1,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	result, err := service.BuildPrepare(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{})
+	if err != nil {
+		t.Fatalf("unexpected build prepare error: %v", err)
+	}
+	if requestedPromptVersion != "global-prepare-v1" {
+		t.Fatalf("unexpected requested prompt version: %s", requestedPromptVersion)
+	}
+	if !strings.Contains(requestedPromptTemplate, "{{raw_text}}") {
+		t.Fatalf("expected global prompt template in payload: %s", requestedPromptTemplate)
+	}
+	if result.PreparePromptVer == nil || *result.PreparePromptVer != "global-prepare-v1" {
+		t.Fatalf("unexpected stored prepare prompt version: %+v", result.PreparePromptVer)
+	}
+}
+
 func TestBuildPrepareUsesProjectPromptDefaultWhenProfilePromptVersionMissing(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
@@ -3037,6 +3125,97 @@ func TestBuildSentimentUsesProjectPromptTemplateOverride(t *testing.T) {
 		t.Fatalf("expected row-only fallback batch size, got %d", requestedBatchSize)
 	}
 	if result.SentimentPromptVer == nil || *result.SentimentPromptVer != "project-sentiment-v1" {
+		t.Fatalf("unexpected stored sentiment prompt version: %+v", result.SentimentPromptVer)
+	}
+}
+
+func TestBuildSentimentUsesGlobalPromptTemplateOverride(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-sentiment-global", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-sentiment-global",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	if err := repository.SavePrompt(domain.Prompt{
+		PromptID:    "global-sentiment-prompt",
+		Version:     "global-sentiment-v1",
+		Operation:   "sentiment",
+		Title:       "Global sentiment",
+		Status:      "active",
+		Content:     "---\ntitle: Global sentiment\noperation: sentiment\n---\n글로벌 감성\n{{text}}\n",
+		ContentHash: "hash",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("unexpected save global prompt error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-sentiment-global",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.prepared.parquet",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"prepared_text_column": "normalized_text",
+		},
+		Profile: &domain.DatasetProfile{
+			SentimentPromptVersion: datasetStringPtr("global-sentiment-v1"),
+		},
+		PrepareStatus:   "ready",
+		PrepareURI:      datasetStringPtr("/tmp/issues.prepared.parquet"),
+		SentimentStatus: "queued",
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	var requestedPromptVersion string
+	var requestedPromptTemplate string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("unexpected decode error: %v", err)
+		}
+		requestedPromptVersion = payload["sentiment_prompt_version"].(string)
+		requestedPromptTemplate = payload["sentiment_prompt_template"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"artifact": map[string]any{
+				"sentiment_uri":            "/tmp/issues.sentiment.parquet",
+				"sentiment_ref":            "/tmp/issues.sentiment.parquet",
+				"sentiment_format":         "parquet",
+				"sentiment_prompt_version": "global-sentiment-v1",
+				"summary": map[string]any{
+					"labeled_row_count": 1,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	result, err := service.BuildSentiment(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{})
+	if err != nil {
+		t.Fatalf("unexpected build sentiment error: %v", err)
+	}
+	if requestedPromptVersion != "global-sentiment-v1" {
+		t.Fatalf("unexpected requested prompt version: %s", requestedPromptVersion)
+	}
+	if !strings.Contains(requestedPromptTemplate, "{{text}}") {
+		t.Fatalf("expected global sentiment template in payload: %s", requestedPromptTemplate)
+	}
+	if result.SentimentPromptVer == nil || *result.SentimentPromptVer != "global-sentiment-v1" {
 		t.Fatalf("unexpected stored sentiment prompt version: %+v", result.SentimentPromptVer)
 	}
 }

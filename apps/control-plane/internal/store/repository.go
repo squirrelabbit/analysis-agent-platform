@@ -15,6 +15,11 @@ type Repository interface {
 	GetProject(projectID string) (domain.Project, error)
 	ListProjects() ([]domain.Project, error)
 	DeleteProject(projectID string) error
+	SavePrompt(prompt domain.Prompt) error
+	GetPrompt(promptID string) (domain.Prompt, error)
+	GetPromptByVersion(version, operation string) (domain.Prompt, error)
+	ListPrompts(operation string) ([]domain.Prompt, error)
+	DeletePrompt(promptID string) error
 	SaveProjectPrompt(prompt domain.ProjectPrompt) error
 	GetProjectPrompt(projectID, version, operation string) (domain.ProjectPrompt, error)
 	ListProjectPrompts(projectID string) ([]domain.ProjectPrompt, error)

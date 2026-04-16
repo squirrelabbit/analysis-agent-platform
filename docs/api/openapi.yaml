@@ -21,6 +21,7 @@ servers:
     description: Local development
 tags:
   - name: System
+  - name: Prompts
   - name: Projects
   - name: Datasets
   - name: Analysis
@@ -64,6 +65,112 @@ paths:
                 type: array
                 items:
                   type: string
+  /prompts:
+    get:
+      tags: [Prompts]
+      summary: List global prompts
+      operationId: listPrompts
+      parameters:
+        - name: operation
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [prepare, prepare_batch, sentiment, sentiment_batch]
+      responses:
+        "200":
+          description: Global prompt list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptListResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Prompts]
+      summary: Create global prompt
+      operationId: createPrompt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromptCreateRequest"
+      responses:
+        "201":
+          description: Global prompt created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Prompt"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+  /prompts/{prompt_id}:
+    get:
+      tags: [Prompts]
+      summary: Get global prompt
+      operationId: getPrompt
+      parameters:
+        - name: prompt_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Global prompt detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Prompt"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    patch:
+      tags: [Prompts]
+      summary: Update global prompt
+      operationId: updatePrompt
+      parameters:
+        - name: prompt_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromptUpdateRequest"
+      responses:
+        "200":
+          description: Global prompt updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Prompt"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Prompts]
+      summary: Delete global prompt
+      operationId: deletePrompt
+      parameters:
+        - name: prompt_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Global prompt deleted
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects:
     get:
       tags: [Projects]
@@ -1556,6 +1663,81 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ProjectPrompt"
+      required: [items]
+    Prompt:
+      type: object
+      properties:
+        prompt_id:
+          type: string
+        version:
+          type: string
+        operation:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        summary:
+          type: string
+        content:
+          type: string
+        content_hash:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [prompt_id, version, operation, title, status, content, content_hash, created_at, updated_at]
+    PromptCreateRequest:
+      type: object
+      description: |
+        글로벌 prompt는 `version`, `operation`, `content` 3개 필드로 등록한다.
+
+        - 같은 `version + operation` 조합은 다시 등록할 수 없다.
+        - operation별 필수 placeholder:
+          - `prepare`: `{{raw_text}}`
+          - `prepare_batch`: `{{rows_json}}`
+          - `sentiment`: `{{text}}`
+          - `sentiment_batch`: `{{rows_json}}`
+      properties:
+        version:
+          type: string
+        operation:
+          type: string
+          enum: [prepare, prepare_batch, sentiment, sentiment_batch]
+        content:
+          type: string
+      required: [version, operation, content]
+    PromptUpdateRequest:
+      type: object
+      description: |
+        글로벌 prompt를 부분 수정한다.
+
+        - `version`, `operation`, `content` 중 하나 이상을 보내야 한다.
+        - `content`를 바꾸면 front matter 기준으로 `title`, `status`, `summary`도 함께 다시 계산된다.
+      properties:
+        version:
+          type:
+            - string
+            - "null"
+        operation:
+          type:
+            - string
+            - "null"
+          enum: [prepare, prepare_batch, sentiment, sentiment_batch, null]
+        content:
+          type:
+            - string
+            - "null"
+    PromptListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Prompt"
       required: [items]
     ProjectPromptDefaults:
       type: object

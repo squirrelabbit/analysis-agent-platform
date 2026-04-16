@@ -11,6 +11,7 @@ import (
 type MemoryStore struct {
 	mu             sync.RWMutex
 	projects       map[string]domain.Project
+	prompts        map[string]domain.Prompt
 	projectPrompts map[string]domain.ProjectPrompt
 	promptDefaults map[string]domain.ProjectPromptDefaults
 	scenarios      map[string]domain.Scenario
@@ -26,6 +27,7 @@ type MemoryStore struct {
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		projects:       make(map[string]domain.Project),
+		prompts:        make(map[string]domain.Prompt),
 		projectPrompts: make(map[string]domain.ProjectPrompt),
 		promptDefaults: make(map[string]domain.ProjectPromptDefaults),
 		scenarios:      make(map[string]domain.Scenario),
@@ -133,6 +135,72 @@ func (s *MemoryStore) DeleteProject(projectID string) error {
 			delete(s.reports, key)
 		}
 	}
+	return nil
+}
+
+func promptVersionKey(version, operation string) string {
+	return version + "::" + operation
+}
+
+func (s *MemoryStore) SavePrompt(prompt domain.Prompt) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prompts[prompt.PromptID] = prompt
+	return nil
+}
+
+func (s *MemoryStore) GetPrompt(promptID string) (domain.Prompt, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	prompt, ok := s.prompts[promptID]
+	if !ok {
+		return domain.Prompt{}, ErrNotFound
+	}
+	return prompt, nil
+}
+
+func (s *MemoryStore) GetPromptByVersion(version, operation string) (domain.Prompt, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	targetKey := promptVersionKey(version, operation)
+	for _, prompt := range s.prompts {
+		if promptVersionKey(prompt.Version, prompt.Operation) == targetKey {
+			return prompt, nil
+		}
+	}
+	return domain.Prompt{}, ErrNotFound
+}
+
+func (s *MemoryStore) ListPrompts(operation string) ([]domain.Prompt, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.Prompt, 0, len(s.prompts))
+	filter := operation
+	for _, prompt := range s.prompts {
+		if filter != "" && prompt.Operation != filter {
+			continue
+		}
+		items = append(items, prompt)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Operation == items[j].Operation {
+			if items[i].Version == items[j].Version {
+				return items[i].UpdatedAt.After(items[j].UpdatedAt)
+			}
+			return items[i].Version < items[j].Version
+		}
+		return items[i].Operation < items[j].Operation
+	})
+	return items, nil
+}
+
+func (s *MemoryStore) DeletePrompt(promptID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.prompts[promptID]; !ok {
+		return ErrNotFound
+	}
+	delete(s.prompts, promptID)
 	return nil
 }
 

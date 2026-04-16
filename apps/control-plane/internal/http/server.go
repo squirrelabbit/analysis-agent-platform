@@ -98,6 +98,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPI)
 	s.mux.HandleFunc("GET /swagger", s.handleSwaggerUI)
 	s.mux.HandleFunc("GET /swagger/", s.handleSwaggerUI)
+	s.mux.HandleFunc("GET /prompts", s.handleListPrompts)
+	s.mux.HandleFunc("POST /prompts", s.handleCreatePrompt)
+	s.mux.HandleFunc("GET /prompts/{prompt_id}", s.handleGetPrompt)
+	s.mux.HandleFunc("PATCH /prompts/{prompt_id}", s.handleUpdatePrompt)
+	s.mux.HandleFunc("DELETE /prompts/{prompt_id}", s.handleDeletePrompt)
 	s.mux.HandleFunc("GET /skills", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		writeJSON(w, stdhttp.StatusOK, registry.SupportedSkills())
 	})
@@ -315,6 +320,60 @@ func (s *Server) handleListProjects(w stdhttp.ResponseWriter, _ *stdhttp.Request
 
 func (s *Server) handleDeleteProject(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if err := s.projectService.DeleteProject(r.PathValue("project_id")); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
+func (s *Server) handleListPrompts(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.ListPrompts(r.URL.Query().Get("operation"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleCreatePrompt(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.PromptCreateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreatePrompt(payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+func (s *Server) handleGetPrompt(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.GetPrompt(r.PathValue("prompt_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleUpdatePrompt(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.PromptUpdateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.UpdatePrompt(r.PathValue("prompt_id"), payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDeletePrompt(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.datasetService.DeletePrompt(r.PathValue("prompt_id")); err != nil {
 		s.writeServiceError(w, err)
 		return
 	}

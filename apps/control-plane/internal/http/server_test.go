@@ -753,6 +753,86 @@ func TestProjectPromptEndpoints(t *testing.T) {
 	}
 }
 
+func TestGlobalPromptEndpoints(t *testing.T) {
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+	})
+	handler := server.Handler()
+
+	created := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/prompts",
+		`{
+		  "version":"dataset-prepare-managed-v1",
+		  "operation":"prepare",
+		  "content":"---\ntitle: 글로벌 전처리\noperation: prepare\nstatus: active\nsummary: 글로벌 전처리 템플릿\n---\n{{raw_text}}\n"
+		}`,
+		http.StatusCreated,
+		&created,
+	)
+	promptID := created["prompt_id"].(string)
+	if created["version"] != "dataset-prepare-managed-v1" || created["operation"] != "prepare" {
+		t.Fatalf("unexpected created global prompt: %+v", created)
+	}
+
+	secondCreated := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/prompts",
+		`{
+		  "version":"dataset-sentiment-managed-v1",
+		  "operation":"sentiment",
+		  "content":"---\ntitle: 글로벌 감성\noperation: sentiment\nstatus: active\nsummary: 글로벌 감성 템플릿\n---\n{{text}}\n"
+		}`,
+		http.StatusCreated,
+		&secondCreated,
+	)
+
+	filtered := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/prompts?operation=prepare", "", http.StatusOK, &filtered)
+	items, ok := filtered["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one prepare prompt: %+v", filtered)
+	}
+	if items[0].(map[string]any)["prompt_id"] != promptID {
+		t.Fatalf("unexpected filtered prompt list: %+v", filtered)
+	}
+
+	loaded := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/prompts/"+promptID, "", http.StatusOK, &loaded)
+	if loaded["title"] != "글로벌 전처리" {
+		t.Fatalf("unexpected prompt detail response: %+v", loaded)
+	}
+
+	updated := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPatch,
+		"/prompts/"+promptID,
+		`{
+		  "content":"---\ntitle: 글로벌 전처리 수정\noperation: prepare\nstatus: experimental\nsummary: 수정된 글로벌 전처리 템플릿\n---\n{{raw_text}}\n"
+		}`,
+		http.StatusOK,
+		&updated,
+	)
+	if updated["title"] != "글로벌 전처리 수정" || updated["status"] != "experimental" {
+		t.Fatalf("expected updated prompt metadata: %+v", updated)
+	}
+
+	readJSONResponse(t, handler, http.MethodDelete, "/prompts/"+promptID, "", http.StatusNoContent, nil)
+
+	deleted := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/prompts/"+promptID, "", http.StatusNotFound, &deleted)
+}
+
 func TestScenarioPlanEndpoint(t *testing.T) {
 	server := NewServer(config.Config{
 		BindAddr:       ":0",
