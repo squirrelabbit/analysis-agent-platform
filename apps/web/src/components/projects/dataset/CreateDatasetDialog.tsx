@@ -27,14 +27,14 @@ export function CreateDatasetDialog({
 }: CreateDatasetDialogProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [type, setType] = useState("");
+  const [type, setType] = useState("unstructured");
 
   const handleSubmit = () => {
     if (!name || !description || !type) return;
     onCreate(name.trim(), description.trim(), type.trim());
     setName("");
     setDescription("");
-    setType("")
+    setType("unstructured")
     onClose();
   };
 
@@ -84,7 +84,7 @@ export function CreateDatasetDialog({
               타입
               <span className="text-red-500">*</span>
             </FieldLabel>
-            <RadioGroup defaultValue="unstructured" orientation="vertical">
+            <RadioGroup onValueChange={(v) => setType(v)} defaultValue="unstructured">
               <FieldLabel>
                 <Field orientation="horizontal">
                   <RadioGroupItem value="structured" />
