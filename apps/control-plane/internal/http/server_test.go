@@ -1231,6 +1231,111 @@ func TestDatasetActiveVersionEndpoints(t *testing.T) {
 	}
 }
 
+func TestDeleteProjectAndDatasetEndpoints(t *testing.T) {
+	uploadRoot := t.TempDir()
+	artifactRoot := t.TempDir()
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+		UploadRoot:     uploadRoot,
+		ArtifactRoot:   artifactRoot,
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"delete-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	dataset := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets",
+		`{"name":"delete-dataset","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&dataset,
+	)
+	datasetID := dataset["dataset_id"].(string)
+
+	version := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"delete-source.jsonl","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&version,
+	)
+
+	datasetPath := filepath.Join(uploadRoot, "projects", projectID, "datasets", datasetID)
+	artifactPath := filepath.Join(artifactRoot, "projects", projectID, "datasets", datasetID)
+	if err := os.MkdirAll(filepath.Join(datasetPath, "stub"), 0o755); err != nil {
+		t.Fatalf("failed to seed dataset upload path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(artifactPath, "stub"), 0o755); err != nil {
+		t.Fatalf("failed to seed dataset artifact path: %v", err)
+	}
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodDelete,
+		"/projects/"+projectID+"/datasets/"+datasetID,
+		"",
+		http.StatusNoContent,
+		nil,
+	)
+
+	deletedDataset := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/datasets/"+datasetID,
+		"",
+		http.StatusNotFound,
+		&deletedDataset,
+	)
+	if _, err := os.Stat(datasetPath); !os.IsNotExist(err) {
+		t.Fatalf("expected upload dataset path to be removed: %v", err)
+	}
+	if _, err := os.Stat(artifactPath); !os.IsNotExist(err) {
+		t.Fatalf("expected artifact dataset path to be removed: %v", err)
+	}
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodDelete,
+		"/projects/"+projectID,
+		"",
+		http.StatusNoContent,
+		nil,
+	)
+
+	deletedProject := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID,
+		"",
+		http.StatusNotFound,
+		&deletedProject,
+	)
+	projectPath := filepath.Join(uploadRoot, "projects", projectID)
+	projectArtifactPath := filepath.Join(artifactRoot, "projects", projectID)
+	if _, err := os.Stat(projectPath); !os.IsNotExist(err) {
+		t.Fatalf("expected project upload path to be removed: %v", err)
+	}
+	if _, err := os.Stat(projectArtifactPath); !os.IsNotExist(err) {
+		t.Fatalf("expected project artifact path to be removed: %v", err)
+	}
+}
+
 func TestDatasetBuildJobEndpoints(t *testing.T) {
 	artifactRoot := t.TempDir()
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

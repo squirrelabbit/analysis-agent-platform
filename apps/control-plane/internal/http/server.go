@@ -47,7 +47,7 @@ func NewServer(cfg config.Config) *Server {
 	server := &Server{
 		cfg:             cfg,
 		mux:             mux,
-		projectService:  service.NewProjectService(repository),
+		projectService:  service.NewProjectService(repository, cfg.UploadRoot, cfg.ArtifactRoot),
 		scenarioService: service.NewScenarioService(repository),
 		datasetService:  service.NewDatasetService(repository, cfg.PythonAIWorkerURL, cfg.UploadRoot, cfg.ArtifactRoot),
 		analysisService: service.NewAnalysisService(repository, starter, planGenerator),
@@ -104,6 +104,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /projects", s.handleListProjects)
 	s.mux.HandleFunc("GET /projects/{project_id}", s.handleGetProject)
+	s.mux.HandleFunc("DELETE /projects/{project_id}", s.handleDeleteProject)
 	s.mux.HandleFunc("GET /projects/{project_id}/prompts", s.handleListProjectPrompts)
 	s.mux.HandleFunc("POST /projects/{project_id}/prompts", s.handleSaveProjectPrompt)
 	s.mux.HandleFunc("GET /projects/{project_id}/prompt_defaults", s.handleGetProjectPromptDefaults)
@@ -117,6 +118,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets", s.handleCreateDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets", s.handleListDatasets)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}", s.handleGetDataset)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}", s.handleDeleteDataset)
 	s.mux.HandleFunc("PUT /projects/{project_id}/datasets/{dataset_id}/active_version", s.handleActivateDatasetVersion)
 	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/active_version", s.handleDeactivateDatasetVersion)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/uploads", s.handleUploadDataset)
@@ -311,6 +313,14 @@ func (s *Server) handleListProjects(w stdhttp.ResponseWriter, _ *stdhttp.Request
 	writeJSON(w, stdhttp.StatusOK, response)
 }
 
+func (s *Server) handleDeleteProject(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.projectService.DeleteProject(r.PathValue("project_id")); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
 func (s *Server) handleListProjectPrompts(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	response, err := s.datasetService.ListProjectPrompts(r.PathValue("project_id"))
 	if err != nil {
@@ -479,6 +489,14 @@ func (s *Server) handleListDatasets(w stdhttp.ResponseWriter, r *stdhttp.Request
 		return
 	}
 	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDeleteDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.datasetService.DeleteDataset(r.PathValue("project_id"), r.PathValue("dataset_id")); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
 }
 
 func (s *Server) handleActivateDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp.Request) {

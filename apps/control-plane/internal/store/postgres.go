@@ -119,6 +119,61 @@ func (s *PostgresStore) ListProjects() ([]domain.Project, error) {
 	return items, nil
 }
 
+func (s *PostgresStore) DeleteProject(projectID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{
+			query: `DELETE FROM embedding_index_chunks
+			        WHERE dataset_version_id IN (
+			            SELECT dataset_version_id
+			            FROM dataset_versions
+			            WHERE project_id = $1::uuid
+			        )`,
+			args: []any{projectID},
+		},
+		{query: `DELETE FROM dataset_build_jobs WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM executions WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM report_drafts WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM skill_plans WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM analysis_requests WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM dataset_versions WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM datasets WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM scenarios WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM project_prompt_defaults WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM project_prompts WHERE project_id = $1::uuid`, args: []any{projectID}},
+	}
+	for _, statement := range statements {
+		if _, err = tx.Exec(statement.query, statement.args...); err != nil {
+			return err
+		}
+	}
+
+	result, err := tx.Exec(`DELETE FROM projects WHERE project_id = $1::uuid`, projectID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
 func (s *PostgresStore) SaveProjectPrompt(prompt domain.ProjectPrompt) error {
 	_, err := s.db.Exec(
 		`INSERT INTO project_prompts (
@@ -479,6 +534,66 @@ func (s *PostgresStore) ListDatasets(projectID string) ([]domain.Dataset, error)
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *PostgresStore) DeleteDataset(projectID, datasetID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	result, err := tx.Exec(
+		`DELETE FROM embedding_index_chunks
+		  WHERE dataset_version_id IN (
+		      SELECT dataset_version_id
+		      FROM dataset_versions
+		      WHERE project_id = $1::uuid AND dataset_id = $2::uuid
+		  )`,
+		projectID,
+		datasetID,
+	)
+	if err != nil {
+		return err
+	}
+	_ = result
+	if _, err = tx.Exec(
+		`DELETE FROM dataset_build_jobs
+		  WHERE project_id = $1::uuid AND dataset_id = $2::uuid`,
+		projectID,
+		datasetID,
+	); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(
+		`DELETE FROM dataset_versions
+		  WHERE project_id = $1::uuid AND dataset_id = $2::uuid`,
+		projectID,
+		datasetID,
+	); err != nil {
+		return err
+	}
+	result, err = tx.Exec(
+		`DELETE FROM datasets
+		  WHERE project_id = $1::uuid AND dataset_id = $2::uuid`,
+		projectID,
+		datasetID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
 }
 
 func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error {

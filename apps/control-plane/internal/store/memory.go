@@ -77,6 +77,65 @@ func (s *MemoryStore) ListProjects() ([]domain.Project, error) {
 	return items, nil
 }
 
+func (s *MemoryStore) DeleteProject(projectID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return ErrNotFound
+	}
+
+	delete(s.projects, projectID)
+	delete(s.promptDefaults, projectID)
+
+	for key, prompt := range s.projectPrompts {
+		if prompt.ProjectID == projectID {
+			delete(s.projectPrompts, key)
+		}
+	}
+	for key, scenario := range s.scenarios {
+		if scenario.ProjectID == projectID {
+			delete(s.scenarios, key)
+		}
+	}
+	for key, dataset := range s.datasets {
+		if dataset.ProjectID == projectID {
+			delete(s.datasets, key)
+		}
+	}
+	for key, version := range s.versions {
+		if version.ProjectID == projectID {
+			delete(s.versions, key)
+		}
+	}
+	for key, job := range s.buildJobs {
+		if job.ProjectID == projectID {
+			delete(s.buildJobs, key)
+		}
+	}
+	for key, request := range s.requests {
+		if request.ProjectID == projectID {
+			delete(s.requests, key)
+		}
+	}
+	for key, plan := range s.plans {
+		if plan.ProjectID == projectID {
+			delete(s.plans, key)
+		}
+	}
+	for key, execution := range s.executions {
+		if execution.ProjectID == projectID {
+			delete(s.executions, key)
+		}
+	}
+	for key, report := range s.reports {
+		if report.ProjectID == projectID {
+			delete(s.reports, key)
+		}
+	}
+	return nil
+}
+
 func projectPromptKey(projectID, version, operation string) string {
 	return projectID + "::" + version + "::" + operation
 }
@@ -207,6 +266,29 @@ func (s *MemoryStore) ListDatasets(projectID string) ([]domain.Dataset, error) {
 		return items[i].CreatedAt.Before(items[j].CreatedAt)
 	})
 	return items, nil
+}
+
+func (s *MemoryStore) DeleteDataset(projectID, datasetID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dataset, ok := s.datasets[datasetID]
+	if !ok || dataset.ProjectID != projectID {
+		return ErrNotFound
+	}
+
+	delete(s.datasets, datasetID)
+	for key, version := range s.versions {
+		if version.ProjectID == projectID && version.DatasetID == datasetID {
+			delete(s.versions, key)
+		}
+	}
+	for key, job := range s.buildJobs {
+		if job.ProjectID == projectID && job.DatasetID == datasetID {
+			delete(s.buildJobs, key)
+		}
+	}
+	return nil
 }
 
 func (s *MemoryStore) SaveDatasetVersion(version domain.DatasetVersion) error {

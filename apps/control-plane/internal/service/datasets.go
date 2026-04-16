@@ -179,6 +179,22 @@ func (s *DatasetService) ListDatasets(projectID string) (domain.DatasetListRespo
 	return domain.DatasetListResponse{Items: items}, nil
 }
 
+func (s *DatasetService) DeleteDataset(projectID, datasetID string) error {
+	if _, err := s.GetDataset(projectID, datasetID); err != nil {
+		return err
+	}
+	if err := s.store.DeleteDataset(projectID, datasetID); err != nil {
+		if err == store.ErrNotFound {
+			return ErrNotFound{Resource: "dataset"}
+		}
+		return err
+	}
+	if err := s.removeDatasetArtifacts(projectID, datasetID); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *DatasetService) ActivateDatasetVersion(projectID, datasetID, datasetVersionID string) (domain.Dataset, error) {
 	dataset, err := s.GetDataset(projectID, datasetID)
 	if err != nil {
@@ -2300,6 +2316,20 @@ func (s *DatasetService) datasetArtifactPath(version domain.DatasetVersion, scop
 		return path, true
 	}
 	return absolutePath, true
+}
+
+func (s *DatasetService) removeDatasetArtifacts(projectID, datasetID string) error {
+	roots := []string{s.uploadRoot, s.artifactRoot}
+	for _, root := range roots {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		target := filepath.Join(root, "projects", projectID, "datasets", datasetID)
+		if err := os.RemoveAll(target); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func normalizeDatasetDataType(value *string, fallback string) string {
