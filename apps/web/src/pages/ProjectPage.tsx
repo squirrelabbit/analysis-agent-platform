@@ -17,6 +17,7 @@ export default function ProjectPage() {
     selectProject,
     searchQuery,
     setSearchQuery,
+    addProject
   } = useProjects();
 
   return (
@@ -27,6 +28,7 @@ export default function ProjectPage() {
           filteredCount={filtered?.length || 0}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          onAddProject={addProject}
         />
         <ProjectList
           filtered={filtered}

@@ -5,15 +5,16 @@ import {
 } from "../ui/input-group";
 import { Plus, Search } from "lucide-react";
 import { useState } from "react";
-import { useProjects } from "@/hooks/useProject";
 import { CreateProjectDialog } from "./CreateProjectDialog";
 import { Button } from "../ui/button";
+import type { CreateProjectPayload } from "@/types/dto/project.dto";
 
 interface ProjectHeadProps {
   total: number;
   filteredCount: number;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  onAddProject: (payload: CreateProjectPayload) => void
 }
 
 export default function ProjectHead({
@@ -21,12 +22,12 @@ export default function ProjectHead({
   filteredCount,
   searchQuery,
   onSearchChange,
+  onAddProject
 }: ProjectHeadProps) {
-  const { addProject } = useProjects();
   const [open, setOpen] = useState(false);
 
   const handleCreate = (name: string, description: string) => {
-    addProject({ name, description });
+    onAddProject({ name, description });
   };
 
   return (
