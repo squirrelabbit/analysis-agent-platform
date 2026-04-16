@@ -8,7 +8,7 @@ import { DatasetItem } from "../dataset/DatasetItem";
 import { Button } from "@/components/ui/button";
 
 export default function DatasetTab({ project_id }: Project) {
-  const { datasets, addDataset, findDatasetById, dataset } =
+  const { datasets, addDataset, fetchVersions, versions } =
     useDataset(project_id);
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -52,8 +52,8 @@ export default function DatasetTab({ project_id }: Project) {
           <DatasetItem
             key={ds.dataset_id}
             dataset={ds}
-            findDataset={findDatasetById}
-            selected={dataset}
+            fetchVersions={fetchVersions}
+            versions={versions}
           />
         ))
       )}
