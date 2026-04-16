@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { CreateDatasetPayload, DatasetListResponse, DatasetResponse } from '@/types/dto/dataset.dto'
+import type { CreateDatasetPayload, DatasetListResponse, DatasetResponse, DatasetVersionResponse } from '@/types/dto/dataset.dto'
 
 export const datasetsApi = {
   getAll: (projectId: string) =>
@@ -11,5 +11,9 @@ export const datasetsApi = {
       apiClient.post<DatasetResponse>(`/projects/${projectId}/datasets`, payload).then((r) => r.data),
 
   getById: (projectId: string, datasetId: string) => 
-    apiClient.get<DatasetResponse>(`/projects/${projectId}/datasets/${datasetId}`).then(r => r.data)
+    apiClient.get<DatasetResponse>(`/projects/${projectId}/datasets/${datasetId}`).then(r => r.data),
+
+  getVersionsByDataset: (projectId: string, datasetId: string) => 
+    apiClient.get<{items: DatasetVersionResponse[]}>(`/projects/${projectId}/datasets/${datasetId}/versions`).then(r => r.data.items)
+
 }
