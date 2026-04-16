@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { datasetsApi } from '@/api/dataset'
 import type { Dataset } from '@/types'
-import type { CreateDatasetPayload } from '@/types/dto/dataset.dto'
+import type { CreateDatasetPayload, DatasetVersionResponse } from '@/types/dto/dataset.dto'
 
 export function useDataset(projectId: string) {
   const [datasets, setDatasets] = useState<Dataset[]>([])
   const [dataset, setDataset] = useState<Dataset>()
+  const [versions, setVersions] = useState<DatasetVersionResponse[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -46,6 +47,18 @@ export function useDataset(projectId: string) {
     }
   }
 
+  // 데이터셋 버전
+  async function fetchVersions(datasetId: string) {
+    try {
+      const res = await datasetsApi.getVersionsByDataset(projectId, datasetId)
+      setVersions(res)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      // setIsLoading(false)
+    }
+  }
+
   // 최초 마운트
   useEffect(() => {
     fetchDatasets()
@@ -56,6 +69,8 @@ export function useDataset(projectId: string) {
     isLoading,
     error,
     dataset,
+    versions,
+    fetchVersions,
     addDataset,
     findDatasetById,
   }

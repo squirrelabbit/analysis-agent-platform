@@ -18,21 +18,21 @@ import {
 import { useState } from "react";
 import { DatasetDialog } from "./DatasetDialog";
 import type { Dataset } from "@/types";
+import type { DatasetVersionResponse } from "@/types/dto/dataset.dto";
 
 export function DatasetItem({
   dataset,
-  findDataset,
-  selected,
+  fetchVersions,
+  versions,
 }: {
   dataset: Dataset;
-  findDataset: (id: string) => void;
-  selected?: Dataset;
+  fetchVersions: (id: string) => void;
+  versions: DatasetVersionResponse[];
 }) {
   const [open, setOpen] = useState(false);
-
-  const handleClick = (datasetId: string) => {
+  const handleClick = async (datasetId: string) => {
+    await fetchVersions(datasetId)
     setOpen(true);
-    findDataset(datasetId);
   };
 
   return (
@@ -111,13 +111,12 @@ export function DatasetItem({
           </Tooltip>
         </TooltipProvider>
       </ItemActions>
-      {selected && (
-        <DatasetDialog
-          open={open}
-          onClose={() => setOpen(false)}
-          dataset={selected}
-        />
-      )}
+      <DatasetDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        dataset={dataset}
+        versions={versions}
+      />
     </Item>
   );
 }

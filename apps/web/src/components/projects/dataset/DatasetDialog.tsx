@@ -12,33 +12,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FileText } from "lucide-react";
 import { FileRow } from "./FileRow";
 import FileUpload from "@/components/common/FileUpload";
+import type { DatasetVersionResponse } from "@/types/dto/dataset.dto";
 import type { Dataset } from "@/types";
 
 type DatasetDialogProps = {
   open: boolean;
   onClose: () => void;
-  dataset: Dataset
+  dataset: Dataset,
+  versions: DatasetVersionResponse[]
 };
 
-const files = [
-  {
-    filename: "customer_master_v3.csv",
-    byte_size: 124,
-    uploaded_at: "2025-06-10",
-  },
-  {
-    filename: "customer_mster_v3.json",
-    byte_size: 124,
-    uploaded_at: "2025-06-10",
-  },
-  {
-    filename: "customer_mster_v3.md",
-    byte_size: 124,
-    uploaded_at: "2025-06-10",
-  },
-];
-
-export function DatasetDialog({ open, onClose, dataset }: DatasetDialogProps) {
+export function DatasetDialog({ open, onClose, dataset, versions }: DatasetDialogProps) {
   return (
     <div>
       <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -66,18 +50,21 @@ export function DatasetDialog({ open, onClose, dataset }: DatasetDialogProps) {
                 <TabsTrigger value="add">데이터 등록</TabsTrigger>
               </TabsList>
               <TabsContent value="version">
-                {files.length === 0 ? (
-                  /* 파일 없는 빈 상태 */
+                {versions.length === 0 ? (
                   <FileUpload title="등록된 파일이 없습니다" />
                 ) : (
                   <div className="px-3 py-2 space-y-1">
-                    {files.map((file, idx) => (
+                    {versions.map((v, idx) =>
+                      <FileRow key={idx} file={v.metadata.upload} isLatest={v.is_active} />
+                    )}
+                    {/* {files.map((file, idx) => (
                       <FileRow
                         key={idx}
                         file={file}
                         isLatest={idx === 0}
                       />
-                    ))}
+                    ))} */}
+                    {}
                   </div>
                 )}
               </TabsContent>
