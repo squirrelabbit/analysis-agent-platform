@@ -18,7 +18,7 @@ export function AppSidebar() {
   const { projects } = useProjects()
   const menus = [
     { label: "채팅", icon: MessageCircle, href: "/chat" },
-    { label: "프로젝트", icon: FolderOpen, badge: projects.length, href: "/project" },
+    { label: "프로젝트", icon: FolderOpen, badge: projects?.length || null, href: "/project" },
   ];
   const location = useLocation();
   return (

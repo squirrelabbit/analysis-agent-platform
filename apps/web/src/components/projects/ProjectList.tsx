@@ -15,7 +15,7 @@ export default function ProjectList({
   selectedId: string | null;
   onClick: (project: Project) => void;
 }) {
-  return filtered.length == 0 ? (
+  return !filtered || filtered.length == 0 ? (
     <EmptyForm
       title={isExist ? "등록된 프로젝트가 없습니다" : "검색 결과가 없습니다"}
       description={
