@@ -14,6 +14,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { formatFileSize } from "@/lib/utils";
 import {
   Clock,
   Download,
@@ -58,7 +59,7 @@ export function FileRow({
         <ItemDescription>
           <Button variant="ghost" size="xs" disabled className="p-0 text-[10px]">
             <HardDrive />
-              {file.byte_size}
+              {formatFileSize(file.byte_size)}
           </Button>
           <Button variant="ghost" size="xs" disabled className="text-[10px]">
             <Clock />
