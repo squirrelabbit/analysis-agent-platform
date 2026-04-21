@@ -191,6 +191,7 @@ type DatasetVersion struct {
 	DataType           string                 `json:"data_type"`
 	RecordCount        *int                   `json:"record_count,omitempty"`
 	Metadata           map[string]any         `json:"metadata"`
+	SourceSummary      *DatasetSourceSummary  `json:"source_summary,omitempty"`
 	Profile            *DatasetProfile        `json:"profile,omitempty"`
 	PrepareStatus      string                 `json:"prepare_status"`
 	PrepareLLMMode     string                 `json:"prepare_llm_mode"`
@@ -211,6 +212,22 @@ type DatasetVersion struct {
 	IsActive           bool                   `json:"is_active"`
 	CreatedAt          time.Time              `json:"created_at"`
 	ReadyAt            *time.Time             `json:"ready_at,omitempty"`
+}
+
+type DatasetSourceColumnSummary struct {
+	Name string `json:"name"`
+	Type string `json:"type,omitempty"`
+}
+
+type DatasetSourceSummary struct {
+	Available    bool                         `json:"available"`
+	Format       string                       `json:"format,omitempty"`
+	RowCount     *int                         `json:"row_count,omitempty"`
+	ColumnCount  int                          `json:"column_count,omitempty"`
+	Columns      []DatasetSourceColumnSummary `json:"columns,omitempty"`
+	SampleLimit  int                          `json:"sample_limit,omitempty"`
+	SampleRows   []map[string]any             `json:"sample_rows,omitempty"`
+	ErrorMessage string                       `json:"error_message,omitempty"`
 }
 
 type DatasetVersionCreateRequest struct {

@@ -765,6 +765,41 @@ components:
     DatasetProfile:
       type: object
       additionalProperties: true
+    DatasetSourceColumnSummary:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+      required: [name]
+    DatasetSourceSummary:
+      type: object
+      properties:
+        available:
+          type: boolean
+        format:
+          type: string
+          description: "원본 파일 포맷. 예: csv, tsv, parquet, jsonl."
+        row_count:
+          type:
+            - integer
+            - "null"
+        column_count:
+          type: integer
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetSourceColumnSummary"
+        sample_limit:
+          type: integer
+        sample_rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnyMap"
+        error_message:
+          type: string
+      required: [available]
     DatasetVersion:
       type: object
       properties:
@@ -784,6 +819,10 @@ components:
             - "null"
         metadata:
           $ref: "#/components/schemas/AnyMap"
+        source_summary:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetSourceSummary"
+            - type: "null"
         profile:
           anyOf:
             - $ref: "#/components/schemas/DatasetProfile"

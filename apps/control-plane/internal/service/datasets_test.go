@@ -2703,6 +2703,76 @@ func TestGetClusterMembersLoadsSummaryAndMembership(t *testing.T) {
 	}
 }
 
+func TestGetDatasetVersionIncludesSourceSummary(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-source-summary", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-source-summary",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	sourcePath := filepath.Join(t.TempDir(), "issues.csv")
+	if err := os.WriteFile(sourcePath, []byte("title,body,count\n결제 오류,카드 결제가 실패합니다,3\n로그인 오류,로그인이 실패합니다,2\n"), 0o644); err != nil {
+		t.Fatalf("unexpected write source file error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-source-summary",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       sourcePath,
+		DataType:         "unstructured",
+		Metadata:         map[string]any{},
+		PrepareStatus:    "not_requested",
+		SentimentStatus:  "not_requested",
+		EmbeddingStatus:  "not_requested",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	response, err := service.GetDatasetVersion(project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset version error: %v", err)
+	}
+	if response.SourceSummary == nil || !response.SourceSummary.Available {
+		t.Fatalf("expected available source summary: %+v", response.SourceSummary)
+	}
+	if response.SourceSummary.Format != "csv" {
+		t.Fatalf("unexpected source format: %s", response.SourceSummary.Format)
+	}
+	if response.SourceSummary.RowCount == nil || *response.SourceSummary.RowCount != 2 {
+		t.Fatalf("unexpected source row_count: %+v", response.SourceSummary.RowCount)
+	}
+	if response.SourceSummary.ColumnCount != 3 {
+		t.Fatalf("unexpected source column_count: %d", response.SourceSummary.ColumnCount)
+	}
+	columnNames := make([]string, 0, len(response.SourceSummary.Columns))
+	for _, column := range response.SourceSummary.Columns {
+		columnNames = append(columnNames, column.Name)
+	}
+	if !reflect.DeepEqual(columnNames, []string{"title", "body", "count"}) {
+		t.Fatalf("unexpected source columns: %+v", response.SourceSummary.Columns)
+	}
+	if len(response.SourceSummary.SampleRows) != 2 {
+		t.Fatalf("unexpected source sample rows: %+v", response.SourceSummary.SampleRows)
+	}
+	if response.SourceSummary.SampleRows[0]["title"] != "결제 오류" {
+		t.Fatalf("unexpected first sample row: %+v", response.SourceSummary.SampleRows[0])
+	}
+}
+
 func TestGetPreparePreviewBuildsSummaryAndWarningPanel(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
