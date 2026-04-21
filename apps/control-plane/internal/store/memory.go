@@ -425,6 +425,8 @@ func (s *MemoryStore) DeleteDatasetVersion(projectID, datasetID, datasetVersionI
 func cloneDatasetVersion(version domain.DatasetVersion) domain.DatasetVersion {
 	cloned := version
 	cloned.Metadata = cloneAnyMap(version.Metadata)
+	cloned.SourceSummary = nil
+	cloned.BuildJobs = nil
 	if version.Profile != nil {
 		profile := *version.Profile
 		profile.RegexRuleNames = append([]string(nil), version.Profile.RegexRuleNames...)

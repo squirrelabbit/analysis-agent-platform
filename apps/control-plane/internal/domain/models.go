@@ -184,34 +184,35 @@ type DatasetProfile struct {
 }
 
 type DatasetVersion struct {
-	DatasetVersionID   string                 `json:"dataset_version_id"`
-	DatasetID          string                 `json:"dataset_id"`
-	ProjectID          string                 `json:"project_id"`
-	StorageURI         string                 `json:"storage_uri"`
-	DataType           string                 `json:"data_type"`
-	RecordCount        *int                   `json:"record_count,omitempty"`
-	Metadata           map[string]any         `json:"metadata"`
-	SourceSummary      *DatasetSourceSummary  `json:"source_summary,omitempty"`
-	Profile            *DatasetProfile        `json:"profile,omitempty"`
-	PrepareStatus      string                 `json:"prepare_status"`
-	PrepareLLMMode     string                 `json:"prepare_llm_mode"`
-	PrepareModel       *string                `json:"prepare_model,omitempty"`
-	PreparePromptVer   *string                `json:"prepare_prompt_version,omitempty"`
-	PrepareURI         *string                `json:"prepare_uri,omitempty"`
-	PreparedAt         *time.Time             `json:"prepared_at,omitempty"`
-	PrepareSummary     *DatasetPrepareSummary `json:"prepare_summary,omitempty"`
-	SentimentStatus    string                 `json:"sentiment_status"`
-	SentimentLLMMode   string                 `json:"sentiment_llm_mode"`
-	SentimentModel     *string                `json:"sentiment_model,omitempty"`
-	SentimentURI       *string                `json:"sentiment_uri,omitempty"`
-	SentimentLabeledAt *time.Time             `json:"sentiment_labeled_at,omitempty"`
-	SentimentPromptVer *string                `json:"sentiment_prompt_version,omitempty"`
-	EmbeddingStatus    string                 `json:"embedding_status"`
-	EmbeddingModel     *string                `json:"embedding_model,omitempty"`
-	EmbeddingURI       *string                `json:"embedding_uri,omitempty"`
-	IsActive           bool                   `json:"is_active"`
-	CreatedAt          time.Time              `json:"created_at"`
-	ReadyAt            *time.Time             `json:"ready_at,omitempty"`
+	DatasetVersionID   string                         `json:"dataset_version_id"`
+	DatasetID          string                         `json:"dataset_id"`
+	ProjectID          string                         `json:"project_id"`
+	StorageURI         string                         `json:"storage_uri"`
+	DataType           string                         `json:"data_type"`
+	RecordCount        *int                           `json:"record_count,omitempty"`
+	Metadata           map[string]any                 `json:"metadata"`
+	SourceSummary      *DatasetSourceSummary          `json:"source_summary,omitempty"`
+	BuildJobs          []DatasetVersionBuildJobStatus `json:"build_jobs,omitempty"`
+	Profile            *DatasetProfile                `json:"profile,omitempty"`
+	PrepareStatus      string                         `json:"prepare_status"`
+	PrepareLLMMode     string                         `json:"prepare_llm_mode"`
+	PrepareModel       *string                        `json:"prepare_model,omitempty"`
+	PreparePromptVer   *string                        `json:"prepare_prompt_version,omitempty"`
+	PrepareURI         *string                        `json:"prepare_uri,omitempty"`
+	PreparedAt         *time.Time                     `json:"prepared_at,omitempty"`
+	PrepareSummary     *DatasetPrepareSummary         `json:"prepare_summary,omitempty"`
+	SentimentStatus    string                         `json:"sentiment_status"`
+	SentimentLLMMode   string                         `json:"sentiment_llm_mode"`
+	SentimentModel     *string                        `json:"sentiment_model,omitempty"`
+	SentimentURI       *string                        `json:"sentiment_uri,omitempty"`
+	SentimentLabeledAt *time.Time                     `json:"sentiment_labeled_at,omitempty"`
+	SentimentPromptVer *string                        `json:"sentiment_prompt_version,omitempty"`
+	EmbeddingStatus    string                         `json:"embedding_status"`
+	EmbeddingModel     *string                        `json:"embedding_model,omitempty"`
+	EmbeddingURI       *string                        `json:"embedding_uri,omitempty"`
+	IsActive           bool                           `json:"is_active"`
+	CreatedAt          time.Time                      `json:"created_at"`
+	ReadyAt            *time.Time                     `json:"ready_at,omitempty"`
 }
 
 type DatasetSourceColumnSummary struct {
@@ -221,6 +222,7 @@ type DatasetSourceColumnSummary struct {
 
 type DatasetSourceSummary struct {
 	Available    bool                         `json:"available"`
+	Status       string                       `json:"status,omitempty"`
 	Format       string                       `json:"format,omitempty"`
 	RowCount     *int                         `json:"row_count,omitempty"`
 	ColumnCount  int                          `json:"column_count,omitempty"`
@@ -228,6 +230,18 @@ type DatasetSourceSummary struct {
 	SampleLimit  int                          `json:"sample_limit,omitempty"`
 	SampleRows   []map[string]any             `json:"sample_rows,omitempty"`
 	ErrorMessage string                       `json:"error_message,omitempty"`
+}
+
+type DatasetVersionBuildJobStatus struct {
+	JobID        string     `json:"job_id"`
+	BuildType    string     `json:"build_type"`
+	Status       string     `json:"status"`
+	TriggeredBy  string     `json:"triggered_by,omitempty"`
+	Attempt      int        `json:"attempt"`
+	CreatedAt    time.Time  `json:"created_at"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	ErrorMessage *string    `json:"error_message,omitempty"`
 }
 
 type DatasetVersionCreateRequest struct {

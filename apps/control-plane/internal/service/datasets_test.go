@@ -2741,6 +2741,21 @@ func TestGetDatasetVersionIncludesSourceSummary(t *testing.T) {
 	if err := repository.SaveDatasetVersion(version); err != nil {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
+	completedAt := time.Now().UTC()
+	if err := repository.SaveDatasetBuildJob(domain.DatasetBuildJob{
+		JobID:            "job-prepare-source-summary",
+		ProjectID:        project.ProjectID,
+		DatasetID:        dataset.DatasetID,
+		DatasetVersionID: version.DatasetVersionID,
+		BuildType:        "prepare",
+		Status:           "completed",
+		TriggeredBy:      "test",
+		Attempt:          1,
+		CreatedAt:        completedAt.Add(-time.Minute),
+		CompletedAt:      &completedAt,
+	}); err != nil {
+		t.Fatalf("unexpected save dataset build job error: %v", err)
+	}
 
 	response, err := service.GetDatasetVersion(project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
 	if err != nil {
@@ -2751,6 +2766,9 @@ func TestGetDatasetVersionIncludesSourceSummary(t *testing.T) {
 	}
 	if response.SourceSummary.Format != "csv" {
 		t.Fatalf("unexpected source format: %s", response.SourceSummary.Format)
+	}
+	if response.SourceSummary.Status != "ready" {
+		t.Fatalf("unexpected source summary status: %s", response.SourceSummary.Status)
 	}
 	if response.SourceSummary.RowCount == nil || *response.SourceSummary.RowCount != 2 {
 		t.Fatalf("unexpected source row_count: %+v", response.SourceSummary.RowCount)
@@ -2770,6 +2788,12 @@ func TestGetDatasetVersionIncludesSourceSummary(t *testing.T) {
 	}
 	if response.SourceSummary.SampleRows[0]["title"] != "결제 오류" {
 		t.Fatalf("unexpected first sample row: %+v", response.SourceSummary.SampleRows[0])
+	}
+	if len(response.BuildJobs) != 1 {
+		t.Fatalf("unexpected build jobs: %+v", response.BuildJobs)
+	}
+	if response.BuildJobs[0].BuildType != "prepare" || response.BuildJobs[0].Status != "completed" {
+		t.Fatalf("unexpected build job status: %+v", response.BuildJobs[0])
 	}
 }
 

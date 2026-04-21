@@ -681,6 +681,11 @@ func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionI
 	}
 	enrichDatasetVersionView(&version)
 	version.SourceSummary = loadDatasetSourceSummary(version.StorageURI, defaultDatasetSourceSummarySampleLimit)
+	buildJobs, err := s.latestDatasetVersionBuildJobStatuses(projectID, version.DatasetVersionID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	version.BuildJobs = buildJobs
 	markDatasetVersionActive(&version, dataset)
 	return version, nil
 }
@@ -3597,15 +3602,18 @@ func loadDatasetSourceSummary(storageURI string, sampleLimit int) *domain.Datase
 	storageURI = strings.TrimSpace(storageURI)
 	summary := &domain.DatasetSourceSummary{
 		Available:   false,
+		Status:      "unavailable",
 		SampleLimit: sampleLimit,
 	}
 	if storageURI == "" {
+		summary.Status = "missing"
 		summary.ErrorMessage = "storage_uri is required"
 		return summary
 	}
 
 	format := inferDatasetSourceFormat(storageURI)
 	if format == "" {
+		summary.Status = "unsupported"
 		summary.ErrorMessage = "unsupported source format"
 		return summary
 	}
@@ -3614,24 +3622,29 @@ func loadDatasetSourceSummary(storageURI string, sampleLimit int) *domain.Datase
 	info, err := os.Stat(storageURI)
 	if err != nil {
 		if os.IsNotExist(err) {
+			summary.Status = "missing"
 			summary.ErrorMessage = "source file not found"
 			return summary
 		}
+		summary.Status = "error"
 		summary.ErrorMessage = err.Error()
 		return summary
 	}
 	if info.IsDir() {
+		summary.Status = "error"
 		summary.ErrorMessage = "source path must be a file"
 		return summary
 	}
 
 	relation, err := datasetSourceDuckDBRelation(storageURI, format)
 	if err != nil {
+		summary.Status = "unsupported"
 		summary.ErrorMessage = err.Error()
 		return summary
 	}
 	db, cleanup, err := openTemporaryDuckDB("dataset-source-summary-*.duckdb")
 	if err != nil {
+		summary.Status = "error"
 		summary.ErrorMessage = err.Error()
 		return summary
 	}
@@ -3639,21 +3652,25 @@ func loadDatasetSourceSummary(storageURI string, sampleLimit int) *domain.Datase
 
 	columns, err := loadDatasetSourceColumns(db, relation)
 	if err != nil {
+		summary.Status = "error"
 		summary.ErrorMessage = err.Error()
 		return summary
 	}
 	rowCount, err := loadDatasetSourceRowCount(db, relation)
 	if err != nil {
+		summary.Status = "error"
 		summary.ErrorMessage = err.Error()
 		return summary
 	}
 	sampleRows, err := loadDatasetSourceSampleRows(db, relation, sampleLimit)
 	if err != nil {
+		summary.Status = "error"
 		summary.ErrorMessage = err.Error()
 		return summary
 	}
 
 	summary.Available = true
+	summary.Status = "ready"
 	summary.RowCount = &rowCount
 	summary.ColumnCount = len(columns)
 	summary.Columns = columns

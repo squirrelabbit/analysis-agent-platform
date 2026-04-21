@@ -2234,6 +2234,10 @@ components:
       properties:
         available:
           type: boolean
+        status:
+          type: string
+          enum: [ready, missing, unsupported, error, unavailable]
+          description: 원본 요약 상태. ready면 columns/row_count/sample_rows가 채워진다.
         format:
           type: string
           description: "원본 파일 포맷. 예: csv, tsv, parquet, jsonl."
@@ -2256,6 +2260,37 @@ components:
         error_message:
           type: string
       required: [available]
+    DatasetVersionBuildJobStatus:
+      type: object
+      properties:
+        job_id:
+          type: string
+        build_type:
+          type: string
+        status:
+          type: string
+        triggered_by:
+          type: string
+        attempt:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        completed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        error_message:
+          type:
+            - string
+            - "null"
+      required: [job_id, build_type, status, attempt, created_at]
     DatasetVersion:
       type: object
       description: |
@@ -2285,6 +2320,10 @@ components:
           anyOf:
             - $ref: "#/components/schemas/DatasetSourceSummary"
             - type: "null"
+        build_jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetVersionBuildJobStatus"
         profile:
           anyOf:
             - $ref: "#/components/schemas/DatasetProfile"

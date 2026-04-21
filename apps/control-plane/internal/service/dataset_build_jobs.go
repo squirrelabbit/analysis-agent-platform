@@ -206,6 +206,46 @@ func (s *DatasetService) ListDatasetBuildJobs(projectID, datasetID, datasetVersi
 	return domain.DatasetBuildJobListResponse{Items: items}, nil
 }
 
+func (s *DatasetService) latestDatasetVersionBuildJobStatuses(projectID, datasetVersionID string) ([]domain.DatasetVersionBuildJobStatus, error) {
+	items, err := s.store.ListDatasetBuildJobs(projectID, datasetVersionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, nil
+	}
+	latestByType := latestDatasetBuildJobsByType(items)
+	orderedTypes := []string{
+		datasetBuildTypePrepare,
+		datasetBuildTypeSentiment,
+		datasetBuildTypeEmbedding,
+		datasetBuildTypeCluster,
+	}
+	result := make([]domain.DatasetVersionBuildJobStatus, 0, len(latestByType))
+	for _, buildType := range orderedTypes {
+		job, ok := latestByType[buildType]
+		if !ok {
+			continue
+		}
+		result = append(result, datasetVersionBuildJobStatus(job))
+	}
+	return result, nil
+}
+
+func datasetVersionBuildJobStatus(job domain.DatasetBuildJob) domain.DatasetVersionBuildJobStatus {
+	return domain.DatasetVersionBuildJobStatus{
+		JobID:        job.JobID,
+		BuildType:    job.BuildType,
+		Status:       job.Status,
+		TriggeredBy:  job.TriggeredBy,
+		Attempt:      job.Attempt,
+		CreatedAt:    job.CreatedAt,
+		StartedAt:    job.StartedAt,
+		CompletedAt:  job.CompletedAt,
+		ErrorMessage: job.ErrorMessage,
+	}
+}
+
 func (s *DatasetService) findActiveDatasetBuildJob(projectID, datasetVersionID, buildType string) (*domain.DatasetBuildJob, error) {
 	items, err := s.store.ListDatasetBuildJobs(projectID, datasetVersionID)
 	if err != nil {
