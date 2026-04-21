@@ -43,6 +43,15 @@ def _artifact_output_format(path: Path, artifact_name: str) -> str:
     raise ValueError(f"{artifact_name} output_path must end with .parquet or .jsonl")
 
 
+def _joined_text(row: dict[str, Any], text_columns: list[str], text_joiner: str) -> str:
+    parts: list[str] = []
+    for column in text_columns:
+        value = str(row.get(column) or "").strip()
+        if value:
+            parts.append(value)
+    return text_joiner.join(parts).strip()
+
+
 def _derive_chunk_output_path(embedding_path: Path) -> Path:
     name = embedding_path.name
     if name.endswith(".index.parquet"):
@@ -250,7 +259,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     handle = output_path.open("w", encoding="utf-8") if output_format == "jsonl" else None
     try:
         for source_index, row in enumerate(rows):
-            raw_text = str(row.get(normalized["text_column"]) or "").strip()
+            raw_text = _joined_text(row, normalized["text_columns"], normalized["text_joiner"])
             if not raw_text:
                 skipped_rows += 1
                 continue
@@ -351,6 +360,9 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
             "prepare_strategy": prepare_strategy,
             "prepare_batch_size": normalized["prepare_batch_size"],
             "prepare_regex_rule_names": list(normalized["regex_rule_names"]),
+            "text_column": normalized["text_column"],
+            "text_columns": list(normalized["text_columns"]),
+            "text_joiner": normalized["text_joiner"],
             "prepared_text_column": "normalized_text",
             "row_id_column": "row_id",
             "storage_contract_version": "unstructured-storage-v1",
@@ -361,6 +373,8 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 "review_count": review_count,
                 "dropped_count": dropped_count,
                 "text_column": normalized["text_column"],
+                "text_columns": list(normalized["text_columns"]),
+                "text_joiner": normalized["text_joiner"],
                 "prepare_batch_size": normalized["prepare_batch_size"],
                 "prepare_regex_rule_names": list(normalized["regex_rule_names"]),
                 "prepare_regex_rule_hits": dict(regex_rule_hits),
@@ -766,7 +780,7 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         labeled_batch: list[tuple[int, dict[str, Any], str]] = []
         for index, row in enumerate(rows):
-            text = str(row.get(normalized["text_column"]) or "").strip()
+            text = _joined_text(row, normalized["text_columns"], normalized["text_joiner"])
             if not text:
                 skipped_rows += 1
                 continue
@@ -855,12 +869,17 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
             "sentiment_label_column": "sentiment_label",
             "sentiment_confidence_column": "sentiment_confidence",
             "sentiment_reason_column": "sentiment_reason",
+            "text_column": normalized["text_column"],
+            "text_columns": list(normalized["text_columns"]),
+            "text_joiner": normalized["text_joiner"],
             "row_id_column": "row_id",
             "storage_contract_version": "unstructured-storage-v1",
             "summary": {
                 "input_row_count": len(rows),
                 "labeled_row_count": labeled_count,
                 "text_column": normalized["text_column"],
+                "text_columns": list(normalized["text_columns"]),
+                "text_joiner": normalized["text_joiner"],
                 "sentiment_batch_size": normalized["sentiment_batch_size"],
                 "label_counts": dict(sorted(label_counts.items())),
             },

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -334,6 +335,19 @@ func waitForDatasetVersionSentimentReady(t *testing.T, service *DatasetService, 
 	return domain.DatasetVersion{}
 }
 
+func valuesAsStrings(t *testing.T, value any) []string {
+	t.Helper()
+	items, ok := value.([]any)
+	if !ok {
+		t.Fatalf("expected []any, got %T", value)
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, fmt.Sprintf("%v", item))
+	}
+	return result
+}
+
 func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	repository := store.NewMemoryStore()
 	uploadRoot := t.TempDir()
@@ -451,6 +465,106 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	}
 	if version.PrepareLLMMode != "default" {
 		t.Fatalf("unexpected stored prepare llm mode: %s", version.PrepareLLMMode)
+	}
+}
+
+func TestBuildPrepareSupportsMultipleTextColumns(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-multi-prepare", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-multi-prepare",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	var requestedTextColumn string
+	var requestedTextColumns []string
+	var requestedTextJoiner string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("unexpected decode error: %v", err)
+		}
+		requestedTextColumn = payload["text_column"].(string)
+		requestedTextColumns = valuesAsStrings(t, payload["text_columns"])
+		requestedTextJoiner = payload["text_joiner"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"notes": []string{"prepare completed"},
+			"artifact": map[string]any{
+				"prepare_uri":              "/tmp/issues.prepared.parquet",
+				"prepared_ref":             "/tmp/issues.prepared.parquet",
+				"prepare_format":           "parquet",
+				"prepared_text_column":     "normalized_text",
+				"row_id_column":            "row_id",
+				"storage_contract_version": "unstructured-storage-v1",
+				"summary": map[string]any{
+					"input_row_count":  2,
+					"output_row_count": 2,
+					"kept_count":       2,
+					"review_count":     0,
+					"dropped_count":    0,
+					"text_column":      "제목 + 본문",
+					"text_columns":     []string{"제목", "본문"},
+					"text_joiner":      "\n\n",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-multi-prepare",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		PrepareStatus:    "queued",
+		SentimentStatus:  "not_requested",
+		EmbeddingStatus:  "not_requested",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	joiner := "\n\n"
+	result, err := service.BuildPrepare(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{
+		TextColumns: []string{"제목", "본문"},
+		TextJoiner:  &joiner,
+		Force:       datasetBoolPtr(true),
+	})
+	if err != nil {
+		t.Fatalf("unexpected build prepare error: %v", err)
+	}
+
+	if requestedTextColumn != "제목 + 본문" {
+		t.Fatalf("unexpected worker text_column: %s", requestedTextColumn)
+	}
+	if !reflect.DeepEqual(requestedTextColumns, []string{"제목", "본문"}) {
+		t.Fatalf("unexpected worker text_columns: %+v", requestedTextColumns)
+	}
+	if requestedTextJoiner != "\n\n" {
+		t.Fatalf("unexpected worker text_joiner: %q", requestedTextJoiner)
+	}
+	if got := metadataString(result.Metadata, "raw_text_column", ""); got != "제목 + 본문" {
+		t.Fatalf("unexpected raw_text_column: %s", got)
+	}
+	if got := metadataStringList(result.Metadata, "raw_text_columns"); !reflect.DeepEqual(got, []string{"제목", "본문"}) {
+		t.Fatalf("unexpected raw_text_columns: %+v", got)
+	}
+	if result.PrepareSummary == nil || !reflect.DeepEqual(result.PrepareSummary.TextColumns, []string{"제목", "본문"}) {
+		t.Fatalf("unexpected prepare summary: %+v", result.PrepareSummary)
 	}
 }
 
@@ -2955,6 +3069,109 @@ func TestBuildSentimentUsesPreparedDatasetWhenReady(t *testing.T) {
 	}
 	if result.SentimentLLMMode != "disabled" {
 		t.Fatalf("unexpected stored sentiment llm mode: %s", result.SentimentLLMMode)
+	}
+}
+
+func TestBuildSentimentSupportsMultipleTextColumns(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-multi-sentiment", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-multi-sentiment",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-multi-sentiment",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"prepared_text_column": "normalized_text",
+		},
+		PrepareStatus:    "ready",
+		PrepareURI:       datasetStringPtr("/tmp/issues.prepared.parquet"),
+		SentimentStatus:  "queued",
+		SentimentLLMMode: "disabled",
+		EmbeddingStatus:  "not_requested",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	var requestedTextColumn string
+	var requestedTextColumns []string
+	var requestedTextJoiner string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("unexpected decode error: %v", err)
+		}
+		requestedTextColumn = payload["text_column"].(string)
+		requestedTextColumns = valuesAsStrings(t, payload["text_columns"])
+		requestedTextJoiner = payload["text_joiner"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"notes": []string{"sentiment completed"},
+			"artifact": map[string]any{
+				"sentiment_uri":               "/tmp/issues.sentiment.parquet",
+				"sentiment_ref":               "/tmp/issues.sentiment.parquet",
+				"sentiment_format":            "parquet",
+				"sentiment_label_column":      "sentiment_label",
+				"sentiment_confidence_column": "sentiment_confidence",
+				"sentiment_reason_column":     "sentiment_reason",
+				"row_id_column":               "row_id",
+				"storage_contract_version":    "unstructured-storage-v1",
+				"summary": map[string]any{
+					"input_row_count":      2,
+					"labeled_row_count":    2,
+					"text_column":          "제목 + 본문",
+					"text_columns":         []string{"제목", "본문"},
+					"text_joiner":          " ",
+					"sentiment_batch_size": 8,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	joiner := " "
+	result, err := service.BuildSentiment(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{
+		TextColumns: []string{"제목", "본문"},
+		TextJoiner:  &joiner,
+	})
+	if err != nil {
+		t.Fatalf("unexpected build sentiment error: %v", err)
+	}
+
+	if requestedTextColumn != "제목 + 본문" {
+		t.Fatalf("unexpected worker text_column: %s", requestedTextColumn)
+	}
+	if !reflect.DeepEqual(requestedTextColumns, []string{"제목", "본문"}) {
+		t.Fatalf("unexpected worker text_columns: %+v", requestedTextColumns)
+	}
+	if requestedTextJoiner != " " {
+		t.Fatalf("unexpected worker text_joiner: %q", requestedTextJoiner)
+	}
+	if got := metadataString(result.Metadata, "sentiment_text_column", ""); got != "제목 + 본문" {
+		t.Fatalf("unexpected sentiment_text_column: %s", got)
+	}
+	if got := metadataStringList(result.Metadata, "sentiment_text_columns"); !reflect.DeepEqual(got, []string{"제목", "본문"}) {
+		t.Fatalf("unexpected sentiment_text_columns: %+v", got)
+	}
+	if summary := buildSentimentSummary(result.Metadata); summary == nil || !reflect.DeepEqual(summary.TextColumns, []string{"제목", "본문"}) {
+		t.Fatalf("unexpected sentiment summary: %+v", summary)
 	}
 }
 

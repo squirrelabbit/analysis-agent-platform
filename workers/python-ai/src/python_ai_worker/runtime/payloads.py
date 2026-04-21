@@ -236,6 +236,37 @@ def _normalize_llm_mode(value: Any) -> str:
     return mode
 
 
+def _normalize_text_columns_payload(payload: dict[str, Any], default_column: str) -> tuple[str, list[str], str]:
+    raw_columns = payload.get("text_columns")
+    columns: list[str] = []
+    if isinstance(raw_columns, list):
+        seen: set[str] = set()
+        for item in raw_columns:
+            column = str(item or "").strip()
+            if not column or column in seen:
+                continue
+            seen.add(column)
+            columns.append(column)
+
+    requested_label = str(payload.get("text_column") or "").strip()
+    if not columns:
+        columns = [requested_label or default_column]
+
+    if requested_label and len(columns) == 1:
+        text_column = requested_label
+    elif len(columns) == 1:
+        text_column = columns[0]
+    else:
+        text_column = " + ".join(columns)
+
+    text_joiner = payload.get("text_joiner")
+    if text_joiner is None:
+        text_joiner = "\n"
+    else:
+        text_joiner = str(text_joiner)
+    return text_column, columns, text_joiner
+
+
 def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_name = str(payload.get("dataset_name") or "").strip()
     if not dataset_name:
@@ -243,7 +274,7 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
     output_path = str(payload.get("output_path") or f"{dataset_name}.prepared.parquet").strip()
     if not output_path:
         raise ValueError("output_path is required")
-    text_column = str(payload.get("text_column") or "text").strip()
+    text_column, text_columns, text_joiner = _normalize_text_columns_payload(payload, "text")
     model = str(payload.get("model") or "").strip()
     llm_mode = _normalize_llm_mode(payload.get("llm_mode"))
     prepare_batch_size = max(1, int(payload.get("prepare_batch_size") or DEFAULT_PREPARE_BATCH_SIZE))
@@ -255,6 +286,8 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "dataset_version_id": str(payload.get("dataset_version_id") or "").strip(),
         "dataset_name": dataset_name,
         "text_column": text_column,
+        "text_columns": text_columns,
+        "text_joiner": text_joiner,
         "output_path": output_path,
         "model": model,
         "llm_mode": llm_mode,
@@ -336,7 +369,7 @@ def _normalize_sentiment_build_payload(payload: dict[str, Any]) -> dict[str, Any
     output_path = str(payload.get("output_path") or f"{dataset_name}.sentiment.parquet").strip()
     if not output_path:
         raise ValueError("output_path is required")
-    text_column = str(payload.get("text_column") or "normalized_text").strip()
+    text_column, text_columns, text_joiner = _normalize_text_columns_payload(payload, "normalized_text")
     model = str(payload.get("model") or "").strip()
     llm_mode = _normalize_llm_mode(payload.get("llm_mode"))
     sentiment_prompt_version = str(payload.get("sentiment_prompt_version") or "").strip()
@@ -347,6 +380,8 @@ def _normalize_sentiment_build_payload(payload: dict[str, Any]) -> dict[str, Any
         "dataset_version_id": str(payload.get("dataset_version_id") or "").strip(),
         "dataset_name": dataset_name,
         "text_column": text_column,
+        "text_columns": text_columns,
+        "text_joiner": text_joiner,
         "output_path": output_path,
         "model": model,
         "llm_mode": llm_mode,

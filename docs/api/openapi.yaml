@@ -2410,6 +2410,14 @@ components:
           type: integer
         dropped_count:
           type: integer
+        text_column:
+          type: string
+        text_columns:
+          type: array
+          items:
+            type: string
+        text_joiner:
+          type: string
         prepare_regex_rule_hits:
           $ref: "#/components/schemas/IntegerMap"
       required: [input_row_count, output_row_count, kept_count, review_count, dropped_count]
@@ -2461,6 +2469,12 @@ components:
           type: string
         raw_text_column:
           type: string
+        raw_text_columns:
+          type: array
+          items:
+            type: string
+        text_joiner:
+          type: string
         prepared_text_column:
           type: string
         row_id_column:
@@ -2488,6 +2502,12 @@ components:
         labeled_row_count:
           type: integer
         text_column:
+          type: string
+        text_columns:
+          type: array
+          items:
+            type: string
+        text_joiner:
           type: string
         sentiment_batch_size:
           type: integer
@@ -2530,6 +2550,12 @@ components:
         sentiment_format:
           type: string
         sentiment_text_column:
+          type: string
+        sentiment_text_columns:
+          type: array
+          items:
+            type: string
+        text_joiner:
           type: string
         sentiment_label_column:
           type: string
@@ -2649,6 +2675,19 @@ components:
           type:
             - string
             - "null"
+          description: "단일 텍스트 컬럼. `text_columns`가 있으면 `text_columns`가 우선 적용된다."
+        text_columns:
+          type:
+            - array
+            - "null"
+          items:
+            type: string
+          description: 제목/본문처럼 여러 컬럼을 합쳐 빌드할 때 사용하는 텍스트 컬럼 목록.
+        text_joiner:
+          type:
+            - string
+            - "null"
+          description: "`text_columns` 값을 합칠 때 사용할 구분자. 기본값은 줄바꿈이다."
         output_path:
           type:
             - string
@@ -2718,6 +2757,19 @@ components:
           type:
             - string
             - "null"
+          description: "단일 텍스트 컬럼. `text_columns`가 있으면 `text_columns`가 우선 적용된다."
+        text_columns:
+          type:
+            - array
+            - "null"
+          items:
+            type: string
+          description: 제목/본문처럼 여러 컬럼을 합쳐 감성 분석할 때 사용하는 텍스트 컬럼 목록.
+        text_joiner:
+          type:
+            - string
+            - "null"
+          description: "`text_columns` 값을 합칠 때 사용할 구분자. 기본값은 줄바꿈이다."
         output_path:
           type:
             - string

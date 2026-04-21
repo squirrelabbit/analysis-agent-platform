@@ -978,6 +978,38 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(prepared_rows[0]["prepare_regex_applied_rules"], [])
         self.assertEqual(prepared_rows[0]["channel"], "app")
 
+    def test_dataset_prepare_joins_multiple_text_columns(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_raw.csv"
+        prepared_path = temp_dir / "issues_raw.prepared.parquet"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["title", "body"])
+            writer.writeheader()
+            writer.writerow({"title": "결제 오류", "body": "카드 결제가 실패합니다!!!"})
+            writer.writerow({"title": "   ", "body": "   "})
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+            result = run_dataset_prepare(
+                {
+                    "dataset_version_id": "version-multi",
+                    "dataset_name": str(csv_path),
+                    "text_columns": ["title", "body"],
+                    "text_joiner": "\n\n",
+                    "output_path": str(prepared_path),
+                }
+            )
+
+        self.assertEqual(result["artifact"]["text_column"], "title + body")
+        self.assertEqual(result["artifact"]["text_columns"], ["title", "body"])
+        self.assertEqual(result["artifact"]["text_joiner"], "\n\n")
+        self.assertEqual(result["artifact"]["summary"]["output_row_count"], 1)
+        self.assertEqual(result["artifact"]["summary"]["text_columns"], ["title", "body"])
+
+        prepared_rows = self._read_parquet_rows(prepared_path)
+        self.assertEqual(len(prepared_rows), 1)
+        self.assertEqual(prepared_rows[0]["raw_text"], "결제 오류\n\n카드 결제가 실패합니다!!!")
+        self.assertEqual(prepared_rows[0]["normalized_text"], "결제 오류 카드 결제가 실패합니다.")
+
     def test_dataset_prepare_applies_regex_rules_before_fallback(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues_raw.csv"
@@ -1191,6 +1223,41 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["usage"]["provider"], "deterministic-fallback")
         self.assertEqual(result["artifact"]["usage"]["request_count"], 2)
         self.assertEqual(result["artifact"]["usage"]["cost_estimation_status"], "free_fallback")
+
+    def test_sentiment_label_joins_multiple_text_columns(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        prepared_path = temp_dir / "issues.prepared.parquet"
+        sentiment_path = temp_dir / "issues.sentiment.parquet"
+        table = pa.Table.from_pylist(
+            [
+                {"title": "결제 오류", "body": "카드 결제가 실패합니다"},
+                {"title": "만족", "body": "빠르게 해결되었습니다"},
+                {"title": "   ", "body": "   "},
+            ]
+        )
+        pq.write_table(table, prepared_path)
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+            result = run_sentiment_label(
+                {
+                    "dataset_version_id": "version-multi-sentiment",
+                    "dataset_name": str(prepared_path),
+                    "text_columns": ["title", "body"],
+                    "text_joiner": " ",
+                    "output_path": str(sentiment_path),
+                }
+            )
+
+        self.assertEqual(result["artifact"]["text_column"], "title + body")
+        self.assertEqual(result["artifact"]["text_columns"], ["title", "body"])
+        self.assertEqual(result["artifact"]["text_joiner"], " ")
+        self.assertEqual(result["artifact"]["summary"]["labeled_row_count"], 2)
+        self.assertEqual(result["artifact"]["summary"]["text_columns"], ["title", "body"])
+
+        labeled_rows = self._read_parquet_rows(sentiment_path)
+        self.assertEqual(len(labeled_rows), 2)
+        self.assertEqual(labeled_rows[0]["sentiment_label"], "negative")
+        self.assertEqual(labeled_rows[1]["sentiment_label"], "positive")
 
     def test_sentiment_label_uses_prompt_version_override(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())

@@ -794,6 +794,16 @@ func (s *DatasetService) GetPreparePreview(
 		return domain.DatasetPreparePreviewResponse{}, err
 	}
 
+	rawTextColumn := metadataString(version.Metadata, "raw_text_column", metadataString(version.Metadata, "text_column", "text"))
+	rawTextColumns := metadataStringList(version.Metadata, "raw_text_columns")
+	if len(rawTextColumns) == 0 {
+		rawTextColumns = metadataStringList(version.Metadata, "text_columns")
+	}
+	if len(rawTextColumns) == 0 && strings.TrimSpace(rawTextColumn) != "" {
+		rawTextColumns = []string{rawTextColumn}
+	}
+	textJoiner, _ := metadataRawString(version.Metadata, "text_joiner")
+
 	response := domain.DatasetPreparePreviewResponse{
 		ProjectID:          projectID,
 		DatasetID:          datasetID,
@@ -802,7 +812,9 @@ func (s *DatasetService) GetPreparePreview(
 		PreparedAt:         version.PreparedAt,
 		PreparedRef:        preparedRef,
 		PrepareFormat:      prepareFormat,
-		RawTextColumn:      metadataString(version.Metadata, "raw_text_column", metadataString(version.Metadata, "text_column", "text")),
+		RawTextColumn:      rawTextColumn,
+		RawTextColumns:     rawTextColumns,
+		TextJoiner:         textJoiner,
 		PreparedTextColumn: metadataString(version.Metadata, "prepared_text_column", "normalized_text"),
 		RowIDColumn:        metadataString(version.Metadata, "row_id_column", "row_id"),
 		Summary:            clonePrepareSummary(version.PrepareSummary),
@@ -898,6 +910,13 @@ func (s *DatasetService) GetSentimentPreview(
 		return domain.DatasetSentimentPreviewResponse{}, err
 	}
 
+	sentimentTextColumn := metadataString(version.Metadata, "sentiment_text_column", defaultPreparedTextColumn(version))
+	sentimentTextColumns := metadataStringList(version.Metadata, "sentiment_text_columns")
+	if len(sentimentTextColumns) == 0 && strings.TrimSpace(sentimentTextColumn) != "" {
+		sentimentTextColumns = []string{sentimentTextColumn}
+	}
+	sentimentTextJoiner, _ := metadataRawString(version.Metadata, "sentiment_text_joiner")
+
 	response := domain.DatasetSentimentPreviewResponse{
 		ProjectID:                 projectID,
 		DatasetID:                 datasetID,
@@ -906,7 +925,9 @@ func (s *DatasetService) GetSentimentPreview(
 		SentimentLabeledAt:        version.SentimentLabeledAt,
 		SentimentRef:              sentimentRef,
 		SentimentFormat:           sentimentFormat,
-		SentimentTextColumn:       metadataString(version.Metadata, "sentiment_text_column", defaultPreparedTextColumn(version)),
+		SentimentTextColumn:       sentimentTextColumn,
+		SentimentTextColumns:      sentimentTextColumns,
+		TextJoiner:                sentimentTextJoiner,
 		SentimentLabelColumn:      metadataString(version.Metadata, "sentiment_label_column", "sentiment_label"),
 		SentimentConfidenceColumn: metadataString(version.Metadata, "sentiment_confidence_column", "sentiment_confidence"),
 		SentimentReasonColumn:     metadataString(version.Metadata, "sentiment_reason_column", "sentiment_reason"),
@@ -1874,10 +1895,19 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 		return version, nil
 	}
 
-	textColumn := metadataString(version.Metadata, "text_column", "text")
-	if input.TextColumn != nil && strings.TrimSpace(*input.TextColumn) != "" {
-		textColumn = strings.TrimSpace(*input.TextColumn)
-	}
+	textSelection := resolveDatasetBuildTextSelection(
+		version.Metadata,
+		input.TextColumn,
+		input.TextColumns,
+		input.TextJoiner,
+		metadataString(version.Metadata, "text_column", "text"),
+		"raw_text_column",
+		"raw_text_columns",
+		"text_joiner",
+	)
+	textColumn := textSelection.TextColumn
+	textColumns := textSelection.Columns
+	textJoiner := textSelection.Joiner
 
 	outputPath := s.derivePrepareURI(version)
 	if input.OutputPath != nil && strings.TrimSpace(*input.OutputPath) != "" {
@@ -1893,7 +1923,11 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if err := ensureParentDir(outputPath); err != nil {
 		return domain.DatasetVersion{}, err
 	}
+	version.Metadata["text_column"] = textColumn
+	version.Metadata["text_columns"] = append([]string(nil), textColumns...)
+	version.Metadata["text_joiner"] = textJoiner
 	version.Metadata["raw_text_column"] = textColumn
+	version.Metadata["raw_text_columns"] = append([]string(nil), textColumns...)
 	if input.Model != nil && strings.TrimSpace(*input.Model) != "" {
 		model := strings.TrimSpace(*input.Model)
 		version.PrepareModel = &model
@@ -1922,6 +1956,8 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 		"dataset_version_id": version.DatasetVersionID,
 		"dataset_name":       version.StorageURI,
 		"text_column":        textColumn,
+		"text_columns":       append([]string(nil), textColumns...),
+		"text_joiner":        textJoiner,
 		"output_path":        outputPath,
 		"llm_mode":           version.PrepareLLMMode,
 	}
@@ -1970,7 +2006,11 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	}
 	prepareMetadata := map[string]any{
 		"prepare_notes":        response.Notes,
+		"text_column":          textColumn,
+		"text_columns":         append([]string(nil), textColumns...),
+		"text_joiner":          textJoiner,
 		"raw_text_column":      textColumn,
+		"raw_text_columns":     append([]string(nil), textColumns...),
 		"prepared_text_column": preparedTextColumn,
 	}
 	if prepareRef != "" {
@@ -2370,12 +2410,31 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 	}
 
 	textColumn := defaultPreparedTextColumn(version)
-	if input.TextColumn != nil && strings.TrimSpace(*input.TextColumn) != "" {
+	textColumns := normalizeStringList(input.TextColumns)
+	if len(textColumns) > 0 {
+		textColumn = datasetBuildTextColumnLabel(textColumns)
+	} else if input.TextColumn != nil && strings.TrimSpace(*input.TextColumn) != "" {
 		requestedTextColumn := strings.TrimSpace(*input.TextColumn)
 		rawTextColumn := metadataString(version.Metadata, "raw_text_column", metadataString(version.Metadata, "text_column", "text"))
 		if !isPrepareReady(version) || requestedTextColumn != rawTextColumn {
 			textColumn = requestedTextColumn
 		}
+		textColumns = []string{textColumn}
+	} else {
+		if existingColumns := metadataStringList(version.Metadata, "sentiment_text_columns"); len(existingColumns) > 0 {
+			textColumns = existingColumns
+			textColumn = datasetBuildTextColumnLabel(textColumns)
+		} else {
+			textColumn = metadataString(version.Metadata, "sentiment_text_column", textColumn)
+			textColumns = []string{textColumn}
+		}
+	}
+	textJoiner := defaultDatasetBuildTextJoiner
+	if value, ok := metadataRawString(version.Metadata, "sentiment_text_joiner"); ok {
+		textJoiner = value
+	}
+	if input.TextJoiner != nil {
+		textJoiner = *input.TextJoiner
 	}
 	datasetName := datasetSourceForUnstructured(version)
 	outputPath := s.deriveSentimentURI(version)
@@ -2393,6 +2452,8 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 	}
 	version.Metadata["sentiment_dataset_name"] = datasetName
 	version.Metadata["sentiment_text_column"] = textColumn
+	version.Metadata["sentiment_text_columns"] = append([]string(nil), textColumns...)
+	version.Metadata["sentiment_text_joiner"] = textJoiner
 	if input.Model != nil && strings.TrimSpace(*input.Model) != "" {
 		model := strings.TrimSpace(*input.Model)
 		version.SentimentModel = &model
@@ -2421,6 +2482,8 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 		"dataset_version_id": version.DatasetVersionID,
 		"dataset_name":       datasetName,
 		"text_column":        textColumn,
+		"text_columns":       append([]string(nil), textColumns...),
+		"text_joiner":        textJoiner,
 		"output_path":        outputPath,
 		"llm_mode":           version.SentimentLLMMode,
 	}
@@ -2462,6 +2525,8 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 	sentimentMetadata := map[string]any{
 		"sentiment_notes":             response.Notes,
 		"sentiment_text_column":       textColumn,
+		"sentiment_text_columns":      append([]string(nil), textColumns...),
+		"sentiment_text_joiner":       textJoiner,
 		"sentiment_label_column":      artifactString(response.Artifact, "sentiment_label_column"),
 		"sentiment_reason_column":     artifactString(response.Artifact, "sentiment_reason_column"),
 		"sentiment_confidence_column": artifactString(response.Artifact, "sentiment_confidence_column"),
@@ -2835,6 +2900,103 @@ func normalizeStringList(values []string) []string {
 	return result
 }
 
+type datasetBuildTextSelection struct {
+	TextColumn string
+	Columns    []string
+	Joiner     string
+}
+
+const defaultDatasetBuildTextJoiner = "\n"
+
+func resolveDatasetBuildTextSelection(
+	metadata map[string]any,
+	inputColumn *string,
+	inputColumns []string,
+	inputJoiner *string,
+	defaultColumn string,
+	metadataColumnKey string,
+	metadataColumnsKey string,
+	metadataJoinerKey string,
+) datasetBuildTextSelection {
+	columns := normalizeStringList(inputColumns)
+	if len(columns) == 0 && inputColumn != nil {
+		if value := strings.TrimSpace(*inputColumn); value != "" {
+			columns = []string{value}
+		}
+	}
+	if len(columns) == 0 {
+		columns = metadataStringList(metadata, metadataColumnsKey)
+	}
+	if len(columns) == 0 && metadataColumnsKey != "text_columns" {
+		columns = metadataStringList(metadata, "text_columns")
+	}
+	if len(columns) == 0 {
+		columns = []string{metadataString(metadata, metadataColumnKey, defaultColumn)}
+	}
+	joiner := defaultDatasetBuildTextJoiner
+	if value, ok := metadataRawString(metadata, metadataJoinerKey); ok {
+		joiner = value
+	}
+	if inputJoiner != nil {
+		joiner = *inputJoiner
+	}
+	return datasetBuildTextSelection{
+		TextColumn: datasetBuildTextColumnLabel(columns),
+		Columns:    append([]string(nil), columns...),
+		Joiner:     joiner,
+	}
+}
+
+func datasetBuildTextColumnLabel(columns []string) string {
+	normalized := normalizeStringList(columns)
+	if len(normalized) == 0 {
+		return ""
+	}
+	if len(normalized) == 1 {
+		return normalized[0]
+	}
+	return strings.Join(normalized, " + ")
+}
+
+func metadataRawString(metadata map[string]any, key string) (string, bool) {
+	if metadata == nil {
+		return "", false
+	}
+	value, ok := metadata[key]
+	if !ok {
+		return "", false
+	}
+	return anyStringValue(value), true
+}
+
+func metadataStringList(metadata map[string]any, key string) []string {
+	if metadata == nil {
+		return nil
+	}
+	value, ok := metadata[key]
+	if !ok {
+		return nil
+	}
+	return anyStringList(value)
+}
+
+func anyStringList(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return normalizeStringList(typed)
+	case []any:
+		values := make([]string, 0, len(typed))
+		for _, item := range typed {
+			values = append(values, anyStringValue(item))
+		}
+		return normalizeStringList(values)
+	case string:
+		return normalizeStringList([]string{typed})
+	default:
+		return nil
+	}
+}
+
 func trimStringPointer(value *string) *string {
 	if value == nil {
 		return nil
@@ -2889,6 +3051,8 @@ func buildSentimentSummary(metadata map[string]any) *domain.DatasetSentimentSumm
 		InputRowCount:      intValueOrZero(raw["input_row_count"]),
 		LabeledRowCount:    intValueOrZero(raw["labeled_row_count"]),
 		TextColumn:         strings.TrimSpace(anyStringValue(raw["text_column"])),
+		TextColumns:        anyStringList(raw["text_columns"]),
+		TextJoiner:         anyStringValue(raw["text_joiner"]),
 		SentimentBatchSize: intValueOrZero(raw["sentiment_batch_size"]),
 		LabelCounts:        intMapValue(raw["label_counts"]),
 	}
@@ -2908,6 +3072,9 @@ func buildPrepareSummary(metadata map[string]any) *domain.DatasetPrepareSummary 
 		KeptCount:            intValueOrZero(raw["kept_count"]),
 		ReviewCount:          intValueOrZero(raw["review_count"]),
 		DroppedCount:         intValueOrZero(raw["dropped_count"]),
+		TextColumn:           strings.TrimSpace(anyStringValue(raw["text_column"])),
+		TextColumns:          anyStringList(raw["text_columns"]),
+		TextJoiner:           anyStringValue(raw["text_joiner"]),
 		PrepareRegexRuleHits: intMapValue(raw["prepare_regex_rule_hits"]),
 	}
 }
@@ -2917,6 +3084,9 @@ func cloneSentimentSummary(summary *domain.DatasetSentimentSummary) *domain.Data
 		return nil
 	}
 	cloned := *summary
+	if len(summary.TextColumns) > 0 {
+		cloned.TextColumns = append([]string(nil), summary.TextColumns...)
+	}
 	if len(summary.LabelCounts) > 0 {
 		cloned.LabelCounts = cloneStringIntMap(summary.LabelCounts)
 	}
@@ -2928,6 +3098,9 @@ func clonePrepareSummary(summary *domain.DatasetPrepareSummary) *domain.DatasetP
 		return nil
 	}
 	cloned := *summary
+	if len(summary.TextColumns) > 0 {
+		cloned.TextColumns = append([]string(nil), summary.TextColumns...)
+	}
 	if len(summary.PrepareRegexRuleHits) > 0 {
 		cloned.PrepareRegexRuleHits = cloneStringIntMap(summary.PrepareRegexRuleHits)
 	}

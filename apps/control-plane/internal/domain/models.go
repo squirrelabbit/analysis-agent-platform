@@ -244,6 +244,9 @@ type DatasetPrepareSummary struct {
 	KeptCount            int            `json:"kept_count"`
 	ReviewCount          int            `json:"review_count"`
 	DroppedCount         int            `json:"dropped_count"`
+	TextColumn           string         `json:"text_column,omitempty"`
+	TextColumns          []string       `json:"text_columns,omitempty"`
+	TextJoiner           string         `json:"text_joiner,omitempty"`
 	PrepareRegexRuleHits map[string]int `json:"prepare_regex_rule_hits,omitempty"`
 }
 
@@ -274,6 +277,8 @@ type DatasetPreparePreviewResponse struct {
 	PreparedRef        string                      `json:"prepared_ref"`
 	PrepareFormat      string                      `json:"prepare_format"`
 	RawTextColumn      string                      `json:"raw_text_column"`
+	RawTextColumns     []string                    `json:"raw_text_columns,omitempty"`
+	TextJoiner         string                      `json:"text_joiner,omitempty"`
 	PreparedTextColumn string                      `json:"prepared_text_column"`
 	RowIDColumn        string                      `json:"row_id_column"`
 	Summary            *DatasetPrepareSummary      `json:"summary,omitempty"`
@@ -290,6 +295,8 @@ type DatasetSentimentSummary struct {
 	InputRowCount      int            `json:"input_row_count"`
 	LabeledRowCount    int            `json:"labeled_row_count"`
 	TextColumn         string         `json:"text_column"`
+	TextColumns        []string       `json:"text_columns,omitempty"`
+	TextJoiner         string         `json:"text_joiner,omitempty"`
 	SentimentBatchSize int            `json:"sentiment_batch_size"`
 	LabelCounts        map[string]int `json:"label_counts,omitempty"`
 }
@@ -311,6 +318,8 @@ type DatasetSentimentPreviewResponse struct {
 	SentimentRef              string                   `json:"sentiment_ref"`
 	SentimentFormat           string                   `json:"sentiment_format"`
 	SentimentTextColumn       string                   `json:"sentiment_text_column"`
+	SentimentTextColumns      []string                 `json:"sentiment_text_columns,omitempty"`
+	TextJoiner                string                   `json:"text_joiner,omitempty"`
 	SentimentLabelColumn      string                   `json:"sentiment_label_column"`
 	SentimentConfidenceColumn string                   `json:"sentiment_confidence_column"`
 	SentimentReasonColumn     string                   `json:"sentiment_reason_column"`
@@ -353,10 +362,12 @@ type DatasetClusterMembersResponse struct {
 }
 
 type DatasetPrepareRequest struct {
-	TextColumn *string `json:"text_column,omitempty"`
-	OutputPath *string `json:"output_path,omitempty"`
-	Model      *string `json:"model,omitempty"`
-	Force      *bool   `json:"force,omitempty"`
+	TextColumn  *string  `json:"text_column,omitempty"`
+	TextColumns []string `json:"text_columns,omitempty"`
+	TextJoiner  *string  `json:"text_joiner,omitempty"`
+	OutputPath  *string  `json:"output_path,omitempty"`
+	Model       *string  `json:"model,omitempty"`
+	Force       *bool    `json:"force,omitempty"`
 }
 
 type DatasetEmbeddingBuildRequest struct {
@@ -377,10 +388,12 @@ type DatasetClusterBuildRequest struct {
 }
 
 type DatasetSentimentBuildRequest struct {
-	TextColumn *string `json:"text_column,omitempty"`
-	OutputPath *string `json:"output_path,omitempty"`
-	Model      *string `json:"model,omitempty"`
-	Force      *bool   `json:"force,omitempty"`
+	TextColumn  *string  `json:"text_column,omitempty"`
+	TextColumns []string `json:"text_columns,omitempty"`
+	TextJoiner  *string  `json:"text_joiner,omitempty"`
+	OutputPath  *string  `json:"output_path,omitempty"`
+	Model       *string  `json:"model,omitempty"`
+	Force       *bool    `json:"force,omitempty"`
 }
 
 type DatasetBuildJob struct {
