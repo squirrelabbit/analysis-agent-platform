@@ -418,13 +418,14 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
 		StorageURI: "/tmp/issues.csv",
 		DataType:   datasetStringPtr("unstructured"),
+		Metadata:   map[string]any{"text_columns": []string{"text"}},
 	})
 	if err != nil {
 		t.Fatalf("unexpected create dataset version error: %v", err)
 	}
 
 	version, err = service.BuildPrepare(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{
-		TextColumn: datasetStringPtr("text"),
+		TextColumns: []string{"text"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected build prepare error: %v", err)
@@ -538,10 +539,8 @@ func TestBuildPrepareSupportsMultipleTextColumns(t *testing.T) {
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
 
-	joiner := "\n\n"
 	result, err := service.BuildPrepare(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{
 		TextColumns: []string{"제목", "본문"},
-		TextJoiner:  &joiner,
 		Force:       datasetBoolPtr(true),
 	})
 	if err != nil {
@@ -568,6 +567,45 @@ func TestBuildPrepareSupportsMultipleTextColumns(t *testing.T) {
 	}
 }
 
+func TestBuildPrepareRequiresTextColumns(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-prepare-required-columns", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-prepare-required-columns",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-prepare-required-columns",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata:         map[string]any{},
+		PrepareStatus:    "queued",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	_, err := service.BuildPrepare(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{})
+	var invalid ErrInvalidArgument
+	if !errors.As(err, &invalid) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
+	}
+}
+
 func TestCreateDatasetVersionStoresExplicitLLMModes(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
@@ -590,6 +628,7 @@ func TestCreateDatasetVersionStoresExplicitLLMModes(t *testing.T) {
 	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
 		StorageURI:        "/tmp/issues.csv",
 		DataType:          datasetStringPtr("unstructured"),
+		Metadata:          map[string]any{"text_columns": []string{"text"}},
 		PrepareLLMMode:    datasetStringPtr("disabled"),
 		SentimentRequired: datasetBoolPtr(true),
 		SentimentLLMMode:  datasetStringPtr("enabled"),
@@ -642,6 +681,36 @@ func TestCreateDatasetVersionRejectsInvalidLLMMode(t *testing.T) {
 	var invalid ErrInvalidArgument
 	if !errors.As(err, &invalid) {
 		t.Fatalf("expected ErrInvalidArgument, got %T", err)
+	}
+}
+
+func TestCreateDatasetVersionRequiresTextColumnsWhenPrepareRequired(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-required-columns", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-required-columns",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	_, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI:      "/tmp/issues.csv",
+		DataType:        datasetStringPtr("unstructured"),
+		PrepareRequired: datasetBoolPtr(true),
+	})
+	var invalid ErrInvalidArgument
+	if !errors.As(err, &invalid) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
 	}
 }
 
@@ -716,6 +785,7 @@ func TestCreateDatasetVersionAutoActivatesLatestVersion(t *testing.T) {
 
 	first, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
 		StorageURI: "/tmp/issues-v1.csv",
+		Metadata:   map[string]any{"text_columns": []string{"text"}},
 	})
 	if err != nil {
 		t.Fatalf("unexpected create first dataset version error: %v", err)
@@ -726,6 +796,7 @@ func TestCreateDatasetVersionAutoActivatesLatestVersion(t *testing.T) {
 
 	second, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
 		StorageURI: "/tmp/issues-v2.csv",
+		Metadata:   map[string]any{"text_columns": []string{"text"}},
 	})
 	if err != nil {
 		t.Fatalf("unexpected create second dataset version error: %v", err)
@@ -772,12 +843,14 @@ func TestDatasetVersionActivationCanBeUpdatedManually(t *testing.T) {
 
 	first, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
 		StorageURI: "/tmp/issues-v1.csv",
+		Metadata:   map[string]any{"text_columns": []string{"text"}},
 	})
 	if err != nil {
 		t.Fatalf("unexpected create first version error: %v", err)
 	}
 	second, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
 		StorageURI:       "/tmp/issues-v2.csv",
+		Metadata:         map[string]any{"text_columns": []string{"text"}},
 		ActivateOnCreate: datasetBoolPtr(false),
 	})
 	if err != nil {
@@ -1228,6 +1301,7 @@ func TestCreateDatasetVersionEnqueuesEagerPrepareJobWhenWorkerConfigured(t *test
 	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
 		StorageURI: "/tmp/issues.csv",
 		DataType:   datasetStringPtr("unstructured"),
+		Metadata:   map[string]any{"text_columns": []string{"text"}},
 	})
 	if err != nil {
 		t.Fatalf("unexpected create dataset version error: %v", err)
@@ -1324,6 +1398,7 @@ func TestCreateDatasetVersionAutoCreatesSentimentJobAfterPrepare(t *testing.T) {
 	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
 		StorageURI:        "/tmp/issues.csv",
 		DataType:          datasetStringPtr("unstructured"),
+		Metadata:          map[string]any{"text_columns": []string{"text"}},
 		SentimentRequired: datasetBoolPtr(true),
 		PrepareRequired:   datasetBoolPtr(true),
 		SentimentModel:    datasetStringPtr("claude-haiku-test"),
@@ -1383,7 +1458,7 @@ func TestCreatePrepareJobCompletesAndStoresStatus(t *testing.T) {
 		ProjectID:        project.ProjectID,
 		StorageURI:       "/tmp/issues.csv",
 		DataType:         "unstructured",
-		Metadata:         map[string]any{},
+		Metadata:         map[string]any{"text_columns": []string{"text"}},
 		PrepareStatus:    "queued",
 		CreatedAt:        time.Now().UTC(),
 	}
@@ -1451,7 +1526,7 @@ func TestCreatePrepareJobStartsTemporalWorkflowWhenStarterConfigured(t *testing.
 		ProjectID:        project.ProjectID,
 		StorageURI:       "/tmp/issues.csv",
 		DataType:         "unstructured",
-		Metadata:         map[string]any{},
+		Metadata:         map[string]any{"text_columns": []string{"text"}},
 		PrepareStatus:    "queued",
 		CreatedAt:        time.Now().UTC(),
 	}
@@ -1503,6 +1578,7 @@ func TestCreateDatasetVersionStoresNormalizedProfile(t *testing.T) {
 	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
 		StorageURI: "/tmp/issues.csv",
 		DataType:   datasetStringPtr("unstructured"),
+		Metadata:   map[string]any{"text_columns": []string{"text"}},
 		Profile: &domain.DatasetProfile{
 			ProfileID:              "  festival-default  ",
 			PreparePromptVersion:   datasetStringPtr("  dataset-prepare-anthropic-batch-v2 "),
@@ -1580,6 +1656,7 @@ func TestCreateDatasetVersionResolvesDefaultProfileFromRegistry(t *testing.T) {
 	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
 		StorageURI: "/tmp/issues.csv",
 		DataType:   datasetStringPtr("unstructured"),
+		Metadata:   map[string]any{"text_columns": []string{"text"}},
 	})
 	if err != nil {
 		t.Fatalf("unexpected create dataset version error: %v", err)
@@ -1643,6 +1720,7 @@ func TestCreateDatasetVersionMergesRegistryProfileWithExplicitOverride(t *testin
 	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
 		StorageURI: "/tmp/issues.csv",
 		DataType:   datasetStringPtr("unstructured"),
+		Metadata:   map[string]any{"text_columns": []string{"text"}},
 		Profile: &domain.DatasetProfile{
 			ProfileID:        "festival-default",
 			EmbeddingModel:   datasetStringPtr("text-embedding-3-small"),
@@ -1691,7 +1769,7 @@ func TestBuildPrepareUsesProfileDefaults(t *testing.T) {
 		ProjectID:        project.ProjectID,
 		StorageURI:       "/tmp/issues.csv",
 		DataType:         "unstructured",
-		Metadata:         map[string]any{},
+		Metadata:         map[string]any{"text_columns": []string{"text"}},
 		Profile: &domain.DatasetProfile{
 			ProfileID:            "festival-default",
 			PreparePromptVersion: datasetStringPtr("dataset-prepare-anthropic-batch-v2"),
@@ -1782,7 +1860,7 @@ func TestBuildPrepareUsesProjectPromptTemplateOverride(t *testing.T) {
 		ProjectID:        project.ProjectID,
 		StorageURI:       "/tmp/issues.csv",
 		DataType:         "unstructured",
-		Metadata:         map[string]any{},
+		Metadata:         map[string]any{"text_columns": []string{"text"}},
 		Profile: &domain.DatasetProfile{
 			PreparePromptVersion: datasetStringPtr("project-prepare-v1"),
 		},
@@ -1875,7 +1953,7 @@ func TestBuildPrepareUsesGlobalPromptTemplateOverride(t *testing.T) {
 		ProjectID:        project.ProjectID,
 		StorageURI:       "/tmp/issues.csv",
 		DataType:         "unstructured",
-		Metadata:         map[string]any{},
+		Metadata:         map[string]any{"text_columns": []string{"text"}},
 		Profile: &domain.DatasetProfile{
 			PreparePromptVersion: datasetStringPtr("global-prepare-v1"),
 		},
@@ -1971,7 +2049,7 @@ func TestBuildPrepareUsesProjectPromptDefaultWhenProfilePromptVersionMissing(t *
 		ProjectID:        project.ProjectID,
 		StorageURI:       "/tmp/issues.csv",
 		DataType:         "unstructured",
-		Metadata:         map[string]any{},
+		Metadata:         map[string]any{"text_columns": []string{"text"}},
 		PrepareStatus:    "queued",
 		CreatedAt:        time.Now().UTC(),
 	}
@@ -3231,7 +3309,7 @@ func TestBuildSentimentSupportsMultipleTextColumns(t *testing.T) {
 					"labeled_row_count":    2,
 					"text_column":          "제목 + 본문",
 					"text_columns":         []string{"제목", "본문"},
-					"text_joiner":          " ",
+					"text_joiner":          "\n\n",
 					"sentiment_batch_size": 8,
 				},
 			},
@@ -3240,10 +3318,8 @@ func TestBuildSentimentSupportsMultipleTextColumns(t *testing.T) {
 	defer server.Close()
 	service.pythonAIWorkerURL = server.URL
 
-	joiner := " "
 	result, err := service.BuildSentiment(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{
 		TextColumns: []string{"제목", "본문"},
-		TextJoiner:  &joiner,
 	})
 	if err != nil {
 		t.Fatalf("unexpected build sentiment error: %v", err)
@@ -3255,7 +3331,7 @@ func TestBuildSentimentSupportsMultipleTextColumns(t *testing.T) {
 	if !reflect.DeepEqual(requestedTextColumns, []string{"제목", "본문"}) {
 		t.Fatalf("unexpected worker text_columns: %+v", requestedTextColumns)
 	}
-	if requestedTextJoiner != " " {
+	if requestedTextJoiner != "\n\n" {
 		t.Fatalf("unexpected worker text_joiner: %q", requestedTextJoiner)
 	}
 	if got := metadataString(result.Metadata, "sentiment_text_column", ""); got != "제목 + 본문" {

@@ -393,9 +393,7 @@ type DatasetClusterMembersResponse struct {
 }
 
 type DatasetPrepareRequest struct {
-	TextColumn  *string  `json:"text_column,omitempty"`
 	TextColumns []string `json:"text_columns,omitempty"`
-	TextJoiner  *string  `json:"text_joiner,omitempty"`
 	OutputPath  *string  `json:"output_path,omitempty"`
 	Model       *string  `json:"model,omitempty"`
 	Force       *bool    `json:"force,omitempty"`
@@ -419,9 +417,7 @@ type DatasetClusterBuildRequest struct {
 }
 
 type DatasetSentimentBuildRequest struct {
-	TextColumn  *string  `json:"text_column,omitempty"`
 	TextColumns []string `json:"text_columns,omitempty"`
-	TextJoiner  *string  `json:"text_joiner,omitempty"`
 	OutputPath  *string  `json:"output_path,omitempty"`
 	Model       *string  `json:"model,omitempty"`
 	Force       *bool    `json:"force,omitempty"`

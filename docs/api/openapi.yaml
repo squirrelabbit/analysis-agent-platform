@@ -2423,7 +2423,11 @@ components:
             - integer
             - "null"
         metadata:
-          $ref: "#/components/schemas/AnyMap"
+          allOf:
+            - $ref: "#/components/schemas/AnyMap"
+          description: prepare_required=true일 때 text_columns가 필요하다.
+          example:
+            text_columns: ["제목", "본문"]
         profile:
           anyOf:
             - $ref: "#/components/schemas/DatasetProfile"
@@ -2667,8 +2671,8 @@ components:
           description: Integer string
         metadata:
           type: string
-          description: JSON object string
-          example: '{"text_column":"text"}'
+          description: JSON object string. prepare_required=true일 때 text_columns가 필요하다.
+          example: '{"text_columns":["제목","본문"]}'
         activate_on_create:
           type: string
           enum: ["true", "false"]
@@ -2749,23 +2753,12 @@ components:
     DatasetPrepareRequest:
       type: object
       properties:
-        text_column:
-          type:
-            - string
-            - "null"
-          description: "단일 텍스트 컬럼. `text_columns`가 있으면 `text_columns`가 우선 적용된다."
         text_columns:
-          type:
-            - array
-            - "null"
+          type: array
           items:
             type: string
-          description: 제목/본문처럼 여러 컬럼을 합쳐 빌드할 때 사용하는 텍스트 컬럼 목록.
-        text_joiner:
-          type:
-            - string
-            - "null"
-          description: "`text_columns` 값을 합칠 때 사용할 구분자. 기본값은 줄바꿈이다."
+          minItems: 1
+          description: 전처리 대상 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
         output_path:
           type:
             - string
@@ -2778,6 +2771,7 @@ components:
           type:
             - boolean
             - "null"
+      required: [text_columns]
     DatasetEmbeddingBuildRequest:
       type: object
       properties:
@@ -2831,23 +2825,12 @@ components:
     DatasetSentimentBuildRequest:
       type: object
       properties:
-        text_column:
-          type:
-            - string
-            - "null"
-          description: "단일 텍스트 컬럼. `text_columns`가 있으면 `text_columns`가 우선 적용된다."
         text_columns:
-          type:
-            - array
-            - "null"
+          type: array
           items:
             type: string
-          description: 제목/본문처럼 여러 컬럼을 합쳐 감성 분석할 때 사용하는 텍스트 컬럼 목록.
-        text_joiner:
-          type:
-            - string
-            - "null"
-          description: "`text_columns` 값을 합칠 때 사용할 구분자. 기본값은 줄바꿈이다."
+          minItems: 1
+          description: 감성 분석 대상 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
         output_path:
           type:
             - string
@@ -2860,6 +2843,7 @@ components:
           type:
             - boolean
             - "null"
+      required: [text_columns]
     DatasetBuildJob:
       type: object
       properties:

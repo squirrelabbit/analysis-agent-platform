@@ -620,6 +620,11 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 		version.EmbeddingModel = nil
 	}
 	if prepareRequired {
+		textColumns := metadataStringList(version.Metadata, "text_columns")
+		if len(textColumns) == 0 {
+			return domain.DatasetVersion{}, ErrInvalidArgument{Message: "metadata.text_columns is required when prepare_required is true"}
+		}
+		version.Metadata["text_columns"] = textColumns
 		version.Metadata["prepare_required"] = true
 	}
 	if sentimentRequired {
@@ -1904,14 +1909,11 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 
 	textSelection := resolveDatasetBuildTextSelection(
 		version.Metadata,
-		input.TextColumn,
 		input.TextColumns,
-		input.TextJoiner,
-		metadataString(version.Metadata, "text_column", "text"),
-		"raw_text_column",
-		"raw_text_columns",
-		"text_joiner",
 	)
+	if len(textSelection.Columns) == 0 {
+		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "text_columns is required for dataset prepare"}
+	}
 	textColumn := textSelection.TextColumn
 	textColumns := textSelection.Columns
 	textJoiner := textSelection.Joiner
@@ -2420,13 +2422,6 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 	textColumns := normalizeStringList(input.TextColumns)
 	if len(textColumns) > 0 {
 		textColumn = datasetBuildTextColumnLabel(textColumns)
-	} else if input.TextColumn != nil && strings.TrimSpace(*input.TextColumn) != "" {
-		requestedTextColumn := strings.TrimSpace(*input.TextColumn)
-		rawTextColumn := metadataString(version.Metadata, "raw_text_column", metadataString(version.Metadata, "text_column", "text"))
-		if !isPrepareReady(version) || requestedTextColumn != rawTextColumn {
-			textColumn = requestedTextColumn
-		}
-		textColumns = []string{textColumn}
 	} else {
 		if existingColumns := metadataStringList(version.Metadata, "sentiment_text_columns"); len(existingColumns) > 0 {
 			textColumns = existingColumns
@@ -2437,12 +2432,6 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 		}
 	}
 	textJoiner := defaultDatasetBuildTextJoiner
-	if value, ok := metadataRawString(version.Metadata, "sentiment_text_joiner"); ok {
-		textJoiner = value
-	}
-	if input.TextJoiner != nil {
-		textJoiner = *input.TextJoiner
-	}
 	datasetName := datasetSourceForUnstructured(version)
 	outputPath := s.deriveSentimentURI(version)
 	if input.OutputPath != nil && strings.TrimSpace(*input.OutputPath) != "" {
@@ -2913,44 +2902,23 @@ type datasetBuildTextSelection struct {
 	Joiner     string
 }
 
-const defaultDatasetBuildTextJoiner = "\n"
+const defaultDatasetBuildTextJoiner = "\n\n"
 
 func resolveDatasetBuildTextSelection(
 	metadata map[string]any,
-	inputColumn *string,
 	inputColumns []string,
-	inputJoiner *string,
-	defaultColumn string,
-	metadataColumnKey string,
-	metadataColumnsKey string,
-	metadataJoinerKey string,
 ) datasetBuildTextSelection {
 	columns := normalizeStringList(inputColumns)
-	if len(columns) == 0 && inputColumn != nil {
-		if value := strings.TrimSpace(*inputColumn); value != "" {
-			columns = []string{value}
-		}
+	if len(columns) == 0 {
+		columns = metadataStringList(metadata, "raw_text_columns")
 	}
 	if len(columns) == 0 {
-		columns = metadataStringList(metadata, metadataColumnsKey)
-	}
-	if len(columns) == 0 && metadataColumnsKey != "text_columns" {
 		columns = metadataStringList(metadata, "text_columns")
-	}
-	if len(columns) == 0 {
-		columns = []string{metadataString(metadata, metadataColumnKey, defaultColumn)}
-	}
-	joiner := defaultDatasetBuildTextJoiner
-	if value, ok := metadataRawString(metadata, metadataJoinerKey); ok {
-		joiner = value
-	}
-	if inputJoiner != nil {
-		joiner = *inputJoiner
 	}
 	return datasetBuildTextSelection{
 		TextColumn: datasetBuildTextColumnLabel(columns),
 		Columns:    append([]string(nil), columns...),
-		Joiner:     joiner,
+		Joiner:     defaultDatasetBuildTextJoiner,
 	}
 }
 

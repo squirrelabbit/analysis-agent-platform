@@ -261,7 +261,7 @@ def _normalize_text_columns_payload(payload: dict[str, Any], default_column: str
 
     text_joiner = payload.get("text_joiner")
     if text_joiner is None:
-        text_joiner = "\n"
+        text_joiner = "\n\n"
     else:
         text_joiner = str(text_joiner)
     return text_column, columns, text_joiner

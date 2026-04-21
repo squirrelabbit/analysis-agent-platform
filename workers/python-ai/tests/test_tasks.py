@@ -994,7 +994,6 @@ class TaskTests(unittest.TestCase):
                     "dataset_version_id": "version-multi",
                     "dataset_name": str(csv_path),
                     "text_columns": ["title", "body"],
-                    "text_joiner": "\n\n",
                     "output_path": str(prepared_path),
                 }
             )
@@ -1243,14 +1242,13 @@ class TaskTests(unittest.TestCase):
                     "dataset_version_id": "version-multi-sentiment",
                     "dataset_name": str(prepared_path),
                     "text_columns": ["title", "body"],
-                    "text_joiner": " ",
                     "output_path": str(sentiment_path),
                 }
             )
 
         self.assertEqual(result["artifact"]["text_column"], "title + body")
         self.assertEqual(result["artifact"]["text_columns"], ["title", "body"])
-        self.assertEqual(result["artifact"]["text_joiner"], " ")
+        self.assertEqual(result["artifact"]["text_joiner"], "\n\n")
         self.assertEqual(result["artifact"]["summary"]["labeled_row_count"], 2)
         self.assertEqual(result["artifact"]["summary"]["text_columns"], ["title", "body"])
 

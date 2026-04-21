@@ -863,6 +863,10 @@ func (s *Server) handleBuildPrepare(w stdhttp.ResponseWriter, r *stdhttp.Request
 		writeError(w, stdhttp.StatusBadRequest, err.Error())
 		return
 	}
+	if !hasTextColumns(payload.TextColumns) {
+		writeError(w, stdhttp.StatusBadRequest, "text_columns is required")
+		return
+	}
 	response, err := s.datasetService.BuildPrepare(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
@@ -880,6 +884,10 @@ func (s *Server) handleCreatePrepareJob(w stdhttp.ResponseWriter, r *stdhttp.Req
 	var payload domain.DatasetPrepareRequest
 	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
 		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	if !hasTextColumns(payload.TextColumns) {
+		writeError(w, stdhttp.StatusBadRequest, "text_columns is required")
 		return
 	}
 	response, err := s.datasetService.CreatePrepareJob(
@@ -1029,6 +1037,10 @@ func (s *Server) handleBuildSentiment(w stdhttp.ResponseWriter, r *stdhttp.Reque
 		writeError(w, stdhttp.StatusBadRequest, err.Error())
 		return
 	}
+	if !hasTextColumns(payload.TextColumns) {
+		writeError(w, stdhttp.StatusBadRequest, "text_columns is required")
+		return
+	}
 	response, err := s.datasetService.BuildSentiment(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
@@ -1046,6 +1058,10 @@ func (s *Server) handleCreateSentimentJob(w stdhttp.ResponseWriter, r *stdhttp.R
 	var payload domain.DatasetSentimentBuildRequest
 	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
 		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	if !hasTextColumns(payload.TextColumns) {
+		writeError(w, stdhttp.StatusBadRequest, "text_columns is required")
 		return
 	}
 	response, err := s.datasetService.CreateSentimentJob(
@@ -1336,6 +1352,15 @@ func decodeJSONAllowEmpty(r *stdhttp.Request, dest any) error {
 		return err
 	}
 	return nil
+}
+
+func hasTextColumns(values []string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func writeError(w stdhttp.ResponseWriter, status int, message string) {

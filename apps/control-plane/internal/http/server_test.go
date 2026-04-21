@@ -486,7 +486,7 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"issues.csv","data_type":"unstructured"}`,
+		`{"storage_uri":"issues.csv","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&version,
 	)
@@ -500,7 +500,7 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"issues_v2.csv","data_type":"unstructured"}`,
+		`{"storage_uri":"issues_v2.csv","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&map[string]any{},
 	)
@@ -892,7 +892,7 @@ func TestScenarioPlanEndpoint(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"festival.csv","data_type":"unstructured"}`,
+		`{"storage_uri":"festival.csv","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&version,
 	)
@@ -1054,7 +1054,7 @@ func TestScenarioExecuteEndpoint(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"festival.csv","data_type":"unstructured"}`,
+		`{"storage_uri":"festival.csv","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&version,
 	)
@@ -1151,7 +1151,7 @@ func TestUploadDatasetCreatesStoredVersion(t *testing.T) {
 	if err := writer.WriteField("sentiment_llm_mode", "enabled"); err != nil {
 		t.Fatalf("unexpected write field error: %v", err)
 	}
-	if err := writer.WriteField("metadata", `{"text_column":"text"}`); err != nil {
+	if err := writer.WriteField("metadata", `{"text_columns":["text"]}`); err != nil {
 		t.Fatalf("unexpected write field error: %v", err)
 	}
 	fileWriter, err := writer.CreateFormFile("file", "issues.csv")
@@ -1251,7 +1251,7 @@ func TestDatasetActiveVersionEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"issues-v1.csv","data_type":"unstructured"}`,
+		`{"storage_uri":"issues-v1.csv","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&firstVersion,
 	)
@@ -1262,7 +1262,7 @@ func TestDatasetActiveVersionEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"issues-v2.csv","data_type":"unstructured","activate_on_create":false}`,
+		`{"storage_uri":"issues-v2.csv","data_type":"unstructured","metadata":{"text_columns":["text"]},"activate_on_create":false}`,
 		http.StatusCreated,
 		&secondVersion,
 	)
@@ -1350,7 +1350,7 @@ func TestDeleteDatasetVersionEndpoint(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"delete-version-source.jsonl","data_type":"unstructured"}`,
+		`{"storage_uri":"delete-version-source.jsonl","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&version,
 	)
@@ -1432,7 +1432,7 @@ func TestDeleteProjectAndDatasetEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"delete-source.jsonl","data_type":"unstructured"}`,
+		`{"storage_uri":"delete-source.jsonl","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&version,
 	)
@@ -1552,7 +1552,7 @@ func TestDatasetBuildJobEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/prepare_jobs",
-		`{}`,
+		`{"text_columns":["text"]}`,
 		http.StatusAccepted,
 		&job,
 	)
@@ -1667,12 +1667,26 @@ func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 		},
 	})
 
+	invalidPrepare := map[string]any{}
 	readJSONResponse(
 		t,
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/prepare",
 		`{}`,
+		http.StatusBadRequest,
+		&invalidPrepare,
+	)
+	if invalidPrepare["detail"] != "text_columns is required" {
+		t.Fatalf("unexpected invalid prepare response: %+v", invalidPrepare)
+	}
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/prepare",
+		`{"text_columns":["text"]}`,
 		http.StatusAccepted,
 		nil,
 	)
@@ -1838,12 +1852,26 @@ func TestSentimentPreviewAndDownloadEndpoints(t *testing.T) {
 		},
 	})
 
+	invalidSentiment := map[string]any{}
 	readJSONResponse(
 		t,
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/sentiment",
 		`{}`,
+		http.StatusBadRequest,
+		&invalidSentiment,
+	)
+	if invalidSentiment["detail"] != "text_columns is required" {
+		t.Fatalf("unexpected invalid sentiment response: %+v", invalidSentiment)
+	}
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/sentiment",
+		`{"text_columns":["text"]}`,
 		http.StatusAccepted,
 		nil,
 	)
