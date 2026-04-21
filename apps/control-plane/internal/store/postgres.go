@@ -169,9 +169,11 @@ func (s *PostgresStore) DeleteProject(projectID string) error {
 		return err
 	}
 	if affected == 0 {
-		return ErrNotFound
+		err = ErrNotFound
+		return err
 	}
-	return tx.Commit()
+	err = tx.Commit()
+	return err
 }
 
 func (s *PostgresStore) SavePrompt(prompt domain.Prompt) error {
@@ -1009,6 +1011,70 @@ func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]doma
 		return nil, err
 	}
 	return items, nil
+}
+
+func (s *PostgresStore) DeleteDatasetVersion(projectID, datasetID, datasetVersionID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.Exec(
+		`DELETE FROM embedding_index_chunks
+		  WHERE dataset_version_id = $1`,
+		datasetVersionID,
+	); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(
+		`DELETE FROM dataset_build_jobs
+		  WHERE project_id = $1::uuid
+		    AND dataset_id = $2::uuid
+		    AND dataset_version_id = $3`,
+		projectID,
+		datasetID,
+		datasetVersionID,
+	); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(
+		`UPDATE datasets
+		    SET active_dataset_version_id = NULL,
+		        active_version_updated_at = NOW()
+		  WHERE project_id = $1::uuid
+		    AND dataset_id = $2::uuid
+		    AND active_dataset_version_id = $3`,
+		projectID,
+		datasetID,
+		datasetVersionID,
+	); err != nil {
+		return err
+	}
+	result, err := tx.Exec(
+		`DELETE FROM dataset_versions
+		  WHERE project_id = $1::uuid
+		    AND dataset_id = $2::uuid
+		    AND dataset_version_id = $3`,
+		projectID,
+		datasetID,
+		datasetVersionID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
 }
 
 func (s *PostgresStore) SaveDatasetBuildJob(job domain.DatasetBuildJob) error {

@@ -133,6 +133,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions", s.handleCreateDatasetVersion)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions", s.handleListDatasetVersions)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}", s.handleGetDatasetVersion)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}", s.handleDeleteDatasetVersion)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/source_download", s.handleDownloadSourceDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_preview", s.handleGetPreparePreview)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_download", s.handleDownloadPreparedDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_preview", s.handleGetSentimentPreview)
@@ -662,6 +664,45 @@ func (s *Server) handleGetDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp.Re
 		return
 	}
 	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDeleteDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.datasetService.DeleteDatasetVersion(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+	); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
+func (s *Server) handleDownloadSourceDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	sourcePath, filename, contentType, err := s.datasetService.ResolveSourceDownload(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	handle, err := os.Open(sourcePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.writeServiceError(w, service.ErrNotFound{Resource: "source file"})
+			return
+		}
+		s.writeServiceError(w, err)
+		return
+	}
+	defer handle.Close()
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
+	w.WriteHeader(stdhttp.StatusOK)
+	_, _ = io.Copy(w, handle)
 }
 
 func (s *Server) handleGetPreparePreview(w stdhttp.ResponseWriter, r *stdhttp.Request) {

@@ -1214,6 +1214,19 @@ func TestUploadDatasetCreatesStoredVersion(t *testing.T) {
 	if loadedDataset["active_dataset_version_id"] != version["dataset_version_id"] {
 		t.Fatalf("expected uploaded version to become active: %+v", loadedDataset)
 	}
+
+	req = httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+version["dataset_version_id"].(string)+"/source_download", nil)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected source download status: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if disposition := recorder.Header().Get("Content-Disposition"); !strings.Contains(disposition, "attachment; filename=") || !strings.Contains(disposition, "issues.csv") {
+		t.Fatalf("unexpected content-disposition: %s", disposition)
+	}
+	if got := recorder.Body.String(); got != "text\n결제 오류가 반복 발생했습니다\n" {
+		t.Fatalf("unexpected source download body: %q", got)
+	}
 }
 
 func TestDatasetActiveVersionEndpoints(t *testing.T) {
@@ -1308,6 +1321,80 @@ func TestDatasetActiveVersionEndpoints(t *testing.T) {
 	)
 	if _, ok := deactivatedDataset["active_dataset_version_id"]; ok {
 		t.Fatalf("expected active_dataset_version_id to be omitted after deactivation: %+v", deactivatedDataset)
+	}
+}
+
+func TestDeleteDatasetVersionEndpoint(t *testing.T) {
+	uploadRoot := t.TempDir()
+	artifactRoot := t.TempDir()
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+		UploadRoot:     uploadRoot,
+		ArtifactRoot:   artifactRoot,
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"delete-version-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	dataset := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects/"+projectID+"/datasets", `{"name":"delete-version-dataset","data_type":"unstructured"}`, http.StatusCreated, &dataset)
+	datasetID := dataset["dataset_id"].(string)
+
+	version := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"delete-version-source.jsonl","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&version,
+	)
+	versionID := version["dataset_version_id"].(string)
+
+	uploadVersionPath := filepath.Join(uploadRoot, "projects", projectID, "datasets", datasetID, "versions", versionID)
+	artifactVersionPath := filepath.Join(artifactRoot, "projects", projectID, "datasets", datasetID, "versions", versionID)
+	if err := os.MkdirAll(filepath.Join(uploadVersionPath, "source"), 0o755); err != nil {
+		t.Fatalf("failed to seed version upload path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(artifactVersionPath, "prepare"), 0o755); err != nil {
+		t.Fatalf("failed to seed version artifact path: %v", err)
+	}
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodDelete,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID,
+		"",
+		http.StatusNoContent,
+		nil,
+	)
+
+	deletedVersion := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID,
+		"",
+		http.StatusNotFound,
+		&deletedVersion,
+	)
+	loadedDataset := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID, "", http.StatusOK, &loadedDataset)
+	if _, ok := loadedDataset["active_dataset_version_id"]; ok {
+		t.Fatalf("expected active version to be cleared after deleting active version: %+v", loadedDataset)
+	}
+	if _, err := os.Stat(uploadVersionPath); !os.IsNotExist(err) {
+		t.Fatalf("expected upload version path to be removed: %v", err)
+	}
+	if _, err := os.Stat(artifactVersionPath); !os.IsNotExist(err) {
+		t.Fatalf("expected artifact version path to be removed: %v", err)
 	}
 }
 

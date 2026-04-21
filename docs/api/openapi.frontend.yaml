@@ -11,7 +11,8 @@ info:
     2. 프로젝트 CRUD
     3. 데이터셋 CRUD
     4. 데이터셋 활성 버전 전환
-    5. 업로드 기반 dataset version 생성 및 조회
+    5. 데이터셋 업로드/버전 조회/버전 삭제/원본 다운로드
+    6. 전처리 및 감성 분석 실행/조회/다운로드
 
     확인 필요:
     - analysis/scenario/report 관련 API는 이후 프론트 범위 확정 시 이 문서에 단계적으로 포함한다.
@@ -44,7 +45,6 @@ paths:
       parameters:
         - name: operation
           in: query
-          required: false
           schema:
             type: string
             enum: [prepare, prepare_batch, sentiment, sentiment_batch]
@@ -355,6 +355,189 @@ paths:
                 $ref: "#/components/schemas/DatasetVersion"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Datasets]
+      summary: Delete dataset version
+      operationId: deleteDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "204":
+          description: Dataset version deleted
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/source_download:
+    get:
+      tags: [Datasets]
+      summary: Download uploaded source file
+      description: 업로드 API로 생성된 local source 파일만 다운로드한다.
+      operationId: downloadDatasetSource
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Uploaded source file download
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare:
+    post:
+      tags: [Datasets]
+      summary: Run prepare for dataset version
+      operationId: buildPrepareDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetPrepareRequest"
+      responses:
+        "202":
+          description: Prepare accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_preview:
+    get:
+      tags: [Datasets]
+      summary: Get prepare preview
+      operationId: getDatasetPreparePreview
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 10
+      responses:
+        "200":
+          description: Prepare preview detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetPreparePreviewResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_download:
+    get:
+      tags: [Datasets]
+      summary: Download prepared dataset as CSV
+      operationId: downloadPreparedDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Prepared CSV download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment:
+    post:
+      tags: [Datasets]
+      summary: Run sentiment for dataset version
+      operationId: buildSentimentDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetSentimentBuildRequest"
+      responses:
+        "202":
+          description: Sentiment accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_preview:
+    get:
+      tags: [Datasets]
+      summary: Get sentiment preview
+      operationId: getDatasetSentimentPreview
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 10
+      responses:
+        "200":
+          description: Sentiment preview detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetSentimentPreviewResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_download:
+    get:
+      tags: [Datasets]
+      summary: Download sentiment-labeled dataset as CSV
+      operationId: downloadSentimentDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Sentiment CSV download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
 components:
   responses:
     ErrorResponse:
@@ -404,21 +587,7 @@ components:
         type: string
     RuntimeStatusTemporal:
       type: object
-      properties:
-        address:
-          type: string
-        namespace:
-          type: string
-        task_queue:
-          type: string
-        build_task_queue:
-          type: string
-        persistence_mode:
-          type: string
-        retention_mode:
-          type: string
-        recovery_mode:
-          type: string
+      additionalProperties: true
     RuntimeStatusResponse:
       type: object
       properties:
@@ -595,25 +764,7 @@ components:
       required: [dataset_version_id]
     DatasetProfile:
       type: object
-      properties:
-        profile_id:
-          type: string
-        prepare_prompt_version:
-          type:
-            - string
-            - "null"
-        sentiment_prompt_version:
-          type:
-            - string
-            - "null"
-        regex_rule_names:
-          $ref: "#/components/schemas/StringList"
-        garbage_rule_names:
-          $ref: "#/components/schemas/StringList"
-        embedding_model:
-          type:
-            - string
-            - "null"
+      additionalProperties: true
     DatasetVersion:
       type: object
       properties:
@@ -701,18 +852,7 @@ components:
             - string
             - "null"
           format: date-time
-      required:
-        - dataset_version_id
-        - dataset_id
-        - project_id
-        - storage_uri
-        - data_type
-        - metadata
-        - prepare_status
-        - sentiment_status
-        - embedding_status
-        - is_active
-        - created_at
+      required: [dataset_version_id, dataset_id, project_id, storage_uri, data_type, metadata, prepare_status, sentiment_status, embedding_status, is_active, created_at]
     DatasetUploadRequest:
       type: object
       properties:
@@ -720,21 +860,25 @@ components:
           type: string
           format: binary
         data_type:
-          type:
-            - string
-            - "null"
+          type: string
+        metadata:
+          type: string
+          description: JSON object string
         activate_on_create:
-          type:
-            - boolean
-            - "null"
+          type: string
+          enum: ["true", "false"]
         prepare_required:
-          type:
-            - boolean
-            - "null"
+          type: string
+          enum: ["true", "false"]
+        prepare_llm_mode:
+          type: string
+          enum: [default, enabled, disabled]
         sentiment_required:
-          type:
-            - boolean
-            - "null"
+          type: string
+          enum: ["true", "false"]
+        sentiment_llm_mode:
+          type: string
+          enum: [default, enabled, disabled]
       required: [file]
     DatasetVersionListResponse:
       type: object
@@ -744,3 +888,47 @@ components:
           items:
             $ref: "#/components/schemas/DatasetVersion"
       required: [items]
+    DatasetPrepareRequest:
+      type: object
+      properties:
+        text_column:
+          type:
+            - string
+            - "null"
+        output_path:
+          type:
+            - string
+            - "null"
+        model:
+          type:
+            - string
+            - "null"
+        force:
+          type:
+            - boolean
+            - "null"
+    DatasetSentimentBuildRequest:
+      type: object
+      properties:
+        text_column:
+          type:
+            - string
+            - "null"
+        output_path:
+          type:
+            - string
+            - "null"
+        model:
+          type:
+            - string
+            - "null"
+        force:
+          type:
+            - boolean
+            - "null"
+    DatasetPreparePreviewResponse:
+      type: object
+      additionalProperties: true
+    DatasetSentimentPreviewResponse:
+      type: object
+      additionalProperties: true

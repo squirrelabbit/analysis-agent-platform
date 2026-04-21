@@ -398,6 +398,30 @@ func (s *MemoryStore) ListDatasetVersions(projectID, datasetID string) ([]domain
 	return items, nil
 }
 
+func (s *MemoryStore) DeleteDatasetVersion(projectID, datasetID, datasetVersionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	version, ok := s.versions[datasetVersionID]
+	if !ok || version.ProjectID != projectID || version.DatasetID != datasetID {
+		return ErrNotFound
+	}
+
+	delete(s.versions, datasetVersionID)
+	for key, job := range s.buildJobs {
+		if job.ProjectID == projectID && job.DatasetID == datasetID && job.DatasetVersionID == datasetVersionID {
+			delete(s.buildJobs, key)
+		}
+	}
+	if dataset, ok := s.datasets[datasetID]; ok && dataset.ProjectID == projectID && dataset.ActiveDatasetVersionID != nil && *dataset.ActiveDatasetVersionID == datasetVersionID {
+		now := time.Now().UTC()
+		dataset.ActiveDatasetVersionID = nil
+		dataset.ActiveVersionUpdatedAt = &now
+		s.datasets[datasetID] = dataset
+	}
+	return nil
+}
+
 func cloneDatasetVersion(version domain.DatasetVersion) domain.DatasetVersion {
 	cloned := version
 	cloned.Metadata = cloneAnyMap(version.Metadata)

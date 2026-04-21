@@ -699,6 +699,68 @@ func (s *DatasetService) ListDatasetVersions(projectID, datasetID string) (domai
 	return domain.DatasetVersionListResponse{Items: items}, nil
 }
 
+func (s *DatasetService) DeleteDatasetVersion(projectID, datasetID, datasetVersionID string) error {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.DeleteDatasetVersion(projectID, datasetID, version.DatasetVersionID); err != nil {
+		if err == store.ErrNotFound {
+			return ErrNotFound{Resource: "dataset version"}
+		}
+		return err
+	}
+	if err := s.removeDatasetVersionArtifacts(projectID, datasetID, version.DatasetVersionID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *DatasetService) ResolveSourceDownload(projectID, datasetID, datasetVersionID string) (string, string, string, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return "", "", "", err
+	}
+	if metadataString(version.Metadata, "storage_backend", "") != "local_fs" || metadataString(version.Metadata, "storage_scope", "") != "dataset_upload" {
+		return "", "", "", ErrInvalidArgument{Message: "source download supports uploaded dataset versions only"}
+	}
+
+	sourcePath := strings.TrimSpace(version.StorageURI)
+	if sourcePath == "" {
+		return "", "", "", ErrInvalidArgument{Message: "storage_uri is required"}
+	}
+	absolutePath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return "", "", "", err
+	}
+	if !s.isDatasetUploadSourcePath(projectID, datasetID, datasetVersionID, absolutePath) {
+		return "", "", "", ErrInvalidArgument{Message: "source file is outside dataset upload storage"}
+	}
+	info, statErr := os.Stat(absolutePath)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return "", "", "", ErrNotFound{Resource: "source file"}
+		}
+		return "", "", "", statErr
+	}
+	if info.IsDir() {
+		return "", "", "", ErrInvalidArgument{Message: "source file must be a file"}
+	}
+
+	filename := sanitizeFilename(metadataNestedString(version.Metadata, "upload", "original_filename"))
+	if filename == "" {
+		filename = sanitizeFilename(metadataNestedString(version.Metadata, "upload", "stored_filename"))
+	}
+	if filename == "" {
+		filename = filepath.Base(absolutePath)
+	}
+	contentType := strings.TrimSpace(metadataNestedString(version.Metadata, "upload", "content_type"))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return absolutePath, filename, contentType, nil
+}
+
 func (s *DatasetService) GetPreparePreview(
 	projectID, datasetID, datasetVersionID string,
 	input domain.DatasetPreparePreviewQuery,
@@ -2567,6 +2629,36 @@ func (s *DatasetService) removeDatasetArtifacts(projectID, datasetID string) err
 	return nil
 }
 
+func (s *DatasetService) removeDatasetVersionArtifacts(projectID, datasetID, datasetVersionID string) error {
+	roots := []string{s.uploadRoot, s.artifactRoot}
+	for _, root := range roots {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		target := filepath.Join(root, "projects", projectID, "datasets", datasetID, "versions", datasetVersionID)
+		if err := os.RemoveAll(target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *DatasetService) isDatasetUploadSourcePath(projectID, datasetID, datasetVersionID, candidate string) bool {
+	root := strings.TrimSpace(s.uploadRoot)
+	if root == "" {
+		return false
+	}
+	sourceRoot, err := filepath.Abs(filepath.Join(root, "projects", projectID, "datasets", datasetID, "versions", datasetVersionID, "source"))
+	if err != nil {
+		return false
+	}
+	relative, err := filepath.Rel(sourceRoot, candidate)
+	if err != nil {
+		return false
+	}
+	return relative == "." || (relative != "" && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
+}
+
 func normalizeDatasetDataType(value *string, fallback string) string {
 	dataType := strings.TrimSpace(fallback)
 	if value != nil && strings.TrimSpace(*value) != "" {
@@ -3842,6 +3934,21 @@ func mergeStringAny(base, overlay map[string]any) map[string]any {
 		merged[key] = value
 	}
 	return merged
+}
+
+func metadataNestedString(metadata map[string]any, key, field string) string {
+	if metadata == nil {
+		return ""
+	}
+	nested, ok := metadata[key].(map[string]any)
+	if !ok {
+		return ""
+	}
+	value, ok := nested[field]
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
 }
 
 func ensureParentDir(path string) error {
