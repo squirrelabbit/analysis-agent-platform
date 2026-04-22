@@ -229,12 +229,9 @@ func (s *DatasetService) BuildSentimentSample(projectID, datasetID, datasetVersi
 		return domain.DatasetSentimentSampleResponse{}, ErrInvalidArgument{Message: "text_columns is required for sentiment sample"}
 	}
 
-	maxRows, err := normalizeOptionalPositiveInt(input.MaxRows, "max_rows")
+	maxRows, err := normalizeDatasetBuildSampleRows(input.MaxRows, "max_rows")
 	if err != nil {
 		return domain.DatasetSentimentSampleResponse{}, err
-	}
-	if maxRows == 0 {
-		maxRows = 10
 	}
 	batchSize, err := normalizeOptionalPositiveInt(input.BatchSize, "batch_size")
 	if err != nil {
@@ -336,6 +333,7 @@ func (s *DatasetService) BuildSentimentSample(projectID, datasetID, datasetVersi
 		SentimentFormat:  sentimentFormat,
 		SampleLimit:      maxRows,
 		Summary:          summary,
+		Columns:          sentimentSampleColumns(),
 		Samples:          samples,
 	}, nil
 }

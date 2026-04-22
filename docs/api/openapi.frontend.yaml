@@ -478,7 +478,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/DatasetPrepareRequest"
+              $ref: "#/components/schemas/DatasetPrepareSampleRequest"
       responses:
         "200":
           description: Prepare sample result
@@ -1281,6 +1281,32 @@ components:
           type:
             - boolean
             - "null"
+    DatasetPrepareSampleRequest:
+      type: object
+      properties:
+        text_columns:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: prepare sample 대상 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
+        model:
+          type:
+            - string
+            - "null"
+        max_rows:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          maximum: 20
+          description: 전처리 샘플로 처리할 최대 row 수. 기본값은 10, 최대값은 20이다.
+        batch_size:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: 동기 LLM 전처리 호출당 묶을 row 수. Anthropic Message Batches API가 아니라 내부 batch prompt 크기다.
     DatasetCleanRequest:
       type: object
       properties:
@@ -1356,7 +1382,8 @@ components:
             - integer
             - "null"
           minimum: 1
-          description: 감성 분석 샘플로 처리할 최대 row 수. 기본값은 10이다.
+          maximum: 20
+          description: 감성 분석 샘플로 처리할 최대 row 수. 기본값은 10, 최대값은 20이다.
         batch_size:
           type:
             - integer
@@ -1397,11 +1424,15 @@ components:
         summary:
           type: object
           additionalProperties: true
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetTableColumn"
         samples:
           type: array
           items:
             $ref: "#/components/schemas/DatasetSentimentSample"
-      required: [project_id, dataset_id, dataset_version_id, sentiment_ref, sentiment_format, sample_limit, samples]
+      required: [project_id, dataset_id, dataset_version_id, sentiment_ref, sentiment_format, sample_limit, columns, samples]
     DatasetPrepareSample:
       type: object
       properties:

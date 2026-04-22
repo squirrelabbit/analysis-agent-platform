@@ -390,6 +390,49 @@ func TestBuildPrepareSampleReturnsTableColumns(t *testing.T) {
 	}
 }
 
+func TestBuildPrepareSampleRejectsTooManyRows(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-prepare-sample-limit", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-prepare-sample-limit",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-prepare-sample-limit",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata:         map[string]any{"text_columns": []string{"text"}},
+		PrepareStatus:    "not_requested",
+		SentimentStatus:  "not_requested",
+		EmbeddingStatus:  "not_requested",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	_, err := service.BuildPrepareSample(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{
+		MaxRows: datasetIntPtr(maxDatasetBuildSampleRows + 1),
+	})
+	var invalid ErrInvalidArgument
+	if !errors.As(err, &invalid) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
+	}
+}
+
 func TestBuildPrepareUsesProfileDefaults(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())

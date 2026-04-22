@@ -334,6 +334,9 @@ func TestGetSentimentPreviewBuildsSummary(t *testing.T) {
 	if len(response.Samples) != 2 {
 		t.Fatalf("unexpected samples: %+v", response.Samples)
 	}
+	if len(response.Columns) != 5 || response.Columns[2].Key != "sentiment_label" || response.Columns[3].Key != "sentiment_confidence" {
+		t.Fatalf("unexpected sentiment preview columns: %+v", response.Columns)
+	}
 	if response.Samples[0].SentimentLabel != "negative" {
 		t.Fatalf("unexpected first sample: %+v", response.Samples[0])
 	}

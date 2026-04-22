@@ -726,6 +726,20 @@ func normalizeOptionalPositiveInt(value *int, fieldName string) (int, error) {
 	return normalized, nil
 }
 
+func normalizeDatasetBuildSampleRows(value *int, fieldName string) (int, error) {
+	normalized, err := normalizeOptionalPositiveInt(value, fieldName)
+	if err != nil {
+		return 0, err
+	}
+	if normalized == 0 {
+		return defaultDatasetBuildSampleRows, nil
+	}
+	if normalized > maxDatasetBuildSampleRows {
+		return 0, ErrInvalidArgument{Message: fmt.Sprintf("%s must be less than or equal to %d", fieldName, maxDatasetBuildSampleRows)}
+	}
+	return normalized, nil
+}
+
 func inferArtifactFormat(path string, fallback string) string {
 	normalized := strings.ToLower(strings.TrimSpace(path))
 	switch {

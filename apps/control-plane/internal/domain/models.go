@@ -404,6 +404,7 @@ type DatasetSentimentPreviewResponse struct {
 	RowIDColumn               string                   `json:"row_id_column"`
 	Summary                   *DatasetSentimentSummary `json:"summary,omitempty"`
 	SampleLimit               int                      `json:"sample_limit"`
+	Columns                   []DatasetTableColumn     `json:"columns"`
 	Samples                   []DatasetSentimentSample `json:"samples"`
 }
 
@@ -489,6 +490,7 @@ type DatasetSentimentSampleResponse struct {
 	SentimentFormat  string                   `json:"sentiment_format"`
 	SampleLimit      int                      `json:"sample_limit"`
 	Summary          *DatasetSentimentSummary `json:"summary,omitempty"`
+	Columns          []DatasetTableColumn     `json:"columns"`
 	Samples          []DatasetSentimentSample `json:"samples"`
 }
 

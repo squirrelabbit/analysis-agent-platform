@@ -144,6 +144,16 @@ func prepareSampleColumns() []domain.DatasetTableColumn {
 	}
 }
 
+func sentimentSampleColumns() []domain.DatasetTableColumn {
+	return []domain.DatasetTableColumn{
+		{Key: "source_row_index", Label: "행 번호", Type: "number"},
+		{Key: "row_id", Label: "Row ID", Type: "string"},
+		{Key: "sentiment_label", Label: "감성", Type: "string"},
+		{Key: "sentiment_confidence", Label: "신뢰도", Type: "number"},
+		{Key: "sentiment_reason", Label: "판단 사유", Type: "string"},
+	}
+}
+
 func (s *DatasetService) ResolveCleanDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
@@ -275,6 +285,7 @@ func (s *DatasetService) GetSentimentPreview(
 		RowIDColumn:               metadataString(version.Metadata, "row_id_column", "row_id"),
 		Summary:                   cloneSentimentSummary(buildSentimentSummary(version.Metadata)),
 		SampleLimit:               limit,
+		Columns:                   sentimentSampleColumns(),
 		Samples:                   samples,
 	}
 

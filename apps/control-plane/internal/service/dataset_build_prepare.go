@@ -267,12 +267,9 @@ func (s *DatasetService) BuildPrepareSample(projectID, datasetID, datasetVersion
 		return domain.DatasetPrepareSampleResponse{}, ErrInvalidArgument{Message: "text_columns is required for dataset prepare sample"}
 	}
 
-	maxRows, err := normalizeOptionalPositiveInt(input.MaxRows, "max_rows")
+	maxRows, err := normalizeDatasetBuildSampleRows(input.MaxRows, "max_rows")
 	if err != nil {
 		return domain.DatasetPrepareSampleResponse{}, err
-	}
-	if maxRows == 0 {
-		maxRows = 10
 	}
 	batchSize, err := normalizeOptionalPositiveInt(input.BatchSize, "batch_size")
 	if err != nil {

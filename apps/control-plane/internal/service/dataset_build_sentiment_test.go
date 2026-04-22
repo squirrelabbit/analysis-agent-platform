@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -377,6 +378,9 @@ func TestBuildSentimentSampleUsesMaxRowsWithoutSavingVersionState(t *testing.T) 
 	if len(response.Samples) != 2 {
 		t.Fatalf("unexpected sample count: %d", len(response.Samples))
 	}
+	if len(response.Columns) != 5 || response.Columns[2].Key != "sentiment_label" || response.Columns[3].Type != "number" {
+		t.Fatalf("unexpected sentiment sample columns: %+v", response.Columns)
+	}
 	if response.Samples[0].SentimentLabel != "negative" {
 		t.Fatalf("unexpected first sample label: %s", response.Samples[0].SentimentLabel)
 	}
@@ -387,6 +391,53 @@ func TestBuildSentimentSampleUsesMaxRowsWithoutSavingVersionState(t *testing.T) 
 	}
 	if stored.SentimentStatus != "not_requested" {
 		t.Fatalf("sentiment sample must not save version status, got: %s", stored.SentimentStatus)
+	}
+}
+
+func TestBuildSentimentSampleRejectsTooManyRows(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-sentiment-sample-limit", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-sentiment-sample-limit",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-sentiment-sample-limit",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"prepared_text_column": "normalized_text",
+		},
+		PrepareStatus:   "ready",
+		PrepareURI:      datasetStringPtr("/tmp/issues.prepared.parquet"),
+		SentimentStatus: "not_requested",
+		EmbeddingStatus: "not_requested",
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	_, err := service.BuildSentimentSample(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetSentimentSampleRequest{
+		TextColumns: []string{"normalized_text"},
+		MaxRows:     datasetIntPtr(maxDatasetBuildSampleRows + 1),
+	})
+	var invalid ErrInvalidArgument
+	if !errors.As(err, &invalid) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
 	}
 }
 

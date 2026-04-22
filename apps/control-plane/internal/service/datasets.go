@@ -21,6 +21,8 @@ const (
 	maxPreparePreviewLimit                 = 20
 	defaultSentimentPreviewLimit           = 10
 	maxSentimentPreviewLimit               = 20
+	defaultDatasetBuildSampleRows          = 10
+	maxDatasetBuildSampleRows              = 20
 )
 
 const (
