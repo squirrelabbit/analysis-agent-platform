@@ -205,6 +205,10 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
+	enrichDatasetVersionView(&version)
+	if err := s.attachDatasetVersionArtifacts(&version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
 	return version, nil
 }
 

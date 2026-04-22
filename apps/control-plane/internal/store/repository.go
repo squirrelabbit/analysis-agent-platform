@@ -36,6 +36,7 @@ type Repository interface {
 	GetDatasetVersion(projectID, datasetVersionID string) (domain.DatasetVersion, error)
 	ListDatasetVersions(projectID, datasetID string) ([]domain.DatasetVersion, error)
 	DeleteDatasetVersion(projectID, datasetID, datasetVersionID string) error
+	ListDatasetVersionArtifacts(projectID, datasetVersionID string) ([]domain.DatasetVersionArtifact, error)
 	SaveDatasetBuildJob(job domain.DatasetBuildJob) error
 	GetDatasetBuildJob(projectID, jobID string) (domain.DatasetBuildJob, error)
 	ListDatasetBuildJobs(projectID, datasetVersionID string) ([]domain.DatasetBuildJob, error)

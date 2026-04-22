@@ -119,6 +119,15 @@ func writeClusterMembershipParquet(t *testing.T, path string, rows []map[string]
 	}
 }
 
+func datasetVersionArtifactByType(items []domain.DatasetVersionArtifact, artifactType string) (domain.DatasetVersionArtifact, bool) {
+	for _, item := range items {
+		if item.ArtifactType == artifactType {
+			return item, true
+		}
+	}
+	return domain.DatasetVersionArtifact{}, false
+}
+
 func writePreparedPreviewParquet(t *testing.T, path string, rows []map[string]any) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "prepare-preview.duckdb")

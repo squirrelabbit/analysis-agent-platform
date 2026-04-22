@@ -239,6 +239,9 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	}
 	result := s.maybeRunEagerSentiment(projectID, datasetID, version)
 	enrichDatasetVersionView(&result)
+	if err := s.attachDatasetVersionArtifacts(&result); err != nil {
+		return domain.DatasetVersion{}, err
+	}
 	return result, nil
 }
 

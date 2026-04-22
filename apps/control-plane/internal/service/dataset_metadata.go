@@ -311,6 +311,18 @@ func enrichDatasetVersionView(version *domain.DatasetVersion) {
 	version.PrepareSummary = buildPrepareSummary(version.Metadata)
 }
 
+func (s *DatasetService) attachDatasetVersionArtifacts(version *domain.DatasetVersion) error {
+	if version == nil {
+		return nil
+	}
+	artifacts, err := s.store.ListDatasetVersionArtifacts(version.ProjectID, version.DatasetVersionID)
+	if err != nil {
+		return err
+	}
+	version.Artifacts = artifacts
+	return nil
+}
+
 func buildCleanSummary(metadata map[string]any) *domain.DatasetCleanSummary {
 	if len(metadata) == 0 {
 		return nil

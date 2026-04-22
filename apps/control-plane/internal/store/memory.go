@@ -17,6 +17,7 @@ type MemoryStore struct {
 	scenarios      map[string]domain.Scenario
 	datasets       map[string]domain.Dataset
 	versions       map[string]domain.DatasetVersion
+	artifacts      map[string]domain.DatasetVersionArtifact
 	buildJobs      map[string]domain.DatasetBuildJob
 	requests       map[string]domain.AnalysisRequest
 	plans          map[string]domain.PlanRecord
@@ -33,6 +34,7 @@ func NewMemoryStore() *MemoryStore {
 		scenarios:      make(map[string]domain.Scenario),
 		datasets:       make(map[string]domain.Dataset),
 		versions:       make(map[string]domain.DatasetVersion),
+		artifacts:      make(map[string]domain.DatasetVersionArtifact),
 		buildJobs:      make(map[string]domain.DatasetBuildJob),
 		requests:       make(map[string]domain.AnalysisRequest),
 		plans:          make(map[string]domain.PlanRecord),
@@ -108,6 +110,11 @@ func (s *MemoryStore) DeleteProject(projectID string) error {
 	for key, version := range s.versions {
 		if version.ProjectID == projectID {
 			delete(s.versions, key)
+		}
+	}
+	for key, artifact := range s.artifacts {
+		if artifact.ProjectID == projectID {
+			delete(s.artifacts, key)
 		}
 	}
 	for key, job := range s.buildJobs {
@@ -351,6 +358,11 @@ func (s *MemoryStore) DeleteDataset(projectID, datasetID string) error {
 			delete(s.versions, key)
 		}
 	}
+	for key, artifact := range s.artifacts {
+		if artifact.ProjectID == projectID && artifact.DatasetID == datasetID {
+			delete(s.artifacts, key)
+		}
+	}
 	for key, job := range s.buildJobs {
 		if job.ProjectID == projectID && job.DatasetID == datasetID {
 			delete(s.buildJobs, key)
@@ -364,6 +376,7 @@ func (s *MemoryStore) SaveDatasetVersion(version domain.DatasetVersion) error {
 	defer s.mu.Unlock()
 	version = normalizeDatasetVersionCleanFields(version)
 	s.versions[version.DatasetVersionID] = cloneDatasetVersion(version)
+	s.syncDatasetVersionArtifactsLocked(version)
 	return nil
 }
 
@@ -374,7 +387,9 @@ func (s *MemoryStore) GetDatasetVersion(projectID, datasetVersionID string) (dom
 	if !ok || version.ProjectID != projectID {
 		return domain.DatasetVersion{}, ErrNotFound
 	}
-	return cloneDatasetVersion(version), nil
+	cloned := cloneDatasetVersion(version)
+	cloned.Artifacts = s.datasetVersionArtifactsLocked(projectID, datasetVersionID)
+	return cloned, nil
 }
 
 func (s *MemoryStore) ListDatasetVersions(projectID, datasetID string) ([]domain.DatasetVersion, error) {
@@ -388,7 +403,9 @@ func (s *MemoryStore) ListDatasetVersions(projectID, datasetID string) ([]domain
 		if datasetID != "" && version.DatasetID != datasetID {
 			continue
 		}
-		items = append(items, cloneDatasetVersion(version))
+		cloned := cloneDatasetVersion(version)
+		cloned.Artifacts = s.datasetVersionArtifactsLocked(projectID, version.DatasetVersionID)
+		items = append(items, cloned)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
@@ -409,6 +426,11 @@ func (s *MemoryStore) DeleteDatasetVersion(projectID, datasetID, datasetVersionI
 	}
 
 	delete(s.versions, datasetVersionID)
+	for key, artifact := range s.artifacts {
+		if artifact.ProjectID == projectID && artifact.DatasetID == datasetID && artifact.DatasetVersionID == datasetVersionID {
+			delete(s.artifacts, key)
+		}
+	}
 	for key, job := range s.buildJobs {
 		if job.ProjectID == projectID && job.DatasetID == datasetID && job.DatasetVersionID == datasetVersionID {
 			delete(s.buildJobs, key)
@@ -423,11 +445,53 @@ func (s *MemoryStore) DeleteDatasetVersion(projectID, datasetID, datasetVersionI
 	return nil
 }
 
+func (s *MemoryStore) ListDatasetVersionArtifacts(projectID, datasetVersionID string) ([]domain.DatasetVersionArtifact, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.datasetVersionArtifactsLocked(projectID, datasetVersionID), nil
+}
+
+func (s *MemoryStore) syncDatasetVersionArtifactsLocked(version domain.DatasetVersion) {
+	now := time.Now().UTC()
+	existingCreatedAt := make(map[string]time.Time)
+	for key, artifact := range s.artifacts {
+		if artifact.DatasetVersionID != version.DatasetVersionID {
+			continue
+		}
+		existingCreatedAt[artifact.ArtifactType] = artifact.CreatedAt
+		delete(s.artifacts, key)
+	}
+	for _, artifact := range deriveDatasetVersionArtifacts(version, now) {
+		if createdAt, ok := existingCreatedAt[artifact.ArtifactType]; ok && !createdAt.IsZero() {
+			artifact.CreatedAt = createdAt
+		}
+		s.artifacts[artifact.ArtifactID] = cloneDatasetVersionArtifact(artifact)
+	}
+}
+
+func (s *MemoryStore) datasetVersionArtifactsLocked(projectID, datasetVersionID string) []domain.DatasetVersionArtifact {
+	items := make([]domain.DatasetVersionArtifact, 0)
+	for _, artifact := range s.artifacts {
+		if artifact.ProjectID != projectID || artifact.DatasetVersionID != datasetVersionID {
+			continue
+		}
+		items = append(items, cloneDatasetVersionArtifact(artifact))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if artifactStageOrder(items[i].Stage) == artifactStageOrder(items[j].Stage) {
+			return items[i].ArtifactType < items[j].ArtifactType
+		}
+		return artifactStageOrder(items[i].Stage) < artifactStageOrder(items[j].Stage)
+	})
+	return items
+}
+
 func cloneDatasetVersion(version domain.DatasetVersion) domain.DatasetVersion {
 	cloned := version
 	cloned.Metadata = cloneAnyMap(version.Metadata)
 	cloned.SourceSummary = nil
 	cloned.BuildJobs = nil
+	cloned.Artifacts = cloneDatasetVersionArtifacts(version.Artifacts)
 	if version.Profile != nil {
 		profile := *version.Profile
 		profile.RegexRuleNames = append([]string(nil), version.Profile.RegexRuleNames...)
@@ -460,6 +524,24 @@ func cloneDatasetVersion(version domain.DatasetVersion) domain.DatasetVersion {
 		}
 		cloned.CleanSummary = &summary
 	}
+	return cloned
+}
+
+func cloneDatasetVersionArtifacts(items []domain.DatasetVersionArtifact) []domain.DatasetVersionArtifact {
+	if len(items) == 0 {
+		return nil
+	}
+	cloned := make([]domain.DatasetVersionArtifact, 0, len(items))
+	for _, item := range items {
+		cloned = append(cloned, cloneDatasetVersionArtifact(item))
+	}
+	return cloned
+}
+
+func cloneDatasetVersionArtifact(artifact domain.DatasetVersionArtifact) domain.DatasetVersionArtifact {
+	cloned := artifact
+	cloned.Summary = cloneAnyMap(artifact.Summary)
+	cloned.Metadata = cloneAnyMap(artifact.Metadata)
 	return cloned
 }
 

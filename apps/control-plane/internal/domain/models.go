@@ -193,6 +193,7 @@ type DatasetVersion struct {
 	Metadata           map[string]any                 `json:"metadata"`
 	SourceSummary      *DatasetSourceSummary          `json:"source_summary,omitempty"`
 	BuildJobs          []DatasetVersionBuildJobStatus `json:"build_jobs,omitempty"`
+	Artifacts          []DatasetVersionArtifact       `json:"artifacts,omitempty"`
 	Profile            *DatasetProfile                `json:"profile,omitempty"`
 	CleanStatus        string                         `json:"clean_status"`
 	CleanURI           *string                        `json:"clean_uri,omitempty"`
@@ -218,6 +219,24 @@ type DatasetVersion struct {
 	IsActive           bool                           `json:"is_active"`
 	CreatedAt          time.Time                      `json:"created_at"`
 	ReadyAt            *time.Time                     `json:"ready_at,omitempty"`
+}
+
+type DatasetVersionArtifact struct {
+	ArtifactID       string         `json:"artifact_id"`
+	ProjectID        string         `json:"project_id"`
+	DatasetID        string         `json:"dataset_id"`
+	DatasetVersionID string         `json:"dataset_version_id"`
+	ArtifactType     string         `json:"artifact_type"`
+	Stage            string         `json:"stage"`
+	Status           string         `json:"status"`
+	URI              string         `json:"uri,omitempty"`
+	Format           string         `json:"format,omitempty"`
+	Model            string         `json:"model,omitempty"`
+	PromptVersion    string         `json:"prompt_version,omitempty"`
+	Summary          map[string]any `json:"summary,omitempty"`
+	Metadata         map[string]any `json:"metadata,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 type DatasetSourceColumnSummary struct {

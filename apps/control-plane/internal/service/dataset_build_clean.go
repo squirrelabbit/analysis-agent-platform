@@ -146,5 +146,8 @@ func (s *DatasetService) BuildClean(projectID, datasetID, datasetVersionID strin
 		return domain.DatasetVersion{}, err
 	}
 	enrichDatasetVersionView(&version)
+	if err := s.attachDatasetVersionArtifacts(&version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
 	return version, nil
 }

@@ -2427,6 +2427,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DatasetVersionBuildJobStatus"
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetVersionArtifact"
         profile:
           anyOf:
             - $ref: "#/components/schemas/DatasetProfile"
@@ -2532,6 +2536,44 @@ components:
         - embedding_status
         - is_active
         - created_at
+    DatasetVersionArtifact:
+      type: object
+      properties:
+        artifact_id:
+          type: string
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        artifact_type:
+          type: string
+          description: source, clean, prepare, sentiment, embedding, cluster_summary 등 산출물 유형
+        stage:
+          type: string
+          description: source, clean, prepare, sentiment, embedding, cluster 등 파이프라인 단계
+        status:
+          type: string
+        uri:
+          type: string
+        format:
+          type: string
+        model:
+          type: string
+        prompt_version:
+          type: string
+        summary:
+          $ref: "#/components/schemas/AnyMap"
+        metadata:
+          $ref: "#/components/schemas/AnyMap"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [artifact_id, project_id, dataset_id, dataset_version_id, artifact_type, stage, status, created_at, updated_at]
     DatasetVersionCreateRequest:
       type: object
       properties:

@@ -103,6 +103,13 @@ func TestGetDatasetVersionIncludesSourceSummary(t *testing.T) {
 	if response.BuildJobs[0].BuildType != "prepare" || response.BuildJobs[0].Status != "completed" {
 		t.Fatalf("unexpected build job status: %+v", response.BuildJobs[0])
 	}
+	sourceArtifact, ok := datasetVersionArtifactByType(response.Artifacts, "source")
+	if !ok {
+		t.Fatalf("expected source artifact: %+v", response.Artifacts)
+	}
+	if sourceArtifact.Stage != "source" || sourceArtifact.Status != "ready" || sourceArtifact.URI != sourcePath || sourceArtifact.Format != "csv" {
+		t.Fatalf("unexpected source artifact: %+v", sourceArtifact)
+	}
 }
 
 func TestGetPreparePreviewBuildsSummaryAndWarningPanel(t *testing.T) {

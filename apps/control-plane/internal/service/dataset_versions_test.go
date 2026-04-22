@@ -169,6 +169,87 @@ func TestListDatasetsAndVersions(t *testing.T) {
 	}
 }
 
+func TestGetDatasetVersionIncludesDerivedArtifacts(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-derived-artifacts", Name: "artifacts", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-derived-artifacts",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	prepareURI := "/tmp/prepared.parquet"
+	prepareModel := "claude-haiku-test"
+	preparePromptVersion := "prepare-v1"
+	preparedAt := time.Now().UTC()
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-derived-artifacts",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/source.csv",
+		DataType:         "unstructured",
+		RecordCount:      datasetIntPtr(10),
+		Metadata: map[string]any{
+			"prepared_ref":             prepareURI,
+			"prepared_format":          "parquet",
+			"prepare_summary":          map[string]any{"input_row_count": 10, "output_row_count": 8},
+			"prepare_usage":            map[string]any{"input_tokens": 120},
+			"prepared_text_column":     "normalized_text",
+			"text_columns":             []string{"제목", "본문"},
+			"prepare_progress_ref":     "/tmp/prepared.parquet.progress.json",
+			"storage_contract_version": "dataset-artifact-v1",
+		},
+		PrepareStatus:    "ready",
+		PrepareLLMMode:   "enabled",
+		PrepareModel:     &prepareModel,
+		PreparePromptVer: &preparePromptVersion,
+		PrepareURI:       &prepareURI,
+		PreparedAt:       &preparedAt,
+		SentimentStatus:  "not_requested",
+		EmbeddingStatus:  "not_requested",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	response, err := service.GetDatasetVersion(project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset version error: %v", err)
+	}
+	sourceArtifact, ok := datasetVersionArtifactByType(response.Artifacts, "source")
+	if !ok || sourceArtifact.URI != version.StorageURI || sourceArtifact.Status != "ready" {
+		t.Fatalf("unexpected source artifact: %+v", sourceArtifact)
+	}
+	prepareArtifact, ok := datasetVersionArtifactByType(response.Artifacts, "prepare")
+	if !ok {
+		t.Fatalf("expected prepare artifact: %+v", response.Artifacts)
+	}
+	if prepareArtifact.Stage != "prepare" || prepareArtifact.Status != "ready" || prepareArtifact.URI != prepareURI || prepareArtifact.Format != "parquet" {
+		t.Fatalf("unexpected prepare artifact: %+v", prepareArtifact)
+	}
+	if prepareArtifact.Model != prepareModel || prepareArtifact.PromptVersion != preparePromptVersion {
+		t.Fatalf("unexpected prepare model metadata: %+v", prepareArtifact)
+	}
+	if intValueOrZero(prepareArtifact.Summary["output_row_count"]) != 8 {
+		t.Fatalf("unexpected prepare summary: %+v", prepareArtifact.Summary)
+	}
+	progressArtifact, ok := datasetVersionArtifactByType(response.Artifacts, "prepare_progress")
+	if !ok || progressArtifact.Stage != "prepare" || progressArtifact.Format != "json" {
+		t.Fatalf("unexpected prepare progress artifact: %+v", progressArtifact)
+	}
+}
+
 func TestCreateDatasetVersionAutoActivatesLatestVersion(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())

@@ -201,5 +201,9 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
+	enrichDatasetVersionView(&version)
+	if err := s.attachDatasetVersionArtifacts(&version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
 	return version, nil
 }
