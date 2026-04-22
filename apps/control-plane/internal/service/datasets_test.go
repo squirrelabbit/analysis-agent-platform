@@ -373,6 +373,9 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	var requestedOutputPath string
 	var requestedLLMMode string
 	var requestedModel string
+	var requestedProgressPath string
+	var requestedMaxRows int
+	var requestedBatchSize int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -382,6 +385,9 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 		requestedOutputPath = payload["output_path"].(string)
 		requestedLLMMode = payload["llm_mode"].(string)
 		requestedModel = payload["model"].(string)
+		requestedProgressPath = payload["progress_path"].(string)
+		requestedMaxRows = intValue(payload["max_rows"])
+		requestedBatchSize = intValue(payload["prepare_batch_size"])
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"notes": []string{"prepare completed"},
 			"artifact": map[string]any{
@@ -391,6 +397,8 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 				"prepare_format":           "parquet",
 				"prepare_model":            "claude-haiku-4-5",
 				"prepare_prompt_version":   "dataset-prepare-anthropic-v1",
+				"progress_ref":             requestedProgressPath,
+				"max_rows":                 requestedMaxRows,
 				"prepared_text_column":     "normalized_text",
 				"row_id_column":            "row_id",
 				"storage_contract_version": "unstructured-storage-v1",
@@ -429,6 +437,8 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	version, err = service.BuildPrepare(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{
 		TextColumns: []string{"text"},
 		Model:       datasetStringPtr("claude-haiku-4-5"),
+		MaxRows:     datasetIntPtr(10),
+		BatchSize:   datasetIntPtr(4),
 	})
 	if err != nil {
 		t.Fatalf("unexpected build prepare error: %v", err)
@@ -443,8 +453,17 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	if requestedModel != "claude-haiku-4-5" {
 		t.Fatalf("unexpected prepare model: %s", requestedModel)
 	}
+	if requestedMaxRows != 10 {
+		t.Fatalf("unexpected prepare max rows: %d", requestedMaxRows)
+	}
+	if requestedBatchSize != 4 {
+		t.Fatalf("unexpected prepare batch size: %d", requestedBatchSize)
+	}
 	if !strings.HasPrefix(requestedOutputPath, artifactRoot) {
 		t.Fatalf("unexpected prepare output path: %s", requestedOutputPath)
+	}
+	if !strings.HasPrefix(requestedProgressPath, artifactRoot) {
+		t.Fatalf("unexpected prepare progress path: %s", requestedProgressPath)
 	}
 	if version.PrepareStatus != "ready" {
 		t.Fatalf("unexpected prepare status: %s", version.PrepareStatus)
@@ -466,6 +485,9 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	}
 	if got := metadataString(version.Metadata, "row_id_column", ""); got != "row_id" {
 		t.Fatalf("unexpected row id column: %s", got)
+	}
+	if got := metadataString(version.Metadata, "prepare_progress_ref", ""); got != requestedProgressPath {
+		t.Fatalf("unexpected prepare progress ref: %s", got)
 	}
 	if version.RecordCount == nil || *version.RecordCount != 7 {
 		t.Fatalf("unexpected record count: %+v", version.RecordCount)
@@ -1289,6 +1311,17 @@ func TestCreateDatasetVersionEnqueuesEagerPrepareJobWhenWorkerConfigured(t *test
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("unexpected decode error: %v", err)
+		}
+		progressPath := stringValue(payload["progress_path"])
+		if progressPath != "" {
+			progressPayload := `{"percent":50,"processed_rows":5,"total_rows":10,"elapsed_seconds":12.5,"eta_seconds":12.5,"message":"prepare processing rows","updated_at":"2026-04-22T01:00:00Z"}`
+			if err := os.WriteFile(progressPath, []byte(progressPayload), 0o644); err != nil {
+				t.Fatalf("unexpected write progress error: %v", err)
+			}
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"artifact": map[string]any{
 				"prepare_uri":          "/tmp/issues.prepared.parquet",
@@ -1341,6 +1374,9 @@ func TestCreateDatasetVersionEnqueuesEagerPrepareJobWhenWorkerConfigured(t *test
 	}
 	if job.Diagnostics.LLMModel == nil || *job.Diagnostics.LLMModel != "claude-3-5-haiku-latest" {
 		t.Fatalf("unexpected llm model: %+v", job.Diagnostics)
+	}
+	if job.Diagnostics.Progress == nil || job.Diagnostics.Progress.Percent != 50 {
+		t.Fatalf("unexpected progress diagnostics: %+v", job.Diagnostics)
 	}
 	version = waitForDatasetVersionPrepareReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
 	if callCount != 1 {

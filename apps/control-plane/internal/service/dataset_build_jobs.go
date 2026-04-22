@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -383,11 +384,14 @@ func enrichBuildJobDiagnosticsFromVersion(job *domain.DatasetBuildJob, version d
 	if prefix == "" || version.Metadata == nil {
 		return
 	}
-	if !metadataBool(version.Metadata, prefix+"_llm_fallback") {
-		return
-	}
 	if job.Diagnostics == nil {
 		job.Diagnostics = &domain.BuildJobDiagnostics{}
+	}
+	if progress := loadBuildJobProgress(version.Metadata, prefix); progress != nil {
+		job.Diagnostics.Progress = progress
+	}
+	if !metadataBool(version.Metadata, prefix+"_llm_fallback") {
+		return
 	}
 	job.Diagnostics.LLMFallback = true
 	if count, ok := anyToInt(version.Metadata[prefix+"_llm_fallback_count"]); ok {
@@ -405,6 +409,43 @@ func enrichBuildJobDiagnosticsFromVersion(job *domain.DatasetBuildJob, version d
 	if warning := metadataString(version.Metadata, prefix+"_warning", ""); warning != "" {
 		job.Diagnostics.Warnings = append(job.Diagnostics.Warnings, warning)
 	}
+}
+
+type buildJobProgressFile struct {
+	Percent        float64  `json:"percent"`
+	ProcessedRows  int      `json:"processed_rows"`
+	TotalRows      int      `json:"total_rows"`
+	ElapsedSeconds float64  `json:"elapsed_seconds"`
+	ETASeconds     *float64 `json:"eta_seconds"`
+	Message        string   `json:"message"`
+	UpdatedAt      string   `json:"updated_at"`
+}
+
+func loadBuildJobProgress(metadata map[string]any, prefix string) *domain.BuildJobProgress {
+	progressRef := strings.TrimSpace(metadataString(metadata, prefix+"_progress_ref", ""))
+	if progressRef == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(progressRef)
+	if err != nil {
+		return nil
+	}
+	var decoded buildJobProgressFile
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil
+	}
+	progress := &domain.BuildJobProgress{
+		Percent:        decoded.Percent,
+		ProcessedRows:  decoded.ProcessedRows,
+		TotalRows:      decoded.TotalRows,
+		ElapsedSeconds: decoded.ElapsedSeconds,
+		ETASeconds:     decoded.ETASeconds,
+		Message:        strings.TrimSpace(decoded.Message),
+	}
+	if parsedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(decoded.UpdatedAt)); err == nil {
+		progress.UpdatedAt = &parsedAt
+	}
+	return progress
 }
 
 func buildJobMetadataPrefix(buildType string) string {

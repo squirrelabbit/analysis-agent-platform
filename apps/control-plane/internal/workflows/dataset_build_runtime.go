@@ -372,6 +372,8 @@ func datasetBuildExecuteActivityOptions(buildType string) workflow.ActivityOptio
 	timeout := 20 * time.Minute
 	maxAttempts := int32(4)
 	switch buildType {
+	case "prepare":
+		timeout = 75 * time.Minute
 	case "sentiment":
 		timeout = 45 * time.Minute
 	case "embedding":
@@ -393,6 +395,7 @@ func datasetBuildExecuteActivityOptions(buildType string) workflow.ActivityOptio
 				"not_found",
 				"invalid_request",
 				"worker_request",
+				"worker_timeout",
 				"configuration_error",
 				"unsupported_build_type",
 			},
@@ -416,6 +419,9 @@ func classifyDatasetBuildError(err error) error {
 	}
 	if strings.Contains(message, "worker task") && strings.Contains(message, "returned 4") {
 		return temporal.NewNonRetryableApplicationError(err.Error(), "worker_request", err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(message, "context deadline exceeded") {
+		return temporal.NewNonRetryableApplicationError(err.Error(), "worker_timeout", err)
 	}
 	if strings.TrimSpace(err.Error()) == "python ai worker url is required" {
 		return temporal.NewNonRetryableApplicationError(err.Error(), "configuration_error", err)

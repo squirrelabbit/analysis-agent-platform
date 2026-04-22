@@ -397,6 +397,8 @@ type DatasetPrepareRequest struct {
 	TextColumns []string `json:"text_columns,omitempty"`
 	OutputPath  *string  `json:"output_path,omitempty"`
 	Model       *string  `json:"model,omitempty"`
+	MaxRows     *int     `json:"max_rows,omitempty"`
+	BatchSize   *int     `json:"batch_size,omitempty"`
 	Force       *bool    `json:"force,omitempty"`
 }
 
@@ -535,18 +537,29 @@ type RuleCatalogResponse struct {
 }
 
 type BuildJobDiagnostics struct {
-	RetryCount            int      `json:"retry_count"`
-	LastErrorType         *string  `json:"last_error_type,omitempty"`
-	LastErrorMessage      *string  `json:"last_error_message,omitempty"`
-	WorkflowID            *string  `json:"workflow_id,omitempty"`
-	WorkflowRunID         *string  `json:"workflow_run_id,omitempty"`
-	ResumedExecutionCount int      `json:"resumed_execution_count"`
-	LLMFallback           bool     `json:"llm_fallback,omitempty"`
-	LLMFallbackReason     *string  `json:"llm_fallback_reason,omitempty"`
-	LLMFallbackCount      int      `json:"llm_fallback_count,omitempty"`
-	LLMProvider           *string  `json:"llm_provider,omitempty"`
-	LLMModel              *string  `json:"llm_model,omitempty"`
-	Warnings              []string `json:"warnings,omitempty"`
+	RetryCount            int               `json:"retry_count"`
+	LastErrorType         *string           `json:"last_error_type,omitempty"`
+	LastErrorMessage      *string           `json:"last_error_message,omitempty"`
+	WorkflowID            *string           `json:"workflow_id,omitempty"`
+	WorkflowRunID         *string           `json:"workflow_run_id,omitempty"`
+	ResumedExecutionCount int               `json:"resumed_execution_count"`
+	Progress              *BuildJobProgress `json:"progress,omitempty"`
+	LLMFallback           bool              `json:"llm_fallback,omitempty"`
+	LLMFallbackReason     *string           `json:"llm_fallback_reason,omitempty"`
+	LLMFallbackCount      int               `json:"llm_fallback_count,omitempty"`
+	LLMProvider           *string           `json:"llm_provider,omitempty"`
+	LLMModel              *string           `json:"llm_model,omitempty"`
+	Warnings              []string          `json:"warnings,omitempty"`
+}
+
+type BuildJobProgress struct {
+	Percent        float64    `json:"percent"`
+	ProcessedRows  int        `json:"processed_rows"`
+	TotalRows      int        `json:"total_rows"`
+	ElapsedSeconds float64    `json:"elapsed_seconds,omitempty"`
+	ETASeconds     *float64   `json:"eta_seconds,omitempty"`
+	Message        string     `json:"message,omitempty"`
+	UpdatedAt      *time.Time `json:"updated_at,omitempty"`
 }
 
 type EmbeddingIndexChunk struct {

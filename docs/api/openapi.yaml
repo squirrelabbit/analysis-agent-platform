@@ -2771,6 +2771,18 @@ components:
           type:
             - string
             - "null"
+        max_rows:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: "전처리 비용 확인용으로 처리할 최대 row 수. 예: 10이면 앞 10개 row만 전처리한다."
+        batch_size:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: 동기 LLM 전처리 호출당 묶을 row 수. Anthropic Message Batches API가 아니라 내부 batch prompt 크기다.
         force:
           type:
             - boolean
@@ -2946,6 +2958,10 @@ components:
             - "null"
         resumed_execution_count:
           type: integer
+        progress:
+          anyOf:
+            - $ref: "#/components/schemas/BuildJobProgress"
+            - type: "null"
         llm_fallback:
           type: boolean
           description: LLM 호출 실패 후 deterministic fallback이 사용되었는지 여부
@@ -2972,6 +2988,32 @@ components:
           items:
             type: string
       required: [retry_count, resumed_execution_count]
+    BuildJobProgress:
+      type: object
+      properties:
+        percent:
+          type: number
+          format: float
+        processed_rows:
+          type: integer
+        total_rows:
+          type: integer
+        elapsed_seconds:
+          type: number
+          format: float
+        eta_seconds:
+          type:
+            - number
+            - "null"
+          format: float
+        message:
+          type: string
+        updated_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required: [percent, processed_rows, total_rows]
     SkillPlanStep:
       type: object
       properties:

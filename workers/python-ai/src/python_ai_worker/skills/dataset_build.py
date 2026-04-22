@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +84,39 @@ def _sentiment_llm_fallback_summary(rows: list[dict[str, Any]]) -> tuple[int, st
     unique_reasons = _unique_strings(reasons)
     first_reason = unique_reasons[0] if unique_reasons else ""
     return count, first_reason, unique_reasons
+
+
+def _write_progress(
+    progress_path: str,
+    *,
+    processed_rows: int,
+    total_rows: int,
+    started_at: float,
+    message: str,
+) -> None:
+    if not progress_path:
+        return
+    total = max(0, int(total_rows))
+    processed = min(max(0, int(processed_rows)), total) if total > 0 else max(0, int(processed_rows))
+    elapsed = max(0.0, time.monotonic() - started_at)
+    percent = 100.0 if total == 0 else round((processed / total) * 100.0, 2)
+    eta_seconds = None
+    if processed > 0 and total > processed and elapsed > 0:
+        rows_per_second = processed / elapsed
+        if rows_per_second > 0:
+            eta_seconds = round((total - processed) / rows_per_second, 2)
+    payload = {
+        "percent": percent,
+        "processed_rows": processed,
+        "total_rows": total,
+        "elapsed_seconds": round(elapsed, 2),
+        "eta_seconds": eta_seconds,
+        "message": message,
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+    path = Path(progress_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
 def _prepare_output_format(path: Path) -> str:
@@ -296,9 +331,22 @@ def _split_text_chunks(
 def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_prepare_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
+    source_row_count = len(rows)
+    if normalized["max_rows"] > 0:
+        rows = rows[: normalized["max_rows"]]
     output_path = Path(normalized["output_path"])
     output_format = _prepare_output_format(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path = normalized["progress_path"]
+    started_at = time.monotonic()
+    processed_source_rows = 0
+    _write_progress(
+        progress_path,
+        processed_rows=0,
+        total_rows=len(rows),
+        started_at=started_at,
+        message="prepare queued",
+    )
 
     client = rt._anthropic_prepare_client(normalized["model"], llm_mode=normalized["llm_mode"])
     kept_count = 0
@@ -313,9 +361,17 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     handle = output_path.open("w", encoding="utf-8") if output_format == "jsonl" else None
     try:
         for source_index, row in enumerate(rows):
+            processed_source_rows = source_index + 1
             raw_text = _joined_text(row, normalized["text_columns"], normalized["text_joiner"])
             if not raw_text:
                 skipped_rows += 1
+                _write_progress(
+                    progress_path,
+                    processed_rows=processed_source_rows,
+                    total_rows=len(rows),
+                    started_at=started_at,
+                    message="prepare scanning rows",
+                )
                 continue
 
             regex_cleaned_text, applied_regex_rules = rt._apply_prepare_regex_rules(raw_text, normalized["regex_rule_names"])
@@ -343,6 +399,13 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                     regex_rule_hits=regex_rule_hits,
                 )
                 prepared_batch = []
+                _write_progress(
+                    progress_path,
+                    processed_rows=processed_source_rows,
+                    total_rows=len(rows),
+                    started_at=started_at,
+                    message="prepare processing rows",
+                )
 
         if prepared_batch:
             batch_results, batch_usage = rt._prepare_rows(
@@ -366,12 +429,35 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 dropped_count=dropped_count,
                 regex_rule_hits=regex_rule_hits,
             )
+            _write_progress(
+                progress_path,
+                processed_rows=len(rows),
+                total_rows=len(rows),
+                started_at=started_at,
+                message="prepare finalizing",
+            )
+    except Exception:
+        _write_progress(
+            progress_path,
+            processed_rows=processed_source_rows,
+            total_rows=len(rows),
+            started_at=started_at,
+            message="prepare failed",
+        )
+        raise
     finally:
         if handle is not None:
             handle.close()
 
     if output_format == "parquet":
         rt._write_parquet_rows(output_path, prepared_rows, schema=_prepare_output_schema())
+    _write_progress(
+        progress_path,
+        processed_rows=len(rows),
+        total_rows=len(rows),
+        started_at=started_at,
+        message="prepare completed",
+    )
 
     notes = [
         "dataset prepare artifact generated by python-ai worker",
@@ -429,6 +515,8 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
             "prepare_prompt_version": prompt_version,
             "prepare_strategy": prepare_strategy,
             "prepare_batch_size": normalized["prepare_batch_size"],
+            "max_rows": normalized["max_rows"],
+            "progress_ref": progress_path,
             "prepare_regex_rule_names": list(normalized["regex_rule_names"]),
             "llm_provider": "anthropic" if attempted_llm_model else "",
             "llm_model": attempted_llm_model,
@@ -444,6 +532,8 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
             "storage_contract_version": "unstructured-storage-v1",
             "summary": {
                 "input_row_count": len(rows),
+                "source_row_count": source_row_count,
+                "max_rows": normalized["max_rows"],
                 "output_row_count": kept_count + review_count,
                 "kept_count": kept_count,
                 "review_count": review_count,

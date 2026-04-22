@@ -278,6 +278,8 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
     model = str(payload.get("model") or "").strip()
     llm_mode = _normalize_llm_mode(payload.get("llm_mode"))
     prepare_batch_size = max(1, int(payload.get("prepare_batch_size") or DEFAULT_PREPARE_BATCH_SIZE))
+    max_rows = max(0, int(payload.get("max_rows") or 0))
+    progress_path = str(payload.get("progress_path") or "").strip()
     regex_rule_names = _normalize_prepare_regex_rule_names(payload.get("regex_rule_names"))
     prepare_prompt_version = str(payload.get("prepare_prompt_version") or "").strip()
     prepare_prompt_template = str(payload.get("prepare_prompt_template") or "").strip()
@@ -292,6 +294,8 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "model": model,
         "llm_mode": llm_mode,
         "prepare_batch_size": prepare_batch_size,
+        "max_rows": max_rows,
+        "progress_path": progress_path,
         "regex_rule_names": regex_rule_names,
         "prepare_prompt_version": prepare_prompt_version,
         "prepare_prompt_template": prepare_prompt_template,

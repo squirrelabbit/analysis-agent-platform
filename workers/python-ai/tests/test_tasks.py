@@ -1136,6 +1136,35 @@ class TaskTests(unittest.TestCase):
         prepared_rows = self._read_parquet_rows(prepared_path)
         self.assertIn("llm_batch_fallback:model unavailable", prepared_rows[0]["quality_flags"])
 
+    def test_dataset_prepare_respects_max_rows_and_writes_progress(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_raw.csv"
+        prepared_path = temp_dir / "issues_raw.prepared.parquet"
+        progress_path = temp_dir / "issues_raw.progress.json"
+        self._write_csv_rows(csv_path, ["첫 번째 본문", "두 번째 본문", "세 번째 본문"])
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+            result = run_dataset_prepare(
+                {
+                    "dataset_version_id": "version-limited",
+                    "dataset_name": str(csv_path),
+                    "text_column": "text",
+                    "output_path": str(prepared_path),
+                    "progress_path": str(progress_path),
+                    "max_rows": 1,
+                }
+            )
+
+        self.assertEqual(result["artifact"]["summary"]["source_row_count"], 3)
+        self.assertEqual(result["artifact"]["summary"]["input_row_count"], 1)
+        self.assertEqual(result["artifact"]["max_rows"], 1)
+        prepared_rows = self._read_parquet_rows(prepared_path)
+        self.assertEqual(len(prepared_rows), 1)
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        self.assertEqual(progress["percent"], 100.0)
+        self.assertEqual(progress["processed_rows"], 1)
+        self.assertEqual(progress["total_rows"], 1)
+
     def test_dataset_prepare_uses_prompt_version_override(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues_raw.csv"

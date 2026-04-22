@@ -35,7 +35,7 @@ const DefaultEmbeddingModel = "intfloat/multilingual-e5-small"
 const tokenProjectionVectorDim = 64
 
 const (
-	workerTaskTimeoutPrepare               = 10 * time.Minute
+	workerTaskTimeoutPrepare               = 60 * time.Minute
 	workerTaskTimeoutSentiment             = 30 * time.Minute
 	workerTaskTimeoutEmbedding             = 45 * time.Minute
 	defaultClusterMembersLimit             = 50
@@ -1923,6 +1923,15 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if input.OutputPath != nil && strings.TrimSpace(*input.OutputPath) != "" {
 		outputPath = strings.TrimSpace(*input.OutputPath)
 	}
+	maxRows, err := normalizeOptionalPositiveInt(input.MaxRows, "max_rows")
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	batchSize, err := normalizeOptionalPositiveInt(input.BatchSize, "batch_size")
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	progressPath := outputPath + ".progress.json"
 
 	version.PrepareStatus = "preparing"
 	if version.Metadata == nil {
@@ -1938,6 +1947,15 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	version.Metadata["text_joiner"] = textJoiner
 	version.Metadata["raw_text_column"] = textColumn
 	version.Metadata["raw_text_columns"] = append([]string(nil), textColumns...)
+	version.Metadata["prepare_progress_ref"] = progressPath
+	if maxRows > 0 {
+		version.Metadata["prepare_max_rows"] = maxRows
+	} else {
+		delete(version.Metadata, "prepare_max_rows")
+	}
+	if batchSize > 0 {
+		version.Metadata["prepare_batch_size"] = batchSize
+	}
 	if input.Model != nil && strings.TrimSpace(*input.Model) != "" {
 		model := strings.TrimSpace(*input.Model)
 		version.PrepareModel = &model
@@ -1969,7 +1987,14 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 		"text_columns":       append([]string(nil), textColumns...),
 		"text_joiner":        textJoiner,
 		"output_path":        outputPath,
+		"progress_path":      progressPath,
 		"llm_mode":           version.PrepareLLMMode,
+	}
+	if maxRows > 0 {
+		payload["max_rows"] = maxRows
+	}
+	if batchSize > 0 {
+		payload["prepare_batch_size"] = batchSize
 	}
 	if version.Profile != nil {
 		if len(version.Profile.RegexRuleNames) > 0 {
@@ -2032,8 +2057,14 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if rowIDColumn := artifactString(response.Artifact, "row_id_column"); rowIDColumn != "" {
 		prepareMetadata["row_id_column"] = rowIDColumn
 	}
+	if progressRef := artifactString(response.Artifact, "progress_ref"); progressRef != "" {
+		prepareMetadata["prepare_progress_ref"] = progressRef
+	}
 	if contractVersion := artifactString(response.Artifact, "storage_contract_version"); contractVersion != "" {
 		prepareMetadata["storage_contract_version"] = contractVersion
+	}
+	if artifactMaxRows, ok := artifactInt(response.Artifact, "max_rows"); ok && artifactMaxRows > 0 {
+		prepareMetadata["prepare_max_rows"] = artifactMaxRows
 	}
 	if usage := artifactMap(response.Artifact, "usage"); len(usage) > 0 {
 		prepareMetadata["prepare_usage"] = usage
@@ -3333,6 +3364,17 @@ func artifactInt(artifact map[string]any, key string) (int, bool) {
 		return 0, false
 	}
 	return anyToInt(value)
+}
+
+func normalizeOptionalPositiveInt(value *int, fieldName string) (int, error) {
+	if value == nil {
+		return 0, nil
+	}
+	normalized := *value
+	if normalized <= 0 {
+		return 0, ErrInvalidArgument{Message: fmt.Sprintf("%s must be a positive integer", fieldName)}
+	}
+	return normalized, nil
 }
 
 func inferArtifactFormat(path string, fallback string) string {
