@@ -130,19 +130,13 @@ func (s *PostgresStore) DeleteProject(projectID string) error {
 		}
 	}()
 
+	if err = deleteEmbeddingIndexChunksForProject(tx, projectID); err != nil {
+		return err
+	}
 	statements := []struct {
 		query string
 		args  []any
 	}{
-		{
-			query: `DELETE FROM embedding_index_chunks
-			        WHERE dataset_version_id IN (
-			            SELECT dataset_version_id
-			            FROM dataset_versions
-			            WHERE project_id = $1::uuid
-			        )`,
-			args: []any{projectID},
-		},
 		{query: `DELETE FROM dataset_build_jobs WHERE project_id = $1::uuid`, args: []any{projectID}},
 		{query: `DELETE FROM executions WHERE project_id = $1::uuid`, args: []any{projectID}},
 		{query: `DELETE FROM report_drafts WHERE project_id = $1::uuid`, args: []any{projectID}},
@@ -694,20 +688,9 @@ func (s *PostgresStore) DeleteDataset(projectID, datasetID string) error {
 		}
 	}()
 
-	result, err := tx.Exec(
-		`DELETE FROM embedding_index_chunks
-		  WHERE dataset_version_id IN (
-		      SELECT dataset_version_id
-		      FROM dataset_versions
-		      WHERE project_id = $1::uuid AND dataset_id = $2::uuid
-		  )`,
-		projectID,
-		datasetID,
-	)
-	if err != nil {
+	if err = deleteEmbeddingIndexChunksForDataset(tx, projectID, datasetID); err != nil {
 		return err
 	}
-	_ = result
 	if _, err = tx.Exec(
 		`DELETE FROM dataset_build_jobs
 		  WHERE project_id = $1::uuid AND dataset_id = $2::uuid`,
@@ -724,7 +707,7 @@ func (s *PostgresStore) DeleteDataset(projectID, datasetID string) error {
 	); err != nil {
 		return err
 	}
-	result, err = tx.Exec(
+	result, err := tx.Exec(
 		`DELETE FROM datasets
 		  WHERE project_id = $1::uuid AND dataset_id = $2::uuid`,
 		projectID,
@@ -1052,11 +1035,7 @@ func (s *PostgresStore) DeleteDatasetVersion(projectID, datasetID, datasetVersio
 		}
 	}()
 
-	if _, err = tx.Exec(
-		`DELETE FROM embedding_index_chunks
-		  WHERE dataset_version_id = $1`,
-		datasetVersionID,
-	); err != nil {
+	if err = deleteEmbeddingIndexChunksForVersion(tx, datasetVersionID); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(
@@ -1103,6 +1082,62 @@ func (s *PostgresStore) DeleteDatasetVersion(projectID, datasetID, datasetVersio
 		return ErrNotFound
 	}
 	return tx.Commit()
+}
+
+func deleteEmbeddingIndexChunksForProject(tx *sql.Tx, projectID string) error {
+	exists, err := tableExists(tx, "embedding_index_chunks")
+	if err != nil || !exists {
+		return err
+	}
+	_, err = tx.Exec(
+		`DELETE FROM embedding_index_chunks
+		  WHERE dataset_version_id IN (
+		      SELECT dataset_version_id
+		      FROM dataset_versions
+		      WHERE project_id = $1::uuid
+		  )`,
+		projectID,
+	)
+	return err
+}
+
+func deleteEmbeddingIndexChunksForDataset(tx *sql.Tx, projectID, datasetID string) error {
+	exists, err := tableExists(tx, "embedding_index_chunks")
+	if err != nil || !exists {
+		return err
+	}
+	_, err = tx.Exec(
+		`DELETE FROM embedding_index_chunks
+		  WHERE dataset_version_id IN (
+		      SELECT dataset_version_id
+		      FROM dataset_versions
+		      WHERE project_id = $1::uuid AND dataset_id = $2::uuid
+		  )`,
+		projectID,
+		datasetID,
+	)
+	return err
+}
+
+func deleteEmbeddingIndexChunksForVersion(tx *sql.Tx, datasetVersionID string) error {
+	exists, err := tableExists(tx, "embedding_index_chunks")
+	if err != nil || !exists {
+		return err
+	}
+	_, err = tx.Exec(
+		`DELETE FROM embedding_index_chunks
+		  WHERE dataset_version_id = $1`,
+		datasetVersionID,
+	)
+	return err
+}
+
+func tableExists(tx *sql.Tx, tableName string) (bool, error) {
+	var exists bool
+	if err := tx.QueryRow(`SELECT to_regclass($1) IS NOT NULL`, "public."+tableName).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func (s *PostgresStore) SaveDatasetBuildJob(job domain.DatasetBuildJob) error {
