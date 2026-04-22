@@ -1,0 +1,1 @@
+export type Operation = 'prepare' | 'prepare_batch' | 'sentiment'
