@@ -18,6 +18,7 @@ from python_ai_worker.tasks import (
     run_document_filter,
     run_document_sample,
     run_dataset_cluster_build,
+    run_dataset_clean,
     run_dataset_prepare,
     run_embedding,
     run_embedding_cluster,
@@ -973,10 +974,6 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["prepare_format"], "parquet")
         self.assertEqual(result["artifact"]["prepared_ref"], str(prepared_path))
         self.assertEqual(result["artifact"]["row_id_column"], "row_id")
-        self.assertEqual(
-            result["artifact"]["prepare_regex_rule_names"],
-            ["media_placeholder", "html_artifact", "url_cleanup", "zero_width_cleanup"],
-        )
         self.assertEqual(result["artifact"]["summary"]["input_row_count"], 3)
         self.assertEqual(result["artifact"]["summary"]["output_row_count"], 2)
         self.assertEqual(result["artifact"]["usage"]["provider"], "deterministic-fallback")
@@ -1025,60 +1022,58 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(prepared_rows[0]["raw_text"], "결제 오류\n\n카드 결제가 실패합니다!!!")
         self.assertEqual(prepared_rows[0]["normalized_text"], "결제 오류 카드 결제가 실패합니다.")
 
-    def test_dataset_prepare_applies_regex_rules_before_fallback(self) -> None:
+    def test_dataset_clean_applies_regex_rules(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues_raw.csv"
-        prepared_path = temp_dir / "issues_raw.prepared.parquet"
+        cleaned_path = temp_dir / "issues_raw.cleaned.parquet"
         with csv_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=["text"])
             writer.writeheader()
             writer.writerow({"text": "존재하지 않는 이미지입니다 https://example.com"})
             writer.writerow({"text": "문의 내용은 <br> 결제 오류입니다"})
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
-            result = run_dataset_prepare(
-                {
-                    "dataset_version_id": "version-regex",
-                    "dataset_name": str(csv_path),
-                    "text_column": "text",
-                    "output_path": str(prepared_path),
-                }
-            )
+        result = run_dataset_clean(
+            {
+                "dataset_version_id": "version-regex",
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "output_path": str(cleaned_path),
+            }
+        )
 
         self.assertEqual(result["artifact"]["summary"]["output_row_count"], 1)
-        self.assertEqual(result["artifact"]["summary"]["prepare_regex_rule_hits"]["media_placeholder"], 1)
-        self.assertEqual(result["artifact"]["summary"]["prepare_regex_rule_hits"]["url_cleanup"], 1)
-        self.assertEqual(result["artifact"]["summary"]["prepare_regex_rule_hits"]["html_artifact"], 1)
+        self.assertEqual(result["artifact"]["summary"]["clean_regex_rule_hits"]["media_placeholder"], 1)
+        self.assertEqual(result["artifact"]["summary"]["clean_regex_rule_hits"]["url_cleanup"], 1)
+        self.assertEqual(result["artifact"]["summary"]["clean_regex_rule_hits"]["html_artifact"], 1)
 
-        prepared_rows = self._read_parquet_rows(prepared_path)
-        self.assertEqual(len(prepared_rows), 1)
-        self.assertEqual(prepared_rows[0]["normalized_text"], "문의 내용은 결제 오류입니다")
-        self.assertIn("html_artifact", prepared_rows[0]["prepare_regex_applied_rules"])
+        cleaned_rows = self._read_parquet_rows(cleaned_path)
+        self.assertEqual(len(cleaned_rows), 1)
+        self.assertEqual(cleaned_rows[0]["cleaned_text"], "문의 내용은 결제 오류입니다")
+        self.assertIn("html_artifact", cleaned_rows[0]["clean_regex_applied_rules"])
 
-    def test_dataset_prepare_applies_preprocess_options_before_llm_fallback(self) -> None:
+    def test_dataset_clean_applies_preprocess_options(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues_raw.csv"
-        prepared_path = temp_dir / "issues_raw.prepared.parquet"
+        cleaned_path = temp_dir / "issues_raw.cleaned.parquet"
         with csv_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=["text"])
             writer.writeheader()
             writer.writerow({"text": "ABC123 축제 후기ㅋㅋㅋ!!! 존재하지 않는 이미지입니다 https://example.com"})
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
-            result = run_dataset_prepare(
-                {
-                    "dataset_version_id": "version-preprocess",
-                    "dataset_name": str(csv_path),
-                    "text_column": "text",
-                    "output_path": str(prepared_path),
-                    "preprocess_options": {
-                        "remove_english": True,
-                        "remove_numbers": True,
-                        "remove_special": True,
-                        "remove_monosyllables": True,
-                    },
-                }
-            )
+        result = run_dataset_clean(
+            {
+                "dataset_version_id": "version-preprocess",
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "output_path": str(cleaned_path),
+                "preprocess_options": {
+                    "remove_english": True,
+                    "remove_numbers": True,
+                    "remove_special": True,
+                    "remove_monosyllables": True,
+                },
+            }
+        )
 
         self.assertEqual(
             result["artifact"]["preprocess_options"],
@@ -1089,12 +1084,12 @@ class TaskTests(unittest.TestCase):
                 "remove_monosyllables": True,
             },
         )
-        self.assertGreater(result["artifact"]["source_input_char_count"], result["artifact"]["llm_input_char_count"])
-        self.assertGreater(result["artifact"]["summary"]["preprocess_reduced_char_count"], 0)
+        self.assertGreater(result["artifact"]["source_input_char_count"], result["artifact"]["cleaned_input_char_count"])
+        self.assertGreater(result["artifact"]["summary"]["clean_reduced_char_count"], 0)
 
-        prepared_rows = self._read_parquet_rows(prepared_path)
-        self.assertEqual(prepared_rows[0]["raw_text"], "ABC123 축제 후기ㅋㅋㅋ!!! 존재하지 않는 이미지입니다 https://example.com")
-        self.assertEqual(prepared_rows[0]["normalized_text"], "축제 후기")
+        cleaned_rows = self._read_parquet_rows(cleaned_path)
+        self.assertEqual(cleaned_rows[0]["raw_text"], "ABC123 축제 후기ㅋㅋㅋ!!! 존재하지 않는 이미지입니다 https://example.com")
+        self.assertEqual(cleaned_rows[0]["cleaned_text"], "축제 후기")
 
     def test_dataset_prepare_batches_llm_requests(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())

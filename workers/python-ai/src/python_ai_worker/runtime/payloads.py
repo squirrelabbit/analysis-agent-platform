@@ -282,7 +282,6 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
     max_rows = max(0, int(payload.get("max_rows") or 0))
     progress_path = str(payload.get("progress_path") or "").strip()
     regex_rule_names = _normalize_prepare_regex_rule_names(payload.get("regex_rule_names"))
-    preprocess_options = _normalize_prepare_preprocess_options(payload.get("preprocess_options"))
     prepare_prompt_version = str(payload.get("prepare_prompt_version") or "").strip()
     prepare_prompt_template = str(payload.get("prepare_prompt_template") or "").strip()
     prepare_batch_prompt_template = str(payload.get("prepare_batch_prompt_template") or "").strip()
@@ -299,10 +298,30 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "max_rows": max_rows,
         "progress_path": progress_path,
         "regex_rule_names": regex_rule_names,
-        "preprocess_options": preprocess_options,
         "prepare_prompt_version": prepare_prompt_version,
         "prepare_prompt_template": prepare_prompt_template,
         "prepare_batch_prompt_template": prepare_batch_prompt_template,
+    }
+
+
+def _normalize_dataset_clean_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    dataset_name = str(payload.get("dataset_name") or "").strip()
+    if not dataset_name:
+        raise ValueError("dataset_name is required")
+    output_path = str(payload.get("output_path") or f"{dataset_name}.cleaned.parquet").strip()
+    if not output_path:
+        raise ValueError("output_path is required")
+    text_column, text_columns, text_joiner = _normalize_text_columns_payload(payload, "text")
+    return {
+        "dataset_version_id": str(payload.get("dataset_version_id") or "").strip(),
+        "dataset_name": dataset_name,
+        "text_column": text_column,
+        "text_columns": text_columns,
+        "text_joiner": text_joiner,
+        "output_path": output_path,
+        "progress_path": str(payload.get("progress_path") or "").strip(),
+        "regex_rule_names": _normalize_prepare_regex_rule_names(payload.get("regex_rule_names")),
+        "preprocess_options": _normalize_prepare_preprocess_options(payload.get("preprocess_options")),
     }
 
 
@@ -447,6 +466,7 @@ __all__ = [
     "_normalize_cluster_build_payload",
     "_normalize_compare_task_payload",
     "_normalize_deduplicate_payload",
+    "_normalize_dataset_clean_payload",
     "_normalize_dictionary_tagging_payload",
     "_normalize_garbage_filter_payload",
     "_normalize_embedding_cluster_payload",

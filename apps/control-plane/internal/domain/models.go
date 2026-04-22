@@ -194,6 +194,10 @@ type DatasetVersion struct {
 	SourceSummary      *DatasetSourceSummary          `json:"source_summary,omitempty"`
 	BuildJobs          []DatasetVersionBuildJobStatus `json:"build_jobs,omitempty"`
 	Profile            *DatasetProfile                `json:"profile,omitempty"`
+	CleanStatus        string                         `json:"clean_status"`
+	CleanedRef         *string                        `json:"cleaned_ref,omitempty"`
+	CleanedAt          *time.Time                     `json:"cleaned_at,omitempty"`
+	CleanSummary       *DatasetCleanSummary           `json:"clean_summary,omitempty"`
 	PrepareStatus      string                         `json:"prepare_status"`
 	PrepareLLMMode     string                         `json:"prepare_llm_mode"`
 	PrepareModel       *string                        `json:"prepare_model,omitempty"`
@@ -270,21 +274,31 @@ type DatasetActiveVersionUpdateRequest struct {
 	DatasetVersionID string `json:"dataset_version_id"`
 }
 
+type DatasetCleanSummary struct {
+	InputRowCount         int             `json:"input_row_count"`
+	OutputRowCount        int             `json:"output_row_count"`
+	KeptCount             int             `json:"kept_count"`
+	DroppedCount          int             `json:"dropped_count"`
+	SkippedRowCount       int             `json:"skipped_row_count,omitempty"`
+	TextColumn            string          `json:"text_column,omitempty"`
+	TextColumns           []string        `json:"text_columns,omitempty"`
+	TextJoiner            string          `json:"text_joiner,omitempty"`
+	PreprocessOptions     map[string]bool `json:"preprocess_options,omitempty"`
+	SourceInputCharCount  int             `json:"source_input_char_count,omitempty"`
+	CleanedInputCharCount int             `json:"cleaned_input_char_count,omitempty"`
+	CleanReducedCharCount int             `json:"clean_reduced_char_count,omitempty"`
+	CleanRegexRuleHits    map[string]int  `json:"clean_regex_rule_hits,omitempty"`
+}
+
 type DatasetPrepareSummary struct {
-	InputRowCount              int             `json:"input_row_count"`
-	OutputRowCount             int             `json:"output_row_count"`
-	KeptCount                  int             `json:"kept_count"`
-	ReviewCount                int             `json:"review_count"`
-	DroppedCount               int             `json:"dropped_count"`
-	TextColumn                 string          `json:"text_column,omitempty"`
-	TextColumns                []string        `json:"text_columns,omitempty"`
-	TextJoiner                 string          `json:"text_joiner,omitempty"`
-	PreprocessOptions          map[string]bool `json:"preprocess_options,omitempty"`
-	SourceInputCharCount       int             `json:"source_input_char_count,omitempty"`
-	LLMInputCharCount          int             `json:"llm_input_char_count,omitempty"`
-	PreprocessReducedCharCount int             `json:"preprocess_reduced_char_count,omitempty"`
-	PreprocessEmptyDropCount   int             `json:"preprocess_empty_drop_count,omitempty"`
-	PrepareRegexRuleHits       map[string]int  `json:"prepare_regex_rule_hits,omitempty"`
+	InputRowCount  int      `json:"input_row_count"`
+	OutputRowCount int      `json:"output_row_count"`
+	KeptCount      int      `json:"kept_count"`
+	ReviewCount    int      `json:"review_count"`
+	DroppedCount   int      `json:"dropped_count"`
+	TextColumn     string   `json:"text_column,omitempty"`
+	TextColumns    []string `json:"text_columns,omitempty"`
+	TextJoiner     string   `json:"text_joiner,omitempty"`
 }
 
 type DatasetPreparePreviewQuery struct {
@@ -399,20 +413,37 @@ type DatasetClusterMembersResponse struct {
 }
 
 type DatasetPrepareRequest struct {
-	TextColumns       []string                         `json:"text_columns,omitempty"`
-	OutputPath        *string                          `json:"output_path,omitempty"`
-	Model             *string                          `json:"model,omitempty"`
-	MaxRows           *int                             `json:"max_rows,omitempty"`
-	BatchSize         *int                             `json:"batch_size,omitempty"`
-	PreprocessOptions *DatasetPreparePreprocessOptions `json:"preprocess_options,omitempty"`
-	Force             *bool                            `json:"force,omitempty"`
+	TextColumns []string `json:"text_columns,omitempty"`
+	OutputPath  *string  `json:"output_path,omitempty"`
+	Model       *string  `json:"model,omitempty"`
+	MaxRows     *int     `json:"max_rows,omitempty"`
+	BatchSize   *int     `json:"batch_size,omitempty"`
+	Force       *bool    `json:"force,omitempty"`
 }
 
-type DatasetPreparePreprocessOptions struct {
+type DatasetCleanRequest struct {
+	TextColumns       []string                       `json:"text_columns,omitempty"`
+	OutputPath        *string                        `json:"output_path,omitempty"`
+	PreprocessOptions *DatasetCleanPreprocessOptions `json:"preprocess_options,omitempty"`
+	Force             *bool                          `json:"force,omitempty"`
+}
+
+type DatasetCleanPreprocessOptions struct {
 	RemoveEnglish       bool `json:"remove_english,omitempty"`
 	RemoveNumbers       bool `json:"remove_numbers,omitempty"`
 	RemoveSpecial       bool `json:"remove_special,omitempty"`
 	RemoveMonosyllables bool `json:"remove_monosyllables,omitempty"`
+}
+
+type DatasetPrepareSampleResponse struct {
+	ProjectID        string                 `json:"project_id"`
+	DatasetID        string                 `json:"dataset_id"`
+	DatasetVersionID string                 `json:"dataset_version_id"`
+	PreparedRef      string                 `json:"prepared_ref"`
+	PrepareFormat    string                 `json:"prepare_format"`
+	SampleLimit      int                    `json:"sample_limit"`
+	Summary          *DatasetPrepareSummary `json:"summary,omitempty"`
+	Samples          []DatasetPrepareSample `json:"samples"`
 }
 
 type DatasetEmbeddingBuildRequest struct {

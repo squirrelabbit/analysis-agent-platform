@@ -435,13 +435,29 @@ func cloneDatasetVersion(version domain.DatasetVersion) domain.DatasetVersion {
 	}
 	if version.PrepareSummary != nil {
 		summary := *version.PrepareSummary
-		if len(version.PrepareSummary.PrepareRegexRuleHits) > 0 {
-			summary.PrepareRegexRuleHits = make(map[string]int, len(version.PrepareSummary.PrepareRegexRuleHits))
-			for key, value := range version.PrepareSummary.PrepareRegexRuleHits {
-				summary.PrepareRegexRuleHits[key] = value
-			}
+		if len(version.PrepareSummary.TextColumns) > 0 {
+			summary.TextColumns = append([]string(nil), version.PrepareSummary.TextColumns...)
 		}
 		cloned.PrepareSummary = &summary
+	}
+	if version.CleanSummary != nil {
+		summary := *version.CleanSummary
+		if len(version.CleanSummary.TextColumns) > 0 {
+			summary.TextColumns = append([]string(nil), version.CleanSummary.TextColumns...)
+		}
+		if len(version.CleanSummary.PreprocessOptions) > 0 {
+			summary.PreprocessOptions = make(map[string]bool, len(version.CleanSummary.PreprocessOptions))
+			for key, value := range version.CleanSummary.PreprocessOptions {
+				summary.PreprocessOptions[key] = value
+			}
+		}
+		if len(version.CleanSummary.CleanRegexRuleHits) > 0 {
+			summary.CleanRegexRuleHits = make(map[string]int, len(version.CleanSummary.CleanRegexRuleHits))
+			for key, value := range version.CleanSummary.CleanRegexRuleHits {
+				summary.CleanRegexRuleHits[key] = value
+			}
+		}
+		cloned.CleanSummary = &summary
 	}
 	return cloned
 }

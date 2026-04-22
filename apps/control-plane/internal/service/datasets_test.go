@@ -295,6 +295,24 @@ func waitForDatasetVersionPrepareReady(t *testing.T, service *DatasetService, pr
 	return domain.DatasetVersion{}
 }
 
+func waitForDatasetVersionCleanReady(t *testing.T, service *DatasetService, projectID, datasetID, versionID string) domain.DatasetVersion {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		version, err := service.GetDatasetVersion(projectID, datasetID, versionID)
+		if err == nil && version.CleanStatus == "ready" {
+			return version
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	version, err := service.GetDatasetVersion(projectID, datasetID, versionID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset version error: %v", err)
+	}
+	t.Fatalf("expected dataset version clean ready, got %s", version.CleanStatus)
+	return domain.DatasetVersion{}
+}
+
 func waitForDatasetBuildJobByType(t *testing.T, service *DatasetService, projectID, datasetID, versionID, buildType string) domain.DatasetBuildJob {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -376,7 +394,6 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	var requestedProgressPath string
 	var requestedMaxRows int
 	var requestedBatchSize int
-	var requestedPreprocessOptions map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -389,25 +406,20 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 		requestedProgressPath = payload["progress_path"].(string)
 		requestedMaxRows = intValue(payload["max_rows"])
 		requestedBatchSize = intValue(payload["prepare_batch_size"])
-		requestedPreprocessOptions = payload["preprocess_options"].(map[string]any)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"notes": []string{"prepare completed"},
 			"artifact": map[string]any{
-				"skill_name":                    "dataset_prepare",
-				"prepare_uri":                   "/tmp/issues.prepared.parquet",
-				"prepared_ref":                  "/tmp/issues.prepared.parquet",
-				"prepare_format":                "parquet",
-				"prepare_model":                 "claude-haiku-4-5",
-				"prepare_prompt_version":        "dataset-prepare-anthropic-v1",
-				"progress_ref":                  requestedProgressPath,
-				"max_rows":                      requestedMaxRows,
-				"preprocess_options":            requestedPreprocessOptions,
-				"source_input_char_count":       1000,
-				"llm_input_char_count":          600,
-				"preprocess_reduced_char_count": 400,
-				"prepared_text_column":          "normalized_text",
-				"row_id_column":                 "row_id",
-				"storage_contract_version":      "unstructured-storage-v1",
+				"skill_name":               "dataset_prepare",
+				"prepare_uri":              "/tmp/issues.prepared.parquet",
+				"prepared_ref":             "/tmp/issues.prepared.parquet",
+				"prepare_format":           "parquet",
+				"prepare_model":            "claude-haiku-4-5",
+				"prepare_prompt_version":   "dataset-prepare-anthropic-v1",
+				"progress_ref":             requestedProgressPath,
+				"max_rows":                 requestedMaxRows,
+				"prepared_text_column":     "normalized_text",
+				"row_id_column":            "row_id",
+				"storage_contract_version": "unstructured-storage-v1",
 				"usage": map[string]any{
 					"provider":               "anthropic",
 					"model":                  "claude-haiku-4-5",
@@ -419,21 +431,16 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 					"cost_estimation_status": "not_configured",
 				},
 				"summary": map[string]any{
-					"input_row_count":               10,
-					"output_row_count":              7,
-					"kept_count":                    6,
-					"review_count":                  1,
-					"dropped_count":                 3,
-					"preprocess_options":            requestedPreprocessOptions,
-					"source_input_char_count":       1000,
-					"llm_input_char_count":          600,
-					"preprocess_reduced_char_count": 400,
+					"input_row_count":  10,
+					"output_row_count": 7,
+					"kept_count":       6,
+					"review_count":     1,
+					"dropped_count":    3,
 				},
 			},
 		})
 	}))
 	defer server.Close()
-	service.pythonAIWorkerURL = server.URL
 
 	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
 		StorageURI: "/tmp/issues.csv",
@@ -443,18 +450,13 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected create dataset version error: %v", err)
 	}
+	service.pythonAIWorkerURL = server.URL
 
 	version, err = service.BuildPrepare(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{
 		TextColumns: []string{"text"},
 		Model:       datasetStringPtr("claude-haiku-4-5"),
 		MaxRows:     datasetIntPtr(10),
 		BatchSize:   datasetIntPtr(4),
-		PreprocessOptions: &domain.DatasetPreparePreprocessOptions{
-			RemoveEnglish:       true,
-			RemoveNumbers:       true,
-			RemoveSpecial:       true,
-			RemoveMonosyllables: true,
-		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected build prepare error: %v", err)
@@ -474,9 +476,6 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	}
 	if requestedBatchSize != 4 {
 		t.Fatalf("unexpected prepare batch size: %d", requestedBatchSize)
-	}
-	if !boolValue(requestedPreprocessOptions["remove_english"]) || !boolValue(requestedPreprocessOptions["remove_numbers"]) || !boolValue(requestedPreprocessOptions["remove_special"]) || !boolValue(requestedPreprocessOptions["remove_monosyllables"]) {
-		t.Fatalf("unexpected prepare preprocess options: %+v", requestedPreprocessOptions)
 	}
 	if !strings.HasPrefix(requestedOutputPath, artifactRoot) {
 		t.Fatalf("unexpected prepare output path: %s", requestedOutputPath)
@@ -508,11 +507,8 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	if got := metadataString(version.Metadata, "prepare_progress_ref", ""); got != requestedProgressPath {
 		t.Fatalf("unexpected prepare progress ref: %s", got)
 	}
-	if got := version.Metadata["prepare_preprocess_options"]; got == nil {
-		t.Fatalf("expected prepare preprocess options in metadata")
-	}
-	if version.PrepareSummary == nil || version.PrepareSummary.PreprocessReducedCharCount != 400 {
-		t.Fatalf("unexpected prepare summary preprocess stats: %+v", version.PrepareSummary)
+	if version.PrepareSummary == nil || version.PrepareSummary.OutputRowCount != 7 {
+		t.Fatalf("unexpected prepare summary: %+v", version.PrepareSummary)
 	}
 	if version.RecordCount == nil || *version.RecordCount != 7 {
 		t.Fatalf("unexpected record count: %+v", version.RecordCount)
@@ -1314,7 +1310,7 @@ func TestValidateSkillPoliciesReturnsUnavailableWhenWorkerNotConfigured(t *testi
 	}
 }
 
-func TestCreateDatasetVersionEnqueuesEagerPrepareJobWhenWorkerConfigured(t *testing.T) {
+func TestCreateDatasetVersionEnqueuesEagerCleanJobWhenWorkerConfigured(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
 
@@ -1342,25 +1338,30 @@ func TestCreateDatasetVersionEnqueuesEagerPrepareJobWhenWorkerConfigured(t *test
 		}
 		progressPath := stringValue(payload["progress_path"])
 		if progressPath != "" {
-			progressPayload := `{"percent":50,"processed_rows":5,"total_rows":10,"elapsed_seconds":12.5,"eta_seconds":12.5,"message":"prepare processing rows","updated_at":"2026-04-22T01:00:00Z"}`
+			progressPayload := `{"percent":50,"processed_rows":5,"total_rows":10,"elapsed_seconds":12.5,"eta_seconds":12.5,"message":"clean processing rows","updated_at":"2026-04-22T01:00:00Z"}`
 			if err := os.WriteFile(progressPath, []byte(progressPayload), 0o644); err != nil {
 				t.Fatalf("unexpected write progress error: %v", err)
 			}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"artifact": map[string]any{
-				"prepare_uri":          "/tmp/issues.prepared.parquet",
-				"prepared_ref":         "/tmp/issues.prepared.parquet",
-				"prepare_format":       "parquet",
-				"llm_provider":         "anthropic",
-				"llm_model":            "claude-3-5-haiku-latest",
-				"llm_fallback":         true,
-				"llm_fallback_count":   3,
-				"llm_fallback_reason":  "HTTP Error 404: Not Found",
-				"llm_fallback_reasons": []string{"HTTP Error 404: Not Found"},
-				"prepared_text_column": "normalized_text",
+				"clean_uri":           "/tmp/issues.cleaned.parquet",
+				"cleaned_ref":         "/tmp/issues.cleaned.parquet",
+				"clean_format":        "parquet",
+				"progress_ref":        progressPath,
+				"cleaned_text_column": "cleaned_text",
+				"row_id_column":       "row_id",
+				"preprocess_options": map[string]any{
+					"remove_english":       false,
+					"remove_numbers":       false,
+					"remove_special":       false,
+					"remove_monosyllables": false,
+				},
 				"summary": map[string]any{
+					"input_row_count":  10,
 					"output_row_count": 3,
+					"kept_count":       3,
+					"dropped_count":    7,
 				},
 			},
 		})
@@ -1382,39 +1383,24 @@ func TestCreateDatasetVersionEnqueuesEagerPrepareJobWhenWorkerConfigured(t *test
 		t.Fatalf("unexpected list dataset build jobs error: %v", err)
 	}
 	if len(jobs.Items) != 1 {
-		t.Fatalf("expected one eager prepare job, got %+v", jobs.Items)
+		t.Fatalf("expected one eager clean job, got %+v", jobs.Items)
 	}
 	job := waitForDatasetBuildJobStatus(t, service, project.ProjectID, jobs.Items[0].JobID, "completed")
-	if job.BuildType != "prepare" {
+	if job.BuildType != "clean" {
 		t.Fatalf("unexpected build type: %+v", job)
-	}
-	if job.Diagnostics == nil || !job.Diagnostics.LLMFallback {
-		t.Fatalf("expected llm fallback diagnostics: %+v", job.Diagnostics)
-	}
-	if job.Diagnostics.LLMFallbackReason == nil || *job.Diagnostics.LLMFallbackReason != "HTTP Error 404: Not Found" {
-		t.Fatalf("unexpected llm fallback reason: %+v", job.Diagnostics)
-	}
-	if job.Diagnostics.LLMFallbackCount != 3 {
-		t.Fatalf("unexpected llm fallback count: %+v", job.Diagnostics)
-	}
-	if job.Diagnostics.LLMModel == nil || *job.Diagnostics.LLMModel != "claude-3-5-haiku-latest" {
-		t.Fatalf("unexpected llm model: %+v", job.Diagnostics)
 	}
 	if job.Diagnostics.Progress == nil || job.Diagnostics.Progress.Percent != 50 {
 		t.Fatalf("unexpected progress diagnostics: %+v", job.Diagnostics)
 	}
-	version = waitForDatasetVersionPrepareReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+	version = waitForDatasetVersionCleanReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
 	if callCount != 1 {
-		t.Fatalf("expected eager prepare worker call once, got %d", callCount)
+		t.Fatalf("expected eager clean worker call once, got %d", callCount)
 	}
-	if version.PrepareURI == nil || *version.PrepareURI != "/tmp/issues.prepared.parquet" {
-		t.Fatalf("unexpected prepare uri: %+v", version.PrepareURI)
+	if version.CleanedRef == nil || *version.CleanedRef != "/tmp/issues.cleaned.parquet" {
+		t.Fatalf("unexpected cleaned ref: %+v", version.CleanedRef)
 	}
-	if !metadataBool(version.Metadata, "prepare_llm_fallback") {
-		t.Fatalf("expected prepare llm fallback metadata: %+v", version.Metadata)
-	}
-	if got := metadataString(version.Metadata, "prepare_llm_fallback_reason", ""); got != "HTTP Error 404: Not Found" {
-		t.Fatalf("unexpected prepare llm fallback reason: %s", got)
+	if version.CleanSummary == nil || version.CleanSummary.OutputRowCount != 3 {
+		t.Fatalf("unexpected clean summary: %+v", version.CleanSummary)
 	}
 }
 
@@ -1452,6 +1438,21 @@ func TestCreateDatasetVersionAutoCreatesSentimentJobAfterPrepare(t *testing.T) {
 		mu.Unlock()
 
 		switch r.URL.Path {
+		case "/tasks/dataset_clean":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"clean_uri":           "/tmp/issues.cleaned.parquet",
+					"cleaned_ref":         "/tmp/issues.cleaned.parquet",
+					"clean_format":        "parquet",
+					"cleaned_text_column": "cleaned_text",
+					"row_id_column":       "row_id",
+					"summary": map[string]any{
+						"input_row_count":  3,
+						"output_row_count": 3,
+						"kept_count":       3,
+					},
+				},
+			})
 		case "/tasks/dataset_prepare":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"artifact": map[string]any{
@@ -1498,6 +1499,18 @@ func TestCreateDatasetVersionAutoCreatesSentimentJobAfterPrepare(t *testing.T) {
 		t.Fatalf("unexpected create dataset version error: %v", err)
 	}
 
+	cleanJob := waitForDatasetBuildJobByType(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID, "clean")
+	waitForDatasetBuildJobStatus(t, service, project.ProjectID, cleanJob.JobID, "completed")
+	waitForDatasetVersionCleanReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+
+	prepareJobCreated, err := service.CreatePrepareJob(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "test")
+	if err != nil {
+		t.Fatalf("unexpected create prepare job error: %v", err)
+	}
+	if prepareJobCreated.BuildType != "prepare" {
+		t.Fatalf("unexpected prepare job: %+v", prepareJobCreated)
+	}
+
 	prepareJob := waitForDatasetBuildJobByType(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID, "prepare")
 	waitForDatasetBuildJobStatus(t, service, project.ProjectID, prepareJob.JobID, "completed")
 
@@ -1508,10 +1521,10 @@ func TestCreateDatasetVersionAutoCreatesSentimentJobAfterPrepare(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(requestPaths) != 2 {
-		t.Fatalf("expected prepare and sentiment worker calls, got %+v", requestPaths)
+	if len(requestPaths) != 3 {
+		t.Fatalf("expected clean, prepare, and sentiment worker calls, got %+v", requestPaths)
 	}
-	if requestPaths[0] != "/tasks/dataset_prepare" || requestPaths[1] != "/tasks/sentiment_label" {
+	if requestPaths[0] != "/tasks/dataset_clean" || requestPaths[1] != "/tasks/dataset_prepare" || requestPaths[2] != "/tasks/sentiment_label" {
 		t.Fatalf("unexpected worker call order: %+v", requestPaths)
 	}
 	if sentimentDatasetName != "/tmp/issues.prepared.parquet" {
@@ -3024,10 +3037,6 @@ func TestGetPreparePreviewBuildsSummaryAndWarningPanel(t *testing.T) {
 				"kept_count":       1,
 				"review_count":     1,
 				"dropped_count":    1,
-				"prepare_regex_rule_hits": map[string]any{
-					"html_artifact": 1,
-					"url_cleanup":   1,
-				},
 			},
 		},
 		PrepareStatus:   "ready",
@@ -3050,9 +3059,6 @@ func TestGetPreparePreviewBuildsSummaryAndWarningPanel(t *testing.T) {
 	}
 	if loadedVersion.PrepareSummary.ReviewCount != 1 {
 		t.Fatalf("unexpected review_count: %+v", loadedVersion.PrepareSummary)
-	}
-	if loadedVersion.PrepareSummary.PrepareRegexRuleHits["html_artifact"] != 1 {
-		t.Fatalf("unexpected prepare_regex_rule_hits: %+v", loadedVersion.PrepareSummary.PrepareRegexRuleHits)
 	}
 
 	limit := 2

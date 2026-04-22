@@ -868,6 +868,32 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_jobs:
+    post:
+      tags: [Datasets]
+      summary: Enqueue async deterministic text clean job
+      operationId: createCleanJob
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetCleanRequest"
+      responses:
+        "202":
+          description: Clean build job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetBuildJob"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare:
     post:
       tags: [Datasets]
@@ -890,6 +916,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_sample:
+    post:
+      tags: [Datasets]
+      summary: Run prepare on a small sample without saving dataset version state
+      operationId: buildPrepareSample
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetPrepareRequest"
+      responses:
+        "200":
+          description: Prepare sample result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetPrepareSampleResponse"
         "400":
           $ref: "#/components/responses/ErrorResponse"
         "404":
@@ -2332,6 +2384,22 @@ components:
           anyOf:
             - $ref: "#/components/schemas/DatasetProfile"
             - type: "null"
+        clean_status:
+          type: string
+          description: deterministic text clean stage status
+        cleaned_ref:
+          type:
+            - string
+            - "null"
+        cleaned_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        clean_summary:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetCleanSummary"
+            - type: "null"
         prepare_status:
           type: string
         prepare_llm_mode:
@@ -2407,6 +2475,7 @@ components:
         - storage_uri
         - data_type
         - metadata
+        - clean_status
         - prepare_status
         - sentiment_status
         - embedding_status
@@ -2429,10 +2498,10 @@ components:
         metadata:
           allOf:
             - $ref: "#/components/schemas/AnyMap"
-          description: prepare_required=true일 때 text_columns가 필요하다.
+          description: clean/prepare 대상 텍스트 컬럼과 clean 옵션을 담는다. 업로드 직후 자동 clean을 실행하려면 text_columns가 필요하다.
           example:
             text_columns: ["제목", "본문"]
-            prepare_preprocess_options:
+            clean_preprocess_options:
               remove_english: false
               remove_numbers: false
               remove_special: false
@@ -2488,6 +2557,41 @@ components:
           items:
             $ref: "#/components/schemas/DatasetVersion"
       required: [items]
+    DatasetCleanSummary:
+      type: object
+      properties:
+        input_row_count:
+          type: integer
+        output_row_count:
+          type: integer
+        kept_count:
+          type: integer
+        dropped_count:
+          type: integer
+        skipped_row_count:
+          type: integer
+        text_column:
+          type: string
+        text_columns:
+          type: array
+          items:
+            type: string
+        text_joiner:
+          type: string
+        preprocess_options:
+          $ref: "#/components/schemas/DatasetCleanPreprocessOptions"
+        source_input_char_count:
+          type: integer
+          description: clean 전 원본 텍스트 총 글자 수.
+        cleaned_input_char_count:
+          type: integer
+          description: clean 후 prepare에 넘길 텍스트 총 글자 수.
+        clean_reduced_char_count:
+          type: integer
+          description: clean으로 줄어든 글자 수.
+        clean_regex_rule_hits:
+          $ref: "#/components/schemas/IntegerMap"
+      required: [input_row_count, output_row_count, kept_count, dropped_count]
     DatasetPrepareSummary:
       type: object
       properties:
@@ -2509,22 +2613,6 @@ components:
             type: string
         text_joiner:
           type: string
-        preprocess_options:
-          $ref: "#/components/schemas/DatasetPreparePreprocessOptions"
-        source_input_char_count:
-          type: integer
-          description: 정제 전 LLM 입력 후보 텍스트 총 글자 수.
-        llm_input_char_count:
-          type: integer
-          description: regex/preprocess 적용 후 실제 LLM으로 넘긴 텍스트 총 글자 수.
-        preprocess_reduced_char_count:
-          type: integer
-          description: 정제로 줄어든 글자 수.
-        preprocess_empty_drop_count:
-          type: integer
-          description: 정제 후 빈 텍스트가 되어 LLM 호출 없이 drop 처리한 row 수.
-        prepare_regex_rule_hits:
-          $ref: "#/components/schemas/IntegerMap"
       required: [input_row_count, output_row_count, kept_count, review_count, dropped_count]
     DatasetPrepareSample:
       type: object
@@ -2599,6 +2687,30 @@ components:
             - $ref: "#/components/schemas/DatasetPrepareWarningPanel"
             - type: "null"
       required: [project_id, dataset_id, dataset_version_id, prepare_status, prepared_ref, prepare_format, raw_text_column, prepared_text_column, row_id_column, sample_limit, samples]
+    DatasetPrepareSampleResponse:
+      type: object
+      properties:
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        prepared_ref:
+          type: string
+        prepare_format:
+          type: string
+        sample_limit:
+          type: integer
+        summary:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetPrepareSummary"
+            - type: "null"
+        samples:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetPrepareSample"
+      required: [project_id, dataset_id, dataset_version_id, prepared_ref, prepare_format, sample_limit, samples]
     DatasetSentimentSummary:
       type: object
       properties:
@@ -2694,8 +2806,8 @@ components:
           description: Integer string
         metadata:
           type: string
-          description: JSON object string. prepare_required=true일 때 text_columns가 필요하다. prepare_preprocess_options를 넣으면 자동 prepare 작업에 전달된다.
-          example: '{"text_columns":["제목","본문"],"prepare_preprocess_options":{"remove_english":false,"remove_numbers":false,"remove_special":false,"remove_monosyllables":true}}'
+          description: JSON object string. 업로드 직후 자동 clean을 실행하려면 text_columns가 필요하다. clean_preprocess_options를 넣으면 clean 작업에 전달된다.
+          example: '{"text_columns":["제목","본문"],"clean_preprocess_options":{"remove_english":false,"remove_numbers":false,"remove_special":false,"remove_monosyllables":true}}'
         activate_on_create:
           type: string
           enum: ["true", "false"]
@@ -2781,7 +2893,7 @@ components:
           items:
             type: string
           minItems: 1
-          description: 전처리 대상 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
+          description: prepare 대상 텍스트 컬럼 목록. clean이 ready면 생략 시 cleaned_text를 사용한다.
         output_path:
           type:
             - string
@@ -2802,29 +2914,45 @@ components:
             - "null"
           minimum: 1
           description: 동기 LLM 전처리 호출당 묶을 row 수. Anthropic Message Batches API가 아니라 내부 batch prompt 크기다.
-        preprocess_options:
-          $ref: "#/components/schemas/DatasetPreparePreprocessOptions"
-          description: LLM 호출 전에 적용할 비용 절감용 로컬 텍스트 정제 옵션.
         force:
           type:
             - boolean
             - "null"
-      required: [text_columns]
-    DatasetPreparePreprocessOptions:
+    DatasetCleanRequest:
+      type: object
+      properties:
+        text_columns:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: clean 대상 원본 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
+        output_path:
+          type:
+            - string
+            - "null"
+        preprocess_options:
+          $ref: "#/components/schemas/DatasetCleanPreprocessOptions"
+          description: prepare/LLM 호출 전에 적용할 비용 절감용 로컬 텍스트 정제 옵션.
+        force:
+          type:
+            - boolean
+            - "null"
+    DatasetCleanPreprocessOptions:
       type: object
       properties:
         remove_english:
           type: boolean
-          description: 영문 알파벳을 LLM 입력 전에 제거한다.
+          description: 영문 알파벳을 clean 단계에서 제거한다.
         remove_numbers:
           type: boolean
-          description: 숫자를 LLM 입력 전에 제거한다.
+          description: 숫자를 clean 단계에서 제거한다.
         remove_special:
           type: boolean
-          description: 특수문자/기호/공백 구분자를 LLM 입력 전에 공백으로 정리한다.
+          description: 특수문자/기호/공백 구분자를 clean 단계에서 공백으로 정리한다.
         remove_monosyllables:
           type: boolean
-          description: ㅋㅋㅋ, ㅠㅠ 같은 한글 자모 반복을 LLM 입력 전에 제거한다.
+          description: ㅋㅋㅋ, ㅠㅠ 같은 한글 자모 반복을 clean 단계에서 제거한다.
     DatasetEmbeddingBuildRequest:
       type: object
       properties:

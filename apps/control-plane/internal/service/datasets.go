@@ -503,7 +503,7 @@ func (s *DatasetService) CreateDatasetVersion(projectID, datasetID string, input
 			return domain.DatasetVersion{}, err
 		}
 	}
-	_ = s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version)
+	_ = s.maybeRunEagerClean(projectID, dataset.DatasetID, version)
 	return s.GetDatasetVersion(projectID, dataset.DatasetID, version.DatasetVersionID)
 }
 
@@ -545,7 +545,7 @@ func (s *DatasetService) UploadDatasetVersion(projectID, datasetID string, input
 			return domain.DatasetVersion{}, err
 		}
 	}
-	_ = s.maybeRunEagerPrepare(projectID, dataset.DatasetID, version)
+	_ = s.maybeRunEagerClean(projectID, dataset.DatasetID, version)
 	return s.GetDatasetVersion(projectID, dataset.DatasetID, version.DatasetVersionID)
 }
 
@@ -573,7 +573,7 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 	if dataType == "unstructured" || dataType == "mixed" || dataType == "both" {
 		prepareStatus = "not_requested"
 		if prepareRequired {
-			prepareStatus = "queued"
+			prepareStatus = "not_requested"
 		}
 	}
 
@@ -628,6 +628,11 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 		version.Metadata["text_columns"] = textColumns
 		version.Metadata["prepare_required"] = true
 	}
+	if dataType == "unstructured" || dataType == "mixed" || dataType == "both" {
+		if _, ok := version.Metadata["clean_status"]; !ok {
+			version.Metadata["clean_status"] = "not_requested"
+		}
+	}
 	if sentimentRequired {
 		version.Metadata["sentiment_required"] = true
 	}
@@ -638,14 +643,17 @@ func (s *DatasetService) resolveDatasetProfile(dataType string, explicit *domain
 	return s.profileRegistry.resolve(dataType, explicit)
 }
 
-func (s *DatasetService) maybeRunEagerPrepare(projectID, datasetID string, version domain.DatasetVersion) domain.DatasetVersion {
+func (s *DatasetService) maybeRunEagerClean(projectID, datasetID string, version domain.DatasetVersion) domain.DatasetVersion {
 	if strings.TrimSpace(s.pythonAIWorkerURL) == "" {
 		return version
 	}
-	if !requiresPrepare(version) || isPrepareReady(version) {
+	if !requiresClean(version) || isCleanReady(version) {
 		return version
 	}
-	if _, err := s.CreatePrepareJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "dataset_version_create"); err == nil {
+	if len(resolveDatasetBuildTextSelection(version.Metadata, nil).Columns) == 0 {
+		return version
+	}
+	if _, err := s.CreateCleanJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetCleanRequest{}, "dataset_version_create"); err == nil {
 		latest, getErr := s.GetDatasetVersion(projectID, datasetID, version.DatasetVersionID)
 		if getErr == nil {
 			return latest
@@ -1894,6 +1902,136 @@ func slicesSortStrings(values []string) {
 	sort.Strings(values)
 }
 
+func (s *DatasetService) BuildClean(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest) (domain.DatasetVersion, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	if version.DataType == "structured" {
+		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "dataset clean requires unstructured or mixed dataset version"}
+	}
+
+	force := input.Force != nil && *input.Force
+	if isCleanReady(version) && !force {
+		return version, nil
+	}
+
+	textSelection := resolveDatasetBuildTextSelection(version.Metadata, input.TextColumns)
+	if len(textSelection.Columns) == 0 {
+		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "text_columns is required for dataset clean"}
+	}
+	textColumn := textSelection.TextColumn
+	textColumns := textSelection.Columns
+	textJoiner := textSelection.Joiner
+	outputPath := s.deriveCleanURI(version)
+	if input.OutputPath != nil && strings.TrimSpace(*input.OutputPath) != "" {
+		outputPath = strings.TrimSpace(*input.OutputPath)
+	}
+	progressPath := outputPath + ".progress.json"
+	preprocessOptions := resolveCleanPreprocessOptions(version.Metadata, input.PreprocessOptions)
+
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.Metadata["clean_status"] = "cleaning"
+	version.Metadata["cleaned_ref"] = outputPath
+	version.Metadata["cleaned_format"] = inferArtifactFormat(outputPath, "parquet")
+	version.Metadata["clean_progress_ref"] = progressPath
+	version.Metadata["raw_text_column"] = textColumn
+	version.Metadata["raw_text_columns"] = append([]string(nil), textColumns...)
+	version.Metadata["text_joiner"] = textJoiner
+	version.Metadata["clean_preprocess_options"] = cloneStringBoolMap(preprocessOptions)
+	invalidateDownstreamArtifactsForClean(&version, "clean output changed")
+	if err := ensureParentDir(outputPath); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+
+	payload := map[string]any{
+		"dataset_version_id": version.DatasetVersionID,
+		"dataset_name":       version.StorageURI,
+		"text_column":        textColumn,
+		"text_columns":       append([]string(nil), textColumns...),
+		"text_joiner":        textJoiner,
+		"output_path":        outputPath,
+		"progress_path":      progressPath,
+		"preprocess_options": cloneStringBoolMap(preprocessOptions),
+	}
+	if version.Profile != nil && len(version.Profile.RegexRuleNames) > 0 {
+		payload["regex_rule_names"] = append([]string(nil), version.Profile.RegexRuleNames...)
+	}
+
+	response, err := s.runWorkerTask(context.Background(), "/tasks/dataset_clean", payload)
+	if err != nil {
+		version.Metadata["clean_status"] = "failed"
+		version.Metadata["clean_error"] = err.Error()
+		_ = s.store.SaveDatasetVersion(version)
+		return domain.DatasetVersion{}, err
+	}
+
+	now := time.Now().UTC()
+	cleanedRef := artifactString(response.Artifact, "cleaned_ref")
+	if cleanedRef == "" {
+		cleanedRef = artifactString(response.Artifact, "clean_uri")
+	}
+	if cleanedRef == "" {
+		cleanedRef = outputPath
+	}
+	cleanFormat := artifactString(response.Artifact, "clean_format")
+	if cleanFormat == "" {
+		cleanFormat = inferArtifactFormat(cleanedRef, "parquet")
+	}
+	cleanMetadata := map[string]any{
+		"clean_status":        "ready",
+		"cleaned_ref":         cleanedRef,
+		"cleaned_format":      cleanFormat,
+		"cleaned_at":          now,
+		"clean_notes":         response.Notes,
+		"raw_text_column":     textColumn,
+		"raw_text_columns":    append([]string(nil), textColumns...),
+		"text_joiner":         textJoiner,
+		"cleaned_text_column": artifactString(response.Artifact, "cleaned_text_column"),
+	}
+	if cleanMetadata["cleaned_text_column"] == "" {
+		cleanMetadata["cleaned_text_column"] = "cleaned_text"
+	}
+	if rowIDColumn := artifactString(response.Artifact, "row_id_column"); rowIDColumn != "" {
+		cleanMetadata["row_id_column"] = rowIDColumn
+	}
+	if progressRef := artifactString(response.Artifact, "progress_ref"); progressRef != "" {
+		cleanMetadata["clean_progress_ref"] = progressRef
+	}
+	if artifactPreprocessOptions := artifactBoolMap(response.Artifact, "preprocess_options"); len(artifactPreprocessOptions) > 0 {
+		cleanMetadata["clean_preprocess_options"] = artifactPreprocessOptions
+	}
+	for _, key := range []string{
+		"source_input_char_count",
+		"cleaned_input_char_count",
+		"clean_reduced_char_count",
+	} {
+		if value, ok := artifactInt(response.Artifact, key); ok {
+			cleanMetadata[key] = value
+		}
+	}
+	if summary, ok := response.Artifact["summary"].(map[string]any); ok {
+		cleanMetadata["clean_summary"] = summary
+		if value, ok := summary["output_row_count"]; ok {
+			if intValue, ok := anyToInt(value); ok {
+				version.RecordCount = &intValue
+			}
+		}
+	}
+	version.Metadata = mergeStringAny(version.Metadata, cleanMetadata)
+	delete(version.Metadata, "clean_error")
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	enrichDatasetVersionView(&version)
+	return version, nil
+}
+
 func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest) (domain.DatasetVersion, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
@@ -1902,22 +2040,37 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if version.DataType == "structured" {
 		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "dataset prepare requires unstructured or mixed dataset version"}
 	}
+	if status := cleanStatus(version); status == "queued" || status == "cleaning" || status == "failed" || status == "stale" {
+		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "dataset clean must be ready before prepare"}
+	}
 
 	force := input.Force != nil && *input.Force
 	if version.PrepareStatus == "ready" && version.PrepareURI != nil && !force {
 		return version, nil
 	}
 
-	textSelection := resolveDatasetBuildTextSelection(
-		version.Metadata,
-		input.TextColumns,
-	)
+	datasetName, defaultPrepareColumns := datasetSourceForPrepare(version)
+	requestedColumns := input.TextColumns
+	if len(normalizeStringList(requestedColumns)) == 0 && len(defaultPrepareColumns) > 0 {
+		requestedColumns = defaultPrepareColumns
+	}
+	textSelection := resolveDatasetBuildTextSelection(version.Metadata, requestedColumns)
 	if len(textSelection.Columns) == 0 {
 		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "text_columns is required for dataset prepare"}
 	}
 	textColumn := textSelection.TextColumn
 	textColumns := textSelection.Columns
 	textJoiner := textSelection.Joiner
+	rawTextColumn := textColumn
+	rawTextColumns := append([]string(nil), textColumns...)
+	if isCleanReady(version) {
+		if value := metadataString(version.Metadata, "raw_text_column", ""); value != "" {
+			rawTextColumn = value
+		}
+		if values := metadataStringList(version.Metadata, "raw_text_columns"); len(values) > 0 {
+			rawTextColumns = values
+		}
+	}
 
 	outputPath := s.derivePrepareURI(version)
 	if input.OutputPath != nil && strings.TrimSpace(*input.OutputPath) != "" {
@@ -1931,7 +2084,6 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if err != nil {
 		return domain.DatasetVersion{}, err
 	}
-	preprocessOptions := resolvePreparePreprocessOptions(version.Metadata, input.PreprocessOptions)
 	progressPath := outputPath + ".progress.json"
 
 	version.PrepareStatus = "preparing"
@@ -1946,8 +2098,8 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	version.Metadata["text_column"] = textColumn
 	version.Metadata["text_columns"] = append([]string(nil), textColumns...)
 	version.Metadata["text_joiner"] = textJoiner
-	version.Metadata["raw_text_column"] = textColumn
-	version.Metadata["raw_text_columns"] = append([]string(nil), textColumns...)
+	version.Metadata["raw_text_column"] = rawTextColumn
+	version.Metadata["raw_text_columns"] = append([]string(nil), rawTextColumns...)
 	version.Metadata["prepare_progress_ref"] = progressPath
 	if maxRows > 0 {
 		version.Metadata["prepare_max_rows"] = maxRows
@@ -1956,11 +2108,6 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	}
 	if batchSize > 0 {
 		version.Metadata["prepare_batch_size"] = batchSize
-	}
-	if hasEnabledPreparePreprocessOption(preprocessOptions) {
-		version.Metadata["prepare_preprocess_options"] = cloneStringBoolMap(preprocessOptions)
-	} else {
-		delete(version.Metadata, "prepare_preprocess_options")
 	}
 	if input.Model != nil && strings.TrimSpace(*input.Model) != "" {
 		model := strings.TrimSpace(*input.Model)
@@ -1988,7 +2135,7 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 
 	payload := map[string]any{
 		"dataset_version_id": version.DatasetVersionID,
-		"dataset_name":       version.StorageURI,
+		"dataset_name":       datasetName,
 		"text_column":        textColumn,
 		"text_columns":       append([]string(nil), textColumns...),
 		"text_joiner":        textJoiner,
@@ -2002,10 +2149,7 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if batchSize > 0 {
 		payload["prepare_batch_size"] = batchSize
 	}
-	if len(preprocessOptions) > 0 {
-		payload["preprocess_options"] = cloneStringBoolMap(preprocessOptions)
-	}
-	if version.Profile != nil {
+	if version.Profile != nil && !isCleanReady(version) {
 		if len(version.Profile.RegexRuleNames) > 0 {
 			payload["regex_rule_names"] = append([]string(nil), version.Profile.RegexRuleNames...)
 		}
@@ -2053,8 +2197,8 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 		"text_column":          textColumn,
 		"text_columns":         append([]string(nil), textColumns...),
 		"text_joiner":          textJoiner,
-		"raw_text_column":      textColumn,
-		"raw_text_columns":     append([]string(nil), textColumns...),
+		"raw_text_column":      rawTextColumn,
+		"raw_text_columns":     append([]string(nil), rawTextColumns...),
 		"prepared_text_column": preparedTextColumn,
 	}
 	if prepareRef != "" {
@@ -2074,19 +2218,6 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	}
 	if artifactMaxRows, ok := artifactInt(response.Artifact, "max_rows"); ok && artifactMaxRows > 0 {
 		prepareMetadata["prepare_max_rows"] = artifactMaxRows
-	}
-	if artifactPreprocessOptions := artifactBoolMap(response.Artifact, "preprocess_options"); hasEnabledPreparePreprocessOption(artifactPreprocessOptions) {
-		prepareMetadata["prepare_preprocess_options"] = artifactPreprocessOptions
-	}
-	for _, key := range []string{
-		"source_input_char_count",
-		"llm_input_char_count",
-		"preprocess_reduced_char_count",
-		"preprocess_empty_drop_count",
-	} {
-		if value, ok := artifactInt(response.Artifact, key); ok {
-			prepareMetadata[key] = value
-		}
 	}
 	if usage := artifactMap(response.Artifact, "usage"); len(usage) > 0 {
 		prepareMetadata["prepare_usage"] = usage
@@ -2129,6 +2260,142 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	result := s.maybeRunEagerSentiment(projectID, datasetID, version)
 	enrichDatasetVersionView(&result)
 	return result, nil
+}
+
+func (s *DatasetService) BuildPrepareSample(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest) (domain.DatasetPrepareSampleResponse, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetPrepareSampleResponse{}, err
+	}
+	if version.DataType == "structured" {
+		return domain.DatasetPrepareSampleResponse{}, ErrInvalidArgument{Message: "dataset prepare sample requires unstructured or mixed dataset version"}
+	}
+	if status := cleanStatus(version); status == "queued" || status == "cleaning" || status == "failed" || status == "stale" {
+		return domain.DatasetPrepareSampleResponse{}, ErrInvalidArgument{Message: "dataset clean must be ready before prepare sample"}
+	}
+
+	datasetName, defaultPrepareColumns := datasetSourceForPrepare(version)
+	requestedColumns := input.TextColumns
+	if len(normalizeStringList(requestedColumns)) == 0 && len(defaultPrepareColumns) > 0 {
+		requestedColumns = defaultPrepareColumns
+	}
+	textSelection := resolveDatasetBuildTextSelection(version.Metadata, requestedColumns)
+	if len(textSelection.Columns) == 0 {
+		return domain.DatasetPrepareSampleResponse{}, ErrInvalidArgument{Message: "text_columns is required for dataset prepare sample"}
+	}
+
+	maxRows, err := normalizeOptionalPositiveInt(input.MaxRows, "max_rows")
+	if err != nil {
+		return domain.DatasetPrepareSampleResponse{}, err
+	}
+	if maxRows == 0 {
+		maxRows = 10
+	}
+	batchSize, err := normalizeOptionalPositiveInt(input.BatchSize, "batch_size")
+	if err != nil {
+		return domain.DatasetPrepareSampleResponse{}, err
+	}
+
+	outputPath := ""
+	if path, ok := s.datasetArtifactPath(version, "prepare_sample", fmt.Sprintf("sample-%s.parquet", id.New())); ok {
+		outputPath = path
+	} else {
+		handle, createErr := os.CreateTemp("", "prepare-sample-*.parquet")
+		if createErr != nil {
+			return domain.DatasetPrepareSampleResponse{}, createErr
+		}
+		outputPath = handle.Name()
+		_ = handle.Close()
+		_ = os.Remove(outputPath)
+	}
+	if err := ensureParentDir(outputPath); err != nil {
+		return domain.DatasetPrepareSampleResponse{}, err
+	}
+
+	var configuredPreparePromptVersion *string
+	if version.Profile != nil {
+		configuredPreparePromptVersion = version.Profile.PreparePromptVersion
+	}
+	preparePromptVersion, err := s.resolveEffectiveProjectPromptVersion(projectID, configuredPreparePromptVersion, "prepare")
+	if err != nil {
+		return domain.DatasetPrepareSampleResponse{}, err
+	}
+	projectPromptOverride, err := s.resolveProjectPromptTemplates(projectID, preparePromptVersion, "prepare", "prepare_batch")
+	if err != nil {
+		return domain.DatasetPrepareSampleResponse{}, err
+	}
+
+	payload := map[string]any{
+		"dataset_version_id": version.DatasetVersionID,
+		"dataset_name":       datasetName,
+		"text_column":        textSelection.TextColumn,
+		"text_columns":       append([]string(nil), textSelection.Columns...),
+		"text_joiner":        textSelection.Joiner,
+		"output_path":        outputPath,
+		"llm_mode":           version.PrepareLLMMode,
+		"max_rows":           maxRows,
+	}
+	if batchSize > 0 {
+		payload["prepare_batch_size"] = batchSize
+	}
+	if version.Profile != nil && !isCleanReady(version) && len(version.Profile.RegexRuleNames) > 0 {
+		payload["regex_rule_names"] = append([]string(nil), version.Profile.RegexRuleNames...)
+	}
+	if preparePromptVersion != "" {
+		payload["prepare_prompt_version"] = preparePromptVersion
+	}
+	if projectPromptOverride.UsesProjectSlot {
+		payload["prepare_prompt_template"] = projectPromptOverride.RowTemplate
+		if projectPromptOverride.BatchTemplate != "" {
+			payload["prepare_batch_prompt_template"] = projectPromptOverride.BatchTemplate
+		} else {
+			payload["prepare_batch_size"] = 1
+		}
+	}
+	if input.Model != nil && strings.TrimSpace(*input.Model) != "" {
+		payload["model"] = strings.TrimSpace(*input.Model)
+	} else if version.PrepareModel != nil && strings.TrimSpace(*version.PrepareModel) != "" {
+		payload["model"] = strings.TrimSpace(*version.PrepareModel)
+	}
+
+	response, err := s.runWorkerTask(context.Background(), "/tasks/dataset_prepare", payload)
+	if err != nil {
+		return domain.DatasetPrepareSampleResponse{}, err
+	}
+
+	preparedRef := artifactString(response.Artifact, "prepared_ref")
+	if preparedRef == "" {
+		preparedRef = artifactString(response.Artifact, "prepare_uri")
+	}
+	if preparedRef == "" {
+		preparedRef = outputPath
+	}
+	prepareFormat := artifactString(response.Artifact, "prepare_format")
+	if prepareFormat == "" {
+		prepareFormat = inferArtifactFormat(preparedRef, "parquet")
+	}
+	if prepareFormat != "parquet" {
+		return domain.DatasetPrepareSampleResponse{}, ErrInvalidArgument{Message: "prepare sample supports parquet artifact only"}
+	}
+
+	samples, err := loadPrepareSamplesFromParquet(preparedRef, maxRows, "")
+	if err != nil {
+		return domain.DatasetPrepareSampleResponse{}, err
+	}
+	var summary *domain.DatasetPrepareSummary
+	if rawSummary, ok := response.Artifact["summary"].(map[string]any); ok {
+		summary = buildPrepareSummary(map[string]any{"prepare_summary": rawSummary})
+	}
+	return domain.DatasetPrepareSampleResponse{
+		ProjectID:        projectID,
+		DatasetID:        datasetID,
+		DatasetVersionID: datasetVersionID,
+		PreparedRef:      preparedRef,
+		PrepareFormat:    prepareFormat,
+		SampleLimit:      maxRows,
+		Summary:          summary,
+		Samples:          samples,
+	}, nil
 }
 
 func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error) {
@@ -2686,6 +2953,8 @@ func (e workerTaskHTTPError) Error() string {
 
 func workerTaskTimeout(taskPath string) time.Duration {
 	switch strings.TrimSpace(taskPath) {
+	case "/tasks/dataset_clean":
+		return 20 * time.Minute
 	case "/tasks/dataset_prepare":
 		return workerTaskTimeoutPrepare
 	case "/tasks/sentiment_label":
@@ -2867,6 +3136,16 @@ func (s *DatasetService) deriveSentimentURI(version domain.DatasetVersion) strin
 	return base + ".sentiment.parquet"
 }
 
+func (s *DatasetService) deriveCleanURI(version domain.DatasetVersion) string {
+	if ref := strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", "")); ref != "" {
+		return ref
+	}
+	if path, ok := s.datasetArtifactPath(version, "clean", "cleaned.parquet"); ok {
+		return path
+	}
+	return strings.TrimSpace(version.StorageURI) + ".cleaned.parquet"
+}
+
 func (s *DatasetService) derivePrepareURI(version domain.DatasetVersion) string {
 	if version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != "" {
 		return strings.TrimSpace(*version.PrepareURI)
@@ -2998,25 +3277,25 @@ func resolveDatasetBuildTextSelection(
 	}
 }
 
-func resolvePreparePreprocessOptions(
+func resolveCleanPreprocessOptions(
 	metadata map[string]any,
-	input *domain.DatasetPreparePreprocessOptions,
+	input *domain.DatasetCleanPreprocessOptions,
 ) map[string]bool {
 	if input != nil {
-		return preparePreprocessOptionsFromDomain(input)
+		return cleanPreprocessOptionsFromDomain(input)
 	}
 	if metadata == nil {
-		return defaultPreparePreprocessOptions()
+		return defaultCleanPreprocessOptions()
 	}
-	for _, key := range []string{"prepare_preprocess_options", "preprocess_options"} {
-		if options := preparePreprocessOptionsFromAny(metadata[key]); len(options) > 0 {
+	for _, key := range []string{"clean_preprocess_options", "preprocess_options"} {
+		if options := cleanPreprocessOptionsFromAny(metadata[key]); len(options) > 0 {
 			return options
 		}
 	}
-	return defaultPreparePreprocessOptions()
+	return defaultCleanPreprocessOptions()
 }
 
-func defaultPreparePreprocessOptions() map[string]bool {
+func defaultCleanPreprocessOptions() map[string]bool {
 	return map[string]bool{
 		"remove_english":       false,
 		"remove_numbers":       false,
@@ -3025,9 +3304,9 @@ func defaultPreparePreprocessOptions() map[string]bool {
 	}
 }
 
-func preparePreprocessOptionsFromDomain(input *domain.DatasetPreparePreprocessOptions) map[string]bool {
+func cleanPreprocessOptionsFromDomain(input *domain.DatasetCleanPreprocessOptions) map[string]bool {
 	if input == nil {
-		return defaultPreparePreprocessOptions()
+		return defaultCleanPreprocessOptions()
 	}
 	return map[string]bool{
 		"remove_english":       input.RemoveEnglish,
@@ -3037,8 +3316,8 @@ func preparePreprocessOptionsFromDomain(input *domain.DatasetPreparePreprocessOp
 	}
 }
 
-func preparePreprocessOptionsFromAny(value any) map[string]bool {
-	result := defaultPreparePreprocessOptions()
+func cleanPreprocessOptionsFromAny(value any) map[string]bool {
+	result := defaultCleanPreprocessOptions()
 	hasKnownKey := false
 	if source, ok := value.(map[string]bool); ok {
 		for key := range result {
@@ -3097,6 +3376,25 @@ func metadataRawString(metadata map[string]any, key string) (string, bool) {
 		return "", false
 	}
 	return anyStringValue(value), true
+}
+
+func metadataTime(metadata map[string]any, key string) (time.Time, bool) {
+	if metadata == nil {
+		return time.Time{}, false
+	}
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return time.Time{}, false
+	}
+	switch typed := value.(type) {
+	case time.Time:
+		return typed, true
+	case string:
+		parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(typed))
+		return parsed, err == nil
+	default:
+		return time.Time{}, false
+	}
 }
 
 func metadataStringList(metadata map[string]any, key string) []string {
@@ -3166,7 +3464,40 @@ func enrichDatasetVersionView(version *domain.DatasetVersion) {
 	if version == nil {
 		return
 	}
+	version.CleanStatus = cleanStatus(*version)
+	if cleanedRef := metadataString(version.Metadata, "cleaned_ref", ""); cleanedRef != "" {
+		version.CleanedRef = &cleanedRef
+	}
+	if cleanedAt, ok := metadataTime(version.Metadata, "cleaned_at"); ok {
+		version.CleanedAt = &cleanedAt
+	}
+	version.CleanSummary = buildCleanSummary(version.Metadata)
 	version.PrepareSummary = buildPrepareSummary(version.Metadata)
+}
+
+func buildCleanSummary(metadata map[string]any) *domain.DatasetCleanSummary {
+	if len(metadata) == 0 {
+		return nil
+	}
+	raw, ok := metadata["clean_summary"].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	return &domain.DatasetCleanSummary{
+		InputRowCount:         intValueOrZero(raw["input_row_count"]),
+		OutputRowCount:        intValueOrZero(raw["output_row_count"]),
+		KeptCount:             intValueOrZero(raw["kept_count"]),
+		DroppedCount:          intValueOrZero(raw["dropped_count"]),
+		SkippedRowCount:       intValueOrZero(raw["skipped_row_count"]),
+		TextColumn:            strings.TrimSpace(anyStringValue(raw["text_column"])),
+		TextColumns:           anyStringList(raw["text_columns"]),
+		TextJoiner:            anyStringValue(raw["text_joiner"]),
+		PreprocessOptions:     boolMapValue(raw["preprocess_options"]),
+		SourceInputCharCount:  intValueOrZero(raw["source_input_char_count"]),
+		CleanedInputCharCount: intValueOrZero(raw["cleaned_input_char_count"]),
+		CleanReducedCharCount: intValueOrZero(raw["clean_reduced_char_count"]),
+		CleanRegexRuleHits:    intMapValue(raw["clean_regex_rule_hits"]),
+	}
 }
 
 func buildSentimentSummary(metadata map[string]any) *domain.DatasetSentimentSummary {
@@ -3197,20 +3528,14 @@ func buildPrepareSummary(metadata map[string]any) *domain.DatasetPrepareSummary 
 		return nil
 	}
 	return &domain.DatasetPrepareSummary{
-		InputRowCount:              intValueOrZero(raw["input_row_count"]),
-		OutputRowCount:             intValueOrZero(raw["output_row_count"]),
-		KeptCount:                  intValueOrZero(raw["kept_count"]),
-		ReviewCount:                intValueOrZero(raw["review_count"]),
-		DroppedCount:               intValueOrZero(raw["dropped_count"]),
-		TextColumn:                 strings.TrimSpace(anyStringValue(raw["text_column"])),
-		TextColumns:                anyStringList(raw["text_columns"]),
-		TextJoiner:                 anyStringValue(raw["text_joiner"]),
-		PreprocessOptions:          boolMapValue(raw["preprocess_options"]),
-		SourceInputCharCount:       intValueOrZero(raw["source_input_char_count"]),
-		LLMInputCharCount:          intValueOrZero(raw["llm_input_char_count"]),
-		PreprocessReducedCharCount: intValueOrZero(raw["preprocess_reduced_char_count"]),
-		PreprocessEmptyDropCount:   intValueOrZero(raw["preprocess_empty_drop_count"]),
-		PrepareRegexRuleHits:       intMapValue(raw["prepare_regex_rule_hits"]),
+		InputRowCount:  intValueOrZero(raw["input_row_count"]),
+		OutputRowCount: intValueOrZero(raw["output_row_count"]),
+		KeptCount:      intValueOrZero(raw["kept_count"]),
+		ReviewCount:    intValueOrZero(raw["review_count"]),
+		DroppedCount:   intValueOrZero(raw["dropped_count"]),
+		TextColumn:     strings.TrimSpace(anyStringValue(raw["text_column"])),
+		TextColumns:    anyStringList(raw["text_columns"]),
+		TextJoiner:     anyStringValue(raw["text_joiner"]),
 	}
 }
 
@@ -3236,12 +3561,6 @@ func clonePrepareSummary(summary *domain.DatasetPrepareSummary) *domain.DatasetP
 	if len(summary.TextColumns) > 0 {
 		cloned.TextColumns = append([]string(nil), summary.TextColumns...)
 	}
-	if len(summary.PrepareRegexRuleHits) > 0 {
-		cloned.PrepareRegexRuleHits = cloneStringIntMap(summary.PrepareRegexRuleHits)
-	}
-	if len(summary.PreprocessOptions) > 0 {
-		cloned.PreprocessOptions = cloneStringBoolMap(summary.PreprocessOptions)
-	}
 	return &cloned
 }
 
@@ -3249,7 +3568,22 @@ func datasetSourceForUnstructured(version domain.DatasetVersion) string {
 	if isPrepareReady(version) && version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != "" {
 		return strings.TrimSpace(*version.PrepareURI)
 	}
+	if isCleanReady(version) {
+		return strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
+	}
 	return strings.TrimSpace(version.StorageURI)
+}
+
+func datasetSourceForPrepare(version domain.DatasetVersion) (string, []string) {
+	if isCleanReady(version) {
+		cleanedRef := strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
+		cleanedTextColumn := strings.TrimSpace(metadataString(version.Metadata, "cleaned_text_column", "cleaned_text"))
+		if cleanedTextColumn == "" {
+			cleanedTextColumn = "cleaned_text"
+		}
+		return cleanedRef, []string{cleanedTextColumn}
+	}
+	return strings.TrimSpace(version.StorageURI), nil
 }
 
 func datasetSourceForSentiment(version domain.DatasetVersion) string {
@@ -3270,7 +3604,16 @@ func defaultPrepareRequired(dataType string, value *bool) bool {
 	if value != nil {
 		return *value
 	}
-	return dataType == "unstructured" || dataType == "mixed" || dataType == "both"
+	return false
+}
+
+func requiresClean(version domain.DatasetVersion) bool {
+	switch version.DataType {
+	case "unstructured", "mixed", "both":
+		return cleanStatus(version) != "not_applicable"
+	default:
+		return false
+	}
 }
 
 func requiresPrepare(version domain.DatasetVersion) bool {
@@ -3289,6 +3632,23 @@ func requiresSentiment(version domain.DatasetVersion) bool {
 	default:
 		return false
 	}
+}
+
+func cleanStatus(version domain.DatasetVersion) string {
+	status := strings.TrimSpace(metadataString(version.Metadata, "clean_status", ""))
+	if status != "" {
+		return status
+	}
+	switch version.DataType {
+	case "unstructured", "mixed", "both":
+		return "not_requested"
+	default:
+		return "not_applicable"
+	}
+}
+
+func isCleanReady(version domain.DatasetVersion) bool {
+	return cleanStatus(version) == "ready" && strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", "")) != ""
 }
 
 func isPrepareReady(version domain.DatasetVersion) bool {

@@ -135,12 +135,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}", s.handleGetDatasetVersion)
 	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}", s.handleDeleteDatasetVersion)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/source_download", s.handleDownloadSourceDataset)
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_jobs", s.handleCreateCleanJob)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_preview", s.handleGetPreparePreview)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_download", s.handleDownloadPreparedDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_preview", s.handleGetSentimentPreview)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_download", s.handleDownloadSentimentDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clusters/{cluster_id}/members", s.handleGetClusterMembers)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare", s.handleBuildPrepare)
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_sample", s.handlePrepareSample)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs", s.handleCreatePrepareJob)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment", s.handleBuildSentiment)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_jobs", s.handleCreateSentimentJob)
@@ -863,10 +865,6 @@ func (s *Server) handleBuildPrepare(w stdhttp.ResponseWriter, r *stdhttp.Request
 		writeError(w, stdhttp.StatusBadRequest, err.Error())
 		return
 	}
-	if !hasTextColumns(payload.TextColumns) {
-		writeError(w, stdhttp.StatusBadRequest, "text_columns is required")
-		return
-	}
 	response, err := s.datasetService.BuildPrepare(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
@@ -880,14 +878,49 @@ func (s *Server) handleBuildPrepare(w stdhttp.ResponseWriter, r *stdhttp.Request
 	writeJSON(w, stdhttp.StatusAccepted, response)
 }
 
-func (s *Server) handleCreatePrepareJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+func (s *Server) handleCreateCleanJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetCleanRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreateCleanJob(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		payload,
+		"api",
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusAccepted, response)
+}
+
+func (s *Server) handlePrepareSample(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	var payload domain.DatasetPrepareRequest
 	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
 		writeError(w, stdhttp.StatusBadRequest, err.Error())
 		return
 	}
-	if !hasTextColumns(payload.TextColumns) {
-		writeError(w, stdhttp.StatusBadRequest, "text_columns is required")
+	response, err := s.datasetService.BuildPrepareSample(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		payload,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleCreatePrepareJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetPrepareRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
 		return
 	}
 	response, err := s.datasetService.CreatePrepareJob(

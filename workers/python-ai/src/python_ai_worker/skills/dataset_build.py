@@ -217,6 +217,22 @@ def _prepare_output_schema() -> Any:
     )
 
 
+def _clean_output_schema() -> Any:
+    arrow, _ = rt._require_pyarrow()
+    return arrow.schema(
+        [
+            ("source_row_index", arrow.int64()),
+            ("row_id", arrow.string()),
+            ("raw_text", arrow.string()),
+            ("cleaned_text", arrow.string()),
+            ("clean_disposition", arrow.string()),
+            ("clean_reason", arrow.string()),
+            ("clean_flags", arrow.list_(arrow.string())),
+            ("clean_regex_applied_rules", arrow.list_(arrow.string())),
+        ]
+    )
+
+
 def _chunk_output_schema() -> Any:
     arrow, _ = rt._require_pyarrow()
     return arrow.schema(
@@ -328,6 +344,150 @@ def _split_text_chunks(
     return chunks
 
 
+def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = rt._normalize_dataset_clean_payload(payload)
+    rows = rt._iter_rows(normalized["dataset_name"])
+    source_row_count = len(rows)
+    output_path = Path(normalized["output_path"])
+    output_format = _artifact_output_format(output_path, "clean")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path = normalized["progress_path"]
+    started_at = time.monotonic()
+    _write_progress(
+        progress_path,
+        processed_rows=0,
+        total_rows=source_row_count,
+        started_at=started_at,
+        message="clean queued",
+    )
+
+    kept_count = 0
+    dropped_count = 0
+    skipped_rows = 0
+    regex_rule_hits: Counter[str] = Counter()
+    source_input_char_count = 0
+    cleaned_input_char_count = 0
+    cleaned_rows: list[dict[str, Any]] = []
+
+    handle = output_path.open("w", encoding="utf-8") if output_format == "jsonl" else None
+    try:
+        for source_index, row in enumerate(rows):
+            raw_text = _joined_text(row, normalized["text_columns"], normalized["text_joiner"])
+            if not raw_text:
+                skipped_rows += 1
+                dropped_count += 1
+                _write_progress(
+                    progress_path,
+                    processed_rows=source_index + 1,
+                    total_rows=source_row_count,
+                    started_at=started_at,
+                    message="clean scanning rows",
+                )
+                continue
+
+            regex_cleaned_text, applied_regex_rules = rt._apply_prepare_regex_rules(raw_text, normalized["regex_rule_names"])
+            regex_rule_hits.update(applied_regex_rules)
+            cleaned_text = rt._prepare_preprocess_text(regex_cleaned_text, normalized["preprocess_options"])
+            source_input_char_count += len(raw_text)
+            cleaned_input_char_count += len(cleaned_text)
+            if not cleaned_text:
+                dropped_count += 1
+                continue
+
+            kept_count += 1
+            cleaned_row = dict(row)
+            cleaned_row["source_row_index"] = source_index
+            cleaned_row["row_id"] = _row_id(cleaned_row, source_index, normalized["dataset_version_id"])
+            cleaned_row["raw_text"] = raw_text
+            cleaned_row["cleaned_text"] = cleaned_text
+            cleaned_row["clean_disposition"] = "keep"
+            cleaned_row["clean_reason"] = "text kept after deterministic cleaning"
+            cleaned_row["clean_flags"] = ["cleaned"] if cleaned_text != raw_text.strip() else []
+            cleaned_row["clean_regex_applied_rules"] = list(applied_regex_rules)
+            cleaned_rows.append(cleaned_row)
+            if handle is not None:
+                handle.write(json.dumps(cleaned_row, ensure_ascii=False))
+                handle.write("\n")
+
+            _write_progress(
+                progress_path,
+                processed_rows=source_index + 1,
+                total_rows=source_row_count,
+                started_at=started_at,
+                message="clean processing rows",
+            )
+    except Exception:
+        _write_progress(
+            progress_path,
+            processed_rows=len(cleaned_rows),
+            total_rows=source_row_count,
+            started_at=started_at,
+            message="clean failed",
+        )
+        raise
+    finally:
+        if handle is not None:
+            handle.close()
+
+    if output_format == "parquet":
+        rt._write_parquet_rows(output_path, cleaned_rows, schema=_clean_output_schema())
+    _write_progress(
+        progress_path,
+        processed_rows=source_row_count,
+        total_rows=source_row_count,
+        started_at=started_at,
+        message="clean completed",
+    )
+
+    summary = {
+        "input_row_count": source_row_count,
+        "output_row_count": kept_count,
+        "kept_count": kept_count,
+        "dropped_count": dropped_count,
+        "skipped_row_count": skipped_rows,
+        "text_column": normalized["text_column"],
+        "text_columns": list(normalized["text_columns"]),
+        "text_joiner": normalized["text_joiner"],
+        "preprocess_options": dict(normalized["preprocess_options"]),
+        "source_input_char_count": source_input_char_count,
+        "cleaned_input_char_count": cleaned_input_char_count,
+        "clean_reduced_char_count": max(0, source_input_char_count - cleaned_input_char_count),
+        "clean_regex_rule_names": list(normalized["regex_rule_names"]),
+        "clean_regex_rule_hits": dict(regex_rule_hits),
+    }
+
+    return {
+        "notes": [
+            "dataset clean artifact generated by python-ai worker",
+            f"dataset source: {normalized['dataset_name']}",
+            f"cleaned output: {output_path}",
+            f"clean regex rules: {', '.join(normalized['regex_rule_names'])}",
+        ],
+        "artifact": {
+            "skill_name": "dataset_clean",
+            "dataset_version_id": normalized["dataset_version_id"],
+            "source_dataset_name": normalized["dataset_name"],
+            "clean_uri": str(output_path),
+            "cleaned_ref": str(output_path),
+            "clean_format": output_format,
+            "progress_ref": progress_path,
+            "text_column": normalized["text_column"],
+            "text_columns": list(normalized["text_columns"]),
+            "text_joiner": normalized["text_joiner"],
+            "raw_text_column": normalized["text_column"],
+            "raw_text_columns": list(normalized["text_columns"]),
+            "cleaned_text_column": "cleaned_text",
+            "row_id_column": "row_id",
+            "preprocess_options": dict(normalized["preprocess_options"]),
+            "source_input_char_count": source_input_char_count,
+            "cleaned_input_char_count": cleaned_input_char_count,
+            "clean_reduced_char_count": max(0, source_input_char_count - cleaned_input_char_count),
+            "clean_regex_rule_names": list(normalized["regex_rule_names"]),
+            "summary": summary,
+        },
+    }
+
+
 def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_prepare_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
@@ -353,10 +513,6 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     review_count = 0
     dropped_count = 0
     skipped_rows = 0
-    regex_rule_hits: Counter[str] = Counter()
-    source_input_char_count = 0
-    llm_input_char_count = 0
-    preprocess_empty_drop_count = 0
     prepared_batch: list[tuple[int, dict[str, Any], str, str, list[str]]] = []
     prepared_rows: list[dict[str, Any]] = []
     usage_records: list[dict[str, Any]] = []
@@ -377,24 +533,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 )
                 continue
 
-            regex_cleaned_text, applied_regex_rules = rt._apply_prepare_regex_rules(raw_text, normalized["regex_rule_names"])
-            regex_rule_hits.update(applied_regex_rules)
-            llm_input_text = rt._prepare_preprocess_text(regex_cleaned_text, normalized["preprocess_options"])
-            source_input_char_count += len(raw_text)
-            llm_input_char_count += len(llm_input_text)
-            if not llm_input_text:
-                dropped_count += 1
-                preprocess_empty_drop_count += 1
-                _write_progress(
-                    progress_path,
-                    processed_rows=processed_source_rows,
-                    total_rows=len(rows),
-                    started_at=started_at,
-                    message="prepare scanning rows",
-                )
-                continue
-
-            prepared_batch.append((source_index, row, raw_text, llm_input_text, applied_regex_rules))
+            prepared_batch.append((source_index, row, raw_text, raw_text, []))
             if len(prepared_batch) >= normalized["prepare_batch_size"]:
                 batch_results, batch_usage = rt._prepare_rows(
                     [item[3] for item in prepared_batch],
@@ -480,7 +619,6 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
         "dataset prepare artifact generated by python-ai worker",
         f"dataset source: {normalized['dataset_name']}",
         f"prepared output: {output_path}",
-        f"prepare regex rules: {', '.join(normalized['regex_rule_names'])}",
     ]
     usage = rt._merge_usage_records(usage_records)
     usage_provider = str(usage.get("provider") or "").strip()
@@ -532,14 +670,8 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
             "prepare_prompt_version": prompt_version,
             "prepare_strategy": prepare_strategy,
             "prepare_batch_size": normalized["prepare_batch_size"],
-            "preprocess_options": dict(normalized["preprocess_options"]),
-            "source_input_char_count": source_input_char_count,
-            "llm_input_char_count": llm_input_char_count,
-            "preprocess_reduced_char_count": max(0, source_input_char_count - llm_input_char_count),
-            "preprocess_empty_drop_count": preprocess_empty_drop_count,
             "max_rows": normalized["max_rows"],
             "progress_ref": progress_path,
-            "prepare_regex_rule_names": list(normalized["regex_rule_names"]),
             "llm_provider": "anthropic" if attempted_llm_model else "",
             "llm_model": attempted_llm_model,
             "llm_fallback": llm_fallback_count > 0,
@@ -564,13 +696,6 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 "text_columns": list(normalized["text_columns"]),
                 "text_joiner": normalized["text_joiner"],
                 "prepare_batch_size": normalized["prepare_batch_size"],
-                "preprocess_options": dict(normalized["preprocess_options"]),
-                "source_input_char_count": source_input_char_count,
-                "llm_input_char_count": llm_input_char_count,
-                "preprocess_reduced_char_count": max(0, source_input_char_count - llm_input_char_count),
-                "preprocess_empty_drop_count": preprocess_empty_drop_count,
-                "prepare_regex_rule_names": list(normalized["regex_rule_names"]),
-                "prepare_regex_rule_hits": dict(regex_rule_hits),
             },
             "usage": usage,
         },
@@ -601,7 +726,7 @@ def _write_prepared_rows(
         prepared_row = dict(row)
         prepared_row["source_row_index"] = source_index
         prepared_row["row_id"] = _row_id(prepared_row, source_index, dataset_version_id)
-        prepared_row["raw_text"] = raw_text
+        prepared_row["raw_text"] = str(row.get("raw_text") or raw_text)
         prepared_row["normalized_text"] = prepared["normalized_text"]
         prepared_row["prepare_disposition"] = disposition
         prepared_row["prepare_reason"] = prepared["reason"]

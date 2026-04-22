@@ -43,6 +43,7 @@ type DatasetBuildLifecycleResult struct {
 }
 
 type DatasetBuildRunner interface {
+	BuildClean(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest) (domain.DatasetVersion, error)
 	BuildPrepare(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest) (domain.DatasetVersion, error)
 	BuildSentiment(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest) (domain.DatasetVersion, error)
 	BuildEmbeddings(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error)
@@ -210,6 +211,13 @@ func (a *DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, inp
 	defer release()
 
 	switch job.BuildType {
+	case "clean":
+		request, err := decodeBuildRequest[domain.DatasetCleanRequest](job.Request)
+		if err != nil {
+			return temporal.NewNonRetryableApplicationError(err.Error(), "invalid_request", err)
+		}
+		_, err = a.Builder.BuildClean(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
+		return classifyDatasetBuildError(err)
 	case "prepare":
 		request, err := decodeBuildRequest[domain.DatasetPrepareRequest](job.Request)
 		if err != nil {
@@ -372,6 +380,8 @@ func datasetBuildExecuteActivityOptions(buildType string) workflow.ActivityOptio
 	timeout := 20 * time.Minute
 	maxAttempts := int32(4)
 	switch buildType {
+	case "clean":
+		timeout = 20 * time.Minute
 	case "prepare":
 		timeout = 75 * time.Minute
 	case "sentiment":
@@ -412,6 +422,7 @@ func classifyDatasetBuildError(err error) error {
 	}
 	message := strings.ToLower(strings.TrimSpace(err.Error()))
 	if strings.Contains(message, "requires unstructured or mixed dataset version") ||
+		strings.Contains(message, "dataset clean requires") ||
 		strings.Contains(message, "must be ready before") ||
 		strings.Contains(message, "storage_uri is required") ||
 		strings.Contains(message, "file is required") {
@@ -493,6 +504,7 @@ func (a *DatasetBuildActivities) getLimiter() *datasetBuildLimiter {
 }
 
 type datasetBuildLimiter struct {
+	clean     chan struct{}
 	prepare   chan struct{}
 	sentiment chan struct{}
 	embedding chan struct{}
@@ -501,6 +513,7 @@ type datasetBuildLimiter struct {
 
 func newDatasetBuildLimiter(limits DatasetBuildConcurrencyLimits) *datasetBuildLimiter {
 	return &datasetBuildLimiter{
+		clean:     makeSemaphore(limits.Prepare),
 		prepare:   makeSemaphore(limits.Prepare),
 		sentiment: makeSemaphore(limits.Sentiment),
 		embedding: makeSemaphore(limits.Embedding),
@@ -525,6 +538,8 @@ func (l *datasetBuildLimiter) acquire(ctx context.Context, buildType string) (fu
 
 func (l *datasetBuildLimiter) semaphore(buildType string) chan struct{} {
 	switch buildType {
+	case "clean":
+		return l.clean
 	case "prepare":
 		return l.prepare
 	case "sentiment":

@@ -1506,14 +1506,34 @@ func TestDeleteProjectAndDatasetEndpoints(t *testing.T) {
 func TestDatasetBuildJobEndpoints(t *testing.T) {
 	artifactRoot := t.TempDir()
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"artifact": map[string]any{
-				"prepare_uri":          filepath.Join(artifactRoot, "prepared.parquet"),
-				"prepared_ref":         filepath.Join(artifactRoot, "prepared.parquet"),
-				"prepare_format":       "parquet",
-				"prepared_text_column": "normalized_text",
-			},
-		})
+		switch r.URL.Path {
+		case "/tasks/dataset_clean":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"clean_uri":           filepath.Join(artifactRoot, "cleaned.parquet"),
+					"cleaned_ref":         filepath.Join(artifactRoot, "cleaned.parquet"),
+					"clean_format":        "parquet",
+					"cleaned_text_column": "cleaned_text",
+					"row_id_column":       "row_id",
+					"summary": map[string]any{
+						"input_row_count":  3,
+						"output_row_count": 3,
+						"kept_count":       3,
+					},
+				},
+			})
+		case "/tasks/dataset_prepare":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"prepare_uri":          filepath.Join(artifactRoot, "prepared.parquet"),
+					"prepared_ref":         filepath.Join(artifactRoot, "prepared.parquet"),
+					"prepare_format":       "parquet",
+					"prepared_text_column": "normalized_text",
+				},
+			})
+		default:
+			t.Fatalf("unexpected worker path: %s", r.URL.Path)
+		}
 	}))
 	defer worker.Close()
 
@@ -1540,11 +1560,28 @@ func TestDatasetBuildJobEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"issues.csv","data_type":"unstructured","prepare_required":false}`,
+		`{"storage_uri":"issues.csv","data_type":"unstructured","prepare_required":false,"metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&version,
 	)
 	versionID := version["dataset_version_id"].(string)
+
+	initialJobs := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/build_jobs",
+		"",
+		http.StatusOK,
+		&initialJobs,
+	)
+	initialItems := initialJobs["items"].([]any)
+	if len(initialItems) != 1 || initialItems[0].(map[string]any)["build_type"] != "clean" {
+		t.Fatalf("expected initial clean build job: %+v", initialJobs)
+	}
+	cleanJobID := initialItems[0].(map[string]any)["job_id"].(string)
+	waitForBuildJobStatusHTTP(t, handler, projectID, cleanJobID, "completed")
 
 	job := map[string]any{}
 	readJSONResponse(
@@ -1580,11 +1617,11 @@ func TestDatasetBuildJobEndpoints(t *testing.T) {
 		&listResponse,
 	)
 	items := listResponse["items"].([]any)
-	if len(items) != 1 {
+	if len(items) != 2 {
 		t.Fatalf("unexpected build job list: %+v", listResponse)
 	}
-	if diagnostics, ok := items[0].(map[string]any)["diagnostics"].(map[string]any); !ok || diagnostics["retry_count"] == nil {
-		t.Fatalf("expected build job diagnostics in list: %+v", listResponse)
+	if diagnostics, ok := items[1].(map[string]any)["diagnostics"].(map[string]any); !ok || diagnostics["retry_count"] == nil {
+		t.Fatalf("expected prepare build job diagnostics in list: %+v", listResponse)
 	}
 }
 
@@ -1592,26 +1629,42 @@ func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 	artifactRoot := t.TempDir()
 	preparedPath := ""
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"artifact": map[string]any{
-				"prepare_uri":          preparedPath,
-				"prepared_ref":         preparedPath,
-				"prepare_format":       "parquet",
-				"prepared_text_column": "normalized_text",
-				"row_id_column":        "row_id",
-				"summary": map[string]any{
-					"input_row_count":  3,
-					"output_row_count": 2,
-					"kept_count":       1,
-					"review_count":     1,
-					"dropped_count":    1,
-					"prepare_regex_rule_hits": map[string]any{
-						"html_artifact": 1,
-						"url_cleanup":   1,
+		switch r.URL.Path {
+		case "/tasks/dataset_clean":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"clean_uri":           filepath.Join(artifactRoot, "cleaned.parquet"),
+					"cleaned_ref":         filepath.Join(artifactRoot, "cleaned.parquet"),
+					"clean_format":        "parquet",
+					"cleaned_text_column": "cleaned_text",
+					"row_id_column":       "row_id",
+					"summary": map[string]any{
+						"input_row_count":  3,
+						"output_row_count": 3,
+						"kept_count":       3,
 					},
 				},
-			},
-		})
+			})
+		case "/tasks/dataset_prepare":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"prepare_uri":          preparedPath,
+					"prepared_ref":         preparedPath,
+					"prepare_format":       "parquet",
+					"prepared_text_column": "normalized_text",
+					"row_id_column":        "row_id",
+					"summary": map[string]any{
+						"input_row_count":  3,
+						"output_row_count": 2,
+						"kept_count":       1,
+						"review_count":     1,
+						"dropped_count":    1,
+					},
+				},
+			})
+		default:
+			t.Fatalf("unexpected worker path: %s", r.URL.Path)
+		}
 	}))
 	defer worker.Close()
 
@@ -1638,11 +1691,27 @@ func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"issues.csv","data_type":"unstructured","prepare_required":false}`,
+		`{"storage_uri":"issues.csv","data_type":"unstructured","prepare_required":false,"metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&version,
 	)
 	versionID := version["dataset_version_id"].(string)
+
+	buildJobs := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/build_jobs",
+		"",
+		http.StatusOK,
+		&buildJobs,
+	)
+	jobs := buildJobs["items"].([]any)
+	if len(jobs) != 1 || jobs[0].(map[string]any)["build_type"] != "clean" {
+		t.Fatalf("expected initial clean build job: %+v", buildJobs)
+	}
+	waitForBuildJobStatusHTTP(t, handler, projectID, jobs[0].(map[string]any)["job_id"].(string), "completed")
 
 	preparedPath = filepath.Join(artifactRoot, "projects", projectID, "datasets", datasetID, "versions", versionID, "prepare", "prepared.parquet")
 	if err := os.MkdirAll(filepath.Dir(preparedPath), 0o755); err != nil {
@@ -1667,26 +1736,12 @@ func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 		},
 	})
 
-	invalidPrepare := map[string]any{}
 	readJSONResponse(
 		t,
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/prepare",
 		`{}`,
-		http.StatusBadRequest,
-		&invalidPrepare,
-	)
-	if invalidPrepare["detail"] != "text_columns is required" {
-		t.Fatalf("unexpected invalid prepare response: %+v", invalidPrepare)
-	}
-
-	readJSONResponse(
-		t,
-		handler,
-		http.MethodPost,
-		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/prepare",
-		`{"text_columns":["text"]}`,
 		http.StatusAccepted,
 		nil,
 	)

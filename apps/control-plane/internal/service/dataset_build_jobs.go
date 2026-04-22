@@ -14,16 +14,67 @@ import (
 )
 
 const (
+	datasetBuildTypeClean     = "clean"
 	datasetBuildTypePrepare   = "prepare"
 	datasetBuildTypeSentiment = "sentiment"
 	datasetBuildTypeEmbedding = "embedding"
 	datasetBuildTypeCluster   = "cluster"
 )
 
+func (s *DatasetService) CreateCleanJob(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest, triggeredBy string) (domain.DatasetBuildJob, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if version.DataType == "structured" {
+		return domain.DatasetBuildJob{}, ErrInvalidArgument{Message: "dataset clean requires unstructured or mixed dataset version"}
+	}
+	if len(resolveDatasetBuildTextSelection(version.Metadata, input.TextColumns).Columns) == 0 {
+		return domain.DatasetBuildJob{}, ErrInvalidArgument{Message: "text_columns is required for dataset clean"}
+	}
+	if active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, datasetBuildTypeClean); err != nil {
+		return domain.DatasetBuildJob{}, err
+	} else if active != nil {
+		return *active, nil
+	}
+
+	job := domain.DatasetBuildJob{
+		JobID:            id.New(),
+		ProjectID:        projectID,
+		DatasetID:        datasetID,
+		DatasetVersionID: datasetVersionID,
+		BuildType:        datasetBuildTypeClean,
+		Status:           "queued",
+		Request:          requestToMap(input),
+		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
+		CreatedAt:        time.Now().UTC(),
+	}
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.Metadata["clean_status"] = "queued"
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := s.store.SaveDatasetBuildJob(job); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := s.dispatchDatasetBuildJob(job, func() error {
+		_, err := s.BuildClean(projectID, datasetID, datasetVersionID, input)
+		return err
+	}); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	return job, nil
+}
+
 func (s *DatasetService) CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy string) (domain.DatasetBuildJob, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
 		return domain.DatasetBuildJob{}, err
+	}
+	if status := cleanStatus(version); status == "queued" || status == "cleaning" || status == "failed" || status == "stale" {
+		return domain.DatasetBuildJob{}, ErrInvalidArgument{Message: "dataset clean must be ready before prepare"}
 	}
 	if active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, datasetBuildTypePrepare); err != nil {
 		return domain.DatasetBuildJob{}, err
@@ -220,6 +271,7 @@ func (s *DatasetService) latestDatasetVersionBuildJobStatuses(projectID string, 
 	}
 	latestByType := latestDatasetBuildJobsByType(items)
 	orderedTypes := []string{
+		datasetBuildTypeClean,
 		datasetBuildTypePrepare,
 		datasetBuildTypeSentiment,
 		datasetBuildTypeEmbedding,
@@ -450,6 +502,8 @@ func loadBuildJobProgress(metadata map[string]any, prefix string) *domain.BuildJ
 
 func buildJobMetadataPrefix(buildType string) string {
 	switch strings.TrimSpace(buildType) {
+	case datasetBuildTypeClean:
+		return "clean"
 	case datasetBuildTypePrepare:
 		return "prepare"
 	case datasetBuildTypeSentiment:
