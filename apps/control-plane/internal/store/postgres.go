@@ -119,6 +119,202 @@ func (s *PostgresStore) ListProjects() ([]domain.Project, error) {
 	return items, nil
 }
 
+func (s *PostgresStore) DeleteProject(projectID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err = deleteEmbeddingIndexChunksForProject(tx, projectID); err != nil {
+		return err
+	}
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{query: `DELETE FROM dataset_build_jobs WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM executions WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM report_drafts WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM skill_plans WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM analysis_requests WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM dataset_versions WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM datasets WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM scenarios WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM project_prompt_defaults WHERE project_id = $1::uuid`, args: []any{projectID}},
+		{query: `DELETE FROM project_prompts WHERE project_id = $1::uuid`, args: []any{projectID}},
+	}
+	for _, statement := range statements {
+		if _, err = tx.Exec(statement.query, statement.args...); err != nil {
+			return err
+		}
+	}
+
+	result, err := tx.Exec(`DELETE FROM projects WHERE project_id = $1::uuid`, projectID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		err = ErrNotFound
+		return err
+	}
+	err = tx.Commit()
+	return err
+}
+
+func (s *PostgresStore) SavePrompt(prompt domain.Prompt) error {
+	_, err := s.db.Exec(
+		`INSERT INTO prompts (
+			prompt_id, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10
+		)
+		ON CONFLICT (prompt_id) DO UPDATE
+		SET version = EXCLUDED.version,
+		    operation = EXCLUDED.operation,
+		    title = EXCLUDED.title,
+		    status = EXCLUDED.status,
+		    summary = EXCLUDED.summary,
+		    content = EXCLUDED.content,
+		    content_hash = EXCLUDED.content_hash,
+		    updated_at = EXCLUDED.updated_at`,
+		prompt.PromptID,
+		prompt.Version,
+		prompt.Operation,
+		prompt.Title,
+		prompt.Status,
+		prompt.Summary,
+		prompt.Content,
+		prompt.ContentHash,
+		prompt.CreatedAt,
+		prompt.UpdatedAt,
+	)
+	return err
+}
+
+func (s *PostgresStore) GetPrompt(promptID string) (domain.Prompt, error) {
+	row := s.db.QueryRow(
+		`SELECT prompt_id::text, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+		 FROM prompts
+		 WHERE prompt_id = $1::uuid`,
+		promptID,
+	)
+
+	var prompt domain.Prompt
+	if err := row.Scan(
+		&prompt.PromptID,
+		&prompt.Version,
+		&prompt.Operation,
+		&prompt.Title,
+		&prompt.Status,
+		&prompt.Summary,
+		&prompt.Content,
+		&prompt.ContentHash,
+		&prompt.CreatedAt,
+		&prompt.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Prompt{}, ErrNotFound
+		}
+		return domain.Prompt{}, err
+	}
+	return prompt, nil
+}
+
+func (s *PostgresStore) GetPromptByVersion(version, operation string) (domain.Prompt, error) {
+	row := s.db.QueryRow(
+		`SELECT prompt_id::text, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+		 FROM prompts
+		 WHERE version = $1 AND operation = $2`,
+		version,
+		operation,
+	)
+
+	var prompt domain.Prompt
+	if err := row.Scan(
+		&prompt.PromptID,
+		&prompt.Version,
+		&prompt.Operation,
+		&prompt.Title,
+		&prompt.Status,
+		&prompt.Summary,
+		&prompt.Content,
+		&prompt.ContentHash,
+		&prompt.CreatedAt,
+		&prompt.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Prompt{}, ErrNotFound
+		}
+		return domain.Prompt{}, err
+	}
+	return prompt, nil
+}
+
+func (s *PostgresStore) ListPrompts(operation string) ([]domain.Prompt, error) {
+	query := `SELECT prompt_id::text, version, operation, title, status, summary, content, content_hash, created_at, updated_at
+	          FROM prompts`
+	args := []any{}
+	if strings.TrimSpace(operation) != "" {
+		query += ` WHERE operation = $1`
+		args = append(args, strings.TrimSpace(operation))
+	}
+	query += ` ORDER BY operation ASC, version ASC, updated_at DESC`
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.Prompt, 0)
+	for rows.Next() {
+		var prompt domain.Prompt
+		if err := rows.Scan(
+			&prompt.PromptID,
+			&prompt.Version,
+			&prompt.Operation,
+			&prompt.Title,
+			&prompt.Status,
+			&prompt.Summary,
+			&prompt.Content,
+			&prompt.ContentHash,
+			&prompt.CreatedAt,
+			&prompt.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, prompt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *PostgresStore) DeletePrompt(promptID string) error {
+	result, err := s.db.Exec(`DELETE FROM prompts WHERE prompt_id = $1::uuid`, promptID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgresStore) SaveProjectPrompt(prompt domain.ProjectPrompt) error {
 	_, err := s.db.Exec(
 		`INSERT INTO project_prompts (
@@ -481,7 +677,57 @@ func (s *PostgresStore) ListDatasets(projectID string) ([]domain.Dataset, error)
 	return items, nil
 }
 
+func (s *PostgresStore) DeleteDataset(projectID, datasetID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err = deleteEmbeddingIndexChunksForDataset(tx, projectID, datasetID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(
+		`DELETE FROM dataset_build_jobs
+		  WHERE project_id = $1::uuid AND dataset_id = $2::uuid`,
+		projectID,
+		datasetID,
+	); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(
+		`DELETE FROM dataset_versions
+		  WHERE project_id = $1::uuid AND dataset_id = $2::uuid`,
+		projectID,
+		datasetID,
+	); err != nil {
+		return err
+	}
+	result, err := tx.Exec(
+		`DELETE FROM datasets
+		  WHERE project_id = $1::uuid AND dataset_id = $2::uuid`,
+		projectID,
+		datasetID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
 func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error {
+	version = normalizeDatasetVersionCleanFields(version)
 	metadataJSON, err := marshalJSON(version.Metadata)
 	if err != nil {
 		return err
@@ -494,11 +740,14 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 	_, err = s.db.Exec(
 		`INSERT INTO dataset_versions (
 		     dataset_version_id, dataset_id, project_id, storage_uri, data_type, record_count,
-		     metadata, profile, prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version, prepare_uri, prepared_at,
+		     metadata, profile, clean_status, clean_uri, cleaned_at,
+		     prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version, prepare_uri, prepared_at,
 		     sentiment_status, sentiment_llm_mode, sentiment_model, sentiment_uri, sentiment_labeled_at, sentiment_prompt_version,
 		     embedding_status, embedding_model, embedding_uri, created_at, ready_at
 		 ) VALUES (
-		     $1, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+		     $1, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11,
+		     $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
+		     $26, $27, $28
 		 )
 		 ON CONFLICT (dataset_version_id) DO UPDATE
 		 SET dataset_id = EXCLUDED.dataset_id,
@@ -508,6 +757,9 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 		     record_count = EXCLUDED.record_count,
 		     metadata = EXCLUDED.metadata,
 		     profile = EXCLUDED.profile,
+		     clean_status = EXCLUDED.clean_status,
+		     clean_uri = EXCLUDED.clean_uri,
+		     cleaned_at = EXCLUDED.cleaned_at,
 		     prepare_status = EXCLUDED.prepare_status,
 		     prepare_llm_mode = EXCLUDED.prepare_llm_mode,
 		     prepare_model = EXCLUDED.prepare_model,
@@ -533,6 +785,9 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 		version.RecordCount,
 		metadataJSON,
 		profileJSON,
+		version.CleanStatus,
+		nullableString(version.CleanURI),
+		nullableTime(version.CleanedAt),
 		version.PrepareStatus,
 		version.PrepareLLMMode,
 		nullableString(version.PrepareModel),
@@ -551,13 +806,17 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 		version.CreatedAt,
 		nullableTime(version.ReadyAt),
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.syncDatasetVersionArtifacts(version)
 }
 
 func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (domain.DatasetVersion, error) {
 	row := s.db.QueryRow(
 		`SELECT dataset_version_id, dataset_id::text, project_id::text, storage_uri, data_type,
-		        record_count, metadata, profile, prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version,
+		        record_count, metadata, profile, clean_status, clean_uri, cleaned_at,
+		        prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version,
 		        prepare_uri, prepared_at, sentiment_status, sentiment_llm_mode, sentiment_model, sentiment_uri,
 		        sentiment_labeled_at, sentiment_prompt_version, embedding_status, embedding_model,
 		        embedding_uri, created_at, ready_at
@@ -571,6 +830,7 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 	var recordCount sql.NullInt64
 	var metadataRaw []byte
 	var profileRaw []byte
+	var cleanURI sql.NullString
 	var prepareModel sql.NullString
 	var preparePromptVersion sql.NullString
 	var prepareURI sql.NullString
@@ -588,6 +848,9 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 		&recordCount,
 		&metadataRaw,
 		&profileRaw,
+		&version.CleanStatus,
+		&cleanURI,
+		&version.CleanedAt,
 		&version.PrepareStatus,
 		&version.PrepareLLMMode,
 		&prepareModel,
@@ -621,6 +884,10 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 		value := int(recordCount.Int64)
 		version.RecordCount = &value
 	}
+	if cleanURI.Valid {
+		version.CleanURI = &cleanURI.String
+		version.CleanedRef = &cleanURI.String
+	}
 	if prepareModel.Valid {
 		version.PrepareModel = &prepareModel.String
 	}
@@ -645,13 +912,20 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 	if embeddingURI.Valid {
 		version.EmbeddingURI = &embeddingURI.String
 	}
+	version = normalizeDatasetVersionCleanFields(version)
+	artifacts, err := s.ListDatasetVersionArtifacts(projectID, version.DatasetVersionID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	version.Artifacts = artifacts
 	return version, nil
 }
 
 func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]domain.DatasetVersion, error) {
 	rows, err := s.db.Query(
 		`SELECT dataset_version_id, dataset_id::text, project_id::text, storage_uri, data_type,
-		        record_count, metadata, profile, prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version,
+		        record_count, metadata, profile, clean_status, clean_uri, cleaned_at,
+		        prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version,
 		        prepare_uri, prepared_at, sentiment_status, sentiment_llm_mode, sentiment_model, sentiment_uri,
 		        sentiment_labeled_at, sentiment_prompt_version, embedding_status, embedding_model,
 		        embedding_uri, created_at, ready_at
@@ -672,6 +946,7 @@ func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]doma
 		var recordCount sql.NullInt64
 		var metadataRaw []byte
 		var profileRaw []byte
+		var cleanURI sql.NullString
 		var prepareModel sql.NullString
 		var preparePromptVersion sql.NullString
 		var prepareURI sql.NullString
@@ -689,6 +964,9 @@ func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]doma
 			&recordCount,
 			&metadataRaw,
 			&profileRaw,
+			&version.CleanStatus,
+			&cleanURI,
+			&version.CleanedAt,
 			&version.PrepareStatus,
 			&version.PrepareLLMMode,
 			&prepareModel,
@@ -719,6 +997,10 @@ func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]doma
 		if err := unmarshalNullableJSON(profileRaw, &version.Profile); err != nil {
 			return nil, err
 		}
+		if cleanURI.Valid {
+			version.CleanURI = &cleanURI.String
+			version.CleanedRef = &cleanURI.String
+		}
 		if prepareModel.Valid {
 			version.PrepareModel = &prepareModel.String
 		}
@@ -743,7 +1025,303 @@ func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]doma
 		if embeddingURI.Valid {
 			version.EmbeddingURI = &embeddingURI.String
 		}
+		version = normalizeDatasetVersionCleanFields(version)
+		artifacts, err := s.ListDatasetVersionArtifacts(projectID, version.DatasetVersionID)
+		if err != nil {
+			return nil, err
+		}
+		version.Artifacts = artifacts
 		items = append(items, version)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *PostgresStore) DeleteDatasetVersion(projectID, datasetID, datasetVersionID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err = deleteEmbeddingIndexChunksForVersion(tx, datasetVersionID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(
+		`DELETE FROM dataset_build_jobs
+		  WHERE project_id = $1::uuid
+		    AND dataset_id = $2::uuid
+		    AND dataset_version_id = $3`,
+		projectID,
+		datasetID,
+		datasetVersionID,
+	); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(
+		`UPDATE datasets
+		    SET active_dataset_version_id = NULL,
+		        active_version_updated_at = NOW()
+		  WHERE project_id = $1::uuid
+		    AND dataset_id = $2::uuid
+		    AND active_dataset_version_id = $3`,
+		projectID,
+		datasetID,
+		datasetVersionID,
+	); err != nil {
+		return err
+	}
+	result, err := tx.Exec(
+		`DELETE FROM dataset_versions
+		  WHERE project_id = $1::uuid
+		    AND dataset_id = $2::uuid
+		    AND dataset_version_id = $3`,
+		projectID,
+		datasetID,
+		datasetVersionID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
+}
+
+func deleteEmbeddingIndexChunksForProject(tx *sql.Tx, projectID string) error {
+	exists, err := tableExists(tx, "embedding_index_chunks")
+	if err != nil || !exists {
+		return err
+	}
+	_, err = tx.Exec(
+		`DELETE FROM embedding_index_chunks
+		  WHERE dataset_version_id IN (
+		      SELECT dataset_version_id
+		      FROM dataset_versions
+		      WHERE project_id = $1::uuid
+		  )`,
+		projectID,
+	)
+	return err
+}
+
+func deleteEmbeddingIndexChunksForDataset(tx *sql.Tx, projectID, datasetID string) error {
+	exists, err := tableExists(tx, "embedding_index_chunks")
+	if err != nil || !exists {
+		return err
+	}
+	_, err = tx.Exec(
+		`DELETE FROM embedding_index_chunks
+		  WHERE dataset_version_id IN (
+		      SELECT dataset_version_id
+		      FROM dataset_versions
+		      WHERE project_id = $1::uuid AND dataset_id = $2::uuid
+		  )`,
+		projectID,
+		datasetID,
+	)
+	return err
+}
+
+func deleteEmbeddingIndexChunksForVersion(tx *sql.Tx, datasetVersionID string) error {
+	exists, err := tableExists(tx, "embedding_index_chunks")
+	if err != nil || !exists {
+		return err
+	}
+	_, err = tx.Exec(
+		`DELETE FROM embedding_index_chunks
+		  WHERE dataset_version_id = $1`,
+		datasetVersionID,
+	)
+	return err
+}
+
+func tableExists(tx *sql.Tx, tableName string) (bool, error) {
+	var exists bool
+	if err := tx.QueryRow(`SELECT to_regclass($1) IS NOT NULL`, "public."+tableName).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func (s *PostgresStore) syncDatasetVersionArtifacts(version domain.DatasetVersion) (err error) {
+	artifacts := deriveDatasetVersionArtifacts(version, time.Now().UTC())
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	staleArgs := []any{version.ProjectID, version.DatasetVersionID}
+	if len(artifacts) == 0 {
+		if _, err = tx.Exec(
+			`DELETE FROM dataset_version_artifacts
+			  WHERE project_id = $1::uuid AND dataset_version_id = $2`,
+			staleArgs...,
+		); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
+	placeholders := make([]string, 0, len(artifacts))
+	for index, artifact := range artifacts {
+		summaryJSON, marshalErr := marshalJSON(defaultMetadataMap(artifact.Summary))
+		if marshalErr != nil {
+			return marshalErr
+		}
+		metadataJSON, marshalErr := marshalJSON(defaultMetadataMap(artifact.Metadata))
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if _, err = tx.Exec(
+			`INSERT INTO dataset_version_artifacts (
+				artifact_id, project_id, dataset_id, dataset_version_id, artifact_type,
+				stage, status, uri, format, model, prompt_version, summary, metadata,
+				created_at, updated_at
+			) VALUES (
+				$1, $2::uuid, $3::uuid, $4, $5,
+				$6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb,
+				$14, $15
+			)
+			ON CONFLICT (dataset_version_id, artifact_type) DO UPDATE
+			SET artifact_id = EXCLUDED.artifact_id,
+			    project_id = EXCLUDED.project_id,
+			    dataset_id = EXCLUDED.dataset_id,
+			    stage = EXCLUDED.stage,
+			    status = EXCLUDED.status,
+			    uri = EXCLUDED.uri,
+			    format = EXCLUDED.format,
+			    model = EXCLUDED.model,
+			    prompt_version = EXCLUDED.prompt_version,
+			    summary = EXCLUDED.summary,
+			    metadata = EXCLUDED.metadata,
+			    updated_at = EXCLUDED.updated_at`,
+			artifact.ArtifactID,
+			artifact.ProjectID,
+			artifact.DatasetID,
+			artifact.DatasetVersionID,
+			artifact.ArtifactType,
+			artifact.Stage,
+			artifact.Status,
+			nullIfEmpty(artifact.URI),
+			nullIfEmpty(artifact.Format),
+			nullIfEmpty(artifact.Model),
+			nullIfEmpty(artifact.PromptVersion),
+			summaryJSON,
+			metadataJSON,
+			artifact.CreatedAt,
+			artifact.UpdatedAt,
+		); err != nil {
+			return err
+		}
+		placeholders = append(placeholders, fmt.Sprintf("$%d", index+3))
+		staleArgs = append(staleArgs, artifact.ArtifactType)
+	}
+
+	if _, err = tx.Exec(
+		fmt.Sprintf(
+			`DELETE FROM dataset_version_artifacts
+			  WHERE project_id = $1::uuid
+			    AND dataset_version_id = $2
+			    AND artifact_type NOT IN (%s)`,
+			strings.Join(placeholders, ", "),
+		),
+		staleArgs...,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *PostgresStore) ListDatasetVersionArtifacts(projectID, datasetVersionID string) ([]domain.DatasetVersionArtifact, error) {
+	rows, err := s.db.Query(
+		`SELECT artifact_id, project_id::text, dataset_id::text, dataset_version_id,
+		        artifact_type, stage, status, uri, format, model, prompt_version,
+		        summary, metadata, created_at, updated_at
+		 FROM dataset_version_artifacts
+		 WHERE project_id = $1::uuid AND dataset_version_id = $2
+		 ORDER BY
+		   CASE stage
+		     WHEN 'source' THEN 10
+		     WHEN 'clean' THEN 20
+		     WHEN 'prepare' THEN 30
+		     WHEN 'sentiment' THEN 40
+		     WHEN 'embedding' THEN 50
+		     WHEN 'cluster' THEN 60
+		     ELSE 100
+		   END,
+		   artifact_type ASC`,
+		projectID,
+		datasetVersionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.DatasetVersionArtifact, 0)
+	for rows.Next() {
+		var artifact domain.DatasetVersionArtifact
+		var uri sql.NullString
+		var format sql.NullString
+		var model sql.NullString
+		var promptVersion sql.NullString
+		var summaryRaw []byte
+		var metadataRaw []byte
+		if err := rows.Scan(
+			&artifact.ArtifactID,
+			&artifact.ProjectID,
+			&artifact.DatasetID,
+			&artifact.DatasetVersionID,
+			&artifact.ArtifactType,
+			&artifact.Stage,
+			&artifact.Status,
+			&uri,
+			&format,
+			&model,
+			&promptVersion,
+			&summaryRaw,
+			&metadataRaw,
+			&artifact.CreatedAt,
+			&artifact.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if uri.Valid {
+			artifact.URI = uri.String
+		}
+		if format.Valid {
+			artifact.Format = format.String
+		}
+		if model.Valid {
+			artifact.Model = model.String
+		}
+		if promptVersion.Valid {
+			artifact.PromptVersion = promptVersion.String
+		}
+		if err := unmarshalJSON(summaryRaw, &artifact.Summary, map[string]any{}); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(metadataRaw, &artifact.Metadata, map[string]any{}); err != nil {
+			return nil, err
+		}
+		items = append(items, artifact)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1510,6 +2088,26 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			description TEXT,
 			created_at TIMESTAMPTZ NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS prompts (
+			prompt_id UUID PRIMARY KEY,
+			version TEXT NOT NULL,
+			operation TEXT NOT NULL,
+			title TEXT NOT NULL,
+			status TEXT NOT NULL,
+			summary TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL,
+			content_hash TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL,
+			updated_at TIMESTAMPTZ NOT NULL,
+			UNIQUE (version, operation)
+		)`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active'`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS content TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 		`CREATE TABLE IF NOT EXISTS project_prompts (
 			project_id UUID NOT NULL REFERENCES projects(project_id),
 			version TEXT NOT NULL,
@@ -1573,6 +2171,9 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			record_count BIGINT,
 			metadata JSONB NOT NULL,
 			profile JSONB,
+			clean_status TEXT NOT NULL DEFAULT 'not_requested',
+			clean_uri TEXT,
+			cleaned_at TIMESTAMPTZ,
 			prepare_status TEXT NOT NULL DEFAULT 'not_requested',
 			prepare_llm_mode TEXT NOT NULL DEFAULT 'default',
 			prepare_model TEXT,
@@ -1592,6 +2193,15 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			ready_at TIMESTAMPTZ
 		)`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS profile JSONB`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS clean_status TEXT NOT NULL DEFAULT 'not_requested'`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS clean_uri TEXT`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS cleaned_at TIMESTAMPTZ`,
+		`UPDATE dataset_versions
+		  SET clean_status = COALESCE(NULLIF(metadata->>'clean_status', ''), clean_status),
+		      clean_uri = COALESCE(NULLIF(metadata->>'clean_uri', ''), NULLIF(metadata->>'cleaned_ref', ''), clean_uri),
+		      cleaned_at = COALESCE(cleaned_at, NULLIF(metadata->>'cleaned_at', '')::timestamptz)
+		  WHERE metadata IS NOT NULL
+		    AND (metadata ? 'clean_status' OR metadata ? 'clean_uri' OR metadata ? 'cleaned_ref' OR metadata ? 'cleaned_at')`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_status TEXT NOT NULL DEFAULT 'not_requested'`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_llm_mode TEXT NOT NULL DEFAULT 'default'`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_model TEXT`,
@@ -1604,6 +2214,91 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_uri TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_labeled_at TIMESTAMPTZ`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_prompt_version TEXT`,
+		`UPDATE datasets d
+		  SET active_dataset_version_id = NULL,
+		      active_version_updated_at = NOW()
+		  WHERE active_dataset_version_id IS NOT NULL
+		    AND NOT EXISTS (
+		        SELECT 1
+		        FROM dataset_versions v
+		        WHERE v.dataset_version_id = d.active_dataset_version_id
+		          AND v.dataset_id = d.dataset_id
+		          AND v.project_id = d.project_id
+		    )`,
+		`DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1
+				FROM pg_constraint
+				WHERE conname = 'datasets_active_dataset_version_fk'
+			) THEN
+				ALTER TABLE datasets
+				ADD CONSTRAINT datasets_active_dataset_version_fk
+				FOREIGN KEY (active_dataset_version_id)
+				REFERENCES dataset_versions(dataset_version_id)
+				ON DELETE SET NULL;
+			END IF;
+		END
+		$$`,
+		`CREATE OR REPLACE FUNCTION validate_dataset_active_version()
+		RETURNS trigger AS $$
+		BEGIN
+			IF NEW.active_dataset_version_id IS NULL THEN
+				RETURN NEW;
+			END IF;
+			IF NOT EXISTS (
+				SELECT 1
+				FROM dataset_versions v
+				WHERE v.dataset_version_id = NEW.active_dataset_version_id
+				  AND v.dataset_id = NEW.dataset_id
+				  AND v.project_id = NEW.project_id
+			) THEN
+				RAISE EXCEPTION 'active_dataset_version_id must reference a dataset version in the same project and dataset';
+			END IF;
+			RETURN NEW;
+		END
+		$$ LANGUAGE plpgsql`,
+		`DROP TRIGGER IF EXISTS datasets_active_version_validate ON datasets`,
+		`CREATE TRIGGER datasets_active_version_validate
+		  BEFORE INSERT OR UPDATE OF project_id, dataset_id, active_dataset_version_id
+		  ON datasets
+		  FOR EACH ROW
+		  EXECUTE FUNCTION validate_dataset_active_version()`,
+		`CREATE INDEX IF NOT EXISTS datasets_active_dataset_version_idx
+		  ON datasets(active_dataset_version_id)
+		  WHERE active_dataset_version_id IS NOT NULL`,
+		`CREATE TABLE IF NOT EXISTS dataset_version_artifacts (
+			artifact_id TEXT PRIMARY KEY,
+			project_id UUID NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+			dataset_id UUID NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+			dataset_version_id TEXT NOT NULL REFERENCES dataset_versions(dataset_version_id) ON DELETE CASCADE,
+			artifact_type TEXT NOT NULL,
+			stage TEXT NOT NULL,
+			status TEXT NOT NULL,
+			uri TEXT,
+			format TEXT,
+			model TEXT,
+			prompt_version TEXT,
+			summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+			metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE (dataset_version_id, artifact_type)
+		)`,
+		`ALTER TABLE dataset_version_artifacts ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE dataset_version_artifacts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE dataset_version_artifacts ADD COLUMN IF NOT EXISTS uri TEXT`,
+		`ALTER TABLE dataset_version_artifacts ADD COLUMN IF NOT EXISTS format TEXT`,
+		`ALTER TABLE dataset_version_artifacts ADD COLUMN IF NOT EXISTS model TEXT`,
+		`ALTER TABLE dataset_version_artifacts ADD COLUMN IF NOT EXISTS prompt_version TEXT`,
+		`ALTER TABLE dataset_version_artifacts ADD COLUMN IF NOT EXISTS summary JSONB NOT NULL DEFAULT '{}'::jsonb`,
+		`ALTER TABLE dataset_version_artifacts ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb`,
+		`ALTER TABLE dataset_version_artifacts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`ALTER TABLE dataset_version_artifacts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`CREATE INDEX IF NOT EXISTS dataset_version_artifacts_version_idx
+		  ON dataset_version_artifacts(project_id, dataset_version_id)`,
+		`CREATE INDEX IF NOT EXISTS dataset_version_artifacts_stage_idx
+		  ON dataset_version_artifacts(project_id, dataset_version_id, stage, artifact_type)`,
 		`CREATE TABLE IF NOT EXISTS dataset_build_jobs (
 			job_id UUID PRIMARY KEY,
 			project_id UUID NOT NULL REFERENCES projects(project_id),
@@ -1716,21 +2411,29 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			return err
 		}
 	}
-	return s.promoteTimestampColumnsToTimestamptz(ctx)
+	if err := s.promoteTimestampColumnsToTimestamptz(ctx); err != nil {
+		return err
+	}
+	return s.backfillDatasetVersionArtifacts(ctx)
 }
 
 func (s *PostgresStore) promoteTimestampColumnsToTimestamptz(ctx context.Context) error {
 	columns := []timestampColumn{
 		{tableName: "projects", columnName: "created_at"},
+		{tableName: "prompts", columnName: "created_at"},
+		{tableName: "prompts", columnName: "updated_at"},
 		{tableName: "project_prompts", columnName: "created_at"},
 		{tableName: "project_prompts", columnName: "updated_at"},
 		{tableName: "project_prompt_defaults", columnName: "updated_at"},
 		{tableName: "scenarios", columnName: "created_at"},
 		{tableName: "datasets", columnName: "created_at"},
+		{tableName: "dataset_versions", columnName: "cleaned_at"},
 		{tableName: "dataset_versions", columnName: "prepared_at"},
 		{tableName: "dataset_versions", columnName: "sentiment_labeled_at"},
 		{tableName: "dataset_versions", columnName: "created_at"},
 		{tableName: "dataset_versions", columnName: "ready_at"},
+		{tableName: "dataset_version_artifacts", columnName: "created_at"},
+		{tableName: "dataset_version_artifacts", columnName: "updated_at"},
 		{tableName: "dataset_build_jobs", columnName: "created_at"},
 		{tableName: "dataset_build_jobs", columnName: "started_at"},
 		{tableName: "dataset_build_jobs", columnName: "completed_at"},
@@ -1759,6 +2462,41 @@ func (s *PostgresStore) promoteTimestampColumnsToTimestamptz(ctx context.Context
 		)
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (s *PostgresStore) backfillDatasetVersionArtifacts(ctx context.Context) error {
+	projects, err := s.ListProjects()
+	if err != nil {
+		return err
+	}
+	for _, project := range projects {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		datasets, err := s.ListDatasets(project.ProjectID)
+		if err != nil {
+			return err
+		}
+		for _, dataset := range datasets {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			versions, err := s.ListDatasetVersions(project.ProjectID, dataset.DatasetID)
+			if err != nil {
+				return err
+			}
+			for _, version := range versions {
+				if err := s.syncDatasetVersionArtifacts(version); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
@@ -1837,6 +2575,100 @@ func nullIfEmpty(value string) any {
 		return nil
 	}
 	return value
+}
+
+func normalizeDatasetVersionCleanFields(version domain.DatasetVersion) domain.DatasetVersion {
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	status := metadataString(version.Metadata, "clean_status")
+	if status == "" {
+		status = strings.TrimSpace(version.CleanStatus)
+	}
+	if status == "" {
+		switch version.DataType {
+		case "unstructured", "mixed", "both":
+			status = "not_requested"
+		default:
+			status = "not_applicable"
+		}
+	}
+	version.CleanStatus = status
+	version.Metadata["clean_status"] = status
+
+	cleanURI := strings.TrimSpace(derefString(version.CleanURI))
+	if cleanURI == "" {
+		cleanURI = strings.TrimSpace(derefString(version.CleanedRef))
+	}
+	if cleanURI == "" {
+		cleanURI = metadataString(version.Metadata, "clean_uri")
+	}
+	if cleanURI == "" {
+		cleanURI = metadataString(version.Metadata, "cleaned_ref")
+	}
+	if cleanURI != "" {
+		version.CleanURI = &cleanURI
+		version.CleanedRef = &cleanURI
+		version.Metadata["clean_uri"] = cleanURI
+		version.Metadata["cleaned_ref"] = cleanURI
+	}
+
+	if version.CleanedAt == nil {
+		if cleanedAt, ok := metadataTime(version.Metadata, "cleaned_at"); ok {
+			version.CleanedAt = &cleanedAt
+		}
+	}
+	if version.CleanedAt != nil {
+		version.Metadata["cleaned_at"] = *version.CleanedAt
+	}
+	return version
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+func metadataTime(metadata map[string]any, key string) (time.Time, bool) {
+	if len(metadata) == 0 {
+		return time.Time{}, false
+	}
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return time.Time{}, false
+	}
+	switch typed := value.(type) {
+	case time.Time:
+		if typed.IsZero() {
+			return time.Time{}, false
+		}
+		return typed, true
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return time.Time{}, false
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, trimmed)
+		if err != nil {
+			return time.Time{}, false
+		}
+		return parsed, true
+	default:
+		return time.Time{}, false
+	}
 }
 
 func defaultMetadataMap(metadata map[string]any) map[string]any {

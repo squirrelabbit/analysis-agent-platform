@@ -3,11 +3,16 @@ from __future__ import annotations
 """Dataset preparation and enrichment skill handlers."""
 
 import json
+import logging
+import time
 from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .. import runtime as rt
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _stable_source_index(row: dict[str, Any], fallback_index: int) -> int:
@@ -30,6 +35,90 @@ def _chunk_id(row_id: str, chunk_index: int = 0) -> str:
     return f"{row_id}:chunk:{chunk_index}"
 
 
+def _unique_strings(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = str(value or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        result.append(normalized)
+        seen.add(normalized)
+    return result
+
+
+def _prepare_llm_fallback_summary(rows: list[dict[str, Any]]) -> tuple[int, str, list[str]]:
+    reasons: list[str] = []
+    count = 0
+    for row in rows:
+        flags = row.get("quality_flags") or []
+        if isinstance(flags, str):
+            flags = [flags]
+        row_has_fallback = False
+        for flag in flags:
+            text = str(flag or "").strip()
+            for prefix in ("llm_fallback:", "llm_batch_fallback:"):
+                if text.startswith(prefix):
+                    row_has_fallback = True
+                    reasons.append(text.removeprefix(prefix).strip())
+        if row_has_fallback:
+            count += 1
+    unique_reasons = _unique_strings(reasons)
+    first_reason = unique_reasons[0] if unique_reasons else ""
+    return count, first_reason, unique_reasons
+
+
+def _sentiment_llm_fallback_summary(rows: list[dict[str, Any]]) -> tuple[int, str, list[str]]:
+    reasons: list[str] = []
+    count = 0
+    marker = "llm_fallback:"
+    for row in rows:
+        reason_text = str(row.get("sentiment_reason") or row.get("reason") or "").strip()
+        if marker not in reason_text:
+            continue
+        count += 1
+        fallback_reason = reason_text.split(marker, 1)[1].strip()
+        if fallback_reason.endswith(")"):
+            fallback_reason = fallback_reason[:-1].strip()
+        reasons.append(fallback_reason)
+    unique_reasons = _unique_strings(reasons)
+    first_reason = unique_reasons[0] if unique_reasons else ""
+    return count, first_reason, unique_reasons
+
+
+def _write_progress(
+    progress_path: str,
+    *,
+    processed_rows: int,
+    total_rows: int,
+    started_at: float,
+    message: str,
+) -> None:
+    if not progress_path:
+        return
+    total = max(0, int(total_rows))
+    processed = min(max(0, int(processed_rows)), total) if total > 0 else max(0, int(processed_rows))
+    elapsed = max(0.0, time.monotonic() - started_at)
+    percent = 100.0 if total == 0 else round((processed / total) * 100.0, 2)
+    eta_seconds = None
+    if processed > 0 and total > processed and elapsed > 0:
+        rows_per_second = processed / elapsed
+        if rows_per_second > 0:
+            eta_seconds = round((total - processed) / rows_per_second, 2)
+    payload = {
+        "percent": percent,
+        "processed_rows": processed,
+        "total_rows": total,
+        "elapsed_seconds": round(elapsed, 2),
+        "eta_seconds": eta_seconds,
+        "message": message,
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+    path = Path(progress_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
 def _prepare_output_format(path: Path) -> str:
     return _artifact_output_format(path, "prepare")
 
@@ -41,6 +130,15 @@ def _artifact_output_format(path: Path, artifact_name: str) -> str:
     if suffix == ".jsonl":
         return "jsonl"
     raise ValueError(f"{artifact_name} output_path must end with .parquet or .jsonl")
+
+
+def _joined_text(row: dict[str, Any], text_columns: list[str], text_joiner: str) -> str:
+    parts: list[str] = []
+    for column in text_columns:
+        value = str(row.get(column) or "").strip()
+        if value:
+            parts.append(value)
+    return text_joiner.join(parts).strip()
 
 
 def _derive_chunk_output_path(embedding_path: Path) -> Path:
@@ -115,6 +213,22 @@ def _prepare_output_schema() -> Any:
             ("quality_flags", arrow.list_(arrow.string())),
             ("prepare_prompt_version", arrow.string()),
             ("prepare_regex_applied_rules", arrow.list_(arrow.string())),
+        ]
+    )
+
+
+def _clean_output_schema() -> Any:
+    arrow, _ = rt._require_pyarrow()
+    return arrow.schema(
+        [
+            ("source_row_index", arrow.int64()),
+            ("row_id", arrow.string()),
+            ("raw_text", arrow.string()),
+            ("cleaned_text", arrow.string()),
+            ("clean_disposition", arrow.string()),
+            ("clean_reason", arrow.string()),
+            ("clean_flags", arrow.list_(arrow.string())),
+            ("clean_regex_applied_rules", arrow.list_(arrow.string())),
         ]
     )
 
@@ -230,19 +344,175 @@ def _split_text_chunks(
     return chunks
 
 
+def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = rt._normalize_dataset_clean_payload(payload)
+    rows = rt._iter_rows(normalized["dataset_name"])
+    source_row_count = len(rows)
+    output_path = Path(normalized["output_path"])
+    output_format = _artifact_output_format(output_path, "clean")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path = normalized["progress_path"]
+    started_at = time.monotonic()
+    _write_progress(
+        progress_path,
+        processed_rows=0,
+        total_rows=source_row_count,
+        started_at=started_at,
+        message="clean queued",
+    )
+
+    kept_count = 0
+    dropped_count = 0
+    skipped_rows = 0
+    regex_rule_hits: Counter[str] = Counter()
+    source_input_char_count = 0
+    cleaned_input_char_count = 0
+    cleaned_rows: list[dict[str, Any]] = []
+
+    handle = output_path.open("w", encoding="utf-8") if output_format == "jsonl" else None
+    try:
+        for source_index, row in enumerate(rows):
+            raw_text = _joined_text(row, normalized["text_columns"], normalized["text_joiner"])
+            if not raw_text:
+                skipped_rows += 1
+                dropped_count += 1
+                _write_progress(
+                    progress_path,
+                    processed_rows=source_index + 1,
+                    total_rows=source_row_count,
+                    started_at=started_at,
+                    message="clean scanning rows",
+                )
+                continue
+
+            regex_cleaned_text, applied_regex_rules = rt._apply_prepare_regex_rules(raw_text, normalized["regex_rule_names"])
+            regex_rule_hits.update(applied_regex_rules)
+            cleaned_text = rt._prepare_preprocess_text(regex_cleaned_text, normalized["preprocess_options"])
+            source_input_char_count += len(raw_text)
+            cleaned_input_char_count += len(cleaned_text)
+            if not cleaned_text:
+                dropped_count += 1
+                continue
+
+            kept_count += 1
+            cleaned_row = dict(row)
+            cleaned_row["source_row_index"] = source_index
+            cleaned_row["row_id"] = _row_id(cleaned_row, source_index, normalized["dataset_version_id"])
+            cleaned_row["raw_text"] = raw_text
+            cleaned_row["cleaned_text"] = cleaned_text
+            cleaned_row["clean_disposition"] = "keep"
+            cleaned_row["clean_reason"] = "text kept after deterministic cleaning"
+            cleaned_row["clean_flags"] = ["cleaned"] if cleaned_text != raw_text.strip() else []
+            cleaned_row["clean_regex_applied_rules"] = list(applied_regex_rules)
+            cleaned_rows.append(cleaned_row)
+            if handle is not None:
+                handle.write(json.dumps(cleaned_row, ensure_ascii=False))
+                handle.write("\n")
+
+            _write_progress(
+                progress_path,
+                processed_rows=source_index + 1,
+                total_rows=source_row_count,
+                started_at=started_at,
+                message="clean processing rows",
+            )
+    except Exception:
+        _write_progress(
+            progress_path,
+            processed_rows=len(cleaned_rows),
+            total_rows=source_row_count,
+            started_at=started_at,
+            message="clean failed",
+        )
+        raise
+    finally:
+        if handle is not None:
+            handle.close()
+
+    if output_format == "parquet":
+        rt._write_parquet_rows(output_path, cleaned_rows, schema=_clean_output_schema())
+    _write_progress(
+        progress_path,
+        processed_rows=source_row_count,
+        total_rows=source_row_count,
+        started_at=started_at,
+        message="clean completed",
+    )
+
+    summary = {
+        "input_row_count": source_row_count,
+        "output_row_count": kept_count,
+        "kept_count": kept_count,
+        "dropped_count": dropped_count,
+        "skipped_row_count": skipped_rows,
+        "text_column": normalized["text_column"],
+        "text_columns": list(normalized["text_columns"]),
+        "text_joiner": normalized["text_joiner"],
+        "preprocess_options": dict(normalized["preprocess_options"]),
+        "source_input_char_count": source_input_char_count,
+        "cleaned_input_char_count": cleaned_input_char_count,
+        "clean_reduced_char_count": max(0, source_input_char_count - cleaned_input_char_count),
+        "clean_regex_rule_names": list(normalized["regex_rule_names"]),
+        "clean_regex_rule_hits": dict(regex_rule_hits),
+    }
+
+    return {
+        "notes": [
+            "dataset clean artifact generated by python-ai worker",
+            f"dataset source: {normalized['dataset_name']}",
+            f"cleaned output: {output_path}",
+            f"clean regex rules: {', '.join(normalized['regex_rule_names'])}",
+        ],
+        "artifact": {
+            "skill_name": "dataset_clean",
+            "dataset_version_id": normalized["dataset_version_id"],
+            "source_dataset_name": normalized["dataset_name"],
+            "clean_uri": str(output_path),
+            "cleaned_ref": str(output_path),
+            "clean_format": output_format,
+            "progress_ref": progress_path,
+            "text_column": normalized["text_column"],
+            "text_columns": list(normalized["text_columns"]),
+            "text_joiner": normalized["text_joiner"],
+            "raw_text_column": normalized["text_column"],
+            "raw_text_columns": list(normalized["text_columns"]),
+            "cleaned_text_column": "cleaned_text",
+            "row_id_column": "row_id",
+            "preprocess_options": dict(normalized["preprocess_options"]),
+            "source_input_char_count": source_input_char_count,
+            "cleaned_input_char_count": cleaned_input_char_count,
+            "clean_reduced_char_count": max(0, source_input_char_count - cleaned_input_char_count),
+            "clean_regex_rule_names": list(normalized["regex_rule_names"]),
+            "summary": summary,
+        },
+    }
+
+
 def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_prepare_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
+    source_row_count = len(rows)
+    if normalized["max_rows"] > 0:
+        rows = rows[: normalized["max_rows"]]
     output_path = Path(normalized["output_path"])
     output_format = _prepare_output_format(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path = normalized["progress_path"]
+    started_at = time.monotonic()
+    processed_source_rows = 0
+    _write_progress(
+        progress_path,
+        processed_rows=0,
+        total_rows=len(rows),
+        started_at=started_at,
+        message="prepare queued",
+    )
 
     client = rt._anthropic_prepare_client(normalized["model"], llm_mode=normalized["llm_mode"])
     kept_count = 0
     review_count = 0
     dropped_count = 0
     skipped_rows = 0
-    regex_rule_hits: Counter[str] = Counter()
     prepared_batch: list[tuple[int, dict[str, Any], str, str, list[str]]] = []
     prepared_rows: list[dict[str, Any]] = []
     usage_records: list[dict[str, Any]] = []
@@ -250,13 +520,20 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     handle = output_path.open("w", encoding="utf-8") if output_format == "jsonl" else None
     try:
         for source_index, row in enumerate(rows):
-            raw_text = str(row.get(normalized["text_column"]) or "").strip()
+            processed_source_rows = source_index + 1
+            raw_text = _joined_text(row, normalized["text_columns"], normalized["text_joiner"])
             if not raw_text:
                 skipped_rows += 1
+                _write_progress(
+                    progress_path,
+                    processed_rows=processed_source_rows,
+                    total_rows=len(rows),
+                    started_at=started_at,
+                    message="prepare scanning rows",
+                )
                 continue
 
-            regex_cleaned_text, applied_regex_rules = rt._apply_prepare_regex_rules(raw_text, normalized["regex_rule_names"])
-            prepared_batch.append((source_index, row, raw_text, regex_cleaned_text, applied_regex_rules))
+            prepared_batch.append((source_index, row, raw_text, raw_text, []))
             if len(prepared_batch) >= normalized["prepare_batch_size"]:
                 batch_results, batch_usage = rt._prepare_rows(
                     [item[3] for item in prepared_batch],
@@ -277,9 +554,15 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                     kept_count=kept_count,
                     review_count=review_count,
                     dropped_count=dropped_count,
-                    regex_rule_hits=regex_rule_hits,
                 )
                 prepared_batch = []
+                _write_progress(
+                    progress_path,
+                    processed_rows=processed_source_rows,
+                    total_rows=len(rows),
+                    started_at=started_at,
+                    message="prepare processing rows",
+                )
 
         if prepared_batch:
             batch_results, batch_usage = rt._prepare_rows(
@@ -301,41 +584,78 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 kept_count=kept_count,
                 review_count=review_count,
                 dropped_count=dropped_count,
-                regex_rule_hits=regex_rule_hits,
             )
+            _write_progress(
+                progress_path,
+                processed_rows=len(rows),
+                total_rows=len(rows),
+                started_at=started_at,
+                message="prepare finalizing",
+            )
+    except Exception:
+        _write_progress(
+            progress_path,
+            processed_rows=processed_source_rows,
+            total_rows=len(rows),
+            started_at=started_at,
+            message="prepare failed",
+        )
+        raise
     finally:
         if handle is not None:
             handle.close()
 
     if output_format == "parquet":
         rt._write_parquet_rows(output_path, prepared_rows, schema=_prepare_output_schema())
+    _write_progress(
+        progress_path,
+        processed_rows=len(rows),
+        total_rows=len(rows),
+        started_at=started_at,
+        message="prepare completed",
+    )
 
     notes = [
         "dataset prepare artifact generated by python-ai worker",
         f"dataset source: {normalized['dataset_name']}",
         f"prepared output: {output_path}",
-        f"prepare regex rules: {', '.join(normalized['regex_rule_names'])}",
     ]
+    usage = rt._merge_usage_records(usage_records)
+    usage_provider = str(usage.get("provider") or "").strip()
+    attempted_llm_model = client._config.model if client and client.is_enabled() else ""
+    llm_fallback_count, llm_fallback_reason, llm_fallback_reasons = _prepare_llm_fallback_summary(prepared_rows)
     prepare_model = "fallback-normalizer-v1"
-    if client and client.is_enabled():
+    if usage_provider == "anthropic" and client and client.is_enabled():
         prepare_model = client._config.model
-        notes.append(f"prepare model: {prepare_model}")
-    else:
-        notes.append(f"prepare model: {prepare_model}")
+    elif usage_provider == "mixed" and client and client.is_enabled():
+        prepare_model = f"{client._config.model}+fallback-normalizer-v1"
+    notes.append(f"prepare model: {prepare_model}")
     notes.append(f"prepare batch size: {normalized['prepare_batch_size']}")
     if skipped_rows > 0:
         notes.append(f"skipped_rows={skipped_rows}")
+    if llm_fallback_count > 0:
+        fallback_note = f"llm fallback used: count={llm_fallback_count}, model={attempted_llm_model}, reason={llm_fallback_reason}"
+        notes.append(fallback_note)
+        LOGGER.warning(
+            "dataset prepare llm fallback used dataset_version_id=%s model=%s fallback_count=%s reason=%s",
+            normalized["dataset_version_id"],
+            attempted_llm_model,
+            llm_fallback_count,
+            llm_fallback_reason,
+        )
 
     prompt_version = "dataset-prepare-fallback-v1"
     prepare_strategy = "deterministic-fallback"
-    if client and client.is_enabled():
+    if usage_provider in {"anthropic", "mixed"} and client and client.is_enabled():
         prompt_version = str(prepared_rows[0].get("prepare_prompt_version") or "").strip() if prepared_rows else ""
         if not prompt_version:
             prompt_version = normalized["prepare_prompt_version"] or (
                 "dataset-prepare-anthropic-batch-v1" if normalized["prepare_batch_size"] > 1 else "dataset-prepare-anthropic-v1"
             )
-        prepare_strategy = "anthropic-batch" if normalized["prepare_batch_size"] > 1 else "anthropic-row"
-    usage = rt._merge_usage_records(usage_records)
+        if usage_provider == "mixed":
+            prepare_strategy = "mixed-anthropic-fallback"
+        else:
+            prepare_strategy = "anthropic-batch" if normalized["prepare_batch_size"] > 1 else "anthropic-row"
 
     return {
         "notes": notes,
@@ -350,20 +670,32 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
             "prepare_prompt_version": prompt_version,
             "prepare_strategy": prepare_strategy,
             "prepare_batch_size": normalized["prepare_batch_size"],
-            "prepare_regex_rule_names": list(normalized["regex_rule_names"]),
+            "max_rows": normalized["max_rows"],
+            "progress_ref": progress_path,
+            "llm_provider": "anthropic" if attempted_llm_model else "",
+            "llm_model": attempted_llm_model,
+            "llm_fallback": llm_fallback_count > 0,
+            "llm_fallback_count": llm_fallback_count,
+            "llm_fallback_reason": llm_fallback_reason,
+            "llm_fallback_reasons": llm_fallback_reasons,
+            "text_column": normalized["text_column"],
+            "text_columns": list(normalized["text_columns"]),
+            "text_joiner": normalized["text_joiner"],
             "prepared_text_column": "normalized_text",
             "row_id_column": "row_id",
             "storage_contract_version": "unstructured-storage-v1",
             "summary": {
                 "input_row_count": len(rows),
+                "source_row_count": source_row_count,
+                "max_rows": normalized["max_rows"],
                 "output_row_count": kept_count + review_count,
                 "kept_count": kept_count,
                 "review_count": review_count,
                 "dropped_count": dropped_count,
                 "text_column": normalized["text_column"],
+                "text_columns": list(normalized["text_columns"]),
+                "text_joiner": normalized["text_joiner"],
                 "prepare_batch_size": normalized["prepare_batch_size"],
-                "prepare_regex_rule_names": list(normalized["regex_rule_names"]),
-                "prepare_regex_rule_hits": dict(regex_rule_hits),
             },
             "usage": usage,
         },
@@ -380,10 +712,8 @@ def _write_prepared_rows(
     kept_count: int,
     review_count: int,
     dropped_count: int,
-    regex_rule_hits: Counter[str],
 ) -> tuple[int, int, int]:
     for (source_index, row, raw_text, _regex_cleaned_text, applied_regex_rules), prepared in zip(batch_rows, batch_results):
-        regex_rule_hits.update(applied_regex_rules)
         disposition = prepared["disposition"]
         if disposition == "drop":
             dropped_count += 1
@@ -396,7 +726,7 @@ def _write_prepared_rows(
         prepared_row = dict(row)
         prepared_row["source_row_index"] = source_index
         prepared_row["row_id"] = _row_id(prepared_row, source_index, dataset_version_id)
-        prepared_row["raw_text"] = raw_text
+        prepared_row["raw_text"] = str(row.get("raw_text") or raw_text)
         prepared_row["normalized_text"] = prepared["normalized_text"]
         prepared_row["prepare_disposition"] = disposition
         prepared_row["prepare_reason"] = prepared["reason"]
@@ -751,6 +1081,9 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
 def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_sentiment_build_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
+    source_row_count = len(rows)
+    if normalized["max_rows"] > 0:
+        rows = rows[: normalized["max_rows"]]
     output_path = Path(normalized["output_path"])
     output_format = _artifact_output_format(output_path, "sentiment")
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -766,7 +1099,7 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         labeled_batch: list[tuple[int, dict[str, Any], str]] = []
         for index, row in enumerate(rows):
-            text = str(row.get(normalized["text_column"]) or "").strip()
+            text = _joined_text(row, normalized["text_columns"], normalized["text_joiner"])
             if not text:
                 skipped_rows += 1
                 continue
@@ -820,16 +1153,29 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     if output_format == "parquet":
         rt._write_parquet_rows(output_path, labeled_rows, schema=_sentiment_output_schema())
 
+    usage = rt._merge_usage_records(usage_records)
+    usage_provider = str(usage.get("provider") or "").strip()
+    attempted_llm_model = client._config.model if client and client.is_enabled() else ""
+    llm_fallback_count, llm_fallback_reason, llm_fallback_reasons = _sentiment_llm_fallback_summary(labeled_rows)
     sentiment_model = "sentiment-fallback-v1"
+    sentiment_strategy = "deterministic-fallback"
     prompt_version = "sentiment-fallback-v1"
-    if client and client.is_enabled():
+    if usage_provider == "anthropic" and client and client.is_enabled():
         sentiment_model = client._config.model
+        sentiment_strategy = "anthropic-batch" if normalized["sentiment_batch_size"] > 1 else "anthropic-row"
         prompt_version = str(labeled_rows[0].get("sentiment_prompt_version") or "").strip() if labeled_rows else ""
         if not prompt_version:
             prompt_version = normalized["sentiment_prompt_version"] or (
                 "sentiment-anthropic-batch-v1" if normalized["sentiment_batch_size"] > 1 else "sentiment-anthropic-v1"
             )
-    usage = rt._merge_usage_records(usage_records)
+    elif usage_provider == "mixed" and client and client.is_enabled():
+        sentiment_model = f"{client._config.model}+sentiment-fallback-v1"
+        sentiment_strategy = "mixed-anthropic-fallback"
+        prompt_version = str(labeled_rows[0].get("sentiment_prompt_version") or "").strip() if labeled_rows else ""
+        if not prompt_version:
+            prompt_version = normalized["sentiment_prompt_version"] or (
+                "sentiment-anthropic-batch-v1" if normalized["sentiment_batch_size"] > 1 else "sentiment-anthropic-v1"
+            )
 
     notes = [
         "sentiment label artifact generated by python-ai worker",
@@ -840,6 +1186,16 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     ]
     if skipped_rows > 0:
         notes.append(f"skipped_rows={skipped_rows}")
+    if llm_fallback_count > 0:
+        fallback_note = f"llm fallback used: count={llm_fallback_count}, model={attempted_llm_model}, reason={llm_fallback_reason}"
+        notes.append(fallback_note)
+        LOGGER.warning(
+            "sentiment label llm fallback used dataset_version_id=%s model=%s fallback_count=%s reason=%s",
+            normalized["dataset_version_id"],
+            attempted_llm_model,
+            llm_fallback_count,
+            llm_fallback_reason,
+        )
 
     return {
         "notes": notes,
@@ -852,15 +1208,30 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
             "sentiment_format": output_format,
             "sentiment_model": sentiment_model,
             "sentiment_prompt_version": prompt_version,
+            "sentiment_strategy": sentiment_strategy,
             "sentiment_label_column": "sentiment_label",
             "sentiment_confidence_column": "sentiment_confidence",
             "sentiment_reason_column": "sentiment_reason",
+            "llm_provider": "anthropic" if attempted_llm_model else "",
+            "llm_model": attempted_llm_model,
+            "llm_fallback": llm_fallback_count > 0,
+            "llm_fallback_count": llm_fallback_count,
+            "llm_fallback_reason": llm_fallback_reason,
+            "llm_fallback_reasons": llm_fallback_reasons,
+            "text_column": normalized["text_column"],
+            "text_columns": list(normalized["text_columns"]),
+            "text_joiner": normalized["text_joiner"],
             "row_id_column": "row_id",
             "storage_contract_version": "unstructured-storage-v1",
+            "max_rows": normalized["max_rows"],
             "summary": {
                 "input_row_count": len(rows),
+                "source_row_count": source_row_count,
+                "max_rows": normalized["max_rows"],
                 "labeled_row_count": labeled_count,
                 "text_column": normalized["text_column"],
+                "text_columns": list(normalized["text_columns"]),
+                "text_joiner": normalized["text_joiner"],
                 "sentiment_batch_size": normalized["sentiment_batch_size"],
                 "label_counts": dict(sorted(label_counts.items())),
             },

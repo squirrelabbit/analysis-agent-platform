@@ -2,7 +2,8 @@ flowchart LR
     Client["사용자 / 내부 호출 주체"]
     Control["Go Control Plane\napps/control-plane"]
     API["Project / Dataset / Analysis API"]
-    Build["Dataset Build API\nprepare / sentiment / embedding"]
+    Build["Dataset Build API\nclean / prepare / sentiment / embedding / cluster"]
+    Resolver["Dataset Source Resolver\nprepared -> cleaned -> raw"]
     Profiles["Dataset Profile Registry\nconfig/dataset_profiles.json"]
     Temporal["Temporal Workflow\nanalysis queue + dataset-build queue\nexecute / waiting / resume / rerun / diff + dataset build jobs"]
     Registry["Skill Bundle / Registry\nconfig/skill_bundle.json"]
@@ -20,6 +21,7 @@ flowchart LR
     API --> Registry
     API --> Build
     API --> Profiles
+    Build --> Resolver
     Build --> Py
     Build --> Artifact
     Build --> Profiles

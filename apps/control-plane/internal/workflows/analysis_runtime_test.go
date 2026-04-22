@@ -602,6 +602,93 @@ func TestWorkflowResolvedTextColumnTreatsDefaultTextAsPlaceholderWhenRawColumnDi
 	}
 }
 
+func TestCheckExecutionReadinessAllowsCleanedSourceForPrepareStep(t *testing.T) {
+	repo := store.NewMemoryStore()
+	fixedNow := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC)
+	versionID := "version-clean"
+	if err := repo.SaveDatasetVersion(domain.DatasetVersion{
+		DatasetVersionID: versionID,
+		DatasetID:        "dataset-1",
+		ProjectID:        "project-1",
+		StorageURI:       "festival.csv",
+		DataType:         "unstructured",
+		PrepareStatus:    "not_requested",
+		Metadata: map[string]any{
+			"clean_status":        "ready",
+			"cleaned_ref":         "festival.cleaned.parquet",
+			"cleaned_text_column": "cleaned_text",
+			"raw_text_column":     "제목 + 본문",
+			"raw_text_columns":    []string{"제목", "본문"},
+		},
+	}); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+	if err := repo.SaveExecution(domain.ExecutionSummary{
+		ExecutionID:      "exec-clean",
+		ProjectID:        "project-1",
+		Status:           "queued",
+		DatasetVersionID: stringPtr(versionID),
+		Plan: domain.SkillPlan{
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "document_filter", DatasetName: "festival.csv", Inputs: map[string]any{}},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("unexpected save execution error: %v", err)
+	}
+
+	activities := AnalysisActivities{
+		Repo: repo,
+		Now: func() time.Time {
+			return fixedNow
+		},
+	}
+	got, err := activities.CheckExecutionReadiness(context.Background(), AnalysisWorkflowInput{
+		ExecutionID:      "exec-clean",
+		ProjectID:        "project-1",
+		DatasetVersionID: stringPtr(versionID),
+	})
+	if err != nil {
+		t.Fatalf("unexpected readiness error: %v", err)
+	}
+	if !got.Ready {
+		t.Fatalf("expected clean source to be ready, got %+v", got)
+	}
+}
+
+func TestWorkflowRefreshPlanUsesCleanedSourceWhenPrepareMissing(t *testing.T) {
+	version := domain.DatasetVersion{
+		DataType:      "unstructured",
+		PrepareStatus: "not_requested",
+		StorageURI:    "festival.csv",
+		Metadata: map[string]any{
+			"clean_status":        "ready",
+			"cleaned_ref":         "festival.cleaned.parquet",
+			"cleaned_text_column": "cleaned_text",
+			"raw_text_column":     "제목 + 본문",
+			"raw_text_columns":    []string{"제목", "본문"},
+		},
+	}
+	plan := domain.SkillPlan{
+		Steps: []domain.SkillPlanStep{
+			{
+				StepID:      "step-1",
+				SkillName:   "document_filter",
+				DatasetName: "fallback.csv",
+				Inputs:      map[string]any{"text_column": "text"},
+			},
+		},
+	}
+
+	got := refreshWorkflowPlanWithDatasetVersion(plan, version)
+	if got.Steps[0].DatasetName != "festival.cleaned.parquet" {
+		t.Fatalf("expected cleaned dataset, got %s", got.Steps[0].DatasetName)
+	}
+	if got.Steps[0].Inputs["text_column"] != "cleaned_text" {
+		t.Fatalf("expected cleaned_text, got %+v", got.Steps[0].Inputs)
+	}
+}
+
 func stringPtr(value string) *string {
 	return &value
 }

@@ -264,13 +264,13 @@ func (a AnalysisActivities) CheckExecutionReadiness(ctx context.Context, input A
 		return ExecutionReadinessResult{}, err
 	}
 	if needsPrepare {
-		if version.PrepareStatus != "ready" || version.PrepareURI == nil || *version.PrepareURI == "" {
+		if waitingFor, reason := workflowDatasetTextSourceWaiting(version); waitingFor != "" {
 			return ExecutionReadinessResult{
 				Ready:      false,
 				Status:     "waiting",
 				Timestamp:  a.now(),
-				WaitingFor: "dataset_prepare",
-				Reason:     "dataset version prepare output is not ready",
+				WaitingFor: waitingFor,
+				Reason:     reason,
 			}, nil
 		}
 	}
@@ -587,6 +587,22 @@ func requiresPrepareReady(plan domain.SkillPlan) bool {
 	return false
 }
 
+func workflowDatasetTextSourceWaiting(version domain.DatasetVersion) (string, string) {
+	source := domain.ResolveDatasetSource(version)
+	if source.Stage != domain.DatasetSourceStageRaw {
+		return "", ""
+	}
+	switch workflowMetadataString(version.Metadata, "clean_status", strings.TrimSpace(version.CleanStatus)) {
+	case "queued", "cleaning", "failed", "stale", "ready":
+		return "dataset_clean", "dataset version clean output is not ready"
+	}
+	switch strings.TrimSpace(version.PrepareStatus) {
+	case "queued", "preparing", "failed", "stale", "ready":
+		return "dataset_prepare", "dataset version prepare output is not ready"
+	}
+	return "", ""
+}
+
 func requiresSentimentReady(plan domain.SkillPlan) bool {
 	for _, step := range plan.Steps {
 		definition, ok := registry.Skill(step.SkillName)
@@ -649,8 +665,9 @@ func refreshWorkflowPlanWithDatasetVersion(plan domain.SkillPlan, version domain
 }
 
 func workflowPreparedDatasetSource(version domain.DatasetVersion, fallback string) string {
-	if version.PrepareStatus == "ready" && version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != "" {
-		return strings.TrimSpace(*version.PrepareURI)
+	source := domain.ResolveDatasetSource(version)
+	if source.DatasetName != "" {
+		return source.DatasetName
 	}
 	return fallback
 }
@@ -663,10 +680,8 @@ func workflowSentimentDatasetSource(version domain.DatasetVersion) string {
 }
 
 func workflowResolvedTextColumn(inputs map[string]any, version domain.DatasetVersion) string {
-	defaultTextColumn := workflowMetadataString(version.Metadata, "prepared_text_column", workflowMetadataString(version.Metadata, "text_column", "normalized_text"))
-	if version.PrepareStatus != "ready" {
-		defaultTextColumn = workflowMetadataString(version.Metadata, "text_column", "text")
-	}
+	source := domain.ResolveDatasetSource(version)
+	defaultTextColumn := source.TextColumn
 	if inputs == nil {
 		return defaultTextColumn
 	}
@@ -678,8 +693,7 @@ func workflowResolvedTextColumn(inputs map[string]any, version domain.DatasetVer
 	if text == "" {
 		return defaultTextColumn
 	}
-	rawTextColumn := workflowMetadataString(version.Metadata, "raw_text_column", workflowMetadataString(version.Metadata, "text_column", "text"))
-	if version.PrepareStatus == "ready" && (text == rawTextColumn || (text == "text" && rawTextColumn != "text")) {
+	if source.Stage != domain.DatasetSourceStageRaw && domain.DatasetSourceIsRawTextColumn(version, text) {
 		return defaultTextColumn
 	}
 	return text

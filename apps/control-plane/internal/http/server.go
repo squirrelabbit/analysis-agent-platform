@@ -47,7 +47,7 @@ func NewServer(cfg config.Config) *Server {
 	server := &Server{
 		cfg:             cfg,
 		mux:             mux,
-		projectService:  service.NewProjectService(repository),
+		projectService:  service.NewProjectService(repository, cfg.UploadRoot, cfg.ArtifactRoot),
 		scenarioService: service.NewScenarioService(repository),
 		datasetService:  service.NewDatasetService(repository, cfg.PythonAIWorkerURL, cfg.UploadRoot, cfg.ArtifactRoot),
 		analysisService: service.NewAnalysisService(repository, starter, planGenerator),
@@ -96,14 +96,23 @@ func (s *Server) routes() {
 	})
 	s.mux.HandleFunc("GET /runtime_status", s.handleRuntimeStatus)
 	s.mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPI)
+	s.mux.HandleFunc("GET /openapi.frontend.yaml", s.handleFrontendOpenAPI)
 	s.mux.HandleFunc("GET /swagger", s.handleSwaggerUI)
 	s.mux.HandleFunc("GET /swagger/", s.handleSwaggerUI)
+	s.mux.HandleFunc("GET /swagger/frontend", s.handleFrontendSwaggerUI)
+	s.mux.HandleFunc("GET /swagger/frontend/", s.handleFrontendSwaggerUI)
+	s.mux.HandleFunc("GET /prompts", s.handleListPrompts)
+	s.mux.HandleFunc("POST /prompts", s.handleCreatePrompt)
+	s.mux.HandleFunc("GET /prompts/{prompt_id}", s.handleGetPrompt)
+	s.mux.HandleFunc("PATCH /prompts/{prompt_id}", s.handleUpdatePrompt)
+	s.mux.HandleFunc("DELETE /prompts/{prompt_id}", s.handleDeletePrompt)
 	s.mux.HandleFunc("GET /skills", func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		writeJSON(w, stdhttp.StatusOK, registry.SupportedSkills())
 	})
 	s.mux.HandleFunc("POST /projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /projects", s.handleListProjects)
 	s.mux.HandleFunc("GET /projects/{project_id}", s.handleGetProject)
+	s.mux.HandleFunc("DELETE /projects/{project_id}", s.handleDeleteProject)
 	s.mux.HandleFunc("GET /projects/{project_id}/prompts", s.handleListProjectPrompts)
 	s.mux.HandleFunc("POST /projects/{project_id}/prompts", s.handleSaveProjectPrompt)
 	s.mux.HandleFunc("GET /projects/{project_id}/prompt_defaults", s.handleGetProjectPromptDefaults)
@@ -117,20 +126,27 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets", s.handleCreateDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets", s.handleListDatasets)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}", s.handleGetDataset)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}", s.handleDeleteDataset)
 	s.mux.HandleFunc("PUT /projects/{project_id}/datasets/{dataset_id}/active_version", s.handleActivateDatasetVersion)
 	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/active_version", s.handleDeactivateDatasetVersion)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/uploads", s.handleUploadDataset)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions", s.handleCreateDatasetVersion)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions", s.handleListDatasetVersions)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}", s.handleGetDatasetVersion)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}", s.handleDeleteDatasetVersion)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/source_download", s.handleDownloadSourceDataset)
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_jobs", s.handleCreateCleanJob)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_download", s.handleDownloadCleanedDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_preview", s.handleGetPreparePreview)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_download", s.handleDownloadPreparedDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_preview", s.handleGetSentimentPreview)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_download", s.handleDownloadSentimentDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clusters/{cluster_id}/members", s.handleGetClusterMembers)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare", s.handleBuildPrepare)
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_sample", s.handlePrepareSample)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs", s.handleCreatePrepareJob)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment", s.handleBuildSentiment)
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_sample", s.handleSentimentSample)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_jobs", s.handleCreateSentimentJob)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embeddings", s.handleBuildEmbeddings)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embedding_jobs", s.handleCreateEmbeddingJob)
@@ -257,7 +273,14 @@ func (s *Server) handleCreateProject(w stdhttp.ResponseWriter, r *stdhttp.Reques
 }
 
 func (s *Server) handleOpenAPI(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
-	path := strings.TrimSpace(s.cfg.OpenAPIPath)
+	s.handleOpenAPIFile(w, strings.TrimSpace(s.cfg.OpenAPIPath))
+}
+
+func (s *Server) handleFrontendOpenAPI(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	s.handleOpenAPIFile(w, strings.TrimSpace(s.cfg.FrontendOpenAPIPath))
+}
+
+func (s *Server) handleOpenAPIFile(w stdhttp.ResponseWriter, path string) {
 	if path == "" {
 		writeError(w, stdhttp.StatusInternalServerError, "openapi path is not configured")
 		return
@@ -275,7 +298,13 @@ func (s *Server) handleOpenAPI(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 func (s *Server) handleSwaggerUI(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(stdhttp.StatusOK)
-	_, _ = io.WriteString(w, swaggerUIHTML(r))
+	_, _ = io.WriteString(w, swaggerUIHTML("/openapi.yaml"))
+}
+
+func (s *Server) handleFrontendSwaggerUI(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(stdhttp.StatusOK)
+	_, _ = io.WriteString(w, swaggerUIHTML("/openapi.frontend.yaml"))
 }
 
 func appendVary(header stdhttp.Header, value string) {
@@ -309,6 +338,68 @@ func (s *Server) handleListProjects(w stdhttp.ResponseWriter, _ *stdhttp.Request
 		return
 	}
 	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDeleteProject(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.projectService.DeleteProject(r.PathValue("project_id")); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
+func (s *Server) handleListPrompts(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.ListPrompts(r.URL.Query().Get("operation"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleCreatePrompt(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.PromptCreateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreatePrompt(payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+func (s *Server) handleGetPrompt(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.GetPrompt(r.PathValue("prompt_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleUpdatePrompt(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.PromptUpdateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.UpdatePrompt(r.PathValue("prompt_id"), payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDeletePrompt(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.datasetService.DeletePrompt(r.PathValue("prompt_id")); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
 }
 
 func (s *Server) handleListProjectPrompts(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -481,6 +572,14 @@ func (s *Server) handleListDatasets(w stdhttp.ResponseWriter, r *stdhttp.Request
 	writeJSON(w, stdhttp.StatusOK, response)
 }
 
+func (s *Server) handleDeleteDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.datasetService.DeleteDataset(r.PathValue("project_id"), r.PathValue("dataset_id")); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
 func (s *Server) handleActivateDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	var payload domain.DatasetActiveVersionUpdateRequest
 	if err := decodeJSON(r, &payload); err != nil {
@@ -569,6 +668,76 @@ func (s *Server) handleGetDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp.Re
 		return
 	}
 	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDeleteDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.datasetService.DeleteDatasetVersion(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+	); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
+func (s *Server) handleDownloadSourceDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	sourcePath, filename, contentType, err := s.datasetService.ResolveSourceDownload(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	handle, err := os.Open(sourcePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.writeServiceError(w, service.ErrNotFound{Resource: "source file"})
+			return
+		}
+		s.writeServiceError(w, err)
+		return
+	}
+	defer handle.Close()
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
+	w.WriteHeader(stdhttp.StatusOK)
+	_, _ = io.Copy(w, handle)
+}
+
+func (s *Server) handleDownloadCleanedDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	artifactPath, filename, err := s.datasetService.ResolveCleanDownload(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	defer os.Remove(artifactPath)
+	handle, err := os.Open(artifactPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.writeServiceError(w, service.ErrNotFound{Resource: "clean artifact"})
+			return
+		}
+		s.writeServiceError(w, err)
+		return
+	}
+	defer handle.Close()
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
+	w.WriteHeader(stdhttp.StatusOK)
+	if _, err := w.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
+		return
+	}
+	_, _ = io.Copy(w, handle)
 }
 
 func (s *Server) handleGetPreparePreview(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -742,6 +911,45 @@ func (s *Server) handleBuildPrepare(w stdhttp.ResponseWriter, r *stdhttp.Request
 	writeJSON(w, stdhttp.StatusAccepted, response)
 }
 
+func (s *Server) handleCreateCleanJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetCleanRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreateCleanJob(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		payload,
+		"api",
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusAccepted, response)
+}
+
+func (s *Server) handlePrepareSample(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetPrepareRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.BuildPrepareSample(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		payload,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
 func (s *Server) handleCreatePrepareJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	var payload domain.DatasetPrepareRequest
 	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
@@ -895,6 +1103,10 @@ func (s *Server) handleBuildSentiment(w stdhttp.ResponseWriter, r *stdhttp.Reque
 		writeError(w, stdhttp.StatusBadRequest, err.Error())
 		return
 	}
+	if !hasTextColumns(payload.TextColumns) {
+		writeError(w, stdhttp.StatusBadRequest, "text_columns is required")
+		return
+	}
 	response, err := s.datasetService.BuildSentiment(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
@@ -908,10 +1120,37 @@ func (s *Server) handleBuildSentiment(w stdhttp.ResponseWriter, r *stdhttp.Reque
 	writeJSON(w, stdhttp.StatusAccepted, response)
 }
 
+func (s *Server) handleSentimentSample(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetSentimentSampleRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	if !hasTextColumns(payload.TextColumns) {
+		writeError(w, stdhttp.StatusBadRequest, "text_columns is required")
+		return
+	}
+	response, err := s.datasetService.BuildSentimentSample(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		payload,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
 func (s *Server) handleCreateSentimentJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	var payload domain.DatasetSentimentBuildRequest
 	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
 		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	if !hasTextColumns(payload.TextColumns) {
+		writeError(w, stdhttp.StatusBadRequest, "text_columns is required")
 		return
 	}
 	response, err := s.datasetService.CreateSentimentJob(
@@ -1204,6 +1443,15 @@ func decodeJSONAllowEmpty(r *stdhttp.Request, dest any) error {
 	return nil
 }
 
+func hasTextColumns(values []string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func writeError(w stdhttp.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]any{
 		"detail": strings.TrimSpace(message),
@@ -1257,10 +1505,9 @@ func stringPtr(value string) *string {
 	return &trimmed
 }
 
-func swaggerUIHTML(r *stdhttp.Request) string {
-	specURL := "/openapi.yaml"
-	if r != nil && r.URL != nil && strings.HasPrefix(r.URL.Path, "/swagger/") {
-		specURL = "../openapi.yaml"
+func swaggerUIHTML(specURL string) string {
+	if strings.TrimSpace(specURL) == "" {
+		specURL = "/openapi.yaml"
 	}
 	return `<!doctype html>
 <html lang="ko">

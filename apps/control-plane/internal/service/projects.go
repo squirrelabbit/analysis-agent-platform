@@ -1,6 +1,8 @@
 package service
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -10,11 +12,17 @@ import (
 )
 
 type ProjectService struct {
-	store store.Repository
+	store        store.Repository
+	uploadRoot   string
+	artifactRoot string
 }
 
-func NewProjectService(repository store.Repository) *ProjectService {
-	return &ProjectService{store: repository}
+func NewProjectService(repository store.Repository, uploadRoot string, artifactRoot string) *ProjectService {
+	return &ProjectService{
+		store:        repository,
+		uploadRoot:   strings.TrimSpace(uploadRoot),
+		artifactRoot: strings.TrimSpace(artifactRoot),
+	}
 }
 
 func (s *ProjectService) CreateProject(input domain.ProjectCreateRequest) (domain.Project, error) {
@@ -60,6 +68,25 @@ func (s *ProjectService) ListProjects() (domain.ProjectListResponse, error) {
 	return domain.ProjectListResponse{Items: items}, nil
 }
 
+func (s *ProjectService) DeleteProject(projectID string) error {
+	if _, err := s.store.GetProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return ErrNotFound{Resource: "project"}
+		}
+		return err
+	}
+	if err := s.store.DeleteProject(projectID); err != nil {
+		if err == store.ErrNotFound {
+			return ErrNotFound{Resource: "project"}
+		}
+		return err
+	}
+	if err := s.removeProjectArtifacts(projectID); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *ProjectService) withProjectCounts(project domain.Project) (domain.Project, error) {
 	scenarios, err := s.store.ListScenarios(project.ProjectID)
 	if err != nil {
@@ -87,4 +114,18 @@ func (s *ProjectService) withProjectCounts(project domain.Project) (domain.Proje
 	project.ScenarioCount = len(scenarios)
 	project.PromptCount = len(prompts)
 	return project, nil
+}
+
+func (s *ProjectService) removeProjectArtifacts(projectID string) error {
+	roots := []string{s.uploadRoot, s.artifactRoot}
+	for _, root := range roots {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		target := filepath.Join(root, "projects", projectID)
+		if err := os.RemoveAll(target); err != nil {
+			return err
+		}
+	}
+	return nil
 }

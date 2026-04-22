@@ -40,6 +40,16 @@ func TestDatasetServiceReconcileStartupBuildJobsRedispatchesQueuedAndRunningJobs
 	runID := "old-run"
 	for _, job := range []domain.DatasetBuildJob{
 		{
+			JobID:            "job-clean",
+			ProjectID:        project.ProjectID,
+			DatasetID:        dataset.DatasetID,
+			DatasetVersionID: version.DatasetVersionID,
+			BuildType:        datasetBuildTypeClean,
+			Status:           "queued",
+			Request:          map[string]any{"text_columns": []any{"제목", "본문"}},
+			CreatedAt:        time.Now().UTC(),
+		},
+		{
 			JobID:            "job-prepare",
 			ProjectID:        project.ProjectID,
 			DatasetID:        dataset.DatasetID,
@@ -72,11 +82,21 @@ func TestDatasetServiceReconcileStartupBuildJobsRedispatchesQueuedAndRunningJobs
 		t.Fatalf("unexpected reconciliation error: %v", err)
 	}
 
-	if requeued != 2 {
-		t.Fatalf("expected 2 requeued build jobs, got %d", requeued)
+	if requeued != 3 {
+		t.Fatalf("expected 3 requeued build jobs, got %d", requeued)
 	}
-	if len(starter.startCalls) != 2 {
-		t.Fatalf("expected 2 dataset build workflow starts, got %d", len(starter.startCalls))
+	if len(starter.startCalls) != 3 {
+		t.Fatalf("expected 3 dataset build workflow starts, got %d", len(starter.startCalls))
+	}
+	hasCleanStart := false
+	for _, call := range starter.startCalls {
+		if call.BuildType == datasetBuildTypeClean {
+			hasCleanStart = true
+			break
+		}
+	}
+	if !hasCleanStart {
+		t.Fatalf("expected clean build to be redispatched, got %+v", starter.startCalls)
 	}
 
 	stored, err := repository.GetDatasetBuildJob(project.ProjectID, "job-embedding")

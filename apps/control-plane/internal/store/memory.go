@@ -11,11 +11,13 @@ import (
 type MemoryStore struct {
 	mu             sync.RWMutex
 	projects       map[string]domain.Project
+	prompts        map[string]domain.Prompt
 	projectPrompts map[string]domain.ProjectPrompt
 	promptDefaults map[string]domain.ProjectPromptDefaults
 	scenarios      map[string]domain.Scenario
 	datasets       map[string]domain.Dataset
 	versions       map[string]domain.DatasetVersion
+	artifacts      map[string]domain.DatasetVersionArtifact
 	buildJobs      map[string]domain.DatasetBuildJob
 	requests       map[string]domain.AnalysisRequest
 	plans          map[string]domain.PlanRecord
@@ -26,11 +28,13 @@ type MemoryStore struct {
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		projects:       make(map[string]domain.Project),
+		prompts:        make(map[string]domain.Prompt),
 		projectPrompts: make(map[string]domain.ProjectPrompt),
 		promptDefaults: make(map[string]domain.ProjectPromptDefaults),
 		scenarios:      make(map[string]domain.Scenario),
 		datasets:       make(map[string]domain.Dataset),
 		versions:       make(map[string]domain.DatasetVersion),
+		artifacts:      make(map[string]domain.DatasetVersionArtifact),
 		buildJobs:      make(map[string]domain.DatasetBuildJob),
 		requests:       make(map[string]domain.AnalysisRequest),
 		plans:          make(map[string]domain.PlanRecord),
@@ -75,6 +79,136 @@ func (s *MemoryStore) ListProjects() ([]domain.Project, error) {
 		return items[i].CreatedAt.Before(items[j].CreatedAt)
 	})
 	return items, nil
+}
+
+func (s *MemoryStore) DeleteProject(projectID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.projects[projectID]; !ok {
+		return ErrNotFound
+	}
+
+	delete(s.projects, projectID)
+	delete(s.promptDefaults, projectID)
+
+	for key, prompt := range s.projectPrompts {
+		if prompt.ProjectID == projectID {
+			delete(s.projectPrompts, key)
+		}
+	}
+	for key, scenario := range s.scenarios {
+		if scenario.ProjectID == projectID {
+			delete(s.scenarios, key)
+		}
+	}
+	for key, dataset := range s.datasets {
+		if dataset.ProjectID == projectID {
+			delete(s.datasets, key)
+		}
+	}
+	for key, version := range s.versions {
+		if version.ProjectID == projectID {
+			delete(s.versions, key)
+		}
+	}
+	for key, artifact := range s.artifacts {
+		if artifact.ProjectID == projectID {
+			delete(s.artifacts, key)
+		}
+	}
+	for key, job := range s.buildJobs {
+		if job.ProjectID == projectID {
+			delete(s.buildJobs, key)
+		}
+	}
+	for key, request := range s.requests {
+		if request.ProjectID == projectID {
+			delete(s.requests, key)
+		}
+	}
+	for key, plan := range s.plans {
+		if plan.ProjectID == projectID {
+			delete(s.plans, key)
+		}
+	}
+	for key, execution := range s.executions {
+		if execution.ProjectID == projectID {
+			delete(s.executions, key)
+		}
+	}
+	for key, report := range s.reports {
+		if report.ProjectID == projectID {
+			delete(s.reports, key)
+		}
+	}
+	return nil
+}
+
+func promptVersionKey(version, operation string) string {
+	return version + "::" + operation
+}
+
+func (s *MemoryStore) SavePrompt(prompt domain.Prompt) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prompts[prompt.PromptID] = prompt
+	return nil
+}
+
+func (s *MemoryStore) GetPrompt(promptID string) (domain.Prompt, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	prompt, ok := s.prompts[promptID]
+	if !ok {
+		return domain.Prompt{}, ErrNotFound
+	}
+	return prompt, nil
+}
+
+func (s *MemoryStore) GetPromptByVersion(version, operation string) (domain.Prompt, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	targetKey := promptVersionKey(version, operation)
+	for _, prompt := range s.prompts {
+		if promptVersionKey(prompt.Version, prompt.Operation) == targetKey {
+			return prompt, nil
+		}
+	}
+	return domain.Prompt{}, ErrNotFound
+}
+
+func (s *MemoryStore) ListPrompts(operation string) ([]domain.Prompt, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.Prompt, 0, len(s.prompts))
+	filter := operation
+	for _, prompt := range s.prompts {
+		if filter != "" && prompt.Operation != filter {
+			continue
+		}
+		items = append(items, prompt)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Operation == items[j].Operation {
+			if items[i].Version == items[j].Version {
+				return items[i].UpdatedAt.After(items[j].UpdatedAt)
+			}
+			return items[i].Version < items[j].Version
+		}
+		return items[i].Operation < items[j].Operation
+	})
+	return items, nil
+}
+
+func (s *MemoryStore) DeletePrompt(promptID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.prompts[promptID]; !ok {
+		return ErrNotFound
+	}
+	delete(s.prompts, promptID)
+	return nil
 }
 
 func projectPromptKey(projectID, version, operation string) string {
@@ -209,10 +343,40 @@ func (s *MemoryStore) ListDatasets(projectID string) ([]domain.Dataset, error) {
 	return items, nil
 }
 
+func (s *MemoryStore) DeleteDataset(projectID, datasetID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dataset, ok := s.datasets[datasetID]
+	if !ok || dataset.ProjectID != projectID {
+		return ErrNotFound
+	}
+
+	delete(s.datasets, datasetID)
+	for key, version := range s.versions {
+		if version.ProjectID == projectID && version.DatasetID == datasetID {
+			delete(s.versions, key)
+		}
+	}
+	for key, artifact := range s.artifacts {
+		if artifact.ProjectID == projectID && artifact.DatasetID == datasetID {
+			delete(s.artifacts, key)
+		}
+	}
+	for key, job := range s.buildJobs {
+		if job.ProjectID == projectID && job.DatasetID == datasetID {
+			delete(s.buildJobs, key)
+		}
+	}
+	return nil
+}
+
 func (s *MemoryStore) SaveDatasetVersion(version domain.DatasetVersion) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	version = normalizeDatasetVersionCleanFields(version)
 	s.versions[version.DatasetVersionID] = cloneDatasetVersion(version)
+	s.syncDatasetVersionArtifactsLocked(version)
 	return nil
 }
 
@@ -223,7 +387,9 @@ func (s *MemoryStore) GetDatasetVersion(projectID, datasetVersionID string) (dom
 	if !ok || version.ProjectID != projectID {
 		return domain.DatasetVersion{}, ErrNotFound
 	}
-	return cloneDatasetVersion(version), nil
+	cloned := cloneDatasetVersion(version)
+	cloned.Artifacts = s.datasetVersionArtifactsLocked(projectID, datasetVersionID)
+	return cloned, nil
 }
 
 func (s *MemoryStore) ListDatasetVersions(projectID, datasetID string) ([]domain.DatasetVersion, error) {
@@ -237,7 +403,9 @@ func (s *MemoryStore) ListDatasetVersions(projectID, datasetID string) ([]domain
 		if datasetID != "" && version.DatasetID != datasetID {
 			continue
 		}
-		items = append(items, cloneDatasetVersion(version))
+		cloned := cloneDatasetVersion(version)
+		cloned.Artifacts = s.datasetVersionArtifactsLocked(projectID, version.DatasetVersionID)
+		items = append(items, cloned)
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
@@ -248,9 +416,82 @@ func (s *MemoryStore) ListDatasetVersions(projectID, datasetID string) ([]domain
 	return items, nil
 }
 
+func (s *MemoryStore) DeleteDatasetVersion(projectID, datasetID, datasetVersionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	version, ok := s.versions[datasetVersionID]
+	if !ok || version.ProjectID != projectID || version.DatasetID != datasetID {
+		return ErrNotFound
+	}
+
+	delete(s.versions, datasetVersionID)
+	for key, artifact := range s.artifacts {
+		if artifact.ProjectID == projectID && artifact.DatasetID == datasetID && artifact.DatasetVersionID == datasetVersionID {
+			delete(s.artifacts, key)
+		}
+	}
+	for key, job := range s.buildJobs {
+		if job.ProjectID == projectID && job.DatasetID == datasetID && job.DatasetVersionID == datasetVersionID {
+			delete(s.buildJobs, key)
+		}
+	}
+	if dataset, ok := s.datasets[datasetID]; ok && dataset.ProjectID == projectID && dataset.ActiveDatasetVersionID != nil && *dataset.ActiveDatasetVersionID == datasetVersionID {
+		now := time.Now().UTC()
+		dataset.ActiveDatasetVersionID = nil
+		dataset.ActiveVersionUpdatedAt = &now
+		s.datasets[datasetID] = dataset
+	}
+	return nil
+}
+
+func (s *MemoryStore) ListDatasetVersionArtifacts(projectID, datasetVersionID string) ([]domain.DatasetVersionArtifact, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.datasetVersionArtifactsLocked(projectID, datasetVersionID), nil
+}
+
+func (s *MemoryStore) syncDatasetVersionArtifactsLocked(version domain.DatasetVersion) {
+	now := time.Now().UTC()
+	existingCreatedAt := make(map[string]time.Time)
+	for key, artifact := range s.artifacts {
+		if artifact.DatasetVersionID != version.DatasetVersionID {
+			continue
+		}
+		existingCreatedAt[artifact.ArtifactType] = artifact.CreatedAt
+		delete(s.artifacts, key)
+	}
+	for _, artifact := range deriveDatasetVersionArtifacts(version, now) {
+		if createdAt, ok := existingCreatedAt[artifact.ArtifactType]; ok && !createdAt.IsZero() {
+			artifact.CreatedAt = createdAt
+		}
+		s.artifacts[artifact.ArtifactID] = cloneDatasetVersionArtifact(artifact)
+	}
+}
+
+func (s *MemoryStore) datasetVersionArtifactsLocked(projectID, datasetVersionID string) []domain.DatasetVersionArtifact {
+	items := make([]domain.DatasetVersionArtifact, 0)
+	for _, artifact := range s.artifacts {
+		if artifact.ProjectID != projectID || artifact.DatasetVersionID != datasetVersionID {
+			continue
+		}
+		items = append(items, cloneDatasetVersionArtifact(artifact))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if artifactStageOrder(items[i].Stage) == artifactStageOrder(items[j].Stage) {
+			return items[i].ArtifactType < items[j].ArtifactType
+		}
+		return artifactStageOrder(items[i].Stage) < artifactStageOrder(items[j].Stage)
+	})
+	return items
+}
+
 func cloneDatasetVersion(version domain.DatasetVersion) domain.DatasetVersion {
 	cloned := version
 	cloned.Metadata = cloneAnyMap(version.Metadata)
+	cloned.SourceSummary = nil
+	cloned.BuildJobs = nil
+	cloned.Artifacts = cloneDatasetVersionArtifacts(version.Artifacts)
 	if version.Profile != nil {
 		profile := *version.Profile
 		profile.RegexRuleNames = append([]string(nil), version.Profile.RegexRuleNames...)
@@ -259,14 +500,48 @@ func cloneDatasetVersion(version domain.DatasetVersion) domain.DatasetVersion {
 	}
 	if version.PrepareSummary != nil {
 		summary := *version.PrepareSummary
-		if len(version.PrepareSummary.PrepareRegexRuleHits) > 0 {
-			summary.PrepareRegexRuleHits = make(map[string]int, len(version.PrepareSummary.PrepareRegexRuleHits))
-			for key, value := range version.PrepareSummary.PrepareRegexRuleHits {
-				summary.PrepareRegexRuleHits[key] = value
-			}
+		if len(version.PrepareSummary.TextColumns) > 0 {
+			summary.TextColumns = append([]string(nil), version.PrepareSummary.TextColumns...)
 		}
 		cloned.PrepareSummary = &summary
 	}
+	if version.CleanSummary != nil {
+		summary := *version.CleanSummary
+		if len(version.CleanSummary.TextColumns) > 0 {
+			summary.TextColumns = append([]string(nil), version.CleanSummary.TextColumns...)
+		}
+		if len(version.CleanSummary.PreprocessOptions) > 0 {
+			summary.PreprocessOptions = make(map[string]bool, len(version.CleanSummary.PreprocessOptions))
+			for key, value := range version.CleanSummary.PreprocessOptions {
+				summary.PreprocessOptions[key] = value
+			}
+		}
+		if len(version.CleanSummary.CleanRegexRuleHits) > 0 {
+			summary.CleanRegexRuleHits = make(map[string]int, len(version.CleanSummary.CleanRegexRuleHits))
+			for key, value := range version.CleanSummary.CleanRegexRuleHits {
+				summary.CleanRegexRuleHits[key] = value
+			}
+		}
+		cloned.CleanSummary = &summary
+	}
+	return cloned
+}
+
+func cloneDatasetVersionArtifacts(items []domain.DatasetVersionArtifact) []domain.DatasetVersionArtifact {
+	if len(items) == 0 {
+		return nil
+	}
+	cloned := make([]domain.DatasetVersionArtifact, 0, len(items))
+	for _, item := range items {
+		cloned = append(cloned, cloneDatasetVersionArtifact(item))
+	}
+	return cloned
+}
+
+func cloneDatasetVersionArtifact(artifact domain.DatasetVersionArtifact) domain.DatasetVersionArtifact {
+	cloned := artifact
+	cloned.Summary = cloneAnyMap(artifact.Summary)
+	cloned.Metadata = cloneAnyMap(artifact.Metadata)
 	return cloned
 }
 

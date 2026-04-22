@@ -127,3 +127,41 @@ func invalidateDownstreamArtifactsForPrepare(version *domain.DatasetVersion, rea
 	invalidateSentimentArtifacts(version, reason)
 	invalidateEmbeddingArtifacts(version, reason)
 }
+
+func invalidatePrepareArtifacts(version *domain.DatasetVersion, reason string) {
+	if version == nil {
+		return
+	}
+	if version.PrepareStatus != "" && version.PrepareStatus != "not_requested" {
+		version.PrepareStatus = "stale"
+	} else if version.PrepareStatus == "" {
+		version.PrepareStatus = "not_requested"
+	}
+	version.PrepareURI = nil
+	version.PreparedAt = nil
+	version.PreparePromptVer = nil
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	if version.PrepareStatus == "stale" {
+		version.Metadata["prepare_stale_reason"] = reason
+	} else {
+		delete(version.Metadata, "prepare_stale_reason")
+	}
+	delete(version.Metadata, "prepared_ref")
+	delete(version.Metadata, "prepared_format")
+	delete(version.Metadata, "prepare_format")
+	delete(version.Metadata, "prepare_notes")
+	delete(version.Metadata, "prepare_summary")
+	delete(version.Metadata, "prepare_usage")
+	delete(version.Metadata, "prepare_error")
+	delete(version.Metadata, "prepare_progress_ref")
+	delete(version.Metadata, "prepare_max_rows")
+	delete(version.Metadata, "prepared_text_column")
+	clearLLMFallbackMetadata(version.Metadata, "prepare")
+	invalidateDownstreamArtifactsForPrepare(version, reason)
+}
+
+func invalidateDownstreamArtifactsForClean(version *domain.DatasetVersion, reason string) {
+	invalidatePrepareArtifacts(version, reason)
+}

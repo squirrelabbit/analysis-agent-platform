@@ -14,11 +14,33 @@ import (
 type fakeExecutionDependencyBuilder struct {
 	repo            store.Repository
 	calls           []string
+	cleanStatus     string
 	prepareStatus   string
 	sentimentStatus string
 	embeddingStatus string
 	clusterStatus   string
 	clusterRequests []domain.DatasetClusterBuildRequest
+}
+
+func (b *fakeExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetCleanRequest, _ string) (domain.DatasetBuildJob, error) {
+	b.calls = append(b.calls, "clean")
+	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	status := builderStatusOrDefault(b.cleanStatus)
+	version.Metadata["clean_status"] = status
+	if status == "ready" {
+		version.Metadata["cleaned_ref"] = "cleaned.parquet"
+		version.Metadata["cleaned_text_column"] = "cleaned_text"
+	}
+	if err := b.repo.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	return domain.DatasetBuildJob{JobID: "job-clean", BuildType: "clean", Status: status}, nil
 }
 
 func (b *fakeExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _ string) (domain.DatasetBuildJob, error) {
@@ -119,6 +141,22 @@ func builderStatusOrDefault(status string) string {
 		return "queued"
 	}
 	return status
+}
+
+func (b *lazyExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetCleanRequest, _ string) (domain.DatasetBuildJob, error) {
+	b.calls = append(b.calls, "clean")
+	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.Metadata["clean_status"] = "queued"
+	if err := b.repo.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	return domain.DatasetBuildJob{JobID: "job-clean", BuildType: "clean", Status: "queued"}, nil
 }
 
 func (b *lazyExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _ string) (domain.DatasetBuildJob, error) {
@@ -428,6 +466,81 @@ func TestExecutePlanAutoBuildsRequiredDependencies(t *testing.T) {
 	}
 	if updatedVersion.PrepareStatus != "queued" {
 		t.Fatalf("unexpected updated version: %+v", updatedVersion)
+	}
+}
+
+func TestExecutePlanBuildsCleanBeforeDownstreamDependencies(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+	builder := &fakeExecutionDependencyBuilder{
+		repo:            repository,
+		cleanStatus:     "queued",
+		sentimentStatus: "queued",
+	}
+	service.SetDependencyBuilder(builder)
+
+	project := domain.Project{ProjectID: "project-clean-first", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{DatasetID: "dataset-clean-first", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-clean-first",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"clean_status": "not_requested",
+			"text_columns": []string{"제목", "본문"},
+		},
+		PrepareStatus:   "not_requested",
+		SentimentStatus: "not_requested",
+		EmbeddingStatus: "not_requested",
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+	plan := domain.PlanRecord{
+		PlanID:           "plan-clean-first",
+		RequestID:        "request-clean-first",
+		ProjectID:        project.ProjectID,
+		DatasetName:      "issues.csv",
+		DatasetVersionID: stringPtr(version.DatasetVersionID),
+		Plan: domain.SkillPlan{
+			PlanID: "plan-clean-first",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "issue_sentiment_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
+			},
+		},
+	}
+	if err := repository.SavePlan(plan); err != nil {
+		t.Fatalf("unexpected save plan error: %v", err)
+	}
+
+	response, err := service.ExecutePlan(project.ProjectID, plan.PlanID)
+	if err != nil {
+		t.Fatalf("unexpected execute plan error: %v", err)
+	}
+
+	if len(builder.calls) != 1 || builder.calls[0] != "clean" {
+		t.Fatalf("expected clean dependency first, got %+v", builder.calls)
+	}
+	if response.Execution.Status != "queued" {
+		t.Fatalf("unexpected execution status: %s", response.Execution.Status)
+	}
+	updatedVersion, err := repository.GetDatasetVersion(project.ProjectID, version.DatasetVersionID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset version error: %v", err)
+	}
+	if got := metadataString(updatedVersion.Metadata, "clean_status", ""); got != "queued" {
+		t.Fatalf("expected queued clean status, got %+v", updatedVersion.Metadata)
+	}
+	if updatedVersion.SentimentStatus != "not_requested" {
+		t.Fatalf("sentiment should not be queued before clean is ready: %+v", updatedVersion)
 	}
 }
 
@@ -2360,6 +2473,57 @@ func TestResolvedTextColumnForSkillTreatsDefaultTextAsPlaceholderWhenRawColumnDi
 	got := resolvedTextColumnForSkill(map[string]any{"text_column": "text"}, version)
 	if got != "normalized_text" {
 		t.Fatalf("expected normalized_text, got %s", got)
+	}
+}
+
+func TestResolvedTextColumnForSkillUsesCleanedColumnWhenPrepareMissing(t *testing.T) {
+	version := domain.DatasetVersion{
+		DataType:      "unstructured",
+		PrepareStatus: "not_requested",
+		StorageURI:    "festival.csv",
+		Metadata: map[string]any{
+			"clean_status":        "ready",
+			"cleaned_ref":         "festival.cleaned.parquet",
+			"cleaned_text_column": "cleaned_text",
+			"raw_text_column":     "제목 + 본문",
+			"raw_text_columns":    []string{"제목", "본문"},
+		},
+	}
+
+	if got := resolvedDatasetNameForSkill("document_filter", "fallback.csv", version); got != "festival.cleaned.parquet" {
+		t.Fatalf("expected cleaned dataset, got %s", got)
+	}
+	if got := resolvedTextColumnForSkill(map[string]any{"text_column": "text"}, version); got != "cleaned_text" {
+		t.Fatalf("expected cleaned_text for default placeholder, got %s", got)
+	}
+	if got := resolvedTextColumnForSkill(map[string]any{"text_column": "제목"}, version); got != "cleaned_text" {
+		t.Fatalf("expected cleaned_text for raw source column, got %s", got)
+	}
+}
+
+func TestPlanDependenciesReadyAcceptsCleanedSourceWithoutPrepare(t *testing.T) {
+	version := domain.DatasetVersion{
+		DataType:      "unstructured",
+		PrepareStatus: "not_requested",
+		StorageURI:    "festival.csv",
+		Metadata: map[string]any{
+			"clean_status":        "ready",
+			"cleaned_ref":         "festival.cleaned.parquet",
+			"cleaned_text_column": "cleaned_text",
+		},
+	}
+	plan := domain.SkillPlan{
+		Steps: []domain.SkillPlanStep{
+			{StepID: "step-1", SkillName: "document_filter", DatasetName: "festival.csv", Inputs: map[string]any{}},
+		},
+	}
+
+	if !planDependenciesReady(plan, version) {
+		t.Fatal("expected clean source to satisfy prepared-source dependency")
+	}
+	version.Metadata["clean_status"] = "cleaning"
+	if planDependenciesReady(plan, version) {
+		t.Fatal("expected in-progress clean source to keep dependency waiting")
 	}
 }
 

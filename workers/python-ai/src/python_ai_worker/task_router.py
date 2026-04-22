@@ -20,7 +20,7 @@ from .skills.aggregate import (
     run_noun_frequency,
     run_time_bucket_count,
 )
-from .skills.dataset_build import run_dataset_cluster_build, run_dataset_prepare, run_embedding, run_sentiment_label
+from .skills.dataset_build import run_dataset_clean, run_dataset_cluster_build, run_dataset_prepare, run_embedding, run_sentiment_label
 from .skills.preprocess import (
     run_deduplicate_documents,
     run_document_filter,
@@ -104,6 +104,7 @@ def task_handlers() -> dict[str, Any]:
     return {
         "planner": run_planner,
         "execution_final_answer": run_execution_final_answer,
+        "dataset_clean": run_dataset_clean,
         "dataset_prepare": run_dataset_prepare,
         "dataset_cluster_build": run_dataset_cluster_build,
         "sentiment_label": run_sentiment_label,

@@ -10,6 +10,7 @@
 | 계층 | 현재 기본 형식 | 핵심 키 |
 | --- | --- | --- |
 | raw upload | 원본 CSV/TXT/JSONL | `dataset_version_id` |
+| cleaned dataset | `cleaned.parquet` | `row_id`, `source_row_index`, `cleaned_text` |
 | prepared dataset | `prepared.parquet` | `row_id`, `source_row_index` |
 | sentiment sidecar | `sentiment.parquet` | `row_id`, `source_row_index` |
 | chunk dataset | `chunks.parquet` | `chunk_id`, `row_id`, `chunk_index` |
@@ -22,24 +23,30 @@
 
 ```mermaid
 flowchart LR
-    A["원본 Upload"] --> B["Prepare"]
-    B --> C["prepared.parquet"]
-    C --> D["Sentiment Build"]
-    C --> E["Chunk + Embedding Build"]
-    E --> F["embeddings.index.parquet"]
-    F --> G["pgvector"]
-    G --> H["Cluster Build"]
-    H --> I["clusters.json"]
-    H --> I2["clusters.memberships.parquet"]
-    G --> J["semantic_search"]
-    I --> K["embedding_cluster (read path)"]
-    I2 --> K
+    A["원본 Upload"] --> B["Clean"]
+    B --> C["cleaned.parquet"]
+    C --> C2["Prepare Sample / Optional Prepare"]
+    C2 --> D["prepared.parquet"]
+    D --> E["Sentiment Build"]
+    D --> F["Chunk + Embedding Build"]
+    C --> E
+    C --> F
+    F --> G["embeddings.index.parquet"]
+    G --> H["pgvector"]
+    H --> I["Cluster Build"]
+    I --> J["clusters.json"]
+    I --> J2["clusters.memberships.parquet"]
+    H --> K["semantic_search"]
+    J --> L["embedding_cluster (read path)"]
+    J2 --> L
 ```
 
 ## 현재 계약
 
-- dataset version metadata는 `prepared_ref`, `sentiment_ref`, `chunk_ref`, `embedding_index_ref`, `cluster_ref`, `cluster_summary_ref`, `cluster_membership_ref` 같은 logical ref를 저장한다.
+- dataset version metadata는 `cleaned_ref`, `prepared_ref`, `sentiment_ref`, `chunk_ref`, `embedding_index_ref`, `cluster_ref`, `cluster_summary_ref`, `cluster_membership_ref` 같은 logical ref를 저장한다.
 - `prepare_uri`, `sentiment_uri`, `embedding_uri` 같은 기존 URI 필드는 호환을 위해 유지하지만, 내부 실행은 ref와 format을 우선 본다.
+- 분석 실행 소스는 `prepared ready -> cleaned ready -> raw` 순서로 결정한다.
+- `clean`이 queued / cleaning / failed / stale이면 downstream build를 먼저 만들지 않는다.
 - `semantic_search`는 `pgvector`와 `chunk_ref`를 우선 사용한다.
 - full-dataset `embedding_cluster`는 precomputed `cluster_ref`를 우선 사용하고, subset 경로만 on-demand fallback을 허용한다.
 - `issue_cluster_summary`와 `issue_evidence_summary`는 필요할 때 `cluster_membership_ref`를 사용해 sample / evidence를 보강한다.

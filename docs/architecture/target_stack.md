@@ -21,13 +21,14 @@
 
 ```mermaid
 flowchart LR
-    A["Dataset Upload / Version"] --> B["Prepare Build"]
-    B --> C["Sentiment / Embedding / Cluster Build"]
-    C --> D["Analysis Request / Scenario"]
-    D --> E["Plan"]
-    E --> F["Temporal Execution"]
-    F --> G["result_v1 snapshot"]
-    G --> H["final_answer"]
+    A["Dataset Upload / Version"] --> B["Clean Build"]
+    B --> C["Prepare Sample / Optional Prepare"]
+    C --> D["Sentiment / Embedding / Cluster Build"]
+    D --> E["Analysis Request / Scenario"]
+    E --> F["Plan"]
+    F --> G["Temporal Execution"]
+    G --> H["result_v1 snapshot"]
+    H --> I["final_answer"]
 ```
 
 ## 설계 원칙
@@ -41,7 +42,8 @@ flowchart LR
 ## 현재 정렬 상태
 
 - control plane, dataset build, execution, final answer 경로는 현재 목표 스택과 맞춰져 있다.
-- `prepare=eager`, `sentiment / embedding / cluster=lazy` build 정책이 반영돼 있다.
+- `clean=eager`, `prepare=sample-first optional`, `sentiment / embedding / cluster=lazy` build 정책이 반영돼 있다.
+- 분석 실행 소스는 `prepared ready -> cleaned ready -> raw` 순서로 해석한다.
 - full-dataset `embedding_cluster`는 precomputed cluster artifact를 우선 읽는다.
 - `확인 필요:` Rust worker는 아직 hot path runtime에 연결되지 않았다.
 - `확인 필요:` Temporal workflow history 장기 보존은 아직 dev server 기본값을 따른다.

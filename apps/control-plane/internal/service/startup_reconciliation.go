@@ -78,6 +78,15 @@ func (s *DatasetService) requeueDatasetBuildJob(job domain.DatasetBuildJob) erro
 
 func (s *DatasetService) recoveryDatasetBuildRunner(job domain.DatasetBuildJob) (func() error, error) {
 	switch job.BuildType {
+	case datasetBuildTypeClean:
+		request, err := decodeStartupBuildRequest[domain.DatasetCleanRequest](job.Request)
+		if err != nil {
+			return nil, err
+		}
+		return func() error {
+			_, err := s.BuildClean(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
+			return err
+		}, nil
 	case datasetBuildTypePrepare:
 		request, err := decodeStartupBuildRequest[domain.DatasetPrepareRequest](job.Request)
 		if err != nil {

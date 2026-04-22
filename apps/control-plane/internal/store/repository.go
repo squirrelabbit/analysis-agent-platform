@@ -14,6 +14,12 @@ type Repository interface {
 	SaveProject(project domain.Project) error
 	GetProject(projectID string) (domain.Project, error)
 	ListProjects() ([]domain.Project, error)
+	DeleteProject(projectID string) error
+	SavePrompt(prompt domain.Prompt) error
+	GetPrompt(promptID string) (domain.Prompt, error)
+	GetPromptByVersion(version, operation string) (domain.Prompt, error)
+	ListPrompts(operation string) ([]domain.Prompt, error)
+	DeletePrompt(promptID string) error
 	SaveProjectPrompt(prompt domain.ProjectPrompt) error
 	GetProjectPrompt(projectID, version, operation string) (domain.ProjectPrompt, error)
 	ListProjectPrompts(projectID string) ([]domain.ProjectPrompt, error)
@@ -25,9 +31,12 @@ type Repository interface {
 	SaveDataset(dataset domain.Dataset) error
 	GetDataset(projectID, datasetID string) (domain.Dataset, error)
 	ListDatasets(projectID string) ([]domain.Dataset, error)
+	DeleteDataset(projectID, datasetID string) error
 	SaveDatasetVersion(version domain.DatasetVersion) error
 	GetDatasetVersion(projectID, datasetVersionID string) (domain.DatasetVersion, error)
 	ListDatasetVersions(projectID, datasetID string) ([]domain.DatasetVersion, error)
+	DeleteDatasetVersion(projectID, datasetID, datasetVersionID string) error
+	ListDatasetVersionArtifacts(projectID, datasetVersionID string) ([]domain.DatasetVersionArtifact, error)
 	SaveDatasetBuildJob(job domain.DatasetBuildJob) error
 	GetDatasetBuildJob(projectID, jobID string) (domain.DatasetBuildJob, error)
 	ListDatasetBuildJobs(projectID, datasetVersionID string) ([]domain.DatasetBuildJob, error)

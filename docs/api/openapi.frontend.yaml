@@ -1,0 +1,1497 @@
+openapi: 3.1.0
+info:
+  title: Analysis Support Platform Frontend API
+  version: 0.1.0
+  summary: 프론트 화면 연동에 필요한 필수 API subset
+  description: |
+    현재 프론트 화면 연동 기준으로 필요한 API만 추린 OpenAPI 문서다.
+
+    포함 범위:
+    1. 글로벌 프롬프트 CRUD
+    2. 프로젝트 CRUD
+    3. 데이터셋 CRUD
+    4. 데이터셋 활성 버전 전환
+    5. 데이터셋 업로드/버전 조회/버전 삭제/원본 다운로드
+    6. clean / prepare sample / prepare / sentiment 실행과 결과 조회/다운로드
+    7. 분석 요청 / 실행 / progress / step / result 조회
+
+    확인 필요:
+    - scenario/report 관련 API는 이후 프론트 범위 확정 시 이 문서에 단계적으로 포함한다.
+servers:
+  - url: http://127.0.0.1:18080
+    description: Local development
+tags:
+  - name: System
+  - name: Prompts
+  - name: Projects
+  - name: Datasets
+paths:
+  /runtime_status:
+    get:
+      tags: [System]
+      summary: Runtime status
+      operationId: getRuntimeStatus
+      responses:
+        "200":
+          description: Runtime status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeStatusResponse"
+  /prompts:
+    get:
+      tags: [Prompts]
+      summary: List global prompts
+      operationId: listPrompts
+      parameters:
+        - name: operation
+          in: query
+          schema:
+            type: string
+            enum: [prepare, prepare_batch, sentiment, sentiment_batch]
+      responses:
+        "200":
+          description: Global prompt list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptListResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Prompts]
+      summary: Create global prompt
+      operationId: createPrompt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromptCreateRequest"
+      responses:
+        "201":
+          description: Global prompt created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Prompt"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+  /prompts/{prompt_id}:
+    get:
+      tags: [Prompts]
+      summary: Get global prompt
+      operationId: getPrompt
+      parameters:
+        - $ref: "#/components/parameters/PromptId"
+      responses:
+        "200":
+          description: Global prompt detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Prompt"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    patch:
+      tags: [Prompts]
+      summary: Update global prompt
+      operationId: updatePrompt
+      parameters:
+        - $ref: "#/components/parameters/PromptId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromptUpdateRequest"
+      responses:
+        "200":
+          description: Global prompt updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Prompt"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Prompts]
+      summary: Delete global prompt
+      operationId: deletePrompt
+      parameters:
+        - $ref: "#/components/parameters/PromptId"
+      responses:
+        "204":
+          description: Global prompt deleted
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      operationId: listProjects
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectListResponse"
+    post:
+      tags: [Projects]
+      summary: Create project
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreateRequest"
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}:
+    get:
+      tags: [Projects]
+      summary: Get project
+      operationId: getProject
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Project detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Projects]
+      summary: Delete project
+      operationId: deleteProject
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "204":
+          description: Project deleted
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets:
+    get:
+      tags: [Datasets]
+      summary: List datasets
+      operationId: listDatasets
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Dataset list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Datasets]
+      summary: Create dataset
+      operationId: createDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetCreateRequest"
+      responses:
+        "201":
+          description: Dataset created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}:
+    get:
+      tags: [Datasets]
+      summary: Get dataset
+      operationId: getDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: Dataset detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Datasets]
+      summary: Delete dataset
+      operationId: deleteDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "204":
+          description: Dataset deleted
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/active_version:
+    put:
+      tags: [Datasets]
+      summary: Activate dataset version
+      operationId: activateDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetActiveVersionUpdateRequest"
+      responses:
+        "200":
+          description: Dataset active version updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Datasets]
+      summary: Deactivate dataset version
+      operationId: deactivateDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: Dataset active version cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/uploads:
+    post:
+      tags: [Datasets]
+      summary: Upload dataset file and create dataset version
+      operationId: uploadDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/DatasetUploadRequest"
+      responses:
+        "201":
+          description: Dataset version created from upload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions:
+    get:
+      tags: [Datasets]
+      summary: List dataset versions
+      operationId: listDatasetVersions
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: Dataset version list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersionListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}:
+    get:
+      tags: [Datasets]
+      summary: Get dataset version
+      operationId: getDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Dataset version detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Datasets]
+      summary: Delete dataset version
+      operationId: deleteDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "204":
+          description: Dataset version deleted
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/source_download:
+    get:
+      tags: [Datasets]
+      summary: Download uploaded source file
+      description: 업로드 API로 생성된 local source 파일만 다운로드한다.
+      operationId: downloadDatasetSource
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Uploaded source file download
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  # /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_jobs:
+  #   post:
+  #     tags: [Datasets]
+  #     summary: Enqueue async deterministic text clean job
+  #     operationId: createCleanJob
+  #     parameters:
+  #       - $ref: "#/components/parameters/ProjectId"
+  #       - $ref: "#/components/parameters/DatasetId"
+  #       - $ref: "#/components/parameters/VersionId"
+  #     requestBody:
+  #       required: false
+  #       content:
+  #         application/json:
+  #           schema:
+  #             $ref: "#/components/schemas/DatasetCleanRequest"
+  #     responses:
+  #       "202":
+  #         description: Clean build job enqueued
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/DatasetBuildJob"
+  #       "400":
+  #         $ref: "#/components/responses/ErrorResponse"
+  #       "404":
+  #         $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_download:
+    get:
+      tags: [Datasets]
+      summary: Download cleaned dataset as CSV
+      operationId: downloadCleanedDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Cleaned CSV download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare:
+    post:
+      tags: [Datasets]
+      summary: Run prepare for dataset version
+      operationId: buildPrepareDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetPrepareRequest"
+      responses:
+        "202":
+          description: Prepare accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_sample:
+    post:
+      tags: [Datasets]
+      summary: Run prepare on a small sample without saving dataset version state
+      operationId: buildPrepareSample
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetPrepareSampleRequest"
+      responses:
+        "200":
+          description: Prepare sample result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetPrepareSampleResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_preview:
+    get:
+      tags: [Datasets]
+      summary: Get prepare preview
+      operationId: getDatasetPreparePreview
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 10
+      responses:
+        "200":
+          description: Prepare preview detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetPreparePreviewResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_download:
+    get:
+      tags: [Datasets]
+      summary: Download prepared dataset as CSV
+      operationId: downloadPreparedDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Prepared CSV download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment:
+    post:
+      tags: [Datasets]
+      summary: Run sentiment for dataset version
+      operationId: buildSentimentDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetSentimentBuildRequest"
+      responses:
+        "202":
+          description: Sentiment accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetVersion"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_sample:
+    post:
+      tags: [Datasets]
+      summary: Run sentiment on a small sample without saving dataset version state
+      operationId: buildSentimentSample
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetSentimentSampleRequest"
+      responses:
+        "200":
+          description: Sentiment sample result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetSentimentSampleResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_preview:
+    get:
+      tags: [Datasets]
+      summary: Get sentiment preview
+      operationId: getDatasetSentimentPreview
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 10
+      responses:
+        "200":
+          description: Sentiment preview detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetSentimentPreviewResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_download:
+    get:
+      tags: [Datasets]
+      summary: Download sentiment-labeled dataset as CSV
+      operationId: downloadSentimentDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Sentiment CSV download
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+components:
+  responses:
+    ErrorResponse:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  parameters:
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+    DatasetId:
+      name: dataset_id
+      in: path
+      required: true
+      schema:
+        type: string
+    VersionId:
+      name: version_id
+      in: path
+      required: true
+      schema:
+        type: string
+    PromptId:
+      name: prompt_id
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+      required: [detail]
+    AnyMap:
+      type: object
+      additionalProperties: true
+    IntegerMap:
+      type: object
+      additionalProperties:
+        type: integer
+    StringList:
+      type: array
+      items:
+        type: string
+    RuntimeStatusTemporal:
+      type: object
+      additionalProperties: true
+    RuntimeStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        stack:
+          type: string
+        workflow_engine:
+          type: string
+        store_backend:
+          type: string
+        planner_backend:
+          type: string
+        temporal:
+          anyOf:
+            - $ref: "#/components/schemas/RuntimeStatusTemporal"
+            - type: "null"
+      required: [status, stack]
+    Prompt:
+      type: object
+      properties:
+        prompt_id:
+          type: string
+        version:
+          type: string
+        operation:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        summary:
+          type: string
+        content:
+          type: string
+        content_hash:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [prompt_id, version, operation, title, status, content, content_hash, created_at, updated_at]
+    PromptCreateRequest:
+      type: object
+      properties:
+        version:
+          type: string
+        operation:
+          type: string
+          enum: [prepare, prepare_batch, sentiment, sentiment_batch]
+        content:
+          type: string
+      required: [version, operation, content]
+    PromptUpdateRequest:
+      type: object
+      properties:
+        version:
+          type:
+            - string
+            - "null"
+        operation:
+          type:
+            - string
+            - "null"
+          enum: [prepare, prepare_batch, sentiment, sentiment_batch, null]
+        content:
+          type:
+            - string
+            - "null"
+    PromptListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Prompt"
+      required: [items]
+    Project:
+      type: object
+      properties:
+        project_id:
+          type: string
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        created_at:
+          type: string
+          format: date-time
+        dataset_version_count:
+          type: integer
+        scenario_count:
+          type: integer
+        prompt_count:
+          type: integer
+      required: [project_id, name, created_at, dataset_version_count, scenario_count, prompt_count]
+    ProjectCreateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+      required: [name]
+    ProjectListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+      required: [items]
+    Dataset:
+      type: object
+      properties:
+        dataset_id:
+          type: string
+        project_id:
+          type: string
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        data_type:
+          type: string
+        active_dataset_version_id:
+          type:
+            - string
+            - "null"
+        active_version_updated_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+      required: [dataset_id, project_id, name, data_type, created_at]
+    DatasetCreateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        data_type:
+          type:
+            - string
+            - "null"
+      required: [name]
+    DatasetListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Dataset"
+      required: [items]
+    DatasetActiveVersionUpdateRequest:
+      type: object
+      properties:
+        dataset_version_id:
+          type: string
+      required: [dataset_version_id]
+    DatasetProfile:
+      type: object
+      additionalProperties: true
+    DatasetSourceColumnSummary:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+      required: [name]
+    DatasetSourceSummary:
+      type: object
+      properties:
+        available:
+          type: boolean
+        status:
+          type: string
+          enum: [ready, missing, unsupported, error, unavailable]
+          description: 원본 요약 상태. ready면 columns/row_count/sample_rows가 채워진다.
+        format:
+          type: string
+          description: "원본 파일 포맷. 예: csv, tsv, parquet, jsonl."
+        row_count:
+          type:
+            - integer
+            - "null"
+        column_count:
+          type: integer
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetSourceColumnSummary"
+        sample_limit:
+          type: integer
+        sample_rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnyMap"
+        error_message:
+          type: string
+      required: [available]
+    DatasetVersionBuildJobStatus:
+      type: object
+      properties:
+        job_id:
+          type: string
+        build_type:
+          type: string
+        status:
+          type: string
+        triggered_by:
+          type: string
+        attempt:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        completed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        error_message:
+          type:
+            - string
+            - "null"
+        diagnostics:
+          anyOf:
+            - $ref: "#/components/schemas/BuildJobDiagnostics"
+            - type: "null"
+      required: [job_id, build_type, status, attempt, created_at]
+    BuildJobDiagnostics:
+      type: object
+      properties:
+        retry_count:
+          type: integer
+        last_error_type:
+          type:
+            - string
+            - "null"
+        last_error_message:
+          type:
+            - string
+            - "null"
+        workflow_id:
+          type:
+            - string
+            - "null"
+        workflow_run_id:
+          type:
+            - string
+            - "null"
+        resumed_execution_count:
+          type: integer
+        progress:
+          anyOf:
+            - $ref: "#/components/schemas/BuildJobProgress"
+            - type: "null"
+        llm_fallback:
+          type: boolean
+          description: LLM 호출 실패 후 deterministic fallback이 사용되었는지 여부
+        llm_fallback_reason:
+          type:
+            - string
+            - "null"
+          description: LLM fallback이 발생한 대표 사유
+        llm_fallback_count:
+          type: integer
+          description: LLM fallback이 적용된 row 수
+        llm_provider:
+          type:
+            - string
+            - "null"
+          description: fallback 전 시도한 LLM provider
+        llm_model:
+          type:
+            - string
+            - "null"
+          description: fallback 전 시도한 LLM model
+        warnings:
+          type: array
+          items:
+            type: string
+      required: [retry_count, resumed_execution_count]
+    BuildJobProgress:
+      type: object
+      properties:
+        percent:
+          type: number
+          format: float
+        processed_rows:
+          type: integer
+        total_rows:
+          type: integer
+        elapsed_seconds:
+          type: number
+          format: float
+        eta_seconds:
+          type:
+            - number
+            - "null"
+          format: float
+        message:
+          type: string
+        updated_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required: [percent, processed_rows, total_rows]
+    DatasetVersion:
+      type: object
+      properties:
+        dataset_version_id:
+          type: string
+        dataset_id:
+          type: string
+        project_id:
+          type: string
+        storage_uri:
+          type: string
+        data_type:
+          type: string
+        record_count:
+          type:
+            - integer
+            - "null"
+        metadata:
+          $ref: "#/components/schemas/AnyMap"
+        source_summary:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetSourceSummary"
+            - type: "null"
+        build_jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetVersionBuildJobStatus"
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetVersionArtifact"
+        profile:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetProfile"
+            - type: "null"
+        clean_status:
+          type: string
+          description: deterministic text clean stage status
+        clean_uri:
+          type:
+            - string
+            - "null"
+        cleaned_ref:
+          type:
+            - string
+            - "null"
+        cleaned_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        clean_summary:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetCleanSummary"
+            - type: "null"
+        prepare_status:
+          type: string
+        prepare_llm_mode:
+          type: string
+          enum: [default, enabled, disabled]
+        prepare_model:
+          type:
+            - string
+            - "null"
+        prepare_prompt_version:
+          type:
+            - string
+            - "null"
+        prepare_uri:
+          type:
+            - string
+            - "null"
+        prepared_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        sentiment_status:
+          type: string
+        sentiment_llm_mode:
+          type: string
+          enum: [default, enabled, disabled]
+        sentiment_model:
+          type:
+            - string
+            - "null"
+        sentiment_uri:
+          type:
+            - string
+            - "null"
+        sentiment_labeled_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        sentiment_prompt_version:
+          type:
+            - string
+            - "null"
+        embedding_status:
+          type: string
+        embedding_model:
+          type:
+            - string
+            - "null"
+        embedding_uri:
+          type:
+            - string
+            - "null"
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        ready_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required: [dataset_version_id, dataset_id, project_id, storage_uri, data_type, metadata, clean_status, prepare_status, sentiment_status, embedding_status, is_active, created_at]
+    DatasetVersionArtifact:
+      type: object
+      properties:
+        artifact_id:
+          type: string
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        artifact_type:
+          type: string
+          description: source, clean, prepare, sentiment, embedding, cluster_summary 등 산출물 유형
+        stage:
+          type: string
+          description: source, clean, prepare, sentiment, embedding, cluster 등 파이프라인 단계
+        status:
+          type: string
+        uri:
+          type: string
+        format:
+          type: string
+        model:
+          type: string
+        prompt_version:
+          type: string
+        summary:
+          $ref: "#/components/schemas/AnyMap"
+        metadata:
+          $ref: "#/components/schemas/AnyMap"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [artifact_id, project_id, dataset_id, dataset_version_id, artifact_type, stage, status, created_at, updated_at]
+    DatasetUploadRequest:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+        data_type:
+          type: string
+        metadata:
+          type: string
+          description: JSON object string. 업로드 직후 자동 clean을 실행하려면 text_columns가 필요하다. clean_preprocess_options를 넣으면 clean 작업에 전달된다.
+          example: '{"text_columns":["제목","본문"],"clean_preprocess_options":{"remove_english":false,"remove_numbers":false,"remove_special":false,"remove_monosyllables":true}}'
+        activate_on_create:
+          type: string
+          enum: ["true", "false"]
+        prepare_required:
+          type: string
+          enum: ["true", "false"]
+        prepare_llm_mode:
+          type: string
+          enum: [default, enabled, disabled]
+        sentiment_required:
+          type: string
+          enum: ["true", "false"]
+        sentiment_llm_mode:
+          type: string
+          enum: [default, enabled, disabled]
+      required: [file]
+    DatasetVersionListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetVersion"
+      required: [items]
+    DatasetCleanSummary:
+      type: object
+      properties:
+        input_row_count:
+          type: integer
+        output_row_count:
+          type: integer
+        kept_count:
+          type: integer
+        dropped_count:
+          type: integer
+        skipped_row_count:
+          type: integer
+        text_column:
+          type: string
+        text_columns:
+          type: array
+          items:
+            type: string
+        text_joiner:
+          type: string
+        preprocess_options:
+          $ref: "#/components/schemas/DatasetCleanPreprocessOptions"
+        source_input_char_count:
+          type: integer
+        cleaned_input_char_count:
+          type: integer
+        clean_reduced_char_count:
+          type: integer
+        clean_regex_rule_hits:
+          $ref: "#/components/schemas/IntegerMap"
+      required: [input_row_count, output_row_count, kept_count, dropped_count]
+    DatasetPrepareRequest:
+      type: object
+      properties:
+        text_columns:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: prepare 대상 텍스트 컬럼 목록. clean이 ready면 생략 시 cleaned_text를 사용한다.
+        output_path:
+          type:
+            - string
+            - "null"
+        model:
+          type:
+            - string
+            - "null"
+        max_rows:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: "전처리 비용 확인용으로 처리할 최대 row 수. 예: 10이면 앞 10개 row만 전처리한다."
+        batch_size:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: 동기 LLM 전처리 호출당 묶을 row 수. Anthropic Message Batches API가 아니라 내부 batch prompt 크기다.
+        force:
+          type:
+            - boolean
+            - "null"
+    DatasetPrepareSampleRequest:
+      type: object
+      properties:
+        text_columns:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: prepare sample 대상 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
+        model:
+          type:
+            - string
+            - "null"
+        max_rows:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          maximum: 20
+          description: 전처리 샘플로 처리할 최대 row 수. 기본값은 10, 최대값은 20이다.
+        batch_size:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: 동기 LLM 전처리 호출당 묶을 row 수. Anthropic Message Batches API가 아니라 내부 batch prompt 크기다.
+    DatasetCleanRequest:
+      type: object
+      properties:
+        text_columns:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: clean 대상 원본 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
+        output_path:
+          type:
+            - string
+            - "null"
+        preprocess_options:
+          $ref: "#/components/schemas/DatasetCleanPreprocessOptions"
+          description: prepare/LLM 호출 전에 적용할 비용 절감용 로컬 텍스트 정제 옵션.
+        force:
+          type:
+            - boolean
+            - "null"
+    DatasetCleanPreprocessOptions:
+      type: object
+      properties:
+        remove_english:
+          type: boolean
+          description: 영문 알파벳을 clean 단계에서 제거한다.
+        remove_numbers:
+          type: boolean
+          description: 숫자를 clean 단계에서 제거한다.
+        remove_special:
+          type: boolean
+          description: 특수문자/기호/공백 구분자를 clean 단계에서 공백으로 정리한다.
+        remove_monosyllables:
+          type: boolean
+          description: ㅋㅋㅋ, ㅠㅠ 같은 한글 자모 반복을 clean 단계에서 제거한다.
+    DatasetSentimentBuildRequest:
+      type: object
+      properties:
+        text_columns:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: 감성 분석 대상 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
+        output_path:
+          type:
+            - string
+            - "null"
+        model:
+          type:
+            - string
+            - "null"
+        force:
+          type:
+            - boolean
+            - "null"
+      required: [text_columns]
+    DatasetSentimentSampleRequest:
+      type: object
+      properties:
+        text_columns:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: 감성 분석 샘플 실행 대상 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
+        model:
+          type:
+            - string
+            - "null"
+        max_rows:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          maximum: 20
+          description: 감성 분석 샘플로 처리할 최대 row 수. 기본값은 10, 최대값은 20이다.
+        batch_size:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: 동기 LLM 감성 분석 호출당 묶을 row 수. Anthropic Message Batches API가 아니라 내부 batch prompt 크기다.
+      required: [text_columns]
+    DatasetSentimentSample:
+      type: object
+      properties:
+        source_row_index:
+          type: integer
+        row_id:
+          type: string
+        sentiment_label:
+          type: string
+        sentiment_confidence:
+          type: number
+          format: double
+        sentiment_reason:
+          type: string
+      required: [source_row_index, row_id, sentiment_label, sentiment_confidence, sentiment_reason]
+    DatasetSentimentSampleResponse:
+      type: object
+      properties:
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        sentiment_ref:
+          type: string
+        sentiment_format:
+          type: string
+        sample_limit:
+          type: integer
+        summary:
+          type: object
+          additionalProperties: true
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetTableColumn"
+        samples:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetSentimentSample"
+      required: [project_id, dataset_id, dataset_version_id, sentiment_ref, sentiment_format, sample_limit, columns, samples]
+    DatasetPrepareSample:
+      type: object
+      properties:
+        source_row_index:
+          type: integer
+        row_id:
+          type: string
+        raw_text:
+          type: string
+        normalized_text:
+          type: string
+        prepare_disposition:
+          type: string
+        prepare_reason:
+          type: string
+      required: [source_row_index, row_id, raw_text, normalized_text, prepare_disposition, prepare_reason]
+    DatasetTableColumn:
+      type: object
+      properties:
+        key:
+          type: string
+          description: samples row object의 필드 키
+        label:
+          type: string
+          description: 프론트 테이블 헤더 표시명
+        type:
+          type: string
+          description: number, string 등 프론트 렌더링 힌트
+      required: [key, label]
+    DatasetPrepareSampleResponse:
+      type: object
+      properties:
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        prepared_ref:
+          type: string
+        prepare_format:
+          type: string
+        sample_limit:
+          type: integer
+        summary:
+          type: object
+          additionalProperties: true
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetTableColumn"
+        samples:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetPrepareSample"
+      required: [project_id, dataset_id, dataset_version_id, prepared_ref, prepare_format, sample_limit, columns, samples]
+    DatasetPreparePreviewResponse:
+      type: object
+      additionalProperties: true
+    DatasetSentimentPreviewResponse:
+      type: object
+      additionalProperties: true
