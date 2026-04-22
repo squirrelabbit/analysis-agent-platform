@@ -271,15 +271,20 @@ type DatasetActiveVersionUpdateRequest struct {
 }
 
 type DatasetPrepareSummary struct {
-	InputRowCount        int            `json:"input_row_count"`
-	OutputRowCount       int            `json:"output_row_count"`
-	KeptCount            int            `json:"kept_count"`
-	ReviewCount          int            `json:"review_count"`
-	DroppedCount         int            `json:"dropped_count"`
-	TextColumn           string         `json:"text_column,omitempty"`
-	TextColumns          []string       `json:"text_columns,omitempty"`
-	TextJoiner           string         `json:"text_joiner,omitempty"`
-	PrepareRegexRuleHits map[string]int `json:"prepare_regex_rule_hits,omitempty"`
+	InputRowCount              int             `json:"input_row_count"`
+	OutputRowCount             int             `json:"output_row_count"`
+	KeptCount                  int             `json:"kept_count"`
+	ReviewCount                int             `json:"review_count"`
+	DroppedCount               int             `json:"dropped_count"`
+	TextColumn                 string          `json:"text_column,omitempty"`
+	TextColumns                []string        `json:"text_columns,omitempty"`
+	TextJoiner                 string          `json:"text_joiner,omitempty"`
+	PreprocessOptions          map[string]bool `json:"preprocess_options,omitempty"`
+	SourceInputCharCount       int             `json:"source_input_char_count,omitempty"`
+	LLMInputCharCount          int             `json:"llm_input_char_count,omitempty"`
+	PreprocessReducedCharCount int             `json:"preprocess_reduced_char_count,omitempty"`
+	PreprocessEmptyDropCount   int             `json:"preprocess_empty_drop_count,omitempty"`
+	PrepareRegexRuleHits       map[string]int  `json:"prepare_regex_rule_hits,omitempty"`
 }
 
 type DatasetPreparePreviewQuery struct {
@@ -394,12 +399,20 @@ type DatasetClusterMembersResponse struct {
 }
 
 type DatasetPrepareRequest struct {
-	TextColumns []string `json:"text_columns,omitempty"`
-	OutputPath  *string  `json:"output_path,omitempty"`
-	Model       *string  `json:"model,omitempty"`
-	MaxRows     *int     `json:"max_rows,omitempty"`
-	BatchSize   *int     `json:"batch_size,omitempty"`
-	Force       *bool    `json:"force,omitempty"`
+	TextColumns       []string                         `json:"text_columns,omitempty"`
+	OutputPath        *string                          `json:"output_path,omitempty"`
+	Model             *string                          `json:"model,omitempty"`
+	MaxRows           *int                             `json:"max_rows,omitempty"`
+	BatchSize         *int                             `json:"batch_size,omitempty"`
+	PreprocessOptions *DatasetPreparePreprocessOptions `json:"preprocess_options,omitempty"`
+	Force             *bool                            `json:"force,omitempty"`
+}
+
+type DatasetPreparePreprocessOptions struct {
+	RemoveEnglish       bool `json:"remove_english,omitempty"`
+	RemoveNumbers       bool `json:"remove_numbers,omitempty"`
+	RemoveSpecial       bool `json:"remove_special,omitempty"`
+	RemoveMonosyllables bool `json:"remove_monosyllables,omitempty"`
 }
 
 type DatasetEmbeddingBuildRequest struct {

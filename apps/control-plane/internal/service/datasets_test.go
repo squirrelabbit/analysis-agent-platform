@@ -376,6 +376,7 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	var requestedProgressPath string
 	var requestedMaxRows int
 	var requestedBatchSize int
+	var requestedPreprocessOptions map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -388,20 +389,25 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 		requestedProgressPath = payload["progress_path"].(string)
 		requestedMaxRows = intValue(payload["max_rows"])
 		requestedBatchSize = intValue(payload["prepare_batch_size"])
+		requestedPreprocessOptions = payload["preprocess_options"].(map[string]any)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"notes": []string{"prepare completed"},
 			"artifact": map[string]any{
-				"skill_name":               "dataset_prepare",
-				"prepare_uri":              "/tmp/issues.prepared.parquet",
-				"prepared_ref":             "/tmp/issues.prepared.parquet",
-				"prepare_format":           "parquet",
-				"prepare_model":            "claude-haiku-4-5",
-				"prepare_prompt_version":   "dataset-prepare-anthropic-v1",
-				"progress_ref":             requestedProgressPath,
-				"max_rows":                 requestedMaxRows,
-				"prepared_text_column":     "normalized_text",
-				"row_id_column":            "row_id",
-				"storage_contract_version": "unstructured-storage-v1",
+				"skill_name":                    "dataset_prepare",
+				"prepare_uri":                   "/tmp/issues.prepared.parquet",
+				"prepared_ref":                  "/tmp/issues.prepared.parquet",
+				"prepare_format":                "parquet",
+				"prepare_model":                 "claude-haiku-4-5",
+				"prepare_prompt_version":        "dataset-prepare-anthropic-v1",
+				"progress_ref":                  requestedProgressPath,
+				"max_rows":                      requestedMaxRows,
+				"preprocess_options":            requestedPreprocessOptions,
+				"source_input_char_count":       1000,
+				"llm_input_char_count":          600,
+				"preprocess_reduced_char_count": 400,
+				"prepared_text_column":          "normalized_text",
+				"row_id_column":                 "row_id",
+				"storage_contract_version":      "unstructured-storage-v1",
 				"usage": map[string]any{
 					"provider":               "anthropic",
 					"model":                  "claude-haiku-4-5",
@@ -413,11 +419,15 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 					"cost_estimation_status": "not_configured",
 				},
 				"summary": map[string]any{
-					"input_row_count":  10,
-					"output_row_count": 7,
-					"kept_count":       6,
-					"review_count":     1,
-					"dropped_count":    3,
+					"input_row_count":               10,
+					"output_row_count":              7,
+					"kept_count":                    6,
+					"review_count":                  1,
+					"dropped_count":                 3,
+					"preprocess_options":            requestedPreprocessOptions,
+					"source_input_char_count":       1000,
+					"llm_input_char_count":          600,
+					"preprocess_reduced_char_count": 400,
 				},
 			},
 		})
@@ -439,6 +449,12 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 		Model:       datasetStringPtr("claude-haiku-4-5"),
 		MaxRows:     datasetIntPtr(10),
 		BatchSize:   datasetIntPtr(4),
+		PreprocessOptions: &domain.DatasetPreparePreprocessOptions{
+			RemoveEnglish:       true,
+			RemoveNumbers:       true,
+			RemoveSpecial:       true,
+			RemoveMonosyllables: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected build prepare error: %v", err)
@@ -458,6 +474,9 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	}
 	if requestedBatchSize != 4 {
 		t.Fatalf("unexpected prepare batch size: %d", requestedBatchSize)
+	}
+	if !boolValue(requestedPreprocessOptions["remove_english"]) || !boolValue(requestedPreprocessOptions["remove_numbers"]) || !boolValue(requestedPreprocessOptions["remove_special"]) || !boolValue(requestedPreprocessOptions["remove_monosyllables"]) {
+		t.Fatalf("unexpected prepare preprocess options: %+v", requestedPreprocessOptions)
 	}
 	if !strings.HasPrefix(requestedOutputPath, artifactRoot) {
 		t.Fatalf("unexpected prepare output path: %s", requestedOutputPath)
@@ -488,6 +507,12 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	}
 	if got := metadataString(version.Metadata, "prepare_progress_ref", ""); got != requestedProgressPath {
 		t.Fatalf("unexpected prepare progress ref: %s", got)
+	}
+	if got := version.Metadata["prepare_preprocess_options"]; got == nil {
+		t.Fatalf("expected prepare preprocess options in metadata")
+	}
+	if version.PrepareSummary == nil || version.PrepareSummary.PreprocessReducedCharCount != 400 {
+		t.Fatalf("unexpected prepare summary preprocess stats: %+v", version.PrepareSummary)
 	}
 	if version.RecordCount == nil || *version.RecordCount != 7 {
 		t.Fatalf("unexpected record count: %+v", version.RecordCount)

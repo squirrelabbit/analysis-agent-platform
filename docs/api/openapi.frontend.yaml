@@ -1024,8 +1024,8 @@ components:
           type: string
         metadata:
           type: string
-          description: JSON object string. prepare_required=true일 때 text_columns가 필요하다.
-          example: '{"text_columns":["제목","본문"]}'
+          description: JSON object string. prepare_required=true일 때 text_columns가 필요하다. prepare_preprocess_options를 넣으면 자동 prepare 작업에 전달된다.
+          example: '{"text_columns":["제목","본문"],"prepare_preprocess_options":{"remove_english":false,"remove_numbers":false,"remove_special":false,"remove_monosyllables":true}}'
         activate_on_create:
           type: string
           enum: ["true", "false"]
@@ -1079,11 +1079,29 @@ components:
             - "null"
           minimum: 1
           description: 동기 LLM 전처리 호출당 묶을 row 수. Anthropic Message Batches API가 아니라 내부 batch prompt 크기다.
+        preprocess_options:
+          $ref: "#/components/schemas/DatasetPreparePreprocessOptions"
+          description: LLM 호출 전에 적용할 비용 절감용 로컬 텍스트 정제 옵션.
         force:
           type:
             - boolean
             - "null"
       required: [text_columns]
+    DatasetPreparePreprocessOptions:
+      type: object
+      properties:
+        remove_english:
+          type: boolean
+          description: 영문 알파벳을 LLM 입력 전에 제거한다.
+        remove_numbers:
+          type: boolean
+          description: 숫자를 LLM 입력 전에 제거한다.
+        remove_special:
+          type: boolean
+          description: 특수문자/기호/공백 구분자를 LLM 입력 전에 공백으로 정리한다.
+        remove_monosyllables:
+          type: boolean
+          description: ㅋㅋㅋ, ㅠㅠ 같은 한글 자모 반복을 LLM 입력 전에 제거한다.
     DatasetSentimentBuildRequest:
       type: object
       properties:

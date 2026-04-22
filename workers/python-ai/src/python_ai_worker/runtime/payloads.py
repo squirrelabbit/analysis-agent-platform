@@ -6,6 +6,7 @@ from ..skill_bundle import default_inputs_for_skill
 from .common import (
     _normalize_garbage_rule_names,
     _normalize_pos_prefixes,
+    _normalize_prepare_preprocess_options,
     _normalize_prepare_regex_rule_names,
     _normalize_stopwords,
     _normalize_taxonomy_rules,
@@ -281,6 +282,7 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
     max_rows = max(0, int(payload.get("max_rows") or 0))
     progress_path = str(payload.get("progress_path") or "").strip()
     regex_rule_names = _normalize_prepare_regex_rule_names(payload.get("regex_rule_names"))
+    preprocess_options = _normalize_prepare_preprocess_options(payload.get("preprocess_options"))
     prepare_prompt_version = str(payload.get("prepare_prompt_version") or "").strip()
     prepare_prompt_template = str(payload.get("prepare_prompt_template") or "").strip()
     prepare_batch_prompt_template = str(payload.get("prepare_batch_prompt_template") or "").strip()
@@ -297,6 +299,7 @@ def _normalize_prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "max_rows": max_rows,
         "progress_path": progress_path,
         "regex_rule_names": regex_rule_names,
+        "preprocess_options": preprocess_options,
         "prepare_prompt_version": prepare_prompt_version,
         "prepare_prompt_template": prepare_prompt_template,
         "prepare_batch_prompt_template": prepare_batch_prompt_template,

@@ -354,6 +354,9 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     dropped_count = 0
     skipped_rows = 0
     regex_rule_hits: Counter[str] = Counter()
+    source_input_char_count = 0
+    llm_input_char_count = 0
+    preprocess_empty_drop_count = 0
     prepared_batch: list[tuple[int, dict[str, Any], str, str, list[str]]] = []
     prepared_rows: list[dict[str, Any]] = []
     usage_records: list[dict[str, Any]] = []
@@ -375,7 +378,23 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 continue
 
             regex_cleaned_text, applied_regex_rules = rt._apply_prepare_regex_rules(raw_text, normalized["regex_rule_names"])
-            prepared_batch.append((source_index, row, raw_text, regex_cleaned_text, applied_regex_rules))
+            regex_rule_hits.update(applied_regex_rules)
+            llm_input_text = rt._prepare_preprocess_text(regex_cleaned_text, normalized["preprocess_options"])
+            source_input_char_count += len(raw_text)
+            llm_input_char_count += len(llm_input_text)
+            if not llm_input_text:
+                dropped_count += 1
+                preprocess_empty_drop_count += 1
+                _write_progress(
+                    progress_path,
+                    processed_rows=processed_source_rows,
+                    total_rows=len(rows),
+                    started_at=started_at,
+                    message="prepare scanning rows",
+                )
+                continue
+
+            prepared_batch.append((source_index, row, raw_text, llm_input_text, applied_regex_rules))
             if len(prepared_batch) >= normalized["prepare_batch_size"]:
                 batch_results, batch_usage = rt._prepare_rows(
                     [item[3] for item in prepared_batch],
@@ -396,7 +415,6 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                     kept_count=kept_count,
                     review_count=review_count,
                     dropped_count=dropped_count,
-                    regex_rule_hits=regex_rule_hits,
                 )
                 prepared_batch = []
                 _write_progress(
@@ -427,7 +445,6 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 kept_count=kept_count,
                 review_count=review_count,
                 dropped_count=dropped_count,
-                regex_rule_hits=regex_rule_hits,
             )
             _write_progress(
                 progress_path,
@@ -515,6 +532,11 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
             "prepare_prompt_version": prompt_version,
             "prepare_strategy": prepare_strategy,
             "prepare_batch_size": normalized["prepare_batch_size"],
+            "preprocess_options": dict(normalized["preprocess_options"]),
+            "source_input_char_count": source_input_char_count,
+            "llm_input_char_count": llm_input_char_count,
+            "preprocess_reduced_char_count": max(0, source_input_char_count - llm_input_char_count),
+            "preprocess_empty_drop_count": preprocess_empty_drop_count,
             "max_rows": normalized["max_rows"],
             "progress_ref": progress_path,
             "prepare_regex_rule_names": list(normalized["regex_rule_names"]),
@@ -542,6 +564,11 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 "text_columns": list(normalized["text_columns"]),
                 "text_joiner": normalized["text_joiner"],
                 "prepare_batch_size": normalized["prepare_batch_size"],
+                "preprocess_options": dict(normalized["preprocess_options"]),
+                "source_input_char_count": source_input_char_count,
+                "llm_input_char_count": llm_input_char_count,
+                "preprocess_reduced_char_count": max(0, source_input_char_count - llm_input_char_count),
+                "preprocess_empty_drop_count": preprocess_empty_drop_count,
                 "prepare_regex_rule_names": list(normalized["regex_rule_names"]),
                 "prepare_regex_rule_hits": dict(regex_rule_hits),
             },
@@ -560,10 +587,8 @@ def _write_prepared_rows(
     kept_count: int,
     review_count: int,
     dropped_count: int,
-    regex_rule_hits: Counter[str],
 ) -> tuple[int, int, int]:
     for (source_index, row, raw_text, _regex_cleaned_text, applied_regex_rules), prepared in zip(batch_rows, batch_results):
-        regex_rule_hits.update(applied_regex_rules)
         disposition = prepared["disposition"]
         if disposition == "drop":
             dropped_count += 1

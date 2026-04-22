@@ -1931,6 +1931,7 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if err != nil {
 		return domain.DatasetVersion{}, err
 	}
+	preprocessOptions := resolvePreparePreprocessOptions(version.Metadata, input.PreprocessOptions)
 	progressPath := outputPath + ".progress.json"
 
 	version.PrepareStatus = "preparing"
@@ -1955,6 +1956,11 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	}
 	if batchSize > 0 {
 		version.Metadata["prepare_batch_size"] = batchSize
+	}
+	if hasEnabledPreparePreprocessOption(preprocessOptions) {
+		version.Metadata["prepare_preprocess_options"] = cloneStringBoolMap(preprocessOptions)
+	} else {
+		delete(version.Metadata, "prepare_preprocess_options")
 	}
 	if input.Model != nil && strings.TrimSpace(*input.Model) != "" {
 		model := strings.TrimSpace(*input.Model)
@@ -1995,6 +2001,9 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	}
 	if batchSize > 0 {
 		payload["prepare_batch_size"] = batchSize
+	}
+	if len(preprocessOptions) > 0 {
+		payload["preprocess_options"] = cloneStringBoolMap(preprocessOptions)
 	}
 	if version.Profile != nil {
 		if len(version.Profile.RegexRuleNames) > 0 {
@@ -2065,6 +2074,19 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	}
 	if artifactMaxRows, ok := artifactInt(response.Artifact, "max_rows"); ok && artifactMaxRows > 0 {
 		prepareMetadata["prepare_max_rows"] = artifactMaxRows
+	}
+	if artifactPreprocessOptions := artifactBoolMap(response.Artifact, "preprocess_options"); hasEnabledPreparePreprocessOption(artifactPreprocessOptions) {
+		prepareMetadata["prepare_preprocess_options"] = artifactPreprocessOptions
+	}
+	for _, key := range []string{
+		"source_input_char_count",
+		"llm_input_char_count",
+		"preprocess_reduced_char_count",
+		"preprocess_empty_drop_count",
+	} {
+		if value, ok := artifactInt(response.Artifact, key); ok {
+			prepareMetadata[key] = value
+		}
 	}
 	if usage := artifactMap(response.Artifact, "usage"); len(usage) > 0 {
 		prepareMetadata["prepare_usage"] = usage
@@ -2976,6 +2998,85 @@ func resolveDatasetBuildTextSelection(
 	}
 }
 
+func resolvePreparePreprocessOptions(
+	metadata map[string]any,
+	input *domain.DatasetPreparePreprocessOptions,
+) map[string]bool {
+	if input != nil {
+		return preparePreprocessOptionsFromDomain(input)
+	}
+	if metadata == nil {
+		return defaultPreparePreprocessOptions()
+	}
+	for _, key := range []string{"prepare_preprocess_options", "preprocess_options"} {
+		if options := preparePreprocessOptionsFromAny(metadata[key]); len(options) > 0 {
+			return options
+		}
+	}
+	return defaultPreparePreprocessOptions()
+}
+
+func defaultPreparePreprocessOptions() map[string]bool {
+	return map[string]bool{
+		"remove_english":       false,
+		"remove_numbers":       false,
+		"remove_special":       false,
+		"remove_monosyllables": false,
+	}
+}
+
+func preparePreprocessOptionsFromDomain(input *domain.DatasetPreparePreprocessOptions) map[string]bool {
+	if input == nil {
+		return defaultPreparePreprocessOptions()
+	}
+	return map[string]bool{
+		"remove_english":       input.RemoveEnglish,
+		"remove_numbers":       input.RemoveNumbers,
+		"remove_special":       input.RemoveSpecial,
+		"remove_monosyllables": input.RemoveMonosyllables,
+	}
+}
+
+func preparePreprocessOptionsFromAny(value any) map[string]bool {
+	result := defaultPreparePreprocessOptions()
+	hasKnownKey := false
+	if source, ok := value.(map[string]bool); ok {
+		for key := range result {
+			if raw, exists := source[key]; exists {
+				result[key] = raw
+				hasKnownKey = true
+			}
+		}
+		if !hasKnownKey {
+			return nil
+		}
+		return result
+	}
+	source, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	for key := range result {
+		if raw, exists := source[key]; exists {
+			result[key] = anyBoolValue(raw)
+			hasKnownKey = true
+		}
+	}
+	if !hasKnownKey {
+		return nil
+	}
+	return result
+}
+
+func hasEnabledPreparePreprocessOption(options map[string]bool) bool {
+	for _, enabled := range options {
+		if enabled {
+			return true
+		}
+	}
+	return false
+}
+
 func datasetBuildTextColumnLabel(columns []string) string {
 	normalized := normalizeStringList(columns)
 	if len(normalized) == 0 {
@@ -3096,15 +3197,20 @@ func buildPrepareSummary(metadata map[string]any) *domain.DatasetPrepareSummary 
 		return nil
 	}
 	return &domain.DatasetPrepareSummary{
-		InputRowCount:        intValueOrZero(raw["input_row_count"]),
-		OutputRowCount:       intValueOrZero(raw["output_row_count"]),
-		KeptCount:            intValueOrZero(raw["kept_count"]),
-		ReviewCount:          intValueOrZero(raw["review_count"]),
-		DroppedCount:         intValueOrZero(raw["dropped_count"]),
-		TextColumn:           strings.TrimSpace(anyStringValue(raw["text_column"])),
-		TextColumns:          anyStringList(raw["text_columns"]),
-		TextJoiner:           anyStringValue(raw["text_joiner"]),
-		PrepareRegexRuleHits: intMapValue(raw["prepare_regex_rule_hits"]),
+		InputRowCount:              intValueOrZero(raw["input_row_count"]),
+		OutputRowCount:             intValueOrZero(raw["output_row_count"]),
+		KeptCount:                  intValueOrZero(raw["kept_count"]),
+		ReviewCount:                intValueOrZero(raw["review_count"]),
+		DroppedCount:               intValueOrZero(raw["dropped_count"]),
+		TextColumn:                 strings.TrimSpace(anyStringValue(raw["text_column"])),
+		TextColumns:                anyStringList(raw["text_columns"]),
+		TextJoiner:                 anyStringValue(raw["text_joiner"]),
+		PreprocessOptions:          boolMapValue(raw["preprocess_options"]),
+		SourceInputCharCount:       intValueOrZero(raw["source_input_char_count"]),
+		LLMInputCharCount:          intValueOrZero(raw["llm_input_char_count"]),
+		PreprocessReducedCharCount: intValueOrZero(raw["preprocess_reduced_char_count"]),
+		PreprocessEmptyDropCount:   intValueOrZero(raw["preprocess_empty_drop_count"]),
+		PrepareRegexRuleHits:       intMapValue(raw["prepare_regex_rule_hits"]),
 	}
 }
 
@@ -3132,6 +3238,9 @@ func clonePrepareSummary(summary *domain.DatasetPrepareSummary) *domain.DatasetP
 	}
 	if len(summary.PrepareRegexRuleHits) > 0 {
 		cloned.PrepareRegexRuleHits = cloneStringIntMap(summary.PrepareRegexRuleHits)
+	}
+	if len(summary.PreprocessOptions) > 0 {
+		cloned.PreprocessOptions = cloneStringBoolMap(summary.PreprocessOptions)
 	}
 	return &cloned
 }
@@ -3281,6 +3390,10 @@ func artifactMap(artifact map[string]any, key string) map[string]any {
 		return nil
 	}
 	return typed
+}
+
+func artifactBoolMap(artifact map[string]any, key string) map[string]bool {
+	return boolMapValue(artifactMap(artifact, key))
 }
 
 type llmFallbackInfo struct {
@@ -4436,11 +4549,60 @@ func intMapValue(value any) map[string]int {
 	return result
 }
 
+func boolMapValue(value any) map[string]bool {
+	if source, ok := value.(map[string]bool); ok {
+		return cloneStringBoolMap(source)
+	}
+	source, ok := value.(map[string]any)
+	if !ok || len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]bool, len(source))
+	for key, item := range source {
+		result[key] = anyBoolValue(item)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func anyBoolValue(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		normalized := strings.TrimSpace(strings.ToLower(typed))
+		return normalized == "true" || normalized == "1" || normalized == "yes" || normalized == "y"
+	case int:
+		return typed != 0
+	case int32:
+		return typed != 0
+	case int64:
+		return typed != 0
+	case float64:
+		return typed != 0
+	default:
+		return false
+	}
+}
+
 func cloneStringIntMap(source map[string]int) map[string]int {
 	if len(source) == 0 {
 		return nil
 	}
 	result := make(map[string]int, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
+func cloneStringBoolMap(source map[string]bool) map[string]bool {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]bool, len(source))
 	for key, value := range source {
 		result[key] = value
 	}

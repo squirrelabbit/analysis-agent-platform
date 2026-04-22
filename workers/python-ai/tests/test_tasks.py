@@ -1055,6 +1055,47 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(prepared_rows[0]["normalized_text"], "문의 내용은 결제 오류입니다")
         self.assertIn("html_artifact", prepared_rows[0]["prepare_regex_applied_rules"])
 
+    def test_dataset_prepare_applies_preprocess_options_before_llm_fallback(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_raw.csv"
+        prepared_path = temp_dir / "issues_raw.prepared.parquet"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "ABC123 축제 후기ㅋㅋㅋ!!! 존재하지 않는 이미지입니다 https://example.com"})
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+            result = run_dataset_prepare(
+                {
+                    "dataset_version_id": "version-preprocess",
+                    "dataset_name": str(csv_path),
+                    "text_column": "text",
+                    "output_path": str(prepared_path),
+                    "preprocess_options": {
+                        "remove_english": True,
+                        "remove_numbers": True,
+                        "remove_special": True,
+                        "remove_monosyllables": True,
+                    },
+                }
+            )
+
+        self.assertEqual(
+            result["artifact"]["preprocess_options"],
+            {
+                "remove_english": True,
+                "remove_numbers": True,
+                "remove_special": True,
+                "remove_monosyllables": True,
+            },
+        )
+        self.assertGreater(result["artifact"]["source_input_char_count"], result["artifact"]["llm_input_char_count"])
+        self.assertGreater(result["artifact"]["summary"]["preprocess_reduced_char_count"], 0)
+
+        prepared_rows = self._read_parquet_rows(prepared_path)
+        self.assertEqual(prepared_rows[0]["raw_text"], "ABC123 축제 후기ㅋㅋㅋ!!! 존재하지 않는 이미지입니다 https://example.com")
+        self.assertEqual(prepared_rows[0]["normalized_text"], "축제 후기")
+
     def test_dataset_prepare_batches_llm_requests(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues_raw.csv"
