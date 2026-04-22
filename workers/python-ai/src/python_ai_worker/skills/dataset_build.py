@@ -3,11 +3,14 @@ from __future__ import annotations
 """Dataset preparation and enrichment skill handlers."""
 
 import json
+import logging
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from .. import runtime as rt
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _stable_source_index(row: dict[str, Any], fallback_index: int) -> int:
@@ -28,6 +31,57 @@ def _row_id(row: dict[str, Any], fallback_index: int, dataset_version_id: str) -
 
 def _chunk_id(row_id: str, chunk_index: int = 0) -> str:
     return f"{row_id}:chunk:{chunk_index}"
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = str(value or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        result.append(normalized)
+        seen.add(normalized)
+    return result
+
+
+def _prepare_llm_fallback_summary(rows: list[dict[str, Any]]) -> tuple[int, str, list[str]]:
+    reasons: list[str] = []
+    count = 0
+    for row in rows:
+        flags = row.get("quality_flags") or []
+        if isinstance(flags, str):
+            flags = [flags]
+        row_has_fallback = False
+        for flag in flags:
+            text = str(flag or "").strip()
+            for prefix in ("llm_fallback:", "llm_batch_fallback:"):
+                if text.startswith(prefix):
+                    row_has_fallback = True
+                    reasons.append(text.removeprefix(prefix).strip())
+        if row_has_fallback:
+            count += 1
+    unique_reasons = _unique_strings(reasons)
+    first_reason = unique_reasons[0] if unique_reasons else ""
+    return count, first_reason, unique_reasons
+
+
+def _sentiment_llm_fallback_summary(rows: list[dict[str, Any]]) -> tuple[int, str, list[str]]:
+    reasons: list[str] = []
+    count = 0
+    marker = "llm_fallback:"
+    for row in rows:
+        reason_text = str(row.get("sentiment_reason") or row.get("reason") or "").strip()
+        if marker not in reason_text:
+            continue
+        count += 1
+        fallback_reason = reason_text.split(marker, 1)[1].strip()
+        if fallback_reason.endswith(")"):
+            fallback_reason = fallback_reason[:-1].strip()
+        reasons.append(fallback_reason)
+    unique_reasons = _unique_strings(reasons)
+    first_reason = unique_reasons[0] if unique_reasons else ""
+    return count, first_reason, unique_reasons
 
 
 def _prepare_output_format(path: Path) -> str:
@@ -327,6 +381,8 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     ]
     usage = rt._merge_usage_records(usage_records)
     usage_provider = str(usage.get("provider") or "").strip()
+    attempted_llm_model = client._config.model if client and client.is_enabled() else ""
+    llm_fallback_count, llm_fallback_reason, llm_fallback_reasons = _prepare_llm_fallback_summary(prepared_rows)
     prepare_model = "fallback-normalizer-v1"
     if usage_provider == "anthropic" and client and client.is_enabled():
         prepare_model = client._config.model
@@ -336,6 +392,16 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     notes.append(f"prepare batch size: {normalized['prepare_batch_size']}")
     if skipped_rows > 0:
         notes.append(f"skipped_rows={skipped_rows}")
+    if llm_fallback_count > 0:
+        fallback_note = f"llm fallback used: count={llm_fallback_count}, model={attempted_llm_model}, reason={llm_fallback_reason}"
+        notes.append(fallback_note)
+        LOGGER.warning(
+            "dataset prepare llm fallback used dataset_version_id=%s model=%s fallback_count=%s reason=%s",
+            normalized["dataset_version_id"],
+            attempted_llm_model,
+            llm_fallback_count,
+            llm_fallback_reason,
+        )
 
     prompt_version = "dataset-prepare-fallback-v1"
     prepare_strategy = "deterministic-fallback"
@@ -364,6 +430,12 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
             "prepare_strategy": prepare_strategy,
             "prepare_batch_size": normalized["prepare_batch_size"],
             "prepare_regex_rule_names": list(normalized["regex_rule_names"]),
+            "llm_provider": "anthropic" if attempted_llm_model else "",
+            "llm_model": attempted_llm_model,
+            "llm_fallback": llm_fallback_count > 0,
+            "llm_fallback_count": llm_fallback_count,
+            "llm_fallback_reason": llm_fallback_reason,
+            "llm_fallback_reasons": llm_fallback_reasons,
             "text_column": normalized["text_column"],
             "text_columns": list(normalized["text_columns"]),
             "text_joiner": normalized["text_joiner"],
@@ -838,16 +910,29 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     if output_format == "parquet":
         rt._write_parquet_rows(output_path, labeled_rows, schema=_sentiment_output_schema())
 
+    usage = rt._merge_usage_records(usage_records)
+    usage_provider = str(usage.get("provider") or "").strip()
+    attempted_llm_model = client._config.model if client and client.is_enabled() else ""
+    llm_fallback_count, llm_fallback_reason, llm_fallback_reasons = _sentiment_llm_fallback_summary(labeled_rows)
     sentiment_model = "sentiment-fallback-v1"
+    sentiment_strategy = "deterministic-fallback"
     prompt_version = "sentiment-fallback-v1"
-    if client and client.is_enabled():
+    if usage_provider == "anthropic" and client and client.is_enabled():
         sentiment_model = client._config.model
+        sentiment_strategy = "anthropic-batch" if normalized["sentiment_batch_size"] > 1 else "anthropic-row"
         prompt_version = str(labeled_rows[0].get("sentiment_prompt_version") or "").strip() if labeled_rows else ""
         if not prompt_version:
             prompt_version = normalized["sentiment_prompt_version"] or (
                 "sentiment-anthropic-batch-v1" if normalized["sentiment_batch_size"] > 1 else "sentiment-anthropic-v1"
             )
-    usage = rt._merge_usage_records(usage_records)
+    elif usage_provider == "mixed" and client and client.is_enabled():
+        sentiment_model = f"{client._config.model}+sentiment-fallback-v1"
+        sentiment_strategy = "mixed-anthropic-fallback"
+        prompt_version = str(labeled_rows[0].get("sentiment_prompt_version") or "").strip() if labeled_rows else ""
+        if not prompt_version:
+            prompt_version = normalized["sentiment_prompt_version"] or (
+                "sentiment-anthropic-batch-v1" if normalized["sentiment_batch_size"] > 1 else "sentiment-anthropic-v1"
+            )
 
     notes = [
         "sentiment label artifact generated by python-ai worker",
@@ -858,6 +943,16 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     ]
     if skipped_rows > 0:
         notes.append(f"skipped_rows={skipped_rows}")
+    if llm_fallback_count > 0:
+        fallback_note = f"llm fallback used: count={llm_fallback_count}, model={attempted_llm_model}, reason={llm_fallback_reason}"
+        notes.append(fallback_note)
+        LOGGER.warning(
+            "sentiment label llm fallback used dataset_version_id=%s model=%s fallback_count=%s reason=%s",
+            normalized["dataset_version_id"],
+            attempted_llm_model,
+            llm_fallback_count,
+            llm_fallback_reason,
+        )
 
     return {
         "notes": notes,
@@ -870,9 +965,16 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
             "sentiment_format": output_format,
             "sentiment_model": sentiment_model,
             "sentiment_prompt_version": prompt_version,
+            "sentiment_strategy": sentiment_strategy,
             "sentiment_label_column": "sentiment_label",
             "sentiment_confidence_column": "sentiment_confidence",
             "sentiment_reason_column": "sentiment_reason",
+            "llm_provider": "anthropic" if attempted_llm_model else "",
+            "llm_model": attempted_llm_model,
+            "llm_fallback": llm_fallback_count > 0,
+            "llm_fallback_count": llm_fallback_count,
+            "llm_fallback_reason": llm_fallback_reason,
+            "llm_fallback_reasons": llm_fallback_reasons,
             "text_column": normalized["text_column"],
             "text_columns": list(normalized["text_columns"]),
             "text_joiner": normalized["text_joiner"],

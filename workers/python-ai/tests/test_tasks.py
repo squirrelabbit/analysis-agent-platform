@@ -1128,6 +1128,11 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["usage"]["provider"], "deterministic-fallback")
         self.assertEqual(result["artifact"]["usage"]["request_count"], 2)
         self.assertEqual(result["artifact"]["usage"]["input_text_count"], 2)
+        self.assertTrue(result["artifact"]["llm_fallback"])
+        self.assertEqual(result["artifact"]["llm_fallback_count"], 2)
+        self.assertEqual(result["artifact"]["llm_fallback_reason"], "model unavailable")
+        self.assertEqual(result["artifact"]["llm_model"], "claude-haiku-4-5")
+        self.assertIn("llm fallback used: count=2", "\n".join(result["notes"]))
         prepared_rows = self._read_parquet_rows(prepared_path)
         self.assertIn("llm_batch_fallback:model unavailable", prepared_rows[0]["quality_flags"])
 
@@ -1264,6 +1269,38 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["usage"]["provider"], "deterministic-fallback")
         self.assertEqual(result["artifact"]["usage"]["request_count"], 2)
         self.assertEqual(result["artifact"]["usage"]["cost_estimation_status"], "free_fallback")
+        self.assertFalse(result["artifact"]["llm_fallback"])
+
+    def test_sentiment_label_records_fallback_when_llm_fails(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        prepared_path = temp_dir / "issues.prepared.parquet"
+        sentiment_path = temp_dir / "issues.sentiment.parquet"
+        table = pa.Table.from_pylist(
+            [
+                {"normalized_text": "결제 오류가 반복 발생했습니다"},
+                {"normalized_text": "빠르게 해결되어 만족합니다"},
+            ]
+        )
+        pq.write_table(table, prepared_path)
+
+        with patch("python_ai_worker.skills.dataset_build.rt._anthropic_sentiment_client", return_value=self._FailingPrepareClient()):
+            result = run_sentiment_label(
+                {
+                    "dataset_version_id": "version-sentiment-fallback",
+                    "dataset_name": str(prepared_path),
+                    "text_column": "normalized_text",
+                    "output_path": str(sentiment_path),
+                    "sentiment_batch_size": 2,
+                }
+            )
+
+        self.assertEqual(result["artifact"]["sentiment_model"], "sentiment-fallback-v1")
+        self.assertEqual(result["artifact"]["sentiment_strategy"], "deterministic-fallback")
+        self.assertTrue(result["artifact"]["llm_fallback"])
+        self.assertEqual(result["artifact"]["llm_fallback_count"], 2)
+        self.assertEqual(result["artifact"]["llm_fallback_reason"], "model unavailable")
+        self.assertEqual(result["artifact"]["llm_model"], "claude-haiku-4-5")
+        self.assertIn("llm fallback used: count=2", "\n".join(result["notes"]))
 
     def test_sentiment_label_joins_multiple_text_columns(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())

@@ -188,6 +188,9 @@ func (s *DatasetService) GetDatasetBuildJob(projectID, jobID string) (domain.Dat
 		}
 		return domain.DatasetBuildJob{}, err
 	}
+	if version, versionErr := s.store.GetDatasetVersion(projectID, job.DatasetVersionID); versionErr == nil {
+		return withBuildJobDiagnosticsForVersion(job, version), nil
+	}
 	return withBuildJobDiagnostics(job), nil
 }
 
@@ -201,13 +204,13 @@ func (s *DatasetService) ListDatasetBuildJobs(projectID, datasetID, datasetVersi
 		return domain.DatasetBuildJobListResponse{}, err
 	}
 	for index := range items {
-		items[index] = withBuildJobDiagnostics(items[index])
+		items[index] = withBuildJobDiagnosticsForVersion(items[index], version)
 	}
 	return domain.DatasetBuildJobListResponse{Items: items}, nil
 }
 
-func (s *DatasetService) latestDatasetVersionBuildJobStatuses(projectID, datasetVersionID string) ([]domain.DatasetVersionBuildJobStatus, error) {
-	items, err := s.store.ListDatasetBuildJobs(projectID, datasetVersionID)
+func (s *DatasetService) latestDatasetVersionBuildJobStatuses(projectID string, version domain.DatasetVersion) ([]domain.DatasetVersionBuildJobStatus, error) {
+	items, err := s.store.ListDatasetBuildJobs(projectID, version.DatasetVersionID)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +230,7 @@ func (s *DatasetService) latestDatasetVersionBuildJobStatuses(projectID, dataset
 		if !ok {
 			continue
 		}
-		result = append(result, datasetVersionBuildJobStatus(job))
+		result = append(result, datasetVersionBuildJobStatus(withBuildJobDiagnosticsForVersion(job, version)))
 	}
 	return result, nil
 }
@@ -243,6 +246,7 @@ func datasetVersionBuildJobStatus(job domain.DatasetBuildJob) domain.DatasetVers
 		StartedAt:    job.StartedAt,
 		CompletedAt:  job.CompletedAt,
 		ErrorMessage: job.ErrorMessage,
+		Diagnostics:  job.Diagnostics,
 	}
 }
 
@@ -366,6 +370,70 @@ func withBuildJobDiagnostics(job domain.DatasetBuildJob) domain.DatasetBuildJob 
 		ResumedExecutionCount: job.ResumedExecutionCount,
 	}
 	return job
+}
+
+func withBuildJobDiagnosticsForVersion(job domain.DatasetBuildJob, version domain.DatasetVersion) domain.DatasetBuildJob {
+	job = withBuildJobDiagnostics(job)
+	enrichBuildJobDiagnosticsFromVersion(&job, version)
+	return job
+}
+
+func enrichBuildJobDiagnosticsFromVersion(job *domain.DatasetBuildJob, version domain.DatasetVersion) {
+	prefix := buildJobMetadataPrefix(job.BuildType)
+	if prefix == "" || version.Metadata == nil {
+		return
+	}
+	if !metadataBool(version.Metadata, prefix+"_llm_fallback") {
+		return
+	}
+	if job.Diagnostics == nil {
+		job.Diagnostics = &domain.BuildJobDiagnostics{}
+	}
+	job.Diagnostics.LLMFallback = true
+	if count, ok := anyToInt(version.Metadata[prefix+"_llm_fallback_count"]); ok {
+		job.Diagnostics.LLMFallbackCount = count
+	}
+	if reason := metadataString(version.Metadata, prefix+"_llm_fallback_reason", ""); reason != "" {
+		job.Diagnostics.LLMFallbackReason = stringPointer(reason)
+	}
+	if provider := metadataString(version.Metadata, prefix+"_llm_provider", ""); provider != "" {
+		job.Diagnostics.LLMProvider = stringPointer(provider)
+	}
+	if model := metadataString(version.Metadata, prefix+"_llm_model", ""); model != "" {
+		job.Diagnostics.LLMModel = stringPointer(model)
+	}
+	if warning := metadataString(version.Metadata, prefix+"_warning", ""); warning != "" {
+		job.Diagnostics.Warnings = append(job.Diagnostics.Warnings, warning)
+	}
+}
+
+func buildJobMetadataPrefix(buildType string) string {
+	switch strings.TrimSpace(buildType) {
+	case datasetBuildTypePrepare:
+		return "prepare"
+	case datasetBuildTypeSentiment:
+		return "sentiment"
+	default:
+		return ""
+	}
+}
+
+func metadataBool(metadata map[string]any, key string) bool {
+	if metadata == nil {
+		return false
+	}
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
 }
 
 func cloneStringPointer(value *string) *string {

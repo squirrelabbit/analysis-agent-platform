@@ -1007,7 +1007,7 @@ func (s *AnalysisService) buildExecutionDependenciesProgress(projectID string, e
 			WaitingFor: buildType == waitingBuildType,
 		}
 		if job, ok := latestJobsByType[buildType]; ok {
-			jobCopy := withBuildJobDiagnostics(job)
+			jobCopy := withBuildJobDiagnosticsForVersion(job, version)
 			dependency.LatestJob = &jobCopy
 			if !dependency.Ready {
 				dependency.Status = strings.TrimSpace(job.Status)

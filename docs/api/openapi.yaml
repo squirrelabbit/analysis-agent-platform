@@ -2290,6 +2290,10 @@ components:
           type:
             - string
             - "null"
+        diagnostics:
+          anyOf:
+            - $ref: "#/components/schemas/BuildJobDiagnostics"
+            - type: "null"
       required: [job_id, build_type, status, attempt, created_at]
     DatasetVersion:
       type: object
@@ -2942,6 +2946,31 @@ components:
             - "null"
         resumed_execution_count:
           type: integer
+        llm_fallback:
+          type: boolean
+          description: LLM 호출 실패 후 deterministic fallback이 사용되었는지 여부
+        llm_fallback_reason:
+          type:
+            - string
+            - "null"
+          description: LLM fallback이 발생한 대표 사유
+        llm_fallback_count:
+          type: integer
+          description: LLM fallback이 적용된 row 수
+        llm_provider:
+          type:
+            - string
+            - "null"
+          description: fallback 전 시도한 LLM provider
+        llm_model:
+          type:
+            - string
+            - "null"
+          description: fallback 전 시도한 LLM model
+        warnings:
+          type: array
+          items:
+            type: string
       required: [retry_count, resumed_execution_count]
     SkillPlanStep:
       type: object

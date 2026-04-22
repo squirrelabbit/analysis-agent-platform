@@ -233,15 +233,16 @@ type DatasetSourceSummary struct {
 }
 
 type DatasetVersionBuildJobStatus struct {
-	JobID        string     `json:"job_id"`
-	BuildType    string     `json:"build_type"`
-	Status       string     `json:"status"`
-	TriggeredBy  string     `json:"triggered_by,omitempty"`
-	Attempt      int        `json:"attempt"`
-	CreatedAt    time.Time  `json:"created_at"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	CompletedAt  *time.Time `json:"completed_at,omitempty"`
-	ErrorMessage *string    `json:"error_message,omitempty"`
+	JobID        string               `json:"job_id"`
+	BuildType    string               `json:"build_type"`
+	Status       string               `json:"status"`
+	TriggeredBy  string               `json:"triggered_by,omitempty"`
+	Attempt      int                  `json:"attempt"`
+	CreatedAt    time.Time            `json:"created_at"`
+	StartedAt    *time.Time           `json:"started_at,omitempty"`
+	CompletedAt  *time.Time           `json:"completed_at,omitempty"`
+	ErrorMessage *string              `json:"error_message,omitempty"`
+	Diagnostics  *BuildJobDiagnostics `json:"diagnostics,omitempty"`
 }
 
 type DatasetVersionCreateRequest struct {
@@ -534,12 +535,18 @@ type RuleCatalogResponse struct {
 }
 
 type BuildJobDiagnostics struct {
-	RetryCount            int     `json:"retry_count"`
-	LastErrorType         *string `json:"last_error_type,omitempty"`
-	LastErrorMessage      *string `json:"last_error_message,omitempty"`
-	WorkflowID            *string `json:"workflow_id,omitempty"`
-	WorkflowRunID         *string `json:"workflow_run_id,omitempty"`
-	ResumedExecutionCount int     `json:"resumed_execution_count"`
+	RetryCount            int      `json:"retry_count"`
+	LastErrorType         *string  `json:"last_error_type,omitempty"`
+	LastErrorMessage      *string  `json:"last_error_message,omitempty"`
+	WorkflowID            *string  `json:"workflow_id,omitempty"`
+	WorkflowRunID         *string  `json:"workflow_run_id,omitempty"`
+	ResumedExecutionCount int      `json:"resumed_execution_count"`
+	LLMFallback           bool     `json:"llm_fallback,omitempty"`
+	LLMFallbackReason     *string  `json:"llm_fallback_reason,omitempty"`
+	LLMFallbackCount      int      `json:"llm_fallback_count,omitempty"`
+	LLMProvider           *string  `json:"llm_provider,omitempty"`
+	LLMModel              *string  `json:"llm_model,omitempty"`
+	Warnings              []string `json:"warnings,omitempty"`
 }
 
 type EmbeddingIndexChunk struct {

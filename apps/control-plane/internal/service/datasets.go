@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"os"
@@ -686,7 +687,7 @@ func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionI
 	}
 	enrichDatasetVersionView(&version)
 	version.SourceSummary = loadDatasetSourceSummary(version.StorageURI, defaultDatasetSourceSummarySampleLimit)
-	buildJobs, err := s.latestDatasetVersionBuildJobStatuses(projectID, version.DatasetVersionID)
+	buildJobs, err := s.latestDatasetVersionBuildJobStatuses(projectID, version)
 	if err != nil {
 		return domain.DatasetVersion{}, err
 	}
@@ -2037,6 +2038,17 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if usage := artifactMap(response.Artifact, "usage"); len(usage) > 0 {
 		prepareMetadata["prepare_usage"] = usage
 	}
+	clearLLMFallbackMetadata(version.Metadata, "prepare")
+	if fallbackInfo := applyLLMFallbackMetadata(prepareMetadata, "prepare", response.Artifact); fallbackInfo.Fallback {
+		log.Printf(
+			"dataset build llm fallback: build_type=prepare project_id=%s dataset_id=%s dataset_version_id=%s model=%s reason=%s",
+			projectID,
+			datasetID,
+			version.DatasetVersionID,
+			fallbackInfo.Model,
+			fallbackInfo.Reason,
+		)
+	}
 	version.Metadata = mergeStringAny(version.Metadata, prepareMetadata)
 	if promptVersion := artifactString(response.Artifact, "prepare_prompt_version"); promptVersion != "" {
 		version.PreparePromptVer = &promptVersion
@@ -2541,6 +2553,17 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 	}
 	if usage := artifactMap(response.Artifact, "usage"); len(usage) > 0 {
 		sentimentMetadata["sentiment_usage"] = usage
+	}
+	clearLLMFallbackMetadata(version.Metadata, "sentiment")
+	if fallbackInfo := applyLLMFallbackMetadata(sentimentMetadata, "sentiment", response.Artifact); fallbackInfo.Fallback {
+		log.Printf(
+			"dataset build llm fallback: build_type=sentiment project_id=%s dataset_id=%s dataset_version_id=%s model=%s reason=%s",
+			projectID,
+			datasetID,
+			version.DatasetVersionID,
+			fallbackInfo.Model,
+			fallbackInfo.Reason,
+		)
 	}
 	version.Metadata = mergeStringAny(version.Metadata, sentimentMetadata)
 	if sentimentURI := artifactString(response.Artifact, "sentiment_uri"); sentimentURI != "" {
@@ -3227,6 +3250,89 @@ func artifactMap(artifact map[string]any, key string) map[string]any {
 		return nil
 	}
 	return typed
+}
+
+type llmFallbackInfo struct {
+	Fallback bool
+	Reason   string
+	Count    int
+	Provider string
+	Model    string
+}
+
+func clearLLMFallbackMetadata(metadata map[string]any, prefix string) {
+	if metadata == nil {
+		return
+	}
+	delete(metadata, prefix+"_llm_fallback")
+	delete(metadata, prefix+"_llm_fallback_reason")
+	delete(metadata, prefix+"_llm_fallback_count")
+	delete(metadata, prefix+"_llm_fallback_reasons")
+	delete(metadata, prefix+"_llm_provider")
+	delete(metadata, prefix+"_llm_model")
+	delete(metadata, prefix+"_warning")
+}
+
+func applyLLMFallbackMetadata(metadata map[string]any, prefix string, artifact map[string]any) llmFallbackInfo {
+	info := llmFallbackInfo{
+		Fallback: artifactBool(artifact, "llm_fallback"),
+		Reason:   artifactString(artifact, "llm_fallback_reason"),
+		Provider: artifactString(artifact, "llm_provider"),
+		Model:    artifactString(artifact, "llm_model"),
+	}
+	if count, ok := artifactInt(artifact, "llm_fallback_count"); ok {
+		info.Count = count
+	}
+	if !info.Fallback {
+		return info
+	}
+	metadata[prefix+"_llm_fallback"] = true
+	metadata[prefix+"_llm_fallback_count"] = info.Count
+	if info.Reason != "" {
+		metadata[prefix+"_llm_fallback_reason"] = info.Reason
+		metadata[prefix+"_warning"] = fmt.Sprintf("%s llm fallback used: %s", prefix, info.Reason)
+	} else {
+		metadata[prefix+"_warning"] = fmt.Sprintf("%s llm fallback used", prefix)
+	}
+	if reasons := metadataStringList(artifact, "llm_fallback_reasons"); len(reasons) > 0 {
+		metadata[prefix+"_llm_fallback_reasons"] = reasons
+	}
+	if info.Provider != "" {
+		metadata[prefix+"_llm_provider"] = info.Provider
+	}
+	if info.Model != "" {
+		metadata[prefix+"_llm_model"] = info.Model
+	}
+	return info
+}
+
+func artifactBool(artifact map[string]any, key string) bool {
+	if artifact == nil {
+		return false
+	}
+	value, ok := artifact[key]
+	if !ok || value == nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
+}
+
+func artifactInt(artifact map[string]any, key string) (int, bool) {
+	if artifact == nil {
+		return 0, false
+	}
+	value, ok := artifact[key]
+	if !ok || value == nil {
+		return 0, false
+	}
+	return anyToInt(value)
 }
 
 func inferArtifactFormat(path string, fallback string) string {

@@ -1294,6 +1294,12 @@ func TestCreateDatasetVersionEnqueuesEagerPrepareJobWhenWorkerConfigured(t *test
 				"prepare_uri":          "/tmp/issues.prepared.parquet",
 				"prepared_ref":         "/tmp/issues.prepared.parquet",
 				"prepare_format":       "parquet",
+				"llm_provider":         "anthropic",
+				"llm_model":            "claude-3-5-haiku-latest",
+				"llm_fallback":         true,
+				"llm_fallback_count":   3,
+				"llm_fallback_reason":  "HTTP Error 404: Not Found",
+				"llm_fallback_reasons": []string{"HTTP Error 404: Not Found"},
 				"prepared_text_column": "normalized_text",
 				"summary": map[string]any{
 					"output_row_count": 3,
@@ -1324,12 +1330,30 @@ func TestCreateDatasetVersionEnqueuesEagerPrepareJobWhenWorkerConfigured(t *test
 	if job.BuildType != "prepare" {
 		t.Fatalf("unexpected build type: %+v", job)
 	}
+	if job.Diagnostics == nil || !job.Diagnostics.LLMFallback {
+		t.Fatalf("expected llm fallback diagnostics: %+v", job.Diagnostics)
+	}
+	if job.Diagnostics.LLMFallbackReason == nil || *job.Diagnostics.LLMFallbackReason != "HTTP Error 404: Not Found" {
+		t.Fatalf("unexpected llm fallback reason: %+v", job.Diagnostics)
+	}
+	if job.Diagnostics.LLMFallbackCount != 3 {
+		t.Fatalf("unexpected llm fallback count: %+v", job.Diagnostics)
+	}
+	if job.Diagnostics.LLMModel == nil || *job.Diagnostics.LLMModel != "claude-3-5-haiku-latest" {
+		t.Fatalf("unexpected llm model: %+v", job.Diagnostics)
+	}
 	version = waitForDatasetVersionPrepareReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
 	if callCount != 1 {
 		t.Fatalf("expected eager prepare worker call once, got %d", callCount)
 	}
 	if version.PrepareURI == nil || *version.PrepareURI != "/tmp/issues.prepared.parquet" {
 		t.Fatalf("unexpected prepare uri: %+v", version.PrepareURI)
+	}
+	if !metadataBool(version.Metadata, "prepare_llm_fallback") {
+		t.Fatalf("expected prepare llm fallback metadata: %+v", version.Metadata)
+	}
+	if got := metadataString(version.Metadata, "prepare_llm_fallback_reason", ""); got != "HTTP Error 404: Not Found" {
+		t.Fatalf("unexpected prepare llm fallback reason: %s", got)
 	}
 }
 
