@@ -391,32 +391,32 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_jobs:
-    post:
-      tags: [Datasets]
-      summary: Enqueue async deterministic text clean job
-      operationId: createCleanJob
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DatasetCleanRequest"
-      responses:
-        "202":
-          description: Clean build job enqueued
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetBuildJob"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
+  # /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_jobs:
+  #   post:
+  #     tags: [Datasets]
+  #     summary: Enqueue async deterministic text clean job
+  #     operationId: createCleanJob
+  #     parameters:
+  #       - $ref: "#/components/parameters/ProjectId"
+  #       - $ref: "#/components/parameters/DatasetId"
+  #       - $ref: "#/components/parameters/VersionId"
+  #     requestBody:
+  #       required: false
+  #       content:
+  #         application/json:
+  #           schema:
+  #             $ref: "#/components/schemas/DatasetCleanRequest"
+  #     responses:
+  #       "202":
+  #         description: Clean build job enqueued
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/DatasetBuildJob"
+  #       "400":
+  #         $ref: "#/components/responses/ErrorResponse"
+  #       "404":
+  #         $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_download:
     get:
       tags: [Datasets]
@@ -1030,6 +1030,10 @@ components:
         clean_status:
           type: string
           description: deterministic text clean stage status
+        clean_uri:
+          type:
+            - string
+            - "null"
         cleaned_ref:
           type:
             - string

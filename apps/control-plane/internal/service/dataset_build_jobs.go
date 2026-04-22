@@ -52,6 +52,7 @@ func (s *DatasetService) CreateCleanJob(projectID, datasetID, datasetVersionID s
 	if version.Metadata == nil {
 		version.Metadata = map[string]any{}
 	}
+	version.CleanStatus = "queued"
 	version.Metadata["clean_status"] = "queued"
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetBuildJob{}, err

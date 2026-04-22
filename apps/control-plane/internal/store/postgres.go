@@ -744,6 +744,7 @@ func (s *PostgresStore) DeleteDataset(projectID, datasetID string) error {
 }
 
 func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error {
+	version = normalizeDatasetVersionCleanFields(version)
 	metadataJSON, err := marshalJSON(version.Metadata)
 	if err != nil {
 		return err
@@ -756,11 +757,14 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 	_, err = s.db.Exec(
 		`INSERT INTO dataset_versions (
 		     dataset_version_id, dataset_id, project_id, storage_uri, data_type, record_count,
-		     metadata, profile, prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version, prepare_uri, prepared_at,
+		     metadata, profile, clean_status, clean_uri, cleaned_at,
+		     prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version, prepare_uri, prepared_at,
 		     sentiment_status, sentiment_llm_mode, sentiment_model, sentiment_uri, sentiment_labeled_at, sentiment_prompt_version,
 		     embedding_status, embedding_model, embedding_uri, created_at, ready_at
 		 ) VALUES (
-		     $1, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+		     $1, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11,
+		     $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
+		     $26, $27, $28
 		 )
 		 ON CONFLICT (dataset_version_id) DO UPDATE
 		 SET dataset_id = EXCLUDED.dataset_id,
@@ -770,6 +774,9 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 		     record_count = EXCLUDED.record_count,
 		     metadata = EXCLUDED.metadata,
 		     profile = EXCLUDED.profile,
+		     clean_status = EXCLUDED.clean_status,
+		     clean_uri = EXCLUDED.clean_uri,
+		     cleaned_at = EXCLUDED.cleaned_at,
 		     prepare_status = EXCLUDED.prepare_status,
 		     prepare_llm_mode = EXCLUDED.prepare_llm_mode,
 		     prepare_model = EXCLUDED.prepare_model,
@@ -795,6 +802,9 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 		version.RecordCount,
 		metadataJSON,
 		profileJSON,
+		version.CleanStatus,
+		nullableString(version.CleanURI),
+		nullableTime(version.CleanedAt),
 		version.PrepareStatus,
 		version.PrepareLLMMode,
 		nullableString(version.PrepareModel),
@@ -819,7 +829,8 @@ func (s *PostgresStore) SaveDatasetVersion(version domain.DatasetVersion) error 
 func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (domain.DatasetVersion, error) {
 	row := s.db.QueryRow(
 		`SELECT dataset_version_id, dataset_id::text, project_id::text, storage_uri, data_type,
-		        record_count, metadata, profile, prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version,
+		        record_count, metadata, profile, clean_status, clean_uri, cleaned_at,
+		        prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version,
 		        prepare_uri, prepared_at, sentiment_status, sentiment_llm_mode, sentiment_model, sentiment_uri,
 		        sentiment_labeled_at, sentiment_prompt_version, embedding_status, embedding_model,
 		        embedding_uri, created_at, ready_at
@@ -833,6 +844,7 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 	var recordCount sql.NullInt64
 	var metadataRaw []byte
 	var profileRaw []byte
+	var cleanURI sql.NullString
 	var prepareModel sql.NullString
 	var preparePromptVersion sql.NullString
 	var prepareURI sql.NullString
@@ -850,6 +862,9 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 		&recordCount,
 		&metadataRaw,
 		&profileRaw,
+		&version.CleanStatus,
+		&cleanURI,
+		&version.CleanedAt,
 		&version.PrepareStatus,
 		&version.PrepareLLMMode,
 		&prepareModel,
@@ -883,6 +898,10 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 		value := int(recordCount.Int64)
 		version.RecordCount = &value
 	}
+	if cleanURI.Valid {
+		version.CleanURI = &cleanURI.String
+		version.CleanedRef = &cleanURI.String
+	}
 	if prepareModel.Valid {
 		version.PrepareModel = &prepareModel.String
 	}
@@ -907,13 +926,14 @@ func (s *PostgresStore) GetDatasetVersion(projectID, datasetVersionID string) (d
 	if embeddingURI.Valid {
 		version.EmbeddingURI = &embeddingURI.String
 	}
-	return version, nil
+	return normalizeDatasetVersionCleanFields(version), nil
 }
 
 func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]domain.DatasetVersion, error) {
 	rows, err := s.db.Query(
 		`SELECT dataset_version_id, dataset_id::text, project_id::text, storage_uri, data_type,
-		        record_count, metadata, profile, prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version,
+		        record_count, metadata, profile, clean_status, clean_uri, cleaned_at,
+		        prepare_status, prepare_llm_mode, prepare_model, prepare_prompt_version,
 		        prepare_uri, prepared_at, sentiment_status, sentiment_llm_mode, sentiment_model, sentiment_uri,
 		        sentiment_labeled_at, sentiment_prompt_version, embedding_status, embedding_model,
 		        embedding_uri, created_at, ready_at
@@ -934,6 +954,7 @@ func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]doma
 		var recordCount sql.NullInt64
 		var metadataRaw []byte
 		var profileRaw []byte
+		var cleanURI sql.NullString
 		var prepareModel sql.NullString
 		var preparePromptVersion sql.NullString
 		var prepareURI sql.NullString
@@ -951,6 +972,9 @@ func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]doma
 			&recordCount,
 			&metadataRaw,
 			&profileRaw,
+			&version.CleanStatus,
+			&cleanURI,
+			&version.CleanedAt,
 			&version.PrepareStatus,
 			&version.PrepareLLMMode,
 			&prepareModel,
@@ -981,6 +1005,10 @@ func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]doma
 		if err := unmarshalNullableJSON(profileRaw, &version.Profile); err != nil {
 			return nil, err
 		}
+		if cleanURI.Valid {
+			version.CleanURI = &cleanURI.String
+			version.CleanedRef = &cleanURI.String
+		}
 		if prepareModel.Valid {
 			version.PrepareModel = &prepareModel.String
 		}
@@ -1005,7 +1033,7 @@ func (s *PostgresStore) ListDatasetVersions(projectID, datasetID string) ([]doma
 		if embeddingURI.Valid {
 			version.EmbeddingURI = &embeddingURI.String
 		}
-		items = append(items, version)
+		items = append(items, normalizeDatasetVersionCleanFields(version))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1919,6 +1947,9 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			record_count BIGINT,
 			metadata JSONB NOT NULL,
 			profile JSONB,
+			clean_status TEXT NOT NULL DEFAULT 'not_requested',
+			clean_uri TEXT,
+			cleaned_at TIMESTAMPTZ,
 			prepare_status TEXT NOT NULL DEFAULT 'not_requested',
 			prepare_llm_mode TEXT NOT NULL DEFAULT 'default',
 			prepare_model TEXT,
@@ -1938,6 +1969,15 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			ready_at TIMESTAMPTZ
 		)`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS profile JSONB`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS clean_status TEXT NOT NULL DEFAULT 'not_requested'`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS clean_uri TEXT`,
+		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS cleaned_at TIMESTAMPTZ`,
+		`UPDATE dataset_versions
+		  SET clean_status = COALESCE(NULLIF(metadata->>'clean_status', ''), clean_status),
+		      clean_uri = COALESCE(NULLIF(metadata->>'clean_uri', ''), NULLIF(metadata->>'cleaned_ref', ''), clean_uri),
+		      cleaned_at = COALESCE(cleaned_at, NULLIF(metadata->>'cleaned_at', '')::timestamptz)
+		  WHERE metadata IS NOT NULL
+		    AND (metadata ? 'clean_status' OR metadata ? 'clean_uri' OR metadata ? 'cleaned_ref' OR metadata ? 'cleaned_at')`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_status TEXT NOT NULL DEFAULT 'not_requested'`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_llm_mode TEXT NOT NULL DEFAULT 'default'`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS prepare_model TEXT`,
@@ -2075,6 +2115,7 @@ func (s *PostgresStore) promoteTimestampColumnsToTimestamptz(ctx context.Context
 		{tableName: "project_prompt_defaults", columnName: "updated_at"},
 		{tableName: "scenarios", columnName: "created_at"},
 		{tableName: "datasets", columnName: "created_at"},
+		{tableName: "dataset_versions", columnName: "cleaned_at"},
 		{tableName: "dataset_versions", columnName: "prepared_at"},
 		{tableName: "dataset_versions", columnName: "sentiment_labeled_at"},
 		{tableName: "dataset_versions", columnName: "created_at"},
@@ -2185,6 +2226,100 @@ func nullIfEmpty(value string) any {
 		return nil
 	}
 	return value
+}
+
+func normalizeDatasetVersionCleanFields(version domain.DatasetVersion) domain.DatasetVersion {
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	status := metadataString(version.Metadata, "clean_status")
+	if status == "" {
+		status = strings.TrimSpace(version.CleanStatus)
+	}
+	if status == "" {
+		switch version.DataType {
+		case "unstructured", "mixed", "both":
+			status = "not_requested"
+		default:
+			status = "not_applicable"
+		}
+	}
+	version.CleanStatus = status
+	version.Metadata["clean_status"] = status
+
+	cleanURI := strings.TrimSpace(derefString(version.CleanURI))
+	if cleanURI == "" {
+		cleanURI = strings.TrimSpace(derefString(version.CleanedRef))
+	}
+	if cleanURI == "" {
+		cleanURI = metadataString(version.Metadata, "clean_uri")
+	}
+	if cleanURI == "" {
+		cleanURI = metadataString(version.Metadata, "cleaned_ref")
+	}
+	if cleanURI != "" {
+		version.CleanURI = &cleanURI
+		version.CleanedRef = &cleanURI
+		version.Metadata["clean_uri"] = cleanURI
+		version.Metadata["cleaned_ref"] = cleanURI
+	}
+
+	if version.CleanedAt == nil {
+		if cleanedAt, ok := metadataTime(version.Metadata, "cleaned_at"); ok {
+			version.CleanedAt = &cleanedAt
+		}
+	}
+	if version.CleanedAt != nil {
+		version.Metadata["cleaned_at"] = *version.CleanedAt
+	}
+	return version
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+func metadataTime(metadata map[string]any, key string) (time.Time, bool) {
+	if len(metadata) == 0 {
+		return time.Time{}, false
+	}
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return time.Time{}, false
+	}
+	switch typed := value.(type) {
+	case time.Time:
+		if typed.IsZero() {
+			return time.Time{}, false
+		}
+		return typed, true
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return time.Time{}, false
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, trimmed)
+		if err != nil {
+			return time.Time{}, false
+		}
+		return parsed, true
+	default:
+		return time.Time{}, false
+	}
 }
 
 func defaultMetadataMap(metadata map[string]any) map[string]any {

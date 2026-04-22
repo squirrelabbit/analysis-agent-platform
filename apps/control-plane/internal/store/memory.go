@@ -362,6 +362,7 @@ func (s *MemoryStore) DeleteDataset(projectID, datasetID string) error {
 func (s *MemoryStore) SaveDatasetVersion(version domain.DatasetVersion) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	version = normalizeDatasetVersionCleanFields(version)
 	s.versions[version.DatasetVersionID] = cloneDatasetVersion(version)
 	return nil
 }

@@ -163,6 +163,12 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 		if _, ok := version.Metadata["clean_status"]; !ok {
 			version.Metadata["clean_status"] = "not_requested"
 		}
+		version.CleanStatus = strings.TrimSpace(fmt.Sprintf("%v", version.Metadata["clean_status"]))
+		if version.CleanStatus == "" {
+			version.CleanStatus = "not_requested"
+		}
+	} else {
+		version.CleanStatus = "not_applicable"
 	}
 	if sentimentRequired {
 		version.Metadata["sentiment_required"] = true

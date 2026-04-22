@@ -39,7 +39,12 @@ func (s *DatasetService) BuildClean(projectID, datasetID, datasetVersionID strin
 	if version.Metadata == nil {
 		version.Metadata = map[string]any{}
 	}
+	version.CleanStatus = "cleaning"
+	version.CleanURI = &outputPath
+	version.CleanedRef = &outputPath
+	version.CleanedAt = nil
 	version.Metadata["clean_status"] = "cleaning"
+	version.Metadata["clean_uri"] = outputPath
 	version.Metadata["cleaned_ref"] = outputPath
 	version.Metadata["cleaned_format"] = inferArtifactFormat(outputPath, "parquet")
 	version.Metadata["clean_progress_ref"] = progressPath
@@ -71,6 +76,7 @@ func (s *DatasetService) BuildClean(projectID, datasetID, datasetVersionID strin
 
 	response, err := s.runWorkerTask(context.Background(), "/tasks/dataset_clean", payload)
 	if err != nil {
+		version.CleanStatus = "failed"
 		version.Metadata["clean_status"] = "failed"
 		version.Metadata["clean_error"] = err.Error()
 		_ = s.store.SaveDatasetVersion(version)
@@ -85,12 +91,17 @@ func (s *DatasetService) BuildClean(projectID, datasetID, datasetVersionID strin
 	if cleanedRef == "" {
 		cleanedRef = outputPath
 	}
+	version.CleanStatus = "ready"
+	version.CleanURI = &cleanedRef
+	version.CleanedRef = &cleanedRef
+	version.CleanedAt = &now
 	cleanFormat := artifactString(response.Artifact, "clean_format")
 	if cleanFormat == "" {
 		cleanFormat = inferArtifactFormat(cleanedRef, "parquet")
 	}
 	cleanMetadata := map[string]any{
 		"clean_status":        "ready",
+		"clean_uri":           cleanedRef,
 		"cleaned_ref":         cleanedRef,
 		"cleaned_format":      cleanFormat,
 		"cleaned_at":          now,

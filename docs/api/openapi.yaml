@@ -2408,6 +2408,10 @@ components:
         clean_status:
           type: string
           description: deterministic text clean stage status
+        clean_uri:
+          type:
+            - string
+            - "null"
         cleaned_ref:
           type:
             - string

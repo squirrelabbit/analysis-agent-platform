@@ -137,8 +137,14 @@ func cleanedDatasetRef(version DatasetVersion) string {
 	if status != "ready" {
 		return ""
 	}
+	if version.CleanURI != nil && strings.TrimSpace(*version.CleanURI) != "" {
+		return strings.TrimSpace(*version.CleanURI)
+	}
 	if version.CleanedRef != nil && strings.TrimSpace(*version.CleanedRef) != "" {
 		return strings.TrimSpace(*version.CleanedRef)
+	}
+	if ref := metadataStringValue(version.Metadata, "clean_uri", ""); ref != "" {
+		return ref
 	}
 	return metadataStringValue(version.Metadata, "cleaned_ref", "")
 }

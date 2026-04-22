@@ -102,6 +102,12 @@ func TestCreateDatasetVersionEnqueuesEagerCleanJobWhenWorkerConfigured(t *testin
 	if version.CleanedRef == nil || *version.CleanedRef != "/tmp/issues.cleaned.parquet" {
 		t.Fatalf("unexpected cleaned ref: %+v", version.CleanedRef)
 	}
+	if version.CleanURI == nil || *version.CleanURI != "/tmp/issues.cleaned.parquet" {
+		t.Fatalf("unexpected clean uri: %+v", version.CleanURI)
+	}
+	if version.CleanedAt == nil {
+		t.Fatalf("expected cleaned_at to be set")
+	}
 	if version.CleanSummary == nil || version.CleanSummary.OutputRowCount != 3 {
 		t.Fatalf("unexpected clean summary: %+v", version.CleanSummary)
 	}

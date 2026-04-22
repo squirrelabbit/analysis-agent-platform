@@ -296,8 +296,13 @@ func enrichDatasetVersionView(version *domain.DatasetVersion) {
 		return
 	}
 	version.CleanStatus = cleanStatus(*version)
-	if cleanedRef := metadataString(version.Metadata, "cleaned_ref", ""); cleanedRef != "" {
+	if cleanedRef := cleanArtifactRef(*version); cleanedRef != "" {
+		version.CleanURI = &cleanedRef
 		version.CleanedRef = &cleanedRef
+		if version.Metadata != nil {
+			version.Metadata["clean_uri"] = cleanedRef
+			version.Metadata["cleaned_ref"] = cleanedRef
+		}
 	}
 	if cleanedAt, ok := metadataTime(version.Metadata, "cleaned_at"); ok {
 		version.CleanedAt = &cleanedAt
@@ -466,6 +471,10 @@ func cleanStatus(version domain.DatasetVersion) string {
 	if status != "" {
 		return status
 	}
+	status = strings.TrimSpace(version.CleanStatus)
+	if status != "" {
+		return status
+	}
 	switch version.DataType {
 	case "unstructured", "mixed", "both":
 		return "not_requested"
@@ -475,7 +484,7 @@ func cleanStatus(version domain.DatasetVersion) string {
 }
 
 func isCleanReady(version domain.DatasetVersion) bool {
-	return cleanStatus(version) == "ready" && strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", "")) != ""
+	return cleanStatus(version) == "ready" && cleanArtifactRef(version) != ""
 }
 
 func isPrepareReady(version domain.DatasetVersion) bool {
@@ -510,7 +519,7 @@ func datasetClusterReady(version domain.DatasetVersion) bool {
 }
 
 func resolveCleanArtifact(version domain.DatasetVersion) (string, string, error) {
-	cleanedRef := strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
+	cleanedRef := cleanArtifactRef(version)
 	if cleanStatus(version) != "ready" || cleanedRef == "" {
 		return "", "", ErrInvalidArgument{Message: "clean artifact is not ready"}
 	}
@@ -522,6 +531,19 @@ func resolveCleanArtifact(version domain.DatasetVersion) (string, string, error)
 		cleanFormat = inferArtifactFormat(cleanedRef, "parquet")
 	}
 	return cleanedRef, cleanFormat, nil
+}
+
+func cleanArtifactRef(version domain.DatasetVersion) string {
+	if version.CleanURI != nil && strings.TrimSpace(*version.CleanURI) != "" {
+		return strings.TrimSpace(*version.CleanURI)
+	}
+	if version.CleanedRef != nil && strings.TrimSpace(*version.CleanedRef) != "" {
+		return strings.TrimSpace(*version.CleanedRef)
+	}
+	if ref := strings.TrimSpace(metadataString(version.Metadata, "clean_uri", "")); ref != "" {
+		return ref
+	}
+	return strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
 }
 
 func resolvePrepareArtifact(version domain.DatasetVersion) (string, string, error) {

@@ -198,7 +198,7 @@ func (s *DatasetService) deriveSentimentURI(version domain.DatasetVersion) strin
 }
 
 func (s *DatasetService) deriveCleanURI(version domain.DatasetVersion) string {
-	if ref := strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", "")); ref != "" {
+	if ref := cleanArtifactRef(version); ref != "" {
 		return ref
 	}
 	if path, ok := s.datasetArtifactPath(version, "clean", "cleaned.parquet"); ok {

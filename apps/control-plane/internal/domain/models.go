@@ -195,6 +195,7 @@ type DatasetVersion struct {
 	BuildJobs          []DatasetVersionBuildJobStatus `json:"build_jobs,omitempty"`
 	Profile            *DatasetProfile                `json:"profile,omitempty"`
 	CleanStatus        string                         `json:"clean_status"`
+	CleanURI           *string                        `json:"clean_uri,omitempty"`
 	CleanedRef         *string                        `json:"cleaned_ref,omitempty"`
 	CleanedAt          *time.Time                     `json:"cleaned_at,omitempty"`
 	CleanSummary       *DatasetCleanSummary           `json:"clean_summary,omitempty"`
