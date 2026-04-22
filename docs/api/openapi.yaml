@@ -9,7 +9,7 @@ info:
     주요 흐름:
     1. 프로젝트 생성
     2. dataset / dataset version 생성 또는 upload
-    3. prepare / sentiment / embeddings build
+    3. clean / prepare sample / prepare / sentiment / embeddings / cluster build
     4. analysis request -> plan -> execute
     5. result / resume / rerun / diff
 

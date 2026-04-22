@@ -71,7 +71,8 @@ curl -sS "$API/projects/$PROJECT_ID/datasets/$DATASET_ID/versions/$VERSION_ID/bu
 ```
 
 기본 정책:
-- `prepare`: eager
+- `clean`: eager
+- `prepare`: sample-first optional
 - `sentiment / embedding / cluster`: lazy
 
 ## 4. 일반 질문 실행

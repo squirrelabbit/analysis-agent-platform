@@ -12,10 +12,11 @@ info:
     3. 데이터셋 CRUD
     4. 데이터셋 활성 버전 전환
     5. 데이터셋 업로드/버전 조회/버전 삭제/원본 다운로드
-    6. 전처리 및 감성 분석 실행/조회/다운로드
+    6. clean / prepare sample / prepare / sentiment 실행과 결과 조회/다운로드
+    7. 분석 요청 / 실행 / progress / step / result 조회
 
     확인 필요:
-    - analysis/scenario/report 관련 API는 이후 프론트 범위 확정 시 이 문서에 단계적으로 포함한다.
+    - scenario/report 관련 API는 이후 프론트 범위 확정 시 이 문서에 단계적으로 포함한다.
 servers:
   - url: http://127.0.0.1:18080
     description: Local development

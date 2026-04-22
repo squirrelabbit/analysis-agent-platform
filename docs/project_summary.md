@@ -8,11 +8,12 @@
 ## 핵심 흐름
 
 1. 프로젝트와 dataset, dataset version을 등록한다.
-2. unstructured dataset version이면 `prepare` build job을 먼저 enqueue한다.
-3. 질문 또는 strict 시나리오를 plan으로 바꾼다.
-4. execution 시작 전에 필요한 `sentiment / embedding / cluster` dependency를 자동 build한다.
-5. Temporal workflow가 execution을 진행하면서 `STEP_*` event와 partial artifact를 execution에 저장한다.
-6. 완료 시 `result_v1 snapshot`과 `final_answer`를 만들고 report draft 같은 후속 문서에 재사용한다.
+2. unstructured dataset version이면 `clean` build job을 먼저 실행해 `cleaned_ref`를 만든다.
+3. `prepare`는 LLM 프롬프트 검증이 필요한 경우 `prepare_sample`로 먼저 확인하고, 필요할 때 full prepare를 실행한다.
+4. 질문 또는 strict 시나리오를 plan으로 바꾼다.
+5. execution 시작 전에 필요한 `sentiment / embedding / cluster` dependency를 자동 build한다.
+6. Temporal workflow가 execution을 진행하면서 `STEP_*` event와 partial artifact를 execution에 저장한다.
+7. 완료 시 `result_v1 snapshot`과 `final_answer`를 만들고 report draft 같은 후속 문서에 재사용한다.
 
 ## 주요 구성 요소
 
@@ -25,7 +26,7 @@
   - dataset build workflow
 - `Python AI worker`
   - planner
-  - prepare / sentiment / embedding / cluster build
+  - clean / prepare / sentiment / embedding / cluster build
   - `preprocess / aggregate / retrieve / summarize / presentation` skill
   - `final_answer` 후처리
 - `Postgres + artifact storage`
@@ -43,7 +44,9 @@
 - 동일한 prompt version이 project registry와 global registry에 모두 있으면 project prompt가 우선한다.
 - project prompt에 batch template가 없으면 row template만 사용하도록 build payload의 batch size를 `1`로 낮춘다.
 - 운영/프론트는 `GET /dataset_profiles`, `GET /prompt_catalog`, `GET /rule_catalog`, `GET /skill_policy_catalog`, `GET /dataset_profiles/validate`, `GET /skill_policies/validate`로 현재 registry와 catalog 상태를 조회할 수 있다.
-- `prepare`는 eager, `sentiment / embedding / cluster`는 lazy build를 기본 정책으로 둔다.
+- dataset version 분석 소스는 `prepared ready -> cleaned ready -> raw` 순서로 해석한다.
+- `clean`은 eager, `prepare`는 sample-first optional, `sentiment / embedding / cluster`는 lazy build를 기본 정책으로 둔다.
+- `clean`이 queued / cleaning / failed / stale이면 downstream build를 먼저 만들지 않는다.
 - full-dataset `embedding_cluster`는 precomputed cluster artifact를 우선 읽고, subset 경로만 on-demand fallback을 허용한다.
 - cluster artifact와 step preview에는 `cluster_execution_mode`, `cluster_materialization_scope`, `cluster_fallback_reason`가 포함돼 materialized/full-dataset 경로와 subset fallback 경로를 구분할 수 있다.
 - cluster 산출물은 현재 `summary JSON + membership parquet`로 분리 저장한다.
@@ -59,4 +62,5 @@
 - 현재 dev compose는 `TEMPORAL_PERSISTENCE_MODE=dev_ephemeral`, `TEMPORAL_RETENTION_MODE=temporal_dev_default`, `TEMPORAL_RECOVERY_MODE=startup_reconciliation` 기준으로 동작한다.
 - `GET /runtime_status`로 현재 런타임 보장 범위를 조회할 수 있다.
 - 프론트는 `apps/web`에 Vite + React + TypeScript 기반 scaffold가 있고, 실행 중간 상태를 붙일 수 있는 backend API는 준비된 상태다.
+- 프론트 연동 기준 흐름은 `docs/operations/frontend_handoff.md`에 정리한다.
 - 확인 필요: Rust worker는 현재 hot path runtime에 연결되지 않았다.

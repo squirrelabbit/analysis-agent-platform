@@ -12,6 +12,7 @@
 - [project_summary.md](project_summary.md)
 - [../manual.md](../manual.md)
 - [operations/local_runbook.md](operations/local_runbook.md)
+- [operations/frontend_handoff.md](operations/frontend_handoff.md)
 - [api/openapi.yaml](api/openapi.yaml)
 - [skill/skill_registry.md](skill/skill_registry.md)
 - [skill/skill_implementation_status.md](skill/skill_implementation_status.md)
@@ -23,6 +24,7 @@
 | 입구 | `README.md` | 제품 개요와 빠른 시작 |
 | 현재 상태 | `docs/project_summary.md` | 현재 제품 정의와 실행 흐름 |
 | 운영 | `manual.md`, `docs/operations/local_runbook.md` | 로컬 실행, 확인, 복구 입구 |
+| 프론트 연동 | `docs/operations/frontend_handoff.md`, `docs/api/openapi.frontend.yaml` | 화면 연결 순서와 프론트 필수 API 기준 |
 | 계약 | `docs/api/openapi.yaml`, `docs/skill/skill_registry.md` | HTTP/API 및 runtime skill 계약 |
 | 구현 현실 | `docs/skill/skill_implementation_status.md` | 스킬 구현 방식과 안정도 |
 | 기록 | `docs/chat-notes/*.md`, `docs/devlog/*.md` | 결정과 작업 이력 |

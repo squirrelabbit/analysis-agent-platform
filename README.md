@@ -14,17 +14,20 @@
 
 ```mermaid
 flowchart LR
-    A["Dataset Upload / Version"] --> B["Prepare Build"]
-    B --> C["Sentiment / Embedding / Cluster Build"]
-    C --> D["Analysis Request / Scenario"]
-    D --> E["Plan"]
-    E --> F["Temporal Execution"]
-    F --> G["result_v1 snapshot"]
-    G --> H["final_answer"]
+    A["Dataset Upload / Version"] --> B["Clean Build"]
+    B --> C["Prepare Sample / Optional Prepare"]
+    C --> D["Sentiment / Embedding / Cluster Build"]
+    D --> E["Analysis Request / Scenario"]
+    E --> F["Plan"]
+    F --> G["Temporal Execution"]
+    G --> H["result_v1 snapshot"]
+    H --> I["final_answer"]
 ```
 
-- 비정형 dataset version은 생성 시 `prepare` build를 먼저 enqueue한다.
+- 비정형 dataset version은 업로드 후 `clean` build를 먼저 실행한다.
+- `prepare`는 프롬프트 검증과 LLM 정제가 필요할 때 `prepare_sample`로 먼저 확인한 뒤 선택 실행한다.
 - `sentiment`, `embedding`, `cluster`는 필요한 plan step이 있을 때 자동 build 후 resume한다.
+- 분석 실행 소스는 `prepared ready -> cleaned ready -> raw` 순서로 해석한다.
 - full-dataset `embedding_cluster`는 precomputed cluster artifact를 우선 사용한다.
 - 현재 planning mode는 `strict` 중심이며, 프론트에서 붙일 `progress / events / step preview / result` API는 준비되어 있다.
 
