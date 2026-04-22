@@ -27,6 +27,7 @@ type AnalysisService struct {
 }
 
 type executionDependencyBuilder interface {
+	CreateCleanJob(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest, triggeredBy string) (domain.DatasetBuildJob, error)
 	CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy string) (domain.DatasetBuildJob, error)
 	CreateSentimentJob(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
 	CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
@@ -321,6 +322,16 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 	needsCluster := planRequiresCluster(plan)
 	clusterRequest, hasMaterializedClusterRequest := domain.ClusterMaterializationRequestForPlan(plan)
 
+	if planNeedsTextBuildDependency(plan) && shouldBuildCleanDependency(version) {
+		if _, err := s.dependencyBuilder.CreateCleanJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetCleanRequest{}, triggeredBy); err != nil {
+			return domain.DatasetVersion{}, err
+		}
+		latest, err := s.store.GetDatasetVersion(projectID, versionID)
+		if err != nil {
+			return domain.DatasetVersion{}, err
+		}
+		return latest, nil
+	}
 	if needsPrepare && requiresPrepare(version) && !datasetPrepareReady(version) {
 		if _, err := s.dependencyBuilder.CreatePrepareJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, triggeredBy); err != nil {
 			return domain.DatasetVersion{}, err
@@ -363,6 +374,24 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 	}
 
 	return version, nil
+}
+
+func planNeedsTextBuildDependency(plan domain.SkillPlan) bool {
+	return planRequiresPrepare(plan) || planRequiresSentiment(plan) || planRequiresEmbedding(plan) || planRequiresCluster(plan)
+}
+
+func shouldBuildCleanDependency(version domain.DatasetVersion) bool {
+	if !requiresClean(version) || isCleanReady(version) {
+		return false
+	}
+	switch cleanStatus(version) {
+	case "queued", "cleaning", "failed", "stale", "ready":
+		return true
+	case "not_requested", "":
+		return len(resolveDatasetBuildTextSelection(version.Metadata, nil).Columns) > 0
+	default:
+		return false
+	}
 }
 
 func (s *AnalysisService) SubmitAndExecute(projectID string, input domain.AnalysisSubmitRequest) (domain.AnalysisExecuteResponse, error) {
