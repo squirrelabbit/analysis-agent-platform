@@ -1081,6 +1081,9 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
 def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_sentiment_build_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
+    source_row_count = len(rows)
+    if normalized["max_rows"] > 0:
+        rows = rows[: normalized["max_rows"]]
     output_path = Path(normalized["output_path"])
     output_format = _artifact_output_format(output_path, "sentiment")
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1220,8 +1223,11 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
             "text_joiner": normalized["text_joiner"],
             "row_id_column": "row_id",
             "storage_contract_version": "unstructured-storage-v1",
+            "max_rows": normalized["max_rows"],
             "summary": {
                 "input_row_count": len(rows),
+                "source_row_count": source_row_count,
+                "max_rows": normalized["max_rows"],
                 "labeled_row_count": labeled_count,
                 "text_column": normalized["text_column"],
                 "text_columns": list(normalized["text_columns"]),

@@ -146,6 +146,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_sample", s.handlePrepareSample)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs", s.handleCreatePrepareJob)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment", s.handleBuildSentiment)
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_sample", s.handleSentimentSample)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_jobs", s.handleCreateSentimentJob)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embeddings", s.handleBuildEmbeddings)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embedding_jobs", s.handleCreateEmbeddingJob)
@@ -1117,6 +1118,29 @@ func (s *Server) handleBuildSentiment(w stdhttp.ResponseWriter, r *stdhttp.Reque
 		return
 	}
 	writeJSON(w, stdhttp.StatusAccepted, response)
+}
+
+func (s *Server) handleSentimentSample(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetSentimentSampleRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	if !hasTextColumns(payload.TextColumns) {
+		writeError(w, stdhttp.StatusBadRequest, "text_columns is required")
+		return
+	}
+	response, err := s.datasetService.BuildSentimentSample(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		payload,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
 }
 
 func (s *Server) handleCreateSentimentJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {

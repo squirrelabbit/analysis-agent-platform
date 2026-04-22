@@ -564,6 +564,32 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_sample:
+    post:
+      tags: [Datasets]
+      summary: Run sentiment on a small sample without saving dataset version state
+      operationId: buildSentimentSample
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetSentimentSampleRequest"
+      responses:
+        "200":
+          description: Sentiment sample result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetSentimentSampleResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_preview:
     get:
       tags: [Datasets]
@@ -1270,6 +1296,70 @@ components:
             - boolean
             - "null"
       required: [text_columns]
+    DatasetSentimentSampleRequest:
+      type: object
+      properties:
+        text_columns:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: 감성 분석 샘플 실행 대상 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
+        model:
+          type:
+            - string
+            - "null"
+        max_rows:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: 감성 분석 샘플로 처리할 최대 row 수. 기본값은 10이다.
+        batch_size:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: 동기 LLM 감성 분석 호출당 묶을 row 수. Anthropic Message Batches API가 아니라 내부 batch prompt 크기다.
+      required: [text_columns]
+    DatasetSentimentSample:
+      type: object
+      properties:
+        source_row_index:
+          type: integer
+        row_id:
+          type: string
+        sentiment_label:
+          type: string
+        sentiment_confidence:
+          type: number
+          format: double
+        sentiment_reason:
+          type: string
+      required: [source_row_index, row_id, sentiment_label, sentiment_confidence, sentiment_reason]
+    DatasetSentimentSampleResponse:
+      type: object
+      properties:
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        sentiment_ref:
+          type: string
+        sentiment_format:
+          type: string
+        sample_limit:
+          type: integer
+        summary:
+          type: object
+          additionalProperties: true
+        samples:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetSentimentSample"
+      required: [project_id, dataset_id, dataset_version_id, sentiment_ref, sentiment_format, sample_limit, samples]
     DatasetPrepareSample:
       type: object
       properties:

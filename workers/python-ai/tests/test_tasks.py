@@ -1336,6 +1336,41 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["usage"]["cost_estimation_status"], "free_fallback")
         self.assertFalse(result["artifact"]["llm_fallback"])
 
+    def test_sentiment_label_respects_max_rows(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        prepared_path = temp_dir / "issues.prepared.parquet"
+        sentiment_path = temp_dir / "issues.sentiment.parquet"
+        table = pa.Table.from_pylist(
+            [
+                {"normalized_text": "결제 오류가 반복 발생했습니다"},
+                {"normalized_text": "빠르게 해결되어 만족합니다"},
+                {"normalized_text": "문의 접수 후 확인 중입니다"},
+            ]
+        )
+        pq.write_table(table, prepared_path)
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+            result = run_sentiment_label(
+                {
+                    "dataset_version_id": "version-sentiment-max-rows",
+                    "dataset_name": str(prepared_path),
+                    "text_column": "normalized_text",
+                    "output_path": str(sentiment_path),
+                    "max_rows": 1,
+                }
+            )
+
+        self.assertEqual(result["artifact"]["max_rows"], 1)
+        self.assertEqual(result["artifact"]["summary"]["input_row_count"], 1)
+        self.assertEqual(result["artifact"]["summary"]["source_row_count"], 3)
+        self.assertEqual(result["artifact"]["summary"]["max_rows"], 1)
+        self.assertEqual(result["artifact"]["summary"]["labeled_row_count"], 1)
+        self.assertEqual(result["artifact"]["usage"]["request_count"], 1)
+
+        labeled_rows = self._read_parquet_rows(sentiment_path)
+        self.assertEqual(len(labeled_rows), 1)
+        self.assertEqual(labeled_rows[0]["sentiment_label"], "negative")
+
     def test_sentiment_label_records_fallback_when_llm_fails(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         prepared_path = temp_dir / "issues.prepared.parquet"

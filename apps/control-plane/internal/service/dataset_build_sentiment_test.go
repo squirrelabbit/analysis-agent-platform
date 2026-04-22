@@ -249,6 +249,147 @@ func TestBuildSentimentSupportsMultipleTextColumns(t *testing.T) {
 	}
 }
 
+func TestBuildSentimentSampleUsesMaxRowsWithoutSavingVersionState(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-sentiment-sample", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-sentiment-sample",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-sentiment-sample",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata: map[string]any{
+			"prepared_text_column": "normalized_text",
+		},
+		PrepareStatus:    "ready",
+		PrepareURI:       datasetStringPtr("/tmp/issues.prepared.parquet"),
+		SentimentStatus:  "not_requested",
+		SentimentLLMMode: "disabled",
+		EmbeddingStatus:  "not_requested",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	var requestedPath string
+	var requestedDatasetName string
+	var requestedTextColumns []string
+	var requestedOutputPath string
+	var requestedModel string
+	var requestedMaxRows int
+	var requestedBatchSize int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("unexpected decode error: %v", err)
+		}
+		requestedPath = r.URL.Path
+		requestedDatasetName = payload["dataset_name"].(string)
+		requestedTextColumns = valuesAsStrings(t, payload["text_columns"])
+		requestedOutputPath = payload["output_path"].(string)
+		requestedModel = payload["model"].(string)
+		requestedMaxRows = intValue(payload["max_rows"])
+		requestedBatchSize = intValue(payload["sentiment_batch_size"])
+		writeSentimentPreviewParquet(t, requestedOutputPath, []map[string]any{
+			{
+				"source_row_index":         0,
+				"row_id":                   "version-sentiment-sample:row:0",
+				"sentiment_label":          "negative",
+				"sentiment_confidence":     0.92,
+				"sentiment_reason":         "불만 표현",
+				"sentiment_prompt_version": "sentiment-anthropic-v1",
+			},
+			{
+				"source_row_index":         1,
+				"row_id":                   "version-sentiment-sample:row:1",
+				"sentiment_label":          "positive",
+				"sentiment_confidence":     0.87,
+				"sentiment_reason":         "만족 표현",
+				"sentiment_prompt_version": "sentiment-anthropic-v1",
+			},
+		})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"notes": []string{"sentiment sample completed"},
+			"artifact": map[string]any{
+				"sentiment_ref":    requestedOutputPath,
+				"sentiment_format": "parquet",
+				"summary": map[string]any{
+					"input_row_count":      2,
+					"labeled_row_count":    2,
+					"text_column":          "normalized_text",
+					"text_columns":         []string{"normalized_text"},
+					"text_joiner":          "\n\n",
+					"sentiment_batch_size": 1,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	response, err := service.BuildSentimentSample(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetSentimentSampleRequest{
+		TextColumns: []string{"normalized_text"},
+		Model:       datasetStringPtr("claude-haiku-4-5"),
+		MaxRows:     datasetIntPtr(2),
+		BatchSize:   datasetIntPtr(1),
+	})
+	if err != nil {
+		t.Fatalf("unexpected sentiment sample error: %v", err)
+	}
+
+	if requestedPath != "/tasks/sentiment_label" {
+		t.Fatalf("unexpected worker path: %s", requestedPath)
+	}
+	if requestedDatasetName != "/tmp/issues.prepared.parquet" {
+		t.Fatalf("unexpected worker dataset name: %s", requestedDatasetName)
+	}
+	if !reflect.DeepEqual(requestedTextColumns, []string{"normalized_text"}) {
+		t.Fatalf("unexpected worker text_columns: %+v", requestedTextColumns)
+	}
+	if requestedModel != "claude-haiku-4-5" {
+		t.Fatalf("unexpected sentiment sample model: %s", requestedModel)
+	}
+	if requestedMaxRows != 2 {
+		t.Fatalf("unexpected sentiment sample max_rows: %d", requestedMaxRows)
+	}
+	if requestedBatchSize != 1 {
+		t.Fatalf("unexpected sentiment sample batch size: %d", requestedBatchSize)
+	}
+	if response.SampleLimit != 2 {
+		t.Fatalf("unexpected sample limit: %d", response.SampleLimit)
+	}
+	if len(response.Samples) != 2 {
+		t.Fatalf("unexpected sample count: %d", len(response.Samples))
+	}
+	if response.Samples[0].SentimentLabel != "negative" {
+		t.Fatalf("unexpected first sample label: %s", response.Samples[0].SentimentLabel)
+	}
+
+	stored, err := repository.GetDatasetVersion(project.ProjectID, version.DatasetVersionID)
+	if err != nil {
+		t.Fatalf("unexpected get version error: %v", err)
+	}
+	if stored.SentimentStatus != "not_requested" {
+		t.Fatalf("sentiment sample must not save version status, got: %s", stored.SentimentStatus)
+	}
+}
+
 func TestBuildSentimentUsesProfilePromptVersion(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())

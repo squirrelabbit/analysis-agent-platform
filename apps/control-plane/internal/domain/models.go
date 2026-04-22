@@ -447,6 +447,24 @@ type DatasetPrepareSampleResponse struct {
 	Samples          []DatasetPrepareSample `json:"samples"`
 }
 
+type DatasetSentimentSampleRequest struct {
+	TextColumns []string `json:"text_columns,omitempty"`
+	Model       *string  `json:"model,omitempty"`
+	MaxRows     *int     `json:"max_rows,omitempty"`
+	BatchSize   *int     `json:"batch_size,omitempty"`
+}
+
+type DatasetSentimentSampleResponse struct {
+	ProjectID        string                   `json:"project_id"`
+	DatasetID        string                   `json:"dataset_id"`
+	DatasetVersionID string                   `json:"dataset_version_id"`
+	SentimentRef     string                   `json:"sentiment_ref"`
+	SentimentFormat  string                   `json:"sentiment_format"`
+	SampleLimit      int                      `json:"sample_limit"`
+	Summary          *DatasetSentimentSummary `json:"summary,omitempty"`
+	Samples          []DatasetSentimentSample `json:"samples"`
+}
+
 type DatasetEmbeddingBuildRequest struct {
 	TextColumn       *string `json:"text_column,omitempty"`
 	EmbeddingModel   *string `json:"embedding_model,omitempty"`
