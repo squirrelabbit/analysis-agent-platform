@@ -303,6 +303,93 @@ func TestBuildPrepareRequiresTextColumns(t *testing.T) {
 	}
 }
 
+func TestBuildPrepareSampleReturnsTableColumns(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-prepare-sample-columns", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-prepare-sample-columns",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-prepare-sample-columns",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "/tmp/issues.csv",
+		DataType:         "unstructured",
+		Metadata:         map[string]any{"text_columns": []string{"text"}},
+		PrepareStatus:    "not_requested",
+		SentimentStatus:  "not_requested",
+		EmbeddingStatus:  "not_requested",
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("unexpected decode error: %v", err)
+		}
+		outputPath := payload["output_path"].(string)
+		writePreparedPreviewParquet(t, outputPath, []map[string]any{
+			{
+				"source_row_index":    0,
+				"row_id":              "row-0",
+				"raw_text":            "raw",
+				"normalized_text":     "normalized",
+				"prepare_disposition": "keep",
+				"prepare_reason":      "valid",
+			},
+		})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"artifact": map[string]any{
+				"prepared_ref":   outputPath,
+				"prepare_format": "parquet",
+				"summary": map[string]any{
+					"input_row_count":  1,
+					"output_row_count": 1,
+					"kept_count":       1,
+					"review_count":     0,
+					"dropped_count":    0,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	response, err := service.BuildPrepareSample(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{
+		MaxRows: datasetIntPtr(1),
+	})
+	if err != nil {
+		t.Fatalf("unexpected build prepare sample error: %v", err)
+	}
+	if len(response.Columns) != 6 {
+		t.Fatalf("unexpected sample columns: %+v", response.Columns)
+	}
+	if response.Columns[0].Key != "source_row_index" || response.Columns[0].Type != "number" {
+		t.Fatalf("unexpected first sample column: %+v", response.Columns[0])
+	}
+	if response.Columns[3].Key != "normalized_text" || response.Columns[3].Label == "" {
+		t.Fatalf("unexpected normalized text column: %+v", response.Columns[3])
+	}
+	if len(response.Samples) != 1 || response.Samples[0].NormalizedText != "normalized" {
+		t.Fatalf("unexpected sample rows: %+v", response.Samples)
+	}
+}
+
 func TestBuildPrepareUsesProfileDefaults(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())

@@ -219,6 +219,9 @@ func TestGetPreparePreviewBuildsSummaryAndWarningPanel(t *testing.T) {
 	if response.Samples[0].RawText != "결제 오류가 반복 발생했습니다!!!" {
 		t.Fatalf("unexpected first sample: %+v", response.Samples[0])
 	}
+	if len(response.Columns) != 6 || response.Columns[2].Key != "raw_text" || response.Columns[3].Key != "normalized_text" {
+		t.Fatalf("unexpected prepare preview columns: %+v", response.Columns)
+	}
 	if response.WarningPanel == nil {
 		t.Fatalf("expected warning_panel for review rows: %+v", response)
 	}

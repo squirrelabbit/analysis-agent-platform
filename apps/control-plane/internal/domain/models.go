@@ -334,6 +334,12 @@ type DatasetPrepareSample struct {
 	PrepareReason      string `json:"prepare_reason"`
 }
 
+type DatasetTableColumn struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Type  string `json:"type,omitempty"`
+}
+
 type DatasetPrepareWarningPanel struct {
 	ReviewCount int                    `json:"review_count"`
 	Samples     []DatasetPrepareSample `json:"samples"`
@@ -354,6 +360,7 @@ type DatasetPreparePreviewResponse struct {
 	RowIDColumn        string                      `json:"row_id_column"`
 	Summary            *DatasetPrepareSummary      `json:"summary,omitempty"`
 	SampleLimit        int                         `json:"sample_limit"`
+	Columns            []DatasetTableColumn        `json:"columns"`
 	Samples            []DatasetPrepareSample      `json:"samples"`
 	WarningPanel       *DatasetPrepareWarningPanel `json:"warning_panel,omitempty"`
 }
@@ -463,6 +470,7 @@ type DatasetPrepareSampleResponse struct {
 	PrepareFormat    string                 `json:"prepare_format"`
 	SampleLimit      int                    `json:"sample_limit"`
 	Summary          *DatasetPrepareSummary `json:"summary,omitempty"`
+	Columns          []DatasetTableColumn   `json:"columns"`
 	Samples          []DatasetPrepareSample `json:"samples"`
 }
 

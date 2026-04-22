@@ -1418,6 +1418,19 @@ components:
         prepare_reason:
           type: string
       required: [source_row_index, row_id, raw_text, normalized_text, prepare_disposition, prepare_reason]
+    DatasetTableColumn:
+      type: object
+      properties:
+        key:
+          type: string
+          description: samples row object의 필드 키
+        label:
+          type: string
+          description: 프론트 테이블 헤더 표시명
+        type:
+          type: string
+          description: number, string 등 프론트 렌더링 힌트
+      required: [key, label]
     DatasetPrepareSampleResponse:
       type: object
       properties:
@@ -1436,11 +1449,15 @@ components:
         summary:
           type: object
           additionalProperties: true
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetTableColumn"
         samples:
           type: array
           items:
             $ref: "#/components/schemas/DatasetPrepareSample"
-      required: [project_id, dataset_id, dataset_version_id, prepared_ref, prepare_format, sample_limit, samples]
+      required: [project_id, dataset_id, dataset_version_id, prepared_ref, prepare_format, sample_limit, columns, samples]
     DatasetPreparePreviewResponse:
       type: object
       additionalProperties: true

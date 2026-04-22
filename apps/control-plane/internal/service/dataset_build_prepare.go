@@ -377,6 +377,7 @@ func (s *DatasetService) BuildPrepareSample(projectID, datasetID, datasetVersion
 		PrepareFormat:    prepareFormat,
 		SampleLimit:      maxRows,
 		Summary:          summary,
+		Columns:          prepareSampleColumns(),
 		Samples:          samples,
 	}, nil
 }

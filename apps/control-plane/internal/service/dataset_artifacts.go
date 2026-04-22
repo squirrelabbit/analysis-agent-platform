@@ -111,6 +111,7 @@ func (s *DatasetService) GetPreparePreview(
 		RowIDColumn:        metadataString(version.Metadata, "row_id_column", "row_id"),
 		Summary:            clonePrepareSummary(version.PrepareSummary),
 		SampleLimit:        limit,
+		Columns:            prepareSampleColumns(),
 		Samples:            samples,
 	}
 
@@ -130,6 +131,17 @@ func (s *DatasetService) GetPreparePreview(
 	}
 
 	return response, nil
+}
+
+func prepareSampleColumns() []domain.DatasetTableColumn {
+	return []domain.DatasetTableColumn{
+		{Key: "source_row_index", Label: "행 번호", Type: "number"},
+		{Key: "row_id", Label: "Row ID", Type: "string"},
+		{Key: "raw_text", Label: "원문", Type: "string"},
+		{Key: "normalized_text", Label: "전처리 결과", Type: "string"},
+		{Key: "prepare_disposition", Label: "처리 상태", Type: "string"},
+		{Key: "prepare_reason", Label: "처리 사유", Type: "string"},
+	}
 }
 
 func (s *DatasetService) ResolveCleanDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
