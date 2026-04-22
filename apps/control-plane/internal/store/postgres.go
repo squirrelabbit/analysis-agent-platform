@@ -2025,6 +2025,59 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_uri TEXT`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_labeled_at TIMESTAMPTZ`,
 		`ALTER TABLE dataset_versions ADD COLUMN IF NOT EXISTS sentiment_prompt_version TEXT`,
+		`UPDATE datasets d
+		  SET active_dataset_version_id = NULL,
+		      active_version_updated_at = NOW()
+		  WHERE active_dataset_version_id IS NOT NULL
+		    AND NOT EXISTS (
+		        SELECT 1
+		        FROM dataset_versions v
+		        WHERE v.dataset_version_id = d.active_dataset_version_id
+		          AND v.dataset_id = d.dataset_id
+		          AND v.project_id = d.project_id
+		    )`,
+		`DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1
+				FROM pg_constraint
+				WHERE conname = 'datasets_active_dataset_version_fk'
+			) THEN
+				ALTER TABLE datasets
+				ADD CONSTRAINT datasets_active_dataset_version_fk
+				FOREIGN KEY (active_dataset_version_id)
+				REFERENCES dataset_versions(dataset_version_id)
+				ON DELETE SET NULL;
+			END IF;
+		END
+		$$`,
+		`CREATE OR REPLACE FUNCTION validate_dataset_active_version()
+		RETURNS trigger AS $$
+		BEGIN
+			IF NEW.active_dataset_version_id IS NULL THEN
+				RETURN NEW;
+			END IF;
+			IF NOT EXISTS (
+				SELECT 1
+				FROM dataset_versions v
+				WHERE v.dataset_version_id = NEW.active_dataset_version_id
+				  AND v.dataset_id = NEW.dataset_id
+				  AND v.project_id = NEW.project_id
+			) THEN
+				RAISE EXCEPTION 'active_dataset_version_id must reference a dataset version in the same project and dataset';
+			END IF;
+			RETURN NEW;
+		END
+		$$ LANGUAGE plpgsql`,
+		`DROP TRIGGER IF EXISTS datasets_active_version_validate ON datasets`,
+		`CREATE TRIGGER datasets_active_version_validate
+		  BEFORE INSERT OR UPDATE OF project_id, dataset_id, active_dataset_version_id
+		  ON datasets
+		  FOR EACH ROW
+		  EXECUTE FUNCTION validate_dataset_active_version()`,
+		`CREATE INDEX IF NOT EXISTS datasets_active_dataset_version_idx
+		  ON datasets(active_dataset_version_id)
+		  WHERE active_dataset_version_id IS NOT NULL`,
 		`CREATE TABLE IF NOT EXISTS dataset_build_jobs (
 			job_id UUID PRIMARY KEY,
 			project_id UUID NOT NULL REFERENCES projects(project_id),
