@@ -2015,7 +2015,7 @@ func datasetEmbeddingReady(version domain.DatasetVersion) bool {
 }
 
 func planDependenciesReady(plan domain.SkillPlan, version domain.DatasetVersion) bool {
-	if planRequiresPrepare(plan) && requiresPrepare(version) && !datasetPrepareReady(version) {
+	if planRequiresPrepare(plan) && !datasetTextSourceReady(version) {
 		return false
 	}
 	if planRequiresSentiment(plan) && !datasetSentimentReady(version) {
@@ -2025,6 +2025,22 @@ func planDependenciesReady(plan domain.SkillPlan, version domain.DatasetVersion)
 		return false
 	}
 	if planRequiresCluster(plan) && !clusterPlanReady(plan, version) {
+		return false
+	}
+	return true
+}
+
+func datasetTextSourceReady(version domain.DatasetVersion) bool {
+	source := domain.ResolveDatasetSource(version)
+	if source.Stage != domain.DatasetSourceStageRaw {
+		return true
+	}
+	switch cleanStatus(version) {
+	case "queued", "cleaning", "failed", "stale", "ready":
+		return false
+	}
+	switch strings.TrimSpace(version.PrepareStatus) {
+	case "queued", "preparing", "failed", "stale", "ready":
 		return false
 	}
 	return true
@@ -2230,25 +2246,12 @@ func resolvedDatasetNameForSkill(skillName, fallback string, version domain.Data
 }
 
 func defaultTextColumnForSkill(version domain.DatasetVersion) string {
-	return defaultPreparedTextColumn(version)
+	return domain.DatasetSourceDefaultTextColumn(version)
 }
 
 func resolvedTextColumnForSkill(inputs map[string]any, version domain.DatasetVersion) string {
-	defaultTextColumn := defaultTextColumnForSkill(version)
-	if !isPrepareReady(version) {
-		if inputs == nil {
-			return defaultTextColumn
-		}
-		if value, ok := inputs["text_column"]; ok {
-			text := strings.TrimSpace(fmt.Sprintf("%v", value))
-			if text != "" {
-				return text
-			}
-		}
-		return defaultTextColumn
-	}
-
-	rawTextColumn := metadataString(version.Metadata, "raw_text_column", metadataString(version.Metadata, "text_column", "text"))
+	source := domain.ResolveDatasetSource(version)
+	defaultTextColumn := source.TextColumn
 	if inputs == nil {
 		return defaultTextColumn
 	}
@@ -2257,7 +2260,10 @@ func resolvedTextColumnForSkill(inputs map[string]any, version domain.DatasetVer
 		return defaultTextColumn
 	}
 	text := strings.TrimSpace(fmt.Sprintf("%v", value))
-	if text == "" || text == rawTextColumn || (text == "text" && rawTextColumn != "text") {
+	if text == "" {
+		return defaultTextColumn
+	}
+	if source.Stage != domain.DatasetSourceStageRaw && domain.DatasetSourceIsRawTextColumn(version, text) {
 		return defaultTextColumn
 	}
 	return text

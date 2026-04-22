@@ -2363,6 +2363,57 @@ func TestResolvedTextColumnForSkillTreatsDefaultTextAsPlaceholderWhenRawColumnDi
 	}
 }
 
+func TestResolvedTextColumnForSkillUsesCleanedColumnWhenPrepareMissing(t *testing.T) {
+	version := domain.DatasetVersion{
+		DataType:      "unstructured",
+		PrepareStatus: "not_requested",
+		StorageURI:    "festival.csv",
+		Metadata: map[string]any{
+			"clean_status":        "ready",
+			"cleaned_ref":         "festival.cleaned.parquet",
+			"cleaned_text_column": "cleaned_text",
+			"raw_text_column":     "제목 + 본문",
+			"raw_text_columns":    []string{"제목", "본문"},
+		},
+	}
+
+	if got := resolvedDatasetNameForSkill("document_filter", "fallback.csv", version); got != "festival.cleaned.parquet" {
+		t.Fatalf("expected cleaned dataset, got %s", got)
+	}
+	if got := resolvedTextColumnForSkill(map[string]any{"text_column": "text"}, version); got != "cleaned_text" {
+		t.Fatalf("expected cleaned_text for default placeholder, got %s", got)
+	}
+	if got := resolvedTextColumnForSkill(map[string]any{"text_column": "제목"}, version); got != "cleaned_text" {
+		t.Fatalf("expected cleaned_text for raw source column, got %s", got)
+	}
+}
+
+func TestPlanDependenciesReadyAcceptsCleanedSourceWithoutPrepare(t *testing.T) {
+	version := domain.DatasetVersion{
+		DataType:      "unstructured",
+		PrepareStatus: "not_requested",
+		StorageURI:    "festival.csv",
+		Metadata: map[string]any{
+			"clean_status":        "ready",
+			"cleaned_ref":         "festival.cleaned.parquet",
+			"cleaned_text_column": "cleaned_text",
+		},
+	}
+	plan := domain.SkillPlan{
+		Steps: []domain.SkillPlanStep{
+			{StepID: "step-1", SkillName: "document_filter", DatasetName: "festival.csv", Inputs: map[string]any{}},
+		},
+	}
+
+	if !planDependenciesReady(plan, version) {
+		t.Fatal("expected clean source to satisfy prepared-source dependency")
+	}
+	version.Metadata["clean_status"] = "cleaning"
+	if planDependenciesReady(plan, version) {
+		t.Fatal("expected in-progress clean source to keep dependency waiting")
+	}
+}
+
 func stringPtr(value string) *string {
 	return &value
 }

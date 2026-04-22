@@ -2415,11 +2415,11 @@ func (s *DatasetService) BuildEmbeddings(projectID, datasetID, datasetVersionID 
 		return version, nil
 	}
 
-	textColumn := defaultPreparedTextColumn(version)
+	source := domain.ResolveDatasetSource(version)
+	textColumn := source.TextColumn
 	if input.TextColumn != nil && strings.TrimSpace(*input.TextColumn) != "" {
 		requestedTextColumn := strings.TrimSpace(*input.TextColumn)
-		rawTextColumn := metadataString(version.Metadata, "raw_text_column", metadataString(version.Metadata, "text_column", "text"))
-		if !isPrepareReady(version) || requestedTextColumn != rawTextColumn {
+		if source.Stage == domain.DatasetSourceStageRaw || !domain.DatasetSourceIsRawTextColumn(version, requestedTextColumn) {
 			textColumn = requestedTextColumn
 		}
 	}
@@ -2750,14 +2750,23 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 		return version, nil
 	}
 
-	textColumn := defaultPreparedTextColumn(version)
+	source := domain.ResolveDatasetSource(version)
+	textColumn := source.TextColumn
 	textColumns := normalizeStringList(input.TextColumns)
 	if len(textColumns) > 0 {
 		textColumn = datasetBuildTextColumnLabel(textColumns)
+		if source.Stage != domain.DatasetSourceStageRaw && textSelectionMatchesRawSource(version, textColumn, textColumns) {
+			textColumn = source.TextColumn
+			textColumns = append([]string(nil), source.TextColumns...)
+		}
 	} else {
 		if existingColumns := metadataStringList(version.Metadata, "sentiment_text_columns"); len(existingColumns) > 0 {
 			textColumns = existingColumns
 			textColumn = datasetBuildTextColumnLabel(textColumns)
+			if source.Stage != domain.DatasetSourceStageRaw && textSelectionMatchesRawSource(version, textColumn, textColumns) {
+				textColumn = source.TextColumn
+				textColumns = append([]string(nil), source.TextColumns...)
+			}
 		} else {
 			textColumn = metadataString(version.Metadata, "sentiment_text_column", textColumn)
 			textColumns = []string{textColumn}
@@ -3129,11 +3138,7 @@ func (s *DatasetService) deriveSentimentURI(version domain.DatasetVersion) strin
 	if path, ok := s.datasetArtifactPath(version, "sentiment", "sentiment.parquet"); ok {
 		return path
 	}
-	base := strings.TrimSpace(version.StorageURI)
-	if requiresPrepare(version) {
-		base = s.derivePrepareURI(version)
-	}
-	return base + ".sentiment.parquet"
+	return domain.ResolveDatasetSource(version).DatasetName + ".sentiment.parquet"
 }
 
 func (s *DatasetService) deriveCleanURI(version domain.DatasetVersion) string {
@@ -3167,11 +3172,7 @@ func deriveSentimentURI(version domain.DatasetVersion) string {
 	if version.SentimentURI != nil && strings.TrimSpace(*version.SentimentURI) != "" {
 		return strings.TrimSpace(*version.SentimentURI)
 	}
-	base := strings.TrimSpace(version.StorageURI)
-	if requiresPrepare(version) {
-		base = derivePrepareURI(version)
-	}
-	return base + ".sentiment.parquet"
+	return domain.ResolveDatasetSource(version).DatasetName + ".sentiment.parquet"
 }
 
 func derivePrepareURI(version domain.DatasetVersion) string {
@@ -3565,25 +3566,12 @@ func clonePrepareSummary(summary *domain.DatasetPrepareSummary) *domain.DatasetP
 }
 
 func datasetSourceForUnstructured(version domain.DatasetVersion) string {
-	if isPrepareReady(version) && version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != "" {
-		return strings.TrimSpace(*version.PrepareURI)
-	}
-	if isCleanReady(version) {
-		return strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
-	}
-	return strings.TrimSpace(version.StorageURI)
+	return domain.ResolveDatasetSource(version).DatasetName
 }
 
 func datasetSourceForPrepare(version domain.DatasetVersion) (string, []string) {
-	if isCleanReady(version) {
-		cleanedRef := strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
-		cleanedTextColumn := strings.TrimSpace(metadataString(version.Metadata, "cleaned_text_column", "cleaned_text"))
-		if cleanedTextColumn == "" {
-			cleanedTextColumn = "cleaned_text"
-		}
-		return cleanedRef, []string{cleanedTextColumn}
-	}
-	return strings.TrimSpace(version.StorageURI), nil
+	source := domain.ResolvePrepareInputSource(version)
+	return source.DatasetName, source.TextColumns
 }
 
 func datasetSourceForSentiment(version domain.DatasetVersion) string {
@@ -3594,10 +3582,19 @@ func datasetSourceForSentiment(version domain.DatasetVersion) string {
 }
 
 func defaultPreparedTextColumn(version domain.DatasetVersion) string {
-	if isPrepareReady(version) {
-		return metadataString(version.Metadata, "prepared_text_column", metadataString(version.Metadata, "text_column", "normalized_text"))
+	return domain.DatasetSourceDefaultTextColumn(version)
+}
+
+func textSelectionMatchesRawSource(version domain.DatasetVersion, textColumn string, textColumns []string) bool {
+	if domain.DatasetSourceIsRawTextColumn(version, textColumn) {
+		return true
 	}
-	return metadataString(version.Metadata, "text_column", "text")
+	for _, column := range textColumns {
+		if domain.DatasetSourceIsRawTextColumn(version, column) {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultPrepareRequired(dataType string, value *bool) bool {
