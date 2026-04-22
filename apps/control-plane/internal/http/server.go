@@ -136,6 +136,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}", s.handleDeleteDatasetVersion)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/source_download", s.handleDownloadSourceDataset)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_jobs", s.handleCreateCleanJob)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_download", s.handleDownloadCleanedDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_preview", s.handleGetPreparePreview)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_download", s.handleDownloadPreparedDataset)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_preview", s.handleGetSentimentPreview)
@@ -704,6 +705,37 @@ func (s *Server) handleDownloadSourceDataset(w stdhttp.ResponseWriter, r *stdhtt
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
 	w.WriteHeader(stdhttp.StatusOK)
+	_, _ = io.Copy(w, handle)
+}
+
+func (s *Server) handleDownloadCleanedDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	artifactPath, filename, err := s.datasetService.ResolveCleanDownload(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	defer os.Remove(artifactPath)
+	handle, err := os.Open(artifactPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.writeServiceError(w, service.ErrNotFound{Resource: "clean artifact"})
+			return
+		}
+		s.writeServiceError(w, err)
+		return
+	}
+	defer handle.Close()
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
+	w.WriteHeader(stdhttp.StatusOK)
+	if _, err := w.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
+		return
+	}
 	_, _ = io.Copy(w, handle)
 }
 

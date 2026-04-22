@@ -1627,14 +1627,15 @@ func TestDatasetBuildJobEndpoints(t *testing.T) {
 
 func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 	artifactRoot := t.TempDir()
+	cleanedPath := filepath.Join(artifactRoot, "cleaned.parquet")
 	preparedPath := ""
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/tasks/dataset_clean":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"artifact": map[string]any{
-					"clean_uri":           filepath.Join(artifactRoot, "cleaned.parquet"),
-					"cleaned_ref":         filepath.Join(artifactRoot, "cleaned.parquet"),
+					"clean_uri":           cleanedPath,
+					"cleaned_ref":         cleanedPath,
 					"clean_format":        "parquet",
 					"cleaned_text_column": "cleaned_text",
 					"row_id_column":       "row_id",
@@ -1712,6 +1713,48 @@ func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 		t.Fatalf("expected initial clean build job: %+v", buildJobs)
 	}
 	waitForBuildJobStatusHTTP(t, handler, projectID, jobs[0].(map[string]any)["job_id"].(string), "completed")
+	writeCleanedParquetForHTTP(t, cleanedPath, []map[string]any{
+		{
+			"source_row_index":  0,
+			"row_id":            "row-0",
+			"raw_text":          "결제 오류가 반복 발생했습니다!!!",
+			"cleaned_text":      "결제 오류가 반복 발생했습니다.",
+			"clean_disposition": "keep",
+			"clean_reason":      "noise removed",
+		},
+		{
+			"source_row_index":  1,
+			"row_id":            "row-1",
+			"raw_text":          "존재하지 않는 이미지입니다",
+			"cleaned_text":      "",
+			"clean_disposition": "drop",
+			"clean_reason":      "empty after clean",
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/clean_download", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected clean download status: got=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "text/csv; charset=utf-8" {
+		t.Fatalf("unexpected clean content-type: %s", contentType)
+	}
+	if disposition := recorder.Header().Get("Content-Disposition"); !strings.Contains(disposition, "attachment; filename=") || !strings.Contains(disposition, "cleaned.csv") {
+		t.Fatalf("unexpected clean content-disposition: %s", disposition)
+	}
+	body := recorder.Body.Bytes()
+	if len(body) < 3 || !bytes.Equal(body[:3], []byte{0xEF, 0xBB, 0xBF}) {
+		t.Fatalf("expected utf-8 bom in clean csv export: %v", body)
+	}
+	csvBody := string(body[3:])
+	if !strings.Contains(csvBody, "source_row_index,row_id,raw_text,cleaned_text,clean_disposition,clean_reason") {
+		t.Fatalf("unexpected clean csv header: %s", csvBody)
+	}
+	if !strings.Contains(csvBody, "row-0") || !strings.Contains(csvBody, "row-1") {
+		t.Fatalf("unexpected clean csv rows: %s", csvBody)
+	}
 
 	preparedPath = filepath.Join(artifactRoot, "projects", projectID, "datasets", datasetID, "versions", versionID, "prepare", "prepared.parquet")
 	if err := os.MkdirAll(filepath.Dir(preparedPath), 0o755); err != nil {
@@ -1789,8 +1832,8 @@ func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 		t.Fatalf("unexpected warning_panel payload: %+v", preview)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/prepare_download", nil)
-	recorder := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/prepare_download", nil)
+	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("unexpected download status: got=%d body=%s", recorder.Code, recorder.Body.String())
@@ -1801,11 +1844,11 @@ func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 	if disposition := recorder.Header().Get("Content-Disposition"); !strings.Contains(disposition, "attachment; filename=") || !strings.Contains(disposition, "prepared.csv") {
 		t.Fatalf("unexpected content-disposition: %s", disposition)
 	}
-	body := recorder.Body.Bytes()
+	body = recorder.Body.Bytes()
 	if len(body) < 3 || !bytes.Equal(body[:3], []byte{0xEF, 0xBB, 0xBF}) {
 		t.Fatalf("expected utf-8 bom in csv export: %v", body)
 	}
-	csvBody := string(body[3:])
+	csvBody = string(body[3:])
 	if !strings.Contains(csvBody, "source_row_index,row_id,raw_text,normalized_text,prepare_disposition,prepare_reason") {
 		t.Fatalf("unexpected csv header: %s", csvBody)
 	}
@@ -2170,6 +2213,37 @@ func waitForBuildJobStatusHTTP(t *testing.T, handler http.Handler, projectID, jo
 	)
 	t.Fatalf("expected build job %s status %s, got %+v", jobID, expectedStatus, job)
 	return nil
+}
+
+func writeCleanedParquetForHTTP(t *testing.T, path string, rows []map[string]any) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "clean-preview-http.duckdb")
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("unexpected duckdb open error: %v", err)
+	}
+	defer db.Close()
+
+	selects := make([]string, 0, len(rows))
+	for _, row := range rows {
+		selects = append(selects, fmt.Sprintf(
+			`SELECT %d AS source_row_index, '%s' AS row_id, '%s' AS raw_text, '%s' AS cleaned_text, '%s' AS clean_disposition, '%s' AS clean_reason`,
+			row["source_row_index"].(int),
+			escapeDuckDBLiteralForHTTP(row["row_id"].(string)),
+			escapeDuckDBLiteralForHTTP(row["raw_text"].(string)),
+			escapeDuckDBLiteralForHTTP(row["cleaned_text"].(string)),
+			escapeDuckDBLiteralForHTTP(row["clean_disposition"].(string)),
+			escapeDuckDBLiteralForHTTP(row["clean_reason"].(string)),
+		))
+	}
+	query := fmt.Sprintf(
+		`COPY (%s) TO '%s' (FORMAT PARQUET)`,
+		strings.Join(selects, " UNION ALL "),
+		escapeDuckDBLiteralForHTTP(path),
+	)
+	if _, err := db.Exec(query); err != nil {
+		t.Fatalf("unexpected parquet write error: %v", err)
+	}
 }
 
 func writePreparedPreviewParquetForHTTP(t *testing.T, path string, rows []map[string]any) {

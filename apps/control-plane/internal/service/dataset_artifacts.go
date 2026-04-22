@@ -132,6 +132,43 @@ func (s *DatasetService) GetPreparePreview(
 	return response, nil
 }
 
+func (s *DatasetService) ResolveCleanDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return "", "", err
+	}
+	cleanedRef, cleanFormat, err := resolveCleanArtifact(version)
+	if err != nil {
+		return "", "", err
+	}
+	if cleanFormat != "parquet" {
+		return "", "", ErrInvalidArgument{Message: "clean download supports parquet artifact only"}
+	}
+	info, statErr := os.Stat(cleanedRef)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return "", "", ErrNotFound{Resource: "clean artifact"}
+		}
+		return "", "", statErr
+	}
+	if info.IsDir() {
+		return "", "", ErrInvalidArgument{Message: "clean artifact must be a file"}
+	}
+	exportPath, err := exportCleanCSVFromParquet(cleanedRef)
+	if err != nil {
+		return "", "", err
+	}
+	filename := strings.TrimSpace(filepath.Base(cleanedRef))
+	if filename == "" || filename == "." || filename == string(filepath.Separator) {
+		filename = "cleaned.csv"
+	} else if strings.HasSuffix(strings.ToLower(filename), ".parquet") {
+		filename = filename[:len(filename)-len(".parquet")] + ".csv"
+	} else {
+		filename = filename + ".csv"
+	}
+	return exportPath, filename, nil
+}
+
 func (s *DatasetService) ResolvePrepareDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {

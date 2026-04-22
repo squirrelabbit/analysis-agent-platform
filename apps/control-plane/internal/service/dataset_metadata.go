@@ -509,6 +509,21 @@ func datasetClusterReady(version domain.DatasetVersion) bool {
 	return strings.TrimSpace(metadataString(version.Metadata, "cluster_ref", "")) != ""
 }
 
+func resolveCleanArtifact(version domain.DatasetVersion) (string, string, error) {
+	cleanedRef := strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
+	if cleanStatus(version) != "ready" || cleanedRef == "" {
+		return "", "", ErrInvalidArgument{Message: "clean artifact is not ready"}
+	}
+	cleanFormat := strings.TrimSpace(metadataString(version.Metadata, "cleaned_format", ""))
+	if cleanFormat == "" {
+		cleanFormat = strings.TrimSpace(metadataString(version.Metadata, "clean_format", ""))
+	}
+	if cleanFormat == "" {
+		cleanFormat = inferArtifactFormat(cleanedRef, "parquet")
+	}
+	return cleanedRef, cleanFormat, nil
+}
+
 func resolvePrepareArtifact(version domain.DatasetVersion) (string, string, error) {
 	preparedRef := strings.TrimSpace(metadataString(version.Metadata, "prepared_ref", ""))
 	if preparedRef == "" && version.PrepareURI != nil {

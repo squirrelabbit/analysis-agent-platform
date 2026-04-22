@@ -304,6 +304,64 @@ func exportPrepareCSVFromParquet(preparedRef string) (string, error) {
 	return csvPath, nil
 }
 
+func exportCleanCSVFromParquet(cleanedRef string) (string, error) {
+	cleanedRef = strings.TrimSpace(cleanedRef)
+	if cleanedRef == "" {
+		return "", ErrInvalidArgument{Message: "clean artifact ref is required"}
+	}
+	if _, err := os.Stat(cleanedRef); err != nil {
+		if os.IsNotExist(err) {
+			return "", ErrNotFound{Resource: "clean artifact"}
+		}
+		return "", err
+	}
+
+	csvHandle, err := os.CreateTemp("", "clean-export-*.csv")
+	if err != nil {
+		return "", err
+	}
+	csvPath := csvHandle.Name()
+	if err := csvHandle.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(csvPath); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+
+	tempHandle, err := os.CreateTemp("", "clean-export-*.duckdb")
+	if err != nil {
+		return "", err
+	}
+	dbPath := tempHandle.Name()
+	if err := tempHandle.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	defer os.Remove(dbPath)
+
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+
+	query := fmt.Sprintf(
+		`COPY (
+			SELECT * FROM read_parquet('%s')
+			ORDER BY source_row_index, row_id
+		) TO '%s' (FORMAT CSV, HEADER)`,
+		escapeDuckDBLiteral(cleanedRef),
+		escapeDuckDBLiteral(csvPath),
+	)
+	if _, err := db.Exec(query); err != nil {
+		_ = os.Remove(csvPath)
+		return "", err
+	}
+	return csvPath, nil
+}
+
 func exportSentimentCSVFromParquet(sentimentRef string) (string, error) {
 	sentimentRef = strings.TrimSpace(sentimentRef)
 	if sentimentRef == "" {
