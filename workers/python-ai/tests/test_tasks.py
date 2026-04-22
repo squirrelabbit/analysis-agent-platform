@@ -88,6 +88,22 @@ class TaskTests(unittest.TestCase):
         def is_enabled(self) -> bool:
             return True
 
+    class _FailingPrepareClient:
+        def __init__(self) -> None:
+            self._config = type("Config", (), {"model": "claude-haiku-4-5"})()
+
+        def is_enabled(self) -> bool:
+            return True
+
+        def create_json_response(
+            self,
+            *,
+            prompt: str,
+            schema: dict[str, object],
+            max_tokens: int | None = None,
+        ) -> AnthropicJSONResponse:
+            raise RuntimeError("model unavailable")
+
     def test_run_execution_final_answer_fallback(self) -> None:
         result = run_execution_final_answer(
             {
@@ -1090,6 +1106,31 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(prepared_rows[0]["row_id"], "version-2:row:0")
         self.assertEqual(prepared_rows[1]["prepare_disposition"], "review")
 
+    def test_dataset_prepare_records_fallback_when_batch_llm_fails(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_raw.csv"
+        prepared_path = temp_dir / "issues_raw.prepared.parquet"
+        self._write_csv_rows(csv_path, ["결제 오류가 반복 발생했습니다", "로그인이 실패합니다"])
+
+        with patch("python_ai_worker.skills.dataset_build.rt._anthropic_prepare_client", return_value=self._FailingPrepareClient()):
+            result = run_dataset_prepare(
+                {
+                    "dataset_version_id": "version-batch-fallback",
+                    "dataset_name": str(csv_path),
+                    "text_column": "text",
+                    "output_path": str(prepared_path),
+                    "prepare_batch_size": 2,
+                }
+            )
+
+        self.assertEqual(result["artifact"]["prepare_model"], "fallback-normalizer-v1")
+        self.assertEqual(result["artifact"]["prepare_strategy"], "deterministic-fallback")
+        self.assertEqual(result["artifact"]["usage"]["provider"], "deterministic-fallback")
+        self.assertEqual(result["artifact"]["usage"]["request_count"], 2)
+        self.assertEqual(result["artifact"]["usage"]["input_text_count"], 2)
+        prepared_rows = self._read_parquet_rows(prepared_path)
+        self.assertIn("llm_batch_fallback:model unavailable", prepared_rows[0]["quality_flags"])
+
     def test_dataset_prepare_uses_prompt_version_override(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues_raw.csv"
@@ -1186,11 +1227,12 @@ class TaskTests(unittest.TestCase):
                     "dataset_name": str(csv_path),
                     "text_column": "text",
                     "output_path": str(prepared_path),
+                    "model": "claude-haiku-4-5",
                     "llm_mode": "disabled",
                 }
             )
 
-        mock_client.assert_called_once_with("", llm_mode="disabled")
+        mock_client.assert_called_once_with("claude-haiku-4-5", llm_mode="disabled")
 
     def test_sentiment_label_fallback(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())

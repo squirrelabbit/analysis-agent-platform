@@ -325,26 +325,30 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
         f"prepared output: {output_path}",
         f"prepare regex rules: {', '.join(normalized['regex_rule_names'])}",
     ]
+    usage = rt._merge_usage_records(usage_records)
+    usage_provider = str(usage.get("provider") or "").strip()
     prepare_model = "fallback-normalizer-v1"
-    if client and client.is_enabled():
+    if usage_provider == "anthropic" and client and client.is_enabled():
         prepare_model = client._config.model
-        notes.append(f"prepare model: {prepare_model}")
-    else:
-        notes.append(f"prepare model: {prepare_model}")
+    elif usage_provider == "mixed" and client and client.is_enabled():
+        prepare_model = f"{client._config.model}+fallback-normalizer-v1"
+    notes.append(f"prepare model: {prepare_model}")
     notes.append(f"prepare batch size: {normalized['prepare_batch_size']}")
     if skipped_rows > 0:
         notes.append(f"skipped_rows={skipped_rows}")
 
     prompt_version = "dataset-prepare-fallback-v1"
     prepare_strategy = "deterministic-fallback"
-    if client and client.is_enabled():
+    if usage_provider in {"anthropic", "mixed"} and client and client.is_enabled():
         prompt_version = str(prepared_rows[0].get("prepare_prompt_version") or "").strip() if prepared_rows else ""
         if not prompt_version:
             prompt_version = normalized["prepare_prompt_version"] or (
                 "dataset-prepare-anthropic-batch-v1" if normalized["prepare_batch_size"] > 1 else "dataset-prepare-anthropic-v1"
             )
-        prepare_strategy = "anthropic-batch" if normalized["prepare_batch_size"] > 1 else "anthropic-row"
-    usage = rt._merge_usage_records(usage_records)
+        if usage_provider == "mixed":
+            prepare_strategy = "mixed-anthropic-fallback"
+        else:
+            prepare_strategy = "anthropic-batch" if normalized["prepare_batch_size"] > 1 else "anthropic-row"
 
     return {
         "notes": notes,

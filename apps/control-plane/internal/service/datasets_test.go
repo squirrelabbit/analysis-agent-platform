@@ -372,6 +372,7 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	var requestedPath string
 	var requestedOutputPath string
 	var requestedLLMMode string
+	var requestedModel string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -380,6 +381,7 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 		requestedPath = r.URL.Path
 		requestedOutputPath = payload["output_path"].(string)
 		requestedLLMMode = payload["llm_mode"].(string)
+		requestedModel = payload["model"].(string)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"notes": []string{"prepare completed"},
 			"artifact": map[string]any{
@@ -387,14 +389,14 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 				"prepare_uri":              "/tmp/issues.prepared.parquet",
 				"prepared_ref":             "/tmp/issues.prepared.parquet",
 				"prepare_format":           "parquet",
-				"prepare_model":            "claude-haiku-test",
+				"prepare_model":            "claude-haiku-4-5",
 				"prepare_prompt_version":   "dataset-prepare-anthropic-v1",
 				"prepared_text_column":     "normalized_text",
 				"row_id_column":            "row_id",
 				"storage_contract_version": "unstructured-storage-v1",
 				"usage": map[string]any{
 					"provider":               "anthropic",
-					"model":                  "claude-haiku-test",
+					"model":                  "claude-haiku-4-5",
 					"operation":              "dataset_prepare",
 					"request_count":          2,
 					"input_tokens":           120,
@@ -426,6 +428,7 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 
 	version, err = service.BuildPrepare(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{
 		TextColumns: []string{"text"},
+		Model:       datasetStringPtr("claude-haiku-4-5"),
 	})
 	if err != nil {
 		t.Fatalf("unexpected build prepare error: %v", err)
@@ -436,6 +439,9 @@ func TestBuildPrepareSetsReadyStatusAndMetadata(t *testing.T) {
 	}
 	if requestedLLMMode != "default" {
 		t.Fatalf("unexpected prepare llm mode: %s", requestedLLMMode)
+	}
+	if requestedModel != "claude-haiku-4-5" {
+		t.Fatalf("unexpected prepare model: %s", requestedModel)
 	}
 	if !strings.HasPrefix(requestedOutputPath, artifactRoot) {
 		t.Fatalf("unexpected prepare output path: %s", requestedOutputPath)
