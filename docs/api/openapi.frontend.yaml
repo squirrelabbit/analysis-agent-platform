@@ -1049,6 +1049,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DatasetVersionBuildJobStatus"
+        build_stages:
+          type: array
+          description: source, clean, prepare, sentiment, embedding, cluster를 프론트 상태 표시용으로 정규화한 단계별 상태
+          items:
+            $ref: "#/components/schemas/DatasetVersionBuildStage"
         artifacts:
           type: array
           items:
@@ -1142,6 +1147,51 @@ components:
             - "null"
           format: date-time
       required: [dataset_version_id, dataset_id, project_id, storage_uri, data_type, metadata, clean_status, prepare_status, sentiment_status, embedding_status, is_active, created_at]
+    DatasetVersionBuildStage:
+      type: object
+      properties:
+        stage:
+          type: string
+          enum: [source, clean, prepare, sentiment, embedding, cluster]
+        status:
+          type: string
+        applicable:
+          type: boolean
+        required:
+          type: boolean
+        ready:
+          type: boolean
+        blocked_reason:
+          type:
+            - string
+            - "null"
+        latest_job:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetVersionBuildJobStatus"
+            - type: "null"
+        primary_artifact:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetVersionArtifact"
+            - type: "null"
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetVersionArtifact"
+        summary:
+          $ref: "#/components/schemas/AnyMap"
+        model:
+          type: string
+        prompt_version:
+          type: string
+        error_message:
+          type:
+            - string
+            - "null"
+        diagnostics:
+          anyOf:
+            - $ref: "#/components/schemas/BuildJobDiagnostics"
+            - type: "null"
+      required: [stage, status, applicable, required, ready]
     DatasetVersionArtifact:
       type: object
       properties:

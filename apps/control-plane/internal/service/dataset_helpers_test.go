@@ -128,6 +128,15 @@ func datasetVersionArtifactByType(items []domain.DatasetVersionArtifact, artifac
 	return domain.DatasetVersionArtifact{}, false
 }
 
+func datasetVersionBuildStageByName(items []domain.DatasetVersionBuildStage, stage string) (domain.DatasetVersionBuildStage, bool) {
+	for _, item := range items {
+		if item.Stage == stage {
+			return item, true
+		}
+	}
+	return domain.DatasetVersionBuildStage{}, false
+}
+
 func writePreparedPreviewParquet(t *testing.T, path string, rows []map[string]any) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "prepare-preview.duckdb")

@@ -320,6 +320,7 @@ func (s *DatasetService) attachDatasetVersionArtifacts(version *domain.DatasetVe
 		return err
 	}
 	version.Artifacts = artifacts
+	version.BuildStages = buildDatasetVersionStages(*version, version.BuildJobs)
 	return nil
 }
 

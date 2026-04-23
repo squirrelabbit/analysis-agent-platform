@@ -228,11 +228,15 @@ func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionI
 	}
 	enrichDatasetVersionView(&version)
 	version.SourceSummary = loadDatasetSourceSummary(version.StorageURI, defaultDatasetSourceSummarySampleLimit)
+	if err := s.attachDatasetVersionArtifacts(&version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
 	buildJobs, err := s.latestDatasetVersionBuildJobStatuses(projectID, version)
 	if err != nil {
 		return domain.DatasetVersion{}, err
 	}
 	version.BuildJobs = buildJobs
+	version.BuildStages = buildDatasetVersionStages(version, buildJobs)
 	markDatasetVersionActive(&version, dataset)
 	return version, nil
 }
@@ -249,6 +253,7 @@ func (s *DatasetService) ListDatasetVersions(projectID, datasetID string) (domai
 	for index := range items {
 		enrichDatasetVersionView(&items[index])
 		markDatasetVersionActive(&items[index], dataset)
+		items[index].BuildStages = buildDatasetVersionStages(items[index], nil)
 	}
 	return domain.DatasetVersionListResponse{Items: items}, nil
 }
