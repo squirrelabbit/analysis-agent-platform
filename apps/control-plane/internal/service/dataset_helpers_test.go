@@ -363,6 +363,24 @@ func waitForDatasetVersionSentimentReady(t *testing.T, service *DatasetService, 
 	return domain.DatasetVersion{}
 }
 
+func waitForDatasetVersionEmbeddingReady(t *testing.T, service *DatasetService, projectID, datasetID, versionID string) domain.DatasetVersion {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		version, err := service.GetDatasetVersion(projectID, datasetID, versionID)
+		if err == nil && version.EmbeddingStatus == "ready" {
+			return version
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	version, err := service.GetDatasetVersion(projectID, datasetID, versionID)
+	if err != nil {
+		t.Fatalf("unexpected get dataset version error: %v", err)
+	}
+	t.Fatalf("expected dataset version embedding ready, got %s", version.EmbeddingStatus)
+	return domain.DatasetVersion{}
+}
+
 func valuesAsStrings(t *testing.T, value any) []string {
 	t.Helper()
 	items, ok := value.([]any)

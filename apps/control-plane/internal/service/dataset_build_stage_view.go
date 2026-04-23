@@ -31,15 +31,21 @@ func buildDatasetVersionStage(
 	latestJob *domain.DatasetVersionBuildJobStatus,
 ) domain.DatasetVersionBuildStage {
 	state := datasetVersionStageState(version, stage)
+	blockedReason := datasetVersionStageBlockedReason(version, stage)
+	canRun := datasetVersionStageCanRun(stage, state, latestJob, blockedReason)
 	stageView := domain.DatasetVersionBuildStage{
-		Stage:      stage,
-		Status:     state.status,
-		Applicable: state.applicable,
-		Required:   state.required,
-		Ready:      state.ready,
-		Artifacts:  cloneBuildStageArtifacts(artifacts),
+		Stage:           stage,
+		Status:          state.status,
+		Applicable:      state.applicable,
+		Required:        state.required,
+		Ready:           state.ready,
+		DependsOn:       datasetVersionStageDependsOn(stage),
+		CanRun:          canRun,
+		RunGroup:        datasetVersionStageRunGroup(stage),
+		AutoRunEligible: datasetVersionStageAutoRunEligible(version, stage, state, canRun),
+		Artifacts:       cloneBuildStageArtifacts(artifacts),
 	}
-	if blockedReason := datasetVersionStageBlockedReason(version, stage); blockedReason != "" {
+	if blockedReason != "" {
 		stageView.BlockedReason = stringPointer(blockedReason)
 	}
 	if latestJob != nil {
@@ -114,7 +120,7 @@ func datasetVersionStageState(version domain.DatasetVersion, stage string) datas
 		return datasetVersionStageRuntimeState{
 			status:     datasetVersionStatusOrNotApplicable(version.EmbeddingStatus, unstructured),
 			applicable: unstructured,
-			required:   datasetVersionStageRequested(version.EmbeddingStatus),
+			required:   requiresEmbedding(version),
 			ready:      embeddingBuildReady(version),
 		}
 	case datasetBuildTypeCluster:
@@ -122,7 +128,7 @@ func datasetVersionStageState(version domain.DatasetVersion, stage string) datas
 		return datasetVersionStageRuntimeState{
 			status:     datasetVersionStatusOrNotApplicable(status, unstructured),
 			applicable: unstructured,
-			required:   datasetVersionStageRequested(status),
+			required:   metadataBool(version.Metadata, "cluster_required") || datasetVersionStageRequested(status),
 			ready:      datasetClusterReady(version),
 		}
 	default:
@@ -153,6 +159,77 @@ func datasetVersionStatusOrNotApplicable(status string, applicable bool) string 
 func datasetVersionStageRequested(status string) bool {
 	status = strings.TrimSpace(status)
 	return status != "" && status != "not_requested" && status != "not_applicable"
+}
+
+func datasetVersionStageDependsOn(stage string) []string {
+	switch stage {
+	case datasetBuildTypeClean:
+		return []string{datasetBuildStageSource}
+	case datasetBuildTypePrepare:
+		return []string{datasetBuildTypeClean}
+	case datasetBuildTypeSentiment, datasetBuildTypeEmbedding:
+		return []string{datasetBuildTypePrepare}
+	case datasetBuildTypeCluster:
+		return []string{datasetBuildTypeEmbedding}
+	default:
+		return []string{}
+	}
+}
+
+func datasetVersionStageRunGroup(stage string) string {
+	switch stage {
+	case datasetBuildStageSource:
+		return "source"
+	case datasetBuildTypeClean:
+		return "pre_prepare"
+	case datasetBuildTypePrepare:
+		return "prepare"
+	case datasetBuildTypeSentiment, datasetBuildTypeEmbedding:
+		return "post_prepare"
+	case datasetBuildTypeCluster:
+		return "post_embedding"
+	default:
+		return ""
+	}
+}
+
+func datasetVersionStageCanRun(stage string, state datasetVersionStageRuntimeState, latestJob *domain.DatasetVersionBuildJobStatus, blockedReason string) bool {
+	if stage == datasetBuildStageSource || !state.applicable {
+		return false
+	}
+	if latestJob != nil && datasetBuildJobActive(latestJob.Status) {
+		return false
+	}
+	return strings.TrimSpace(blockedReason) == ""
+}
+
+func datasetBuildJobActive(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "queued", "running":
+		return true
+	default:
+		return false
+	}
+}
+
+func datasetVersionStageAutoRunEligible(version domain.DatasetVersion, stage string, state datasetVersionStageRuntimeState, canRun bool) bool {
+	if !canRun || state.ready {
+		return false
+	}
+	switch stage {
+	case datasetBuildTypeClean:
+		return requiresClean(version) && len(resolveDatasetBuildTextSelection(version.Metadata, nil).Columns) > 0
+	case datasetBuildTypePrepare:
+		return metadataBool(version.Metadata, "prepare_required")
+	case datasetBuildTypeSentiment:
+		return metadataBool(version.Metadata, "sentiment_required")
+	case datasetBuildTypeEmbedding:
+		return metadataBool(version.Metadata, "embedding_required") || version.EmbeddingStatus == "queued"
+	case datasetBuildTypeCluster:
+		return metadataBool(version.Metadata, "cluster_required")
+	default:
+		return false
+	}
 }
 
 func datasetVersionStageBlockedReason(version domain.DatasetVersion, stage string) string {

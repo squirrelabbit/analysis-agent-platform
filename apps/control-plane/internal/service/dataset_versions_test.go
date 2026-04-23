@@ -273,6 +273,9 @@ func TestGetDatasetVersionIncludesDerivedArtifacts(t *testing.T) {
 	if !prepareStage.Applicable || !prepareStage.Required || !prepareStage.Ready || prepareStage.Status != "ready" {
 		t.Fatalf("unexpected prepare build stage state: %+v", prepareStage)
 	}
+	if len(prepareStage.DependsOn) != 1 || prepareStage.DependsOn[0] != "clean" {
+		t.Fatalf("unexpected prepare dependencies: %+v", prepareStage.DependsOn)
+	}
 	if prepareStage.LatestJob == nil || prepareStage.LatestJob.JobID != "job-prepare-derived-artifacts" || prepareStage.LatestJob.Status != "completed" {
 		t.Fatalf("unexpected prepare latest job: %+v", prepareStage.LatestJob)
 	}
@@ -282,12 +285,20 @@ func TestGetDatasetVersionIncludesDerivedArtifacts(t *testing.T) {
 	if intValueOrZero(prepareStage.Summary["output_row_count"]) != 8 {
 		t.Fatalf("unexpected prepare stage summary: %+v", prepareStage.Summary)
 	}
+	sentimentStage, ok := datasetVersionBuildStageByName(response.BuildStages, "sentiment")
+	if !ok || len(sentimentStage.DependsOn) != 1 || sentimentStage.DependsOn[0] != "prepare" || !sentimentStage.CanRun || sentimentStage.RunGroup != "post_prepare" {
+		t.Fatalf("unexpected sentiment build stage: %+v", sentimentStage)
+	}
+	embeddingStage, ok := datasetVersionBuildStageByName(response.BuildStages, "embedding")
+	if !ok || len(embeddingStage.DependsOn) != 1 || embeddingStage.DependsOn[0] != "prepare" || !embeddingStage.CanRun || embeddingStage.RunGroup != sentimentStage.RunGroup {
+		t.Fatalf("unexpected embedding build stage: %+v", embeddingStage)
+	}
 	progressArtifact, ok := datasetVersionArtifactByType(response.Artifacts, "prepare_progress")
 	if !ok || progressArtifact.Stage != "prepare" || progressArtifact.Format != "json" {
 		t.Fatalf("unexpected prepare progress artifact: %+v", progressArtifact)
 	}
 	clusterStage, ok := datasetVersionBuildStageByName(response.BuildStages, "cluster")
-	if !ok || clusterStage.BlockedReason == nil || *clusterStage.BlockedReason != "embedding stage must be ready before cluster" {
+	if !ok || clusterStage.CanRun || clusterStage.BlockedReason == nil || *clusterStage.BlockedReason != "embedding stage must be ready before cluster" {
 		t.Fatalf("unexpected cluster build stage: %+v", clusterStage)
 	}
 }

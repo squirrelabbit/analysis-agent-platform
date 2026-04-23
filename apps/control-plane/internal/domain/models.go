@@ -276,6 +276,10 @@ type DatasetVersionBuildStage struct {
 	Applicable      bool                          `json:"applicable"`
 	Required        bool                          `json:"required"`
 	Ready           bool                          `json:"ready"`
+	DependsOn       []string                      `json:"depends_on"`
+	CanRun          bool                          `json:"can_run"`
+	RunGroup        string                        `json:"run_group"`
+	AutoRunEligible bool                          `json:"auto_run_eligible"`
 	BlockedReason   *string                       `json:"blocked_reason,omitempty"`
 	LatestJob       *DatasetVersionBuildJobStatus `json:"latest_job,omitempty"`
 	PrimaryArtifact *DatasetVersionArtifact       `json:"primary_artifact,omitempty"`

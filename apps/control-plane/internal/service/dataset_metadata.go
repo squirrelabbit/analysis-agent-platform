@@ -479,6 +479,18 @@ func requiresSentiment(version domain.DatasetVersion) bool {
 	}
 }
 
+func requiresEmbedding(version domain.DatasetVersion) bool {
+	switch version.DataType {
+	case "unstructured", "mixed", "both":
+		if metadataBool(version.Metadata, "embedding_required") {
+			return true
+		}
+		return version.EmbeddingStatus != "" && version.EmbeddingStatus != "not_requested" && version.EmbeddingStatus != "not_applicable"
+	default:
+		return false
+	}
+}
+
 func cleanStatus(version domain.DatasetVersion) string {
 	status := strings.TrimSpace(metadataString(version.Metadata, "clean_status", ""))
 	if status != "" {
