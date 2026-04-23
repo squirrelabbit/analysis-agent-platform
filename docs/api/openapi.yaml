@@ -2427,6 +2427,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DatasetVersionBuildJobStatus"
+        build_stages:
+          type: array
+          description: source, clean, prepare, sentiment, embedding, cluster를 프론트 상태 표시용으로 정규화한 단계별 상태
+          items:
+            $ref: "#/components/schemas/DatasetVersionBuildStage"
         artifacts:
           type: array
           items:
@@ -2536,6 +2541,66 @@ components:
         - embedding_status
         - is_active
         - created_at
+    DatasetVersionBuildStage:
+      type: object
+      properties:
+        stage:
+          type: string
+          enum: [source, clean, prepare, sentiment, embedding, cluster]
+        status:
+          type: string
+        applicable:
+          type: boolean
+        required:
+          type: boolean
+        ready:
+          type: boolean
+        depends_on:
+          type: array
+          description: 이 stage가 논리적으로 의존하는 stage 목록. sentiment와 embedding은 모두 prepare에만 의존하므로 병렬 실행 가능하다.
+          items:
+            type: string
+            enum: [source, clean, prepare, sentiment, embedding, cluster]
+        can_run:
+          type: boolean
+          description: 현재 상태에서 해당 stage 실행 API를 호출할 수 있는지 여부
+        run_group:
+          type: string
+          description: 프론트 병렬/순차 표시용 실행 그룹. sentiment와 embedding은 post_prepare 그룹이다.
+        auto_run_eligible:
+          type: boolean
+          description: required 설정과 현재 의존성 기준으로 자동 실행 대상이 될 수 있는지 여부
+        blocked_reason:
+          type:
+            - string
+            - "null"
+        latest_job:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetVersionBuildJobStatus"
+            - type: "null"
+        primary_artifact:
+          anyOf:
+            - $ref: "#/components/schemas/DatasetVersionArtifact"
+            - type: "null"
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetVersionArtifact"
+        summary:
+          $ref: "#/components/schemas/AnyMap"
+        model:
+          type: string
+        prompt_version:
+          type: string
+        error_message:
+          type:
+            - string
+            - "null"
+        diagnostics:
+          anyOf:
+            - $ref: "#/components/schemas/BuildJobDiagnostics"
+            - type: "null"
+      required: [stage, status, applicable, required, ready, depends_on, can_run, run_group, auto_run_eligible]
     DatasetVersionArtifact:
       type: object
       properties:

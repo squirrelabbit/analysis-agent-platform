@@ -193,6 +193,7 @@ type DatasetVersion struct {
 	Metadata           map[string]any                 `json:"metadata"`
 	SourceSummary      *DatasetSourceSummary          `json:"source_summary,omitempty"`
 	BuildJobs          []DatasetVersionBuildJobStatus `json:"build_jobs,omitempty"`
+	BuildStages        []DatasetVersionBuildStage     `json:"build_stages,omitempty"`
 	Artifacts          []DatasetVersionArtifact       `json:"artifacts,omitempty"`
 	Profile            *DatasetProfile                `json:"profile,omitempty"`
 	CleanStatus        string                         `json:"clean_status"`
@@ -267,6 +268,27 @@ type DatasetVersionBuildJobStatus struct {
 	CompletedAt  *time.Time           `json:"completed_at,omitempty"`
 	ErrorMessage *string              `json:"error_message,omitempty"`
 	Diagnostics  *BuildJobDiagnostics `json:"diagnostics,omitempty"`
+}
+
+type DatasetVersionBuildStage struct {
+	Stage           string                        `json:"stage"`
+	Status          string                        `json:"status"`
+	Applicable      bool                          `json:"applicable"`
+	Required        bool                          `json:"required"`
+	Ready           bool                          `json:"ready"`
+	DependsOn       []string                      `json:"depends_on"`
+	CanRun          bool                          `json:"can_run"`
+	RunGroup        string                        `json:"run_group"`
+	AutoRunEligible bool                          `json:"auto_run_eligible"`
+	BlockedReason   *string                       `json:"blocked_reason,omitempty"`
+	LatestJob       *DatasetVersionBuildJobStatus `json:"latest_job,omitempty"`
+	PrimaryArtifact *DatasetVersionArtifact       `json:"primary_artifact,omitempty"`
+	Artifacts       []DatasetVersionArtifact      `json:"artifacts,omitempty"`
+	Summary         map[string]any                `json:"summary,omitempty"`
+	Model           string                        `json:"model,omitempty"`
+	PromptVersion   string                        `json:"prompt_version,omitempty"`
+	ErrorMessage    *string                       `json:"error_message,omitempty"`
+	Diagnostics     *BuildJobDiagnostics          `json:"diagnostics,omitempty"`
 }
 
 type DatasetVersionCreateRequest struct {

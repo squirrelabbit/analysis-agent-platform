@@ -320,6 +320,7 @@ func (s *DatasetService) attachDatasetVersionArtifacts(version *domain.DatasetVe
 		return err
 	}
 	version.Artifacts = artifacts
+	version.BuildStages = buildDatasetVersionStages(*version, version.BuildJobs)
 	return nil
 }
 
@@ -473,6 +474,18 @@ func requiresSentiment(version domain.DatasetVersion) bool {
 	switch version.DataType {
 	case "unstructured", "mixed", "both":
 		return version.SentimentStatus != "" && version.SentimentStatus != "not_requested" && version.SentimentStatus != "not_applicable"
+	default:
+		return false
+	}
+}
+
+func requiresEmbedding(version domain.DatasetVersion) bool {
+	switch version.DataType {
+	case "unstructured", "mixed", "both":
+		if metadataBool(version.Metadata, "embedding_required") {
+			return true
+		}
+		return version.EmbeddingStatus != "" && version.EmbeddingStatus != "not_requested" && version.EmbeddingStatus != "not_applicable"
 	default:
 		return false
 	}

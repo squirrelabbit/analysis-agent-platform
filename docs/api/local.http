@@ -1,0 +1,341 @@
+@api = http://127.0.0.1:18080
+@worker = http://127.0.0.1:18090
+@project_id = replace-project-id
+@dataset_id = replace-dataset-id
+@version_id = replace-version-id
+@job_id = replace-job-id
+@request_id = replace-request-id
+@plan_id = replace-plan-id
+@execution_id = replace-execution-id
+@execution_id_to = replace-execution-id-to
+@step_id = replace-step-id
+@cluster_id = replace-cluster-id
+@scenario_id = replace-scenario-id
+@draft_id = replace-draft-id
+
+### Control plane health
+GET {{api}}/health
+
+### Runtime status
+GET {{api}}/runtime_status
+
+### Python worker health
+GET {{worker}}/health
+
+### OpenAPI
+GET {{api}}/openapi.yaml
+
+### Global prompts by operation
+GET {{api}}/prompts?operation=prepare
+
+### Prompt catalog
+GET {{api}}/prompt_catalog
+
+### Dataset profiles
+GET {{api}}/dataset_profiles
+
+### Create project
+POST {{api}}/projects
+Content-Type: application/json
+
+{
+  "name": "local-api-test",
+  "description": "local.http test"
+}
+
+### List projects
+GET {{api}}/projects
+
+### Get project
+GET {{api}}/projects/{{project_id}}
+
+### Delete project
+DELETE {{api}}/projects/{{project_id}}
+
+### Create dataset
+POST {{api}}/projects/{{project_id}}/datasets
+Content-Type: application/json
+
+{
+  "name": "sns-data",
+  "description": "SNS sample dataset",
+  "data_type": "unstructured"
+}
+
+### List datasets
+GET {{api}}/projects/{{project_id}}/datasets
+
+### Get dataset
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}
+
+### Delete dataset
+DELETE {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}
+
+### Upload dataset version
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/uploads
+Content-Type: multipart/form-data; boundary=local-boundary
+
+--local-boundary
+Content-Disposition: form-data; name="metadata"
+
+{"text_columns":["제목","본문"],"clean_preprocess_options":{"remove_english":false,"remove_numbers":false,"remove_special":false,"remove_monosyllables":true}}
+--local-boundary
+Content-Disposition: form-data; name="activate_on_create"
+
+true
+--local-boundary
+Content-Disposition: form-data; name="prepare_required"
+
+false
+--local-boundary
+Content-Disposition: form-data; name="sentiment_required"
+
+false
+--local-boundary
+Content-Disposition: form-data; name="embedding_required"
+
+false
+--local-boundary
+Content-Disposition: form-data; name="file"; filename="sample.csv"
+Content-Type: text/csv
+
+제목,본문
+테스트 제목,테스트 본문입니다
+--local-boundary--
+
+### List dataset versions
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions
+
+### Get dataset version
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}
+
+### Activate dataset version
+PUT {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/active_version
+Content-Type: application/json
+
+{
+  "dataset_version_id": "{{version_id}}"
+}
+
+### Clear active dataset version
+DELETE {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/active_version
+
+### Source download
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/source_download
+
+### Clean job
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/clean_jobs
+Content-Type: application/json
+
+{
+  "text_columns": ["제목", "본문"],
+  "preprocess_options": {
+    "remove_english": false,
+    "remove_numbers": false,
+    "remove_special": false,
+    "remove_monosyllables": true
+  },
+  "force": true
+}
+
+### Clean download
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/clean_download
+
+### Prepare sample
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/prepare_sample
+Content-Type: application/json
+
+{
+  "text_columns": ["cleaned_text"],
+  "max_rows": 10,
+  "batch_size": 5
+}
+
+### Prepare job
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/prepare_jobs
+Content-Type: application/json
+
+{
+  "max_rows": 100,
+  "force": true
+}
+
+### Prepare preview
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/prepare_preview?limit=20
+
+### Prepare download
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/prepare_download
+
+### Sentiment sample
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/sentiment_sample
+Content-Type: application/json
+
+{
+  "text_columns": ["normalized_text"],
+  "max_rows": 10,
+  "batch_size": 5
+}
+
+### Sentiment job
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/sentiment_jobs
+Content-Type: application/json
+
+{
+  "text_columns": ["normalized_text"],
+  "force": true
+}
+
+### Sentiment preview
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/sentiment_preview?limit=20
+
+### Sentiment download
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/sentiment_download
+
+### Embedding job
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/embedding_jobs
+Content-Type: application/json
+
+{
+  "text_column": "normalized_text",
+  "force": true
+}
+
+### Cluster job
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/cluster_jobs
+Content-Type: application/json
+
+{
+  "force": true
+}
+
+### Build jobs
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/build_jobs
+
+### Build job detail
+GET {{api}}/projects/{{project_id}}/dataset_build_jobs/{{job_id}}
+
+### Cluster members
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/clusters/{{cluster_id}}/members?limit=50&samples_only=false
+
+### Create analysis request
+POST {{api}}/projects/{{project_id}}/analysis_requests
+Content-Type: application/json
+
+{
+  "dataset_id": "{{dataset_id}}",
+  "goal": "주요 불만 이슈를 요약해줘",
+  "constraints": [],
+  "context": {}
+}
+
+### Get analysis request
+GET {{api}}/projects/{{project_id}}/analysis_requests/{{request_id}}
+
+### Get plan
+GET {{api}}/projects/{{project_id}}/plans/{{plan_id}}
+
+### Execute plan
+POST {{api}}/projects/{{project_id}}/plans/{{plan_id}}/execute
+Content-Type: application/json
+
+{}
+
+### List executions
+GET {{api}}/projects/{{project_id}}/executions
+
+### Get execution
+GET {{api}}/projects/{{project_id}}/executions/{{execution_id}}
+
+### Execution progress
+GET {{api}}/projects/{{project_id}}/executions/{{execution_id}}/progress
+
+### Execution events
+GET {{api}}/projects/{{project_id}}/executions/{{execution_id}}/events
+
+### Execution step preview
+GET {{api}}/projects/{{project_id}}/executions/{{execution_id}}/steps/{{step_id}}
+
+### Execution result
+GET {{api}}/projects/{{project_id}}/executions/{{execution_id}}/result
+
+### Resume waiting execution
+POST {{api}}/projects/{{project_id}}/executions/{{execution_id}}/resume
+Content-Type: application/json
+
+{}
+
+### Rerun execution
+POST {{api}}/projects/{{project_id}}/executions/{{execution_id}}/rerun
+Content-Type: application/json
+
+{}
+
+### Diff executions
+GET {{api}}/projects/{{project_id}}/executions/diff?from={{execution_id}}&to={{execution_id_to}}
+
+### Create scenario
+POST {{api}}/projects/{{project_id}}/scenarios
+Content-Type: application/json
+
+{
+  "scenario_id": "S1",
+  "planning_mode": "strict",
+  "user_query": "주요 불만 이슈를 요약해줘",
+  "query_type": "이슈 요약",
+  "interpretation": "고객 불만의 주요 주제와 근거를 요약한다",
+  "analysis_scope": "선택한 dataset version",
+  "steps": [
+    {
+      "step": 1,
+      "function_name": "가비지 필터링",
+      "runtime_skill_name": "garbage_filter",
+      "result_description": "분석 대상 텍스트 정제"
+    },
+    {
+      "step": 2,
+      "function_name": "전체 담론 요약",
+      "runtime_skill_name": "issue_evidence_summary",
+      "result_description": "주요 이슈와 근거 요약"
+    }
+  ]
+}
+
+### List scenarios
+GET {{api}}/projects/{{project_id}}/scenarios
+
+### Get scenario
+GET {{api}}/projects/{{project_id}}/scenarios/{{scenario_id}}
+
+### Create scenario plan
+POST {{api}}/projects/{{project_id}}/scenarios/{{scenario_id}}/plans
+Content-Type: application/json
+
+{
+  "dataset_id": "{{dataset_id}}",
+  "goal": "주요 불만 이슈를 요약해줘",
+  "constraints": [],
+  "context": {}
+}
+
+### Execute scenario
+POST {{api}}/projects/{{project_id}}/scenarios/{{scenario_id}}/execute
+Content-Type: application/json
+
+{
+  "dataset_id": "{{dataset_id}}",
+  "goal": "주요 불만 이슈를 요약해줘",
+  "constraints": [],
+  "context": {}
+}
+
+### Create report draft
+POST {{api}}/projects/{{project_id}}/report_drafts
+Content-Type: application/json
+
+{
+  "title": "주요 VOC 보고서 초안",
+  "execution_ids": ["{{execution_id}}"]
+}
+
+### Get report draft
+GET {{api}}/projects/{{project_id}}/report_drafts/{{draft_id}}

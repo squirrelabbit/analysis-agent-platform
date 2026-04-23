@@ -247,6 +247,128 @@ func TestCreateDatasetVersionAutoCreatesSentimentJobAfterPrepare(t *testing.T) {
 	}
 }
 
+func TestCreateDatasetVersionAutoCreatesEmbeddingJobAfterPrepare(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())
+
+	project := domain.Project{ProjectID: "project-auto-embedding", Name: "test", CreatedAt: time.Now().UTC()}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{
+		DatasetID: "dataset-auto-embedding",
+		ProjectID: project.ProjectID,
+		Name:      "issues",
+		DataType:  "unstructured",
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+
+	var mu sync.Mutex
+	requestPaths := make([]string, 0, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requestPaths = append(requestPaths, r.URL.Path)
+		mu.Unlock()
+
+		switch r.URL.Path {
+		case "/tasks/dataset_clean":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"clean_uri":           "/tmp/issues.cleaned.parquet",
+					"cleaned_ref":         "/tmp/issues.cleaned.parquet",
+					"clean_format":        "parquet",
+					"cleaned_text_column": "cleaned_text",
+					"row_id_column":       "row_id",
+					"summary": map[string]any{
+						"input_row_count":  3,
+						"output_row_count": 3,
+						"kept_count":       3,
+					},
+				},
+			})
+		case "/tasks/dataset_prepare":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"prepare_uri":          "/tmp/issues.prepared.parquet",
+					"prepared_ref":         "/tmp/issues.prepared.parquet",
+					"prepare_format":       "parquet",
+					"prepared_text_column": "normalized_text",
+					"summary": map[string]any{
+						"output_row_count": 3,
+					},
+				},
+			})
+		case "/tasks/embedding":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"embedding_index_source_ref":    "/tmp/issues.embedding.parquet",
+					"embedding_index_source_format": "parquet",
+					"chunk_ref":                     "/tmp/issues.chunks.parquet",
+					"chunk_format":                  "parquet",
+					"document_count":                3,
+					"chunk_count":                   3,
+					"embedding_model":               "test-embedding-model",
+				},
+			})
+		default:
+			t.Fatalf("unexpected worker path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	version, err := service.CreateDatasetVersion(project.ProjectID, dataset.DatasetID, domain.DatasetVersionCreateRequest{
+		StorageURI:        "/tmp/issues.csv",
+		DataType:          datasetStringPtr("unstructured"),
+		Metadata:          map[string]any{"text_columns": []string{"text"}},
+		PrepareRequired:   datasetBoolPtr(true),
+		EmbeddingRequired: datasetBoolPtr(true),
+		EmbeddingModel:    datasetStringPtr("test-embedding-model"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected create dataset version error: %v", err)
+	}
+	if !metadataBool(version.Metadata, "embedding_required") {
+		t.Fatalf("expected embedding_required metadata: %+v", version.Metadata)
+	}
+
+	cleanJob := waitForDatasetBuildJobByType(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID, "clean")
+	waitForDatasetBuildJobStatus(t, service, project.ProjectID, cleanJob.JobID, "completed")
+	waitForDatasetVersionCleanReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+
+	prepareJobCreated, err := service.CreatePrepareJob(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "test")
+	if err != nil {
+		t.Fatalf("unexpected create prepare job error: %v", err)
+	}
+	if prepareJobCreated.BuildType != "prepare" {
+		t.Fatalf("unexpected prepare job: %+v", prepareJobCreated)
+	}
+
+	prepareJob := waitForDatasetBuildJobByType(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID, "prepare")
+	waitForDatasetBuildJobStatus(t, service, project.ProjectID, prepareJob.JobID, "completed")
+
+	embeddingJob := waitForDatasetBuildJobByType(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID, "embedding")
+	waitForDatasetBuildJobStatus(t, service, project.ProjectID, embeddingJob.JobID, "completed")
+
+	version = waitForDatasetVersionEmbeddingReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
+	embeddingStage, ok := datasetVersionBuildStageByName(version.BuildStages, "embedding")
+	if !ok || !embeddingStage.Ready || embeddingStage.RunGroup != "post_prepare" || len(embeddingStage.DependsOn) != 1 || embeddingStage.DependsOn[0] != "prepare" {
+		t.Fatalf("unexpected embedding stage: %+v", embeddingStage)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requestPaths) != 3 {
+		t.Fatalf("expected clean, prepare, and embedding worker calls, got %+v", requestPaths)
+	}
+	if requestPaths[0] != "/tasks/dataset_clean" || requestPaths[1] != "/tasks/dataset_prepare" || requestPaths[2] != "/tasks/embedding" {
+		t.Fatalf("unexpected worker call order: %+v", requestPaths)
+	}
+}
+
 func TestCreatePrepareJobCompletesAndStoresStatus(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewDatasetService(repository, "", t.TempDir(), t.TempDir())

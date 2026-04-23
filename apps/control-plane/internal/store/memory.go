@@ -491,6 +491,7 @@ func cloneDatasetVersion(version domain.DatasetVersion) domain.DatasetVersion {
 	cloned.Metadata = cloneAnyMap(version.Metadata)
 	cloned.SourceSummary = nil
 	cloned.BuildJobs = nil
+	cloned.BuildStages = nil
 	cloned.Artifacts = cloneDatasetVersionArtifacts(version.Artifacts)
 	if version.Profile != nil {
 		profile := *version.Profile

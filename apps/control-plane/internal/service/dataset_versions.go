@@ -173,6 +173,9 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 	if sentimentRequired {
 		version.Metadata["sentiment_required"] = true
 	}
+	if embeddingRequired {
+		version.Metadata["embedding_required"] = true
+	}
 	return version, nil
 }
 
@@ -211,6 +214,30 @@ func (s *DatasetService) maybeRunEagerSentiment(projectID, datasetID string, ver
 	return version
 }
 
+func (s *DatasetService) maybeRunEagerEmbedding(projectID, datasetID string, version domain.DatasetVersion) domain.DatasetVersion {
+	if strings.TrimSpace(s.pythonAIWorkerURL) == "" {
+		return version
+	}
+	if !requiresEmbedding(version) || embeddingBuildReady(version) {
+		return version
+	}
+	if requiresPrepare(version) && !isPrepareReady(version) {
+		return version
+	}
+	if _, err := s.CreateEmbeddingJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}, "dataset_prepare_complete"); err == nil {
+		latest, getErr := s.GetDatasetVersion(projectID, datasetID, version.DatasetVersionID)
+		if getErr == nil {
+			return latest
+		}
+	}
+	return version
+}
+
+func (s *DatasetService) maybeRunEagerPostPrepareBuilds(projectID, datasetID string, version domain.DatasetVersion) domain.DatasetVersion {
+	result := s.maybeRunEagerSentiment(projectID, datasetID, version)
+	return s.maybeRunEagerEmbedding(projectID, datasetID, result)
+}
+
 func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionID string) (domain.DatasetVersion, error) {
 	dataset, err := s.GetDataset(projectID, datasetID)
 	if err != nil {
@@ -228,11 +255,15 @@ func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionI
 	}
 	enrichDatasetVersionView(&version)
 	version.SourceSummary = loadDatasetSourceSummary(version.StorageURI, defaultDatasetSourceSummarySampleLimit)
+	if err := s.attachDatasetVersionArtifacts(&version); err != nil {
+		return domain.DatasetVersion{}, err
+	}
 	buildJobs, err := s.latestDatasetVersionBuildJobStatuses(projectID, version)
 	if err != nil {
 		return domain.DatasetVersion{}, err
 	}
 	version.BuildJobs = buildJobs
+	version.BuildStages = buildDatasetVersionStages(version, buildJobs)
 	markDatasetVersionActive(&version, dataset)
 	return version, nil
 }
@@ -249,6 +280,7 @@ func (s *DatasetService) ListDatasetVersions(projectID, datasetID string) (domai
 	for index := range items {
 		enrichDatasetVersionView(&items[index])
 		markDatasetVersionActive(&items[index], dataset)
+		items[index].BuildStages = buildDatasetVersionStages(items[index], nil)
 	}
 	return domain.DatasetVersionListResponse{Items: items}, nil
 }

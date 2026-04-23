@@ -237,7 +237,7 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
-	result := s.maybeRunEagerSentiment(projectID, datasetID, version)
+	result := s.maybeRunEagerPostPrepareBuilds(projectID, datasetID, version)
 	enrichDatasetVersionView(&result)
 	if err := s.attachDatasetVersionArtifacts(&result); err != nil {
 		return domain.DatasetVersion{}, err

@@ -3,11 +3,13 @@ flowchart LR
     Control["Go Control Plane\napps/control-plane"]
     API["Project / Dataset / Analysis API"]
     Build["Dataset Build API\nclean / prepare / sentiment / embedding / cluster"]
+    StageView["Dataset Build Stages\nsource -> clean -> prepare -> sentiment/embedding -> cluster"]
     Resolver["Dataset Source Resolver\nprepared -> cleaned -> raw"]
     Profiles["Dataset Profile Registry\nconfig/dataset_profiles.json"]
     Temporal["Temporal Workflow\nanalysis queue + dataset-build queue\nexecute / waiting / resume / rerun / diff + dataset build jobs"]
     Registry["Skill Bundle / Registry\nconfig/skill_bundle.json"]
     PG["Postgres\nmetadata + execution records"]
+    ArtifactTable["dataset_version_artifacts\nstage별 artifact index"]
     Duck["DuckDB\nstructured skill runtime"]
     Py["Python AI Worker\nplanner + task router + runtime helper + support/core skills"]
     Prompts["Prompt Templates\nconfig/prompts/*.md"]
@@ -21,11 +23,15 @@ flowchart LR
     API --> Registry
     API --> Build
     API --> Profiles
+    API --> StageView
     Build --> Resolver
     Build --> Py
     Build --> Artifact
+    Build --> ArtifactTable
     Build --> Profiles
     Build --> Temporal
+    StageView --> ArtifactTable
+    StageView --> PG
     Temporal --> Registry
     Temporal --> PG
     Temporal --> Duck
