@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from ._pydantic_compat import BaseModel, Field
+from pydantic import BaseModel, Field
+
+ResultScopeLiteral = Literal[
+    "full_dataset",
+    "document_subset",
+    "cluster_subset",
+    "partial_build",
+]
 
 
 class DateRangeModel(BaseModel):
@@ -33,7 +40,8 @@ class RankedIssueModel(BaseModel):
 class RankedIssueSummaryArtifactModel(BaseModel):
     ranked_issues: list[RankedIssueModel] = Field(default_factory=list)
     coverage: CoverageModel
-    result_scope: str
+    result_scope: ResultScopeLiteral
+    runtime_result_scope: ResultScopeLiteral
     quality_tier: str
     llm_output_parsed_strictly: bool | None = None
 
@@ -60,7 +68,8 @@ class IssueEvidenceArtifactModel(BaseModel):
     key_findings: list[str] = Field(default_factory=list)
     evidence: list[EvidenceItemModel] = Field(default_factory=list)
     follow_up_questions: list[str] = Field(default_factory=list)
-    result_scope: str
+    result_scope: ResultScopeLiteral
+    runtime_result_scope: ResultScopeLiteral
     quality_tier: str
     llm_output_parsed_strictly: bool
 
@@ -77,7 +86,8 @@ class ExecutionFinalAnswerModel(BaseModel):
     follow_up_questions: list[str] = Field(default_factory=list)
     model: str
     generated_at: str
-    result_scope: str
+    result_scope: ResultScopeLiteral
+    runtime_result_scope: ResultScopeLiteral
     quality_tier: str
     llm_output_parsed_strictly: bool
 

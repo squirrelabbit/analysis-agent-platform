@@ -54,6 +54,13 @@ class SkillPolicyRegistryTests(unittest.TestCase):
 
 
 class SkillPolicyBehaviorTests(unittest.TestCase):
+    class _DummyClient:
+        def __init__(self) -> None:
+            self._config = type("Config", (), {"model": "claude-test"})()
+
+        def is_enabled(self) -> bool:
+            return True
+
     def test_cluster_label_candidates_uses_policy_filtered_terms(self) -> None:
         result = run_cluster_label_candidates(
             {
@@ -84,24 +91,65 @@ class SkillPolicyBehaviorTests(unittest.TestCase):
         self.assertEqual(artifact["summary"]["label_rule"], "top_terms")
 
     def test_issue_evidence_summary_limits_selected_documents_by_policy(self) -> None:
-        result = run_issue_evidence_summary(
-            {
-                "dataset_name": "issues.csv",
-                "goal": "결제 오류 근거를 보여줘",
-                "sample_n": 5,
-                "prior_artifacts": {
-                    "semantic": {
-                        "skill_name": "semantic_search",
-                        "matches": [
-                            {"source_index": 0, "score": 0.9, "text": "결제 오류가 반복됩니다."},
-                            {"source_index": 1, "score": 0.8, "text": "결제가 계속 실패합니다."},
-                            {"source_index": 2, "score": 0.7, "text": "결제 승인 오류가 있습니다."},
-                            {"source_index": 3, "score": 0.6, "text": "주문 결제 에러가 발생했습니다."},
+        with TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "issues.csv"
+            csv_path.write_text(
+                "text\n결제 오류가 반복됩니다.\n결제가 계속 실패합니다.\n결제 승인 오류가 있습니다.\n주문 결제 에러가 발생했습니다.\n",
+                encoding="utf-8",
+            )
+            with patch(
+                "python_ai_worker.skills._summarize_impl.rt._anthropic_client",
+                return_value=self._DummyClient(),
+            ), patch(
+                "python_ai_worker.skills._summarize_impl.rt._run_evidence_pack_with_llm",
+                return_value={
+                    "notes": ["llm presenter stubbed in test"],
+                    "artifact": {
+                        "summary": "결제 오류 근거를 정리했습니다.",
+                        "key_findings": ["결제 오류 근거가 반복됩니다."],
+                        "evidence": [
+                            {
+                                "rank": 1,
+                                "source_index": 0,
+                                "snippet": "결제 오류가 반복됩니다.",
+                                "rationale": "대표 근거입니다.",
+                            },
+                            {
+                                "rank": 2,
+                                "source_index": 1,
+                                "snippet": "결제가 계속 실패합니다.",
+                                "rationale": "추가 근거입니다.",
+                            },
+                            {
+                                "rank": 3,
+                                "source_index": 2,
+                                "snippet": "결제 승인 오류가 있습니다.",
+                                "rationale": "보강 근거입니다.",
+                            },
                         ],
-                    }
+                        "follow_up_questions": ["대표 원문을 더 볼까요?"],
+                        "citation_mode": "row",
+                    },
                 },
-            }
-        )
+            ):
+                result = run_issue_evidence_summary(
+                    {
+                        "dataset_name": str(csv_path),
+                        "goal": "결제 오류 근거를 보여줘",
+                        "sample_n": 5,
+                        "prior_artifacts": {
+                            "semantic": {
+                                "skill_name": "semantic_search",
+                                "matches": [
+                                    {"source_index": 0, "score": 0.9, "text": "결제 오류가 반복됩니다."},
+                                    {"source_index": 1, "score": 0.8, "text": "결제가 계속 실패합니다."},
+                                    {"source_index": 2, "score": 0.7, "text": "결제 승인 오류가 있습니다."},
+                                    {"source_index": 3, "score": 0.6, "text": "주문 결제 에러가 발생했습니다."},
+                                ],
+                            }
+                        },
+                    }
+                )
 
         artifact = result["artifact"]
         self.assertEqual(artifact["policy_version"], "issue-evidence-summary-v1")

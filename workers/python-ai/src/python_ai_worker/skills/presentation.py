@@ -23,7 +23,8 @@ def run_execution_final_answer(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"execution_final_answer presenter failed: {exc}") from exc
 
     answer = dict(result.get("answer") or {})
-    answer["result_scope"] = "single_record"
+    answer["result_scope"] = "document_subset"
+    answer["runtime_result_scope"] = _source_runtime_result_scope(enriched["result_v1"])
     answer["quality_tier"] = "llm_dependent"
     answer["llm_output_parsed_strictly"] = True
     result["answer"] = answer
@@ -110,6 +111,15 @@ def _build_result_context(
         "waiting": waiting,
         "step_results": step_results,
     }
+
+
+def _source_runtime_result_scope(result_v1: dict[str, Any]) -> str:
+    answer = answer_dict(result_v1)
+    for key in ("runtime_result_scope", "result_scope"):
+        value = rt._normalize_result_scope(answer.get(key))
+        if value:
+            return value
+    return "document_subset"
 
 
 def answer_dict(result_v1: dict[str, Any]) -> dict[str, Any]:

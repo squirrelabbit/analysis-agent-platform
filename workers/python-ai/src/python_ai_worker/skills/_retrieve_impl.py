@@ -43,6 +43,15 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
             summary["top_n"] = normalized["top_n"]
             summary["sample_n"] = normalized["sample_n"]
             artifact["summary"] = summary
+            rt._set_scope_fields(
+                artifact,
+                declared_result_scope="cluster_subset",
+                runtime_result_scope=(
+                    "full_dataset"
+                    if artifact["cluster_materialization_scope"] == "full_dataset"
+                    else "cluster_subset"
+                ),
+            )
             return {
                 "notes": [
                     f"embedding_cluster loaded precomputed cluster artifact",
@@ -88,7 +97,8 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
         notes.append(f"cluster_fallback_reason: {cluster_fallback_reason}")
     return {
         "notes": notes,
-        "artifact": {
+        "artifact": rt._set_scope_fields(
+            {
             "skill_name": "embedding_cluster",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -118,7 +128,14 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
                 "embedding_source_backend": source_backend,
             },
             "clusters": clusters,
-        },
+            },
+            declared_result_scope="cluster_subset",
+            runtime_result_scope=(
+                "full_dataset"
+                if cluster_materialization_scope == "full_dataset"
+                else "cluster_subset"
+            ),
+        ),
     }
 
 def _load_precomputed_cluster_artifact(cluster_ref: str) -> dict[str, Any] | None:
@@ -172,7 +189,8 @@ def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
             f"cluster_label_candidates generated labels for {len(clusters)} clusters",
             f"dataset source: {normalized['dataset_name']}",
         ],
-        "artifact": {
+        "artifact": rt._inherit_scope_fields(
+            {
             "skill_name": "cluster_label_candidates",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -191,7 +209,9 @@ def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
                 "label_rule": "top_terms",
             },
             "clusters": clusters,
-        },
+            },
+            payload,
+        ),
     }
 
 
@@ -252,7 +272,8 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
             f"retrieval_backend: {retrieval_backend}",
             f"citation_mode: {citation_mode}",
         ],
-        "artifact": {
+        "artifact": rt._inherit_scope_fields(
+            {
             "skill_name": "semantic_search",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -271,7 +292,9 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
                 "citation_mode": citation_mode,
             },
             "matches": limited,
-        },
+            },
+            payload,
+        ),
     }
 
 

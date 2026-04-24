@@ -16,10 +16,16 @@
 
 ### `result_scope`
 
-- `full_dataset`: 전체 dataset 기준
-- `subset_filtered`: prior artifact 등으로 좁혀진 subset 기준
-- `sample_n`: 제한된 샘플 수 기준
-- `single_record`: 단일 결과 문서/응답 기준
+- `full_dataset`: 데이터셋 전체가 처리된 provenance
+- `document_subset`: 문서 필터/정제/질의 결과로 좁혀진 문서 집합 provenance
+- `cluster_subset`: 특정 cluster member 집합 provenance
+- `partial_build`: dataset build 단계에서 `max_rows` 등으로 잘린 부분 빌드 provenance
+
+### `result_scope_policy`
+
+- `static`: 선언된 `result_scope` 가 runtime provenance 와 동일해야 한다.
+- `inherits_from_input`: 가장 최근 prior artifact 의 provenance 를 계승한다.
+- `dynamic`: handler 가 `runtime_result_scope` 를 직접 채우고, 선언된 허용 집합 안에 있어야 한다.
 
 ### `fallback_policy`
 
@@ -35,11 +41,11 @@
 
 ## Validation Rule
 
+- 모든 skill artifact 는 `result_scope` 와 `runtime_result_scope` 를 함께 가진다.
+- `result_scope` 는 선언값이고, `runtime_result_scope` 는 실제 provenance 다.
+- `result_scope_policy=static` 인 skill 은 `runtime_result_scope == result_scope` 여야 한다.
+- `result_scope_policy=inherits_from_input` 인 skill 은 prior artifact 의 provenance 를 계승해야 한다.
+- `result_scope_policy=dynamic` 인 skill 은 `allowed_runtime_result_scopes` 선언 범위 안에서만 runtime provenance 를 반환할 수 있다.
 - `fallback_policy=strict_fail` 인 skill은 post-check에서 graceful empty 결과를 허용하지 않는다.
 - `quality_tier=llm_dependent` 인 skill이 planner sequence에 포함되면 plan metadata에 `contains_llm_stage`, `llm_stages`를 기록한다.
-- analyst-facing skill은 runtime artifact에도 `result_scope`, `coverage`, `quality_tier`를 포함해 실제 적용 범위를 드러낸다.
-
-## 확인 필요
-
-- `result_scope` 는 bundle 선언값과 실제 runtime artifact 값이 완전히 일치하지 않을 수 있다.
-  예: `embedding_cluster` 는 전체 dataset 실행과 filtered subset 실행을 모두 가질 수 있다.
+- analyst-facing skill은 runtime artifact에도 `coverage`, `quality_tier`를 포함해 실제 적용 범위를 드러낸다.

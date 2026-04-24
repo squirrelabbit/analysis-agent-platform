@@ -25,20 +25,23 @@ def run_keyword_frequency(payload: dict[str, Any]) -> dict[str, Any]:
             f"keyword_frequency counted tokens across {document_count} rows",
             f"dataset source: {normalized['dataset_name']}",
         ],
-        "artifact": {
-            "skill_name": "keyword_frequency",
-            "step_id": normalized["step"].get("step_id"),
-            "dataset_name": normalized["dataset_name"],
-            "summary": {
-                "document_count": document_count,
-                "unique_terms": len(tokens),
-                "total_terms": total_terms,
+        "artifact": rt._inherit_scope_fields(
+            {
+                "skill_name": "keyword_frequency",
+                "step_id": normalized["step"].get("step_id"),
+                "dataset_name": normalized["dataset_name"],
+                "summary": {
+                    "document_count": document_count,
+                    "unique_terms": len(tokens),
+                    "total_terms": total_terms,
+                },
+                "top_terms": [
+                    {"term": term, "count": count}
+                    for term, count in tokens.most_common(normalized["top_n"])
+                ],
             },
-            "top_terms": [
-                {"term": term, "count": count}
-                for term, count in tokens.most_common(normalized["top_n"])
-            ],
-        },
+            payload,
+        ),
     }
 
 def run_noun_frequency(payload: dict[str, Any]) -> dict[str, Any]:
@@ -97,23 +100,26 @@ def run_noun_frequency(payload: dict[str, Any]) -> dict[str, Any]:
             f"dataset source: {normalized['dataset_name']}",
             f"analyzer_backend: {analyzer_backend}",
         ],
-        "artifact": {
-            "skill_name": "noun_frequency",
-            "step_id": normalized["step"].get("step_id"),
-            "dataset_name": normalized["dataset_name"],
-            "user_dictionary_path": normalized["user_dictionary_path"],
-            "stopwords": list(normalized["stopwords"]),
-            "allowed_pos_prefixes": list(normalized["allowed_pos_prefixes"]),
-            "summary": {
-                "document_count": document_count,
-                "unique_terms": len(term_frequency),
-                "total_terms": total_terms,
-                "min_token_length": normalized["min_token_length"],
-                "analyzer_backend": analyzer_backend,
+        "artifact": rt._inherit_scope_fields(
+            {
+                "skill_name": "noun_frequency",
+                "step_id": normalized["step"].get("step_id"),
+                "dataset_name": normalized["dataset_name"],
+                "user_dictionary_path": normalized["user_dictionary_path"],
+                "stopwords": list(normalized["stopwords"]),
+                "allowed_pos_prefixes": list(normalized["allowed_pos_prefixes"]),
+                "summary": {
+                    "document_count": document_count,
+                    "unique_terms": len(term_frequency),
+                    "total_terms": total_terms,
+                    "min_token_length": normalized["min_token_length"],
+                    "analyzer_backend": analyzer_backend,
+                },
+                "top_nouns": top_nouns,
+                "sample_rows": sample_rows,
             },
-            "top_nouns": top_nouns,
-            "sample_rows": sample_rows,
-        },
+            payload,
+        ),
     }
 
 def run_time_bucket_count(payload: dict[str, Any]) -> dict[str, Any]:
@@ -121,6 +127,7 @@ def run_time_bucket_count(payload: dict[str, Any]) -> dict[str, Any]:
     selected_rows = rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
     artifact = rt._build_time_bucket_artifact(normalized, selected_rows)
     artifact["skill_name"] = "time_bucket_count"
+    rt._inherit_scope_fields(artifact, payload)
     return {
         "notes": [
             f"time_bucket_count built {normalized['bucket']} buckets",
@@ -134,6 +141,7 @@ def run_meta_group_count(payload: dict[str, Any]) -> dict[str, Any]:
     selected_rows = rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
     artifact = rt._build_meta_group_artifact(normalized, selected_rows)
     artifact["skill_name"] = "meta_group_count"
+    rt._inherit_scope_fields(artifact, payload)
     return {
         "notes": [
             f"meta_group_count grouped rows by {normalized['dimension_column']}",
@@ -147,6 +155,7 @@ def run_dictionary_tagging(payload: dict[str, Any]) -> dict[str, Any]:
     selected_rows = rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
     artifact = rt._build_dictionary_tagging_artifact(normalized, selected_rows)
     artifact["skill_name"] = "dictionary_tagging"
+    rt._inherit_scope_fields(artifact, payload)
     return {
         "notes": [
             f"dictionary_tagging assigned tags to {artifact['summary']['tagged_row_count']} rows",

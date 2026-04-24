@@ -28,7 +28,14 @@ _PRESENTER_SKILL_META = {
         "fallback_policy": "strict_fail",
         "quality_tier": "llm_dependent",
         "result_kind": "summary_narrative",
-        "result_scope": "single_record",
+        "result_scope": "document_subset",
+        "result_scope_policy": "dynamic",
+        "allowed_runtime_result_scopes": [
+            "full_dataset",
+            "document_subset",
+            "cluster_subset",
+            "partial_build",
+        ],
     }
 }
 
@@ -63,7 +70,7 @@ def validate_task_payload(name: str, payload: dict[str, Any]) -> None:
         )
 
 
-def validate_task_result(name: str, result: dict[str, Any]) -> None:
+def validate_task_result(name: str, payload: dict[str, Any], result: dict[str, Any]) -> None:
     if not isinstance(result, dict):
         raise SkillOutputError(f"{name} must return a JSON object")
 
@@ -92,6 +99,8 @@ def validate_task_result(name: str, result: dict[str, Any]) -> None:
         )
 
     definition = _skill_contract_meta(name)
+    _apply_declared_result_scope(name, artifact, definition)
+    _validate_result_scope_policy(name, payload, artifact, definition)
     fallback_policy = str(definition.get("fallback_policy") or "").strip()
     if fallback_policy == "strict_fail" and _looks_gracefully_empty(name, result, artifact):
         raise SkillOutputError(f"{name} returned an empty result despite strict_fail contract")
@@ -104,7 +113,87 @@ def validate_task_result(name: str, result: dict[str, Any]) -> None:
         answer = result.get("answer")
         if not isinstance(answer, dict):
             raise SkillOutputError("execution_final_answer result must contain an answer object")
+        _apply_declared_result_scope(name, answer, definition)
+        runtime_result_scope = rt._normalize_result_scope(answer.get("runtime_result_scope"))
+        if runtime_result_scope:
+            artifact["runtime_result_scope"] = runtime_result_scope
+        declared_result_scope = rt._normalize_result_scope(answer.get("result_scope"))
+        if declared_result_scope:
+            artifact["result_scope"] = declared_result_scope
         validate_execution_final_answer(answer)
+
+
+def _apply_declared_result_scope(
+    name: str,
+    artifact: dict[str, Any],
+    definition: dict[str, Any],
+) -> None:
+    declared_result_scope = rt._normalize_result_scope(definition.get("result_scope"))
+    if not declared_result_scope:
+        return
+    current_result_scope = rt._normalize_result_scope(artifact.get("result_scope"))
+    if not current_result_scope:
+        artifact["result_scope"] = declared_result_scope
+        current_result_scope = declared_result_scope
+    else:
+        artifact["result_scope"] = current_result_scope
+    if current_result_scope != declared_result_scope:
+        raise SkillOutputError(
+            f"{name} declared result_scope mismatch: {current_result_scope} != {declared_result_scope}"
+        )
+
+
+def _validate_result_scope_policy(
+    name: str,
+    payload: dict[str, Any],
+    artifact: dict[str, Any],
+    definition: dict[str, Any],
+) -> None:
+    policy = str(definition.get("result_scope_policy") or "").strip()
+    declared_result_scope = rt._normalize_result_scope(definition.get("result_scope"))
+    runtime_result_scope = rt._normalize_result_scope(artifact.get("runtime_result_scope"))
+    if runtime_result_scope:
+        artifact["runtime_result_scope"] = runtime_result_scope
+    if not policy:
+        return
+    if policy == "static":
+        if not runtime_result_scope:
+            if not declared_result_scope:
+                raise SkillOutputError(f"{name} static result_scope is missing")
+            artifact["runtime_result_scope"] = declared_result_scope
+            runtime_result_scope = declared_result_scope
+        if runtime_result_scope != declared_result_scope:
+            raise SkillOutputError(
+                f"{name} runtime_result_scope mismatch for static policy: {runtime_result_scope}"
+            )
+        return
+    if policy == "inherits_from_input":
+        expected_runtime_scope = rt.infer_runtime_scope_from_prior(
+            payload,
+            declared_result_scope=declared_result_scope,
+        )
+        if not runtime_result_scope:
+            raise SkillOutputError(f"{name} runtime_result_scope is required for inherits_from_input policy")
+        if runtime_result_scope != expected_runtime_scope:
+            raise SkillOutputError(
+                f"{name} runtime_result_scope mismatch for inherits_from_input policy: "
+                f"{runtime_result_scope} != {expected_runtime_scope}"
+            )
+        return
+    if policy == "dynamic":
+        allowed_runtime_scopes = {
+            normalized
+            for item in _string_list(definition.get("allowed_runtime_result_scopes"))
+            if (normalized := rt._normalize_result_scope(item))
+        }
+        if not runtime_result_scope:
+            raise SkillOutputError(f"{name} runtime_result_scope is required for dynamic policy")
+        if allowed_runtime_scopes and runtime_result_scope not in allowed_runtime_scopes:
+            raise SkillOutputError(
+                f"{name} runtime_result_scope {runtime_result_scope} is outside allowed_runtime_result_scopes"
+            )
+        return
+    raise SkillOutputError(f"{name} has unsupported result_scope_policy: {policy}")
 
 
 def _skill_contract_meta(name: str) -> dict[str, Any]:

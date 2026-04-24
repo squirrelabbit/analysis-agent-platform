@@ -259,7 +259,8 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(answer["generation_mode"], "llm")
         self.assertEqual(answer["quality_tier"], "llm_dependent")
         self.assertTrue(answer["llm_output_parsed_strictly"])
-        self.assertEqual(answer["result_scope"], "single_record")
+        self.assertEqual(answer["result_scope"], "document_subset")
+        self.assertEqual(answer["runtime_result_scope"], "document_subset")
         self.assertTrue(answer["follow_up_questions"])
 
     def test_run_execution_final_answer_requires_llm_presenter(self) -> None:
@@ -725,7 +726,8 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(artifact["quality_tier"], "heuristic")
         self.assertEqual(artifact["coverage"]["documents_considered"], 3)
         self.assertEqual(artifact["coverage"]["total_documents"], 3)
-        self.assertEqual(artifact["result_scope"], "full_dataset")
+        self.assertEqual(artifact["result_scope"], "document_subset")
+        self.assertEqual(artifact["runtime_result_scope"], "full_dataset")
         self.assertTrue(artifact["ranked_issues"])
         self.assertEqual(artifact["ranked_issues"][0]["rank"], 1)
 

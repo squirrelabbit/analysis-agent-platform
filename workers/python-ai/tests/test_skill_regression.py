@@ -7,7 +7,7 @@ from pathlib import Path
 
 class SkillRegressionFormatTests(unittest.TestCase):
     def test_regression_yaml_format_is_parseable(self) -> None:
-        path = Path("docs/eval/skill_regression_v1.yaml")
+        path = Path(__file__).resolve().parents[3] / "docs" / "eval" / "skill_regression_v1.yaml"
         cases = json.loads(path.read_text(encoding="utf-8"))
         self.assertIsInstance(cases, list)
         self.assertTrue(cases)

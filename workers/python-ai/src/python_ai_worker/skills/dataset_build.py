@@ -463,7 +463,7 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
             f"cleaned output: {output_path}",
             f"clean regex rules: {', '.join(normalized['regex_rule_names'])}",
         ],
-        "artifact": {
+        "artifact": rt._set_scope_fields({
             "skill_name": "dataset_clean",
             "dataset_version_id": normalized["dataset_version_id"],
             "source_dataset_name": normalized["dataset_name"],
@@ -484,7 +484,7 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
             "clean_reduced_char_count": max(0, source_input_char_count - cleaned_input_char_count),
             "clean_regex_rule_names": list(normalized["regex_rule_names"]),
             "summary": summary,
-        },
+        }, declared_result_scope="full_dataset", runtime_result_scope="full_dataset"),
     }
 
 
@@ -657,9 +657,14 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
         else:
             prepare_strategy = "anthropic-batch" if normalized["prepare_batch_size"] > 1 else "anthropic-row"
 
+    runtime_result_scope = (
+        "partial_build"
+        if 0 < normalized["max_rows"] < source_row_count
+        else "full_dataset"
+    )
     return {
         "notes": notes,
-        "artifact": {
+        "artifact": rt._set_scope_fields({
             "skill_name": "dataset_prepare",
             "dataset_version_id": normalized["dataset_version_id"],
             "source_dataset_name": normalized["dataset_name"],
@@ -698,7 +703,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 "prepare_batch_size": normalized["prepare_batch_size"],
             },
             "usage": usage,
-        },
+        }, declared_result_scope="full_dataset", runtime_result_scope=runtime_result_scope),
     }
 
 
@@ -865,7 +870,7 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
         summary_cluster.pop("members", None)
         summary_clusters.append(summary_cluster)
 
-    cluster_artifact = {
+    cluster_artifact = rt._set_scope_fields({
         "skill_name": "embedding_cluster",
         "dataset_name": normalized["dataset_name"],
         "embedding_source_backend": "embedding-index-parquet",
@@ -894,7 +899,7 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
             "cluster_membership_row_count": len(membership_rows),
         },
         "clusters": summary_clusters,
-    }
+    }, declared_result_scope="cluster_subset", runtime_result_scope="full_dataset")
     summary_path.write_text(json.dumps(cluster_artifact, ensure_ascii=False), encoding="utf-8")
     rt._write_parquet_rows(membership_path, membership_rows, schema=_cluster_membership_output_schema())
 
@@ -907,7 +912,7 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
             f"cluster_count: {len(summary_clusters)}",
             f"similarity_backend: {similarity_backend}",
         ],
-        "artifact": {
+        "artifact": rt._set_scope_fields({
             "skill_name": "dataset_cluster_build",
             "dataset_version_id": normalized["dataset_version_id"],
             "cluster_execution_mode": "materialized_build",
@@ -922,7 +927,7 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
             "cluster_source_embedding_ref": normalized["embedding_index_source_ref"],
             "chunk_ref": normalized["chunk_ref"],
             "summary": cluster_artifact["summary"],
-        },
+        }, declared_result_scope="full_dataset", runtime_result_scope="full_dataset"),
     }
 
 
@@ -1049,7 +1054,7 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "notes": notes,
-        "artifact": {
+        "artifact": rt._set_scope_fields({
             "skill_name": "embedding",
             "dataset_name": normalized["dataset_name"],
             "embedding_uri": str(embedding_path) if embedding_path is not None else "",
@@ -1074,7 +1079,7 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
             "chunking_strategy": "text-window-v1",
             "storage_contract_version": "unstructured-storage-v1",
             "usage": usage,
-        },
+        }, declared_result_scope="full_dataset", runtime_result_scope="full_dataset"),
     }
 
 
@@ -1197,9 +1202,14 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
             llm_fallback_reason,
         )
 
+    runtime_result_scope = (
+        "partial_build"
+        if 0 < normalized["max_rows"] < source_row_count
+        else "full_dataset"
+    )
     return {
         "notes": notes,
-        "artifact": {
+        "artifact": rt._set_scope_fields({
             "skill_name": "sentiment_label",
             "dataset_version_id": normalized["dataset_version_id"],
             "source_dataset_name": normalized["dataset_name"],
@@ -1236,7 +1246,7 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
                 "label_counts": dict(sorted(label_counts.items())),
             },
             "usage": usage,
-        },
+        }, declared_result_scope="full_dataset", runtime_result_scope=runtime_result_scope),
     }
 
 

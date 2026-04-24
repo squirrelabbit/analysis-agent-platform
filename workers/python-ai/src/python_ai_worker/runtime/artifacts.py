@@ -23,6 +23,13 @@ from .common import (
     _vector_norm,
 )
 
+_RESULT_SCOPE_ALIASES = {
+    "subset_filtered": "document_subset",
+    "sample_n": "document_subset",
+    "single_record": "document_subset",
+    "subset_selection": "cluster_subset",
+}
+
 
 def _copy_citation_fields(source: dict[str, Any], target: dict[str, Any]) -> None:
     for key in ("row_id", "chunk_id", "chunk_ref", "chunk_format"):
@@ -198,6 +205,12 @@ def _cluster_candidates_from_artifact(artifact: dict[str, Any], normalized: dict
 
 
 def _iter_prior_artifacts(prior_artifacts: Any) -> list[dict[str, Any]]:
+    if isinstance(prior_artifacts, list):
+        artifacts: list[dict[str, Any]] = []
+        for artifact in prior_artifacts:
+            if isinstance(artifact, dict):
+                artifacts.append(artifact)
+        return artifacts
     if not isinstance(prior_artifacts, dict):
         return []
     artifacts: list[dict[str, Any]] = []
@@ -373,6 +386,69 @@ def _copy_artifact_fields(artifact: dict[str, Any], skill_name: str, step_id: An
     copied["skill_name"] = skill_name
     copied["step_id"] = step_id
     return copied
+
+
+def _normalize_result_scope(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return ""
+    return _RESULT_SCOPE_ALIASES.get(normalized, normalized)
+
+
+def infer_runtime_scope_from_prior(
+    payload: dict[str, Any],
+    *,
+    declared_result_scope: str | None = None,
+) -> str:
+    for artifact in reversed(_iter_prior_artifacts(payload.get("prior_artifacts"))):
+        runtime_result_scope = _normalize_result_scope(artifact.get("runtime_result_scope"))
+        if runtime_result_scope:
+            return runtime_result_scope
+        result_scope = _normalize_result_scope(artifact.get("result_scope"))
+        if result_scope:
+            return result_scope
+    normalized_declared_result_scope = _normalize_result_scope(
+        declared_result_scope or payload.get("_declared_result_scope")
+    )
+    if normalized_declared_result_scope:
+        return normalized_declared_result_scope
+    raise ValueError("runtime_result_scope could not be inferred from prior artifacts")
+
+
+def _set_scope_fields(
+    artifact: dict[str, Any],
+    *,
+    declared_result_scope: str,
+    runtime_result_scope: str | None = None,
+) -> dict[str, Any]:
+    normalized_declared_result_scope = _normalize_result_scope(declared_result_scope)
+    if not normalized_declared_result_scope:
+        raise ValueError("declared_result_scope is required")
+    normalized_runtime_result_scope = _normalize_result_scope(
+        runtime_result_scope or normalized_declared_result_scope
+    )
+    if not normalized_runtime_result_scope:
+        raise ValueError("runtime_result_scope is required")
+    artifact["result_scope"] = normalized_declared_result_scope
+    artifact["runtime_result_scope"] = normalized_runtime_result_scope
+    return artifact
+
+
+def _inherit_scope_fields(
+    artifact: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    declared_result_scope: str = "document_subset",
+) -> dict[str, Any]:
+    runtime_result_scope = infer_runtime_scope_from_prior(
+        payload,
+        declared_result_scope=declared_result_scope,
+    )
+    return _set_scope_fields(
+        artifact,
+        declared_result_scope=declared_result_scope,
+        runtime_result_scope=runtime_result_scope,
+    )
 
 
 def _indexed_rows(dataset_name: str) -> list[dict[str, Any]]:
@@ -1012,12 +1088,16 @@ __all__ = [
     "_build_time_bucket_artifact",
     "_cluster_embedding_records",
     "_copy_artifact_fields",
+    "_inherit_scope_fields",
+    "_normalize_result_scope",
+    "_set_scope_fields",
     "_extract_deduplicated_indices",
     "_extract_document_filter_indices",
     "_extract_garbage_filter_indices",
     "_extract_document_samples",
     "_extract_semantic_candidates",
     "_find_prior_artifact",
+    "infer_runtime_scope_from_prior",
     "_indexed_rows",
     "_iter_prior_artifacts",
     "_rank_sample_rows",

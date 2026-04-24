@@ -8,12 +8,13 @@ from python_ai_worker.skill_contracts import SkillOutputError, validate_task_res
 class SkillContractValidationTests(unittest.TestCase):
     def test_validate_task_result_requires_artifact_for_non_planner_tasks(self) -> None:
         with self.assertRaisesRegex(SkillOutputError, "artifact object"):
-            validate_task_result("keyword_frequency", {"notes": []})
+            validate_task_result("keyword_frequency", {}, {"notes": []})
 
     def test_validate_task_result_requires_matching_skill_name(self) -> None:
         with self.assertRaisesRegex(SkillOutputError, "skill_name mismatch"):
             validate_task_result(
                 "keyword_frequency",
+                {},
                 {
                     "artifact": {
                         "skill_name": "document_filter",
@@ -24,6 +25,7 @@ class SkillContractValidationTests(unittest.TestCase):
     def test_validate_task_result_allows_planner_payload_with_steps(self) -> None:
         validate_task_result(
             "planner",
+            {},
             {
                 "plan": {
                     "steps": [],
@@ -39,6 +41,7 @@ class SkillContractValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(SkillOutputError, "strict_fail"):
             validate_task_result(
                 "issue_cluster_summary",
+                {},
                 {
                     "artifact": {
                         "skill_name": "issue_cluster_summary",
@@ -47,7 +50,8 @@ class SkillContractValidationTests(unittest.TestCase):
                             "documents_considered": 0,
                             "total_documents": 3,
                         },
-                        "result_scope": "subset_filtered",
+                        "result_scope": "cluster_subset",
+                        "runtime_result_scope": "cluster_subset",
                         "quality_tier": "heuristic",
                     }
                 },

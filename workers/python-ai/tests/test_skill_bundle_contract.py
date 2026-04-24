@@ -16,9 +16,14 @@ RESULT_KINDS = {
 }
 RESULT_SCOPES = {
     "full_dataset",
-    "subset_filtered",
-    "sample_n",
-    "single_record",
+    "document_subset",
+    "cluster_subset",
+    "partial_build",
+}
+RESULT_SCOPE_POLICIES = {
+    "static",
+    "inherits_from_input",
+    "dynamic",
 }
 FALLBACK_POLICIES = {
     "strict_fail",
@@ -85,8 +90,14 @@ class SkillBundleContractTests(unittest.TestCase):
             with self.subTest(skill_name=name):
                 self.assertIn(str(skill.get("result_kind") or "").strip(), RESULT_KINDS)
                 self.assertIn(str(skill.get("result_scope") or "").strip(), RESULT_SCOPES)
+                self.assertIn(str(skill.get("result_scope_policy") or "").strip(), RESULT_SCOPE_POLICIES)
                 self.assertIn(str(skill.get("fallback_policy") or "").strip(), FALLBACK_POLICIES)
                 self.assertIn(str(skill.get("quality_tier") or "").strip(), QUALITY_TIERS)
+                if str(skill.get("result_scope_policy") or "").strip() == "dynamic":
+                    allowed_runtime_scopes = list(skill.get("allowed_runtime_result_scopes") or [])
+                    self.assertTrue(allowed_runtime_scopes)
+                    for runtime_scope in allowed_runtime_scopes:
+                        self.assertIn(str(runtime_scope or "").strip(), RESULT_SCOPES)
 
 
 if __name__ == "__main__":

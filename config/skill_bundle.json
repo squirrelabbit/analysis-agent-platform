@@ -120,7 +120,8 @@
       "result_kind": "metric_table",
       "result_scope": "full_dataset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "static"
     },
     {
       "name": "garbage_filter",
@@ -143,9 +144,10 @@
         ]
       },
       "result_kind": "preprocessing",
-      "result_scope": "full_dataset",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "document_filter",
@@ -164,9 +166,10 @@
         "sample_n": 5
       },
       "result_kind": "preprocessing",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "deduplicate_documents",
@@ -184,9 +187,10 @@
         "duplicate_threshold": 0.85
       },
       "result_kind": "preprocessing",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "heuristic"
+      "quality_tier": "heuristic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "keyword_frequency",
@@ -203,9 +207,10 @@
         "top_n": 10
       },
       "result_kind": "summary_ranked",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "noun_frequency",
@@ -227,9 +232,10 @@
         ]
       },
       "result_kind": "summary_ranked",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "heuristic"
+      "quality_tier": "heuristic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "sentence_split",
@@ -248,9 +254,10 @@
         "preview_sentences_per_row": 3
       },
       "result_kind": "preprocessing",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "heuristic"
+      "quality_tier": "heuristic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "time_bucket_count",
@@ -274,9 +281,10 @@
         "sample_n": 3
       },
       "result_kind": "metric_table",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "meta_group_count",
@@ -298,9 +306,10 @@
         "sample_n": 3
       },
       "result_kind": "metric_table",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "document_sample",
@@ -318,9 +327,10 @@
         "sample_n": 3
       },
       "result_kind": "evidence",
-      "result_scope": "sample_n",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "heuristic"
+      "quality_tier": "heuristic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "dictionary_tagging",
@@ -339,9 +349,10 @@
         "max_tags_per_document": 3
       },
       "result_kind": "summary_ranked",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "embedding_cluster",
@@ -368,9 +379,14 @@
         "chunk_format": "parquet"
       },
       "result_kind": "cluster_output",
-      "result_scope": "subset_filtered",
+      "result_scope": "cluster_subset",
       "fallback_policy": "strict_fail",
-      "quality_tier": "heuristic"
+      "quality_tier": "heuristic",
+      "result_scope_policy": "dynamic",
+      "allowed_runtime_result_scopes": [
+        "full_dataset",
+        "cluster_subset"
+      ]
     },
     {
       "name": "cluster_label_candidates",
@@ -389,9 +405,10 @@
         "sample_n": 3
       },
       "result_kind": "cluster_output",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "strict_fail",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "unstructured_issue_summary",
@@ -409,9 +426,14 @@
         "sample_n": 3
       },
       "result_kind": "summary_ranked",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "heuristic"
+      "quality_tier": "heuristic",
+      "result_scope_policy": "dynamic",
+      "allowed_runtime_result_scopes": [
+        "full_dataset",
+        "document_subset"
+      ]
     },
     {
       "name": "issue_breakdown_summary",
@@ -433,9 +455,10 @@
         "sample_n": 3
       },
       "result_kind": "metric_table",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "issue_cluster_summary",
@@ -457,9 +480,14 @@
         "sample_n": 3
       },
       "result_kind": "summary_ranked",
-      "result_scope": "subset_filtered",
+      "result_scope": "cluster_subset",
       "fallback_policy": "strict_fail",
-      "quality_tier": "heuristic"
+      "quality_tier": "heuristic",
+      "result_scope_policy": "dynamic",
+      "allowed_runtime_result_scopes": [
+        "full_dataset",
+        "cluster_subset"
+      ]
     },
     {
       "name": "issue_trend_summary",
@@ -483,9 +511,10 @@
         "sample_n": 3
       },
       "result_kind": "metric_table",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "issue_period_compare",
@@ -510,9 +539,10 @@
         "sample_n": 3
       },
       "result_kind": "metric_table",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "issue_sentiment_summary",
@@ -539,9 +569,10 @@
         "sample_n": 3
       },
       "result_kind": "summary_ranked",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "issue_taxonomy_summary",
@@ -560,9 +591,10 @@
         "max_tags_per_document": 3
       },
       "result_kind": "summary_ranked",
-      "result_scope": "subset_filtered",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic"
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "semantic_search",
@@ -589,9 +621,11 @@
         "chunk_format": "parquet"
       },
       "result_kind": "evidence",
-      "result_scope": "sample_n",
+      "result_scope": "document_subset",
       "fallback_policy": "graceful_empty",
-      "quality_tier": "heuristic"
+      "quality_tier": "heuristic",
+      "result_scope_policy": "inherits_from_input",
+      "follow_up": "pgvector path does not honor prior_artifacts (TODO)"
     },
     {
       "name": "issue_evidence_summary",
@@ -609,9 +643,10 @@
         "sample_n": 3
       },
       "result_kind": "summary_narrative",
-      "result_scope": "sample_n",
+      "result_scope": "document_subset",
       "fallback_policy": "strict_fail",
-      "quality_tier": "llm_dependent"
+      "quality_tier": "llm_dependent",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "evidence_pack",
@@ -629,9 +664,10 @@
         "sample_n": 3
       },
       "result_kind": "evidence",
-      "result_scope": "sample_n",
+      "result_scope": "document_subset",
       "fallback_policy": "strict_fail",
-      "quality_tier": "llm_dependent"
+      "quality_tier": "llm_dependent",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "dataset_prepare",
@@ -645,7 +681,12 @@
       "result_kind": "dataset_artifact",
       "result_scope": "full_dataset",
       "fallback_policy": "rule_fallback_allowed",
-      "quality_tier": "llm_dependent"
+      "quality_tier": "llm_dependent",
+      "result_scope_policy": "dynamic",
+      "allowed_runtime_result_scopes": [
+        "full_dataset",
+        "partial_build"
+      ]
     },
     {
       "name": "sentiment_label",
@@ -660,7 +701,12 @@
       "result_kind": "dataset_artifact",
       "result_scope": "full_dataset",
       "fallback_policy": "rule_fallback_allowed",
-      "quality_tier": "llm_dependent"
+      "quality_tier": "llm_dependent",
+      "result_scope_policy": "dynamic",
+      "allowed_runtime_result_scopes": [
+        "full_dataset",
+        "partial_build"
+      ]
     },
     {
       "name": "embedding",
@@ -675,7 +721,8 @@
       "result_kind": "dataset_artifact",
       "result_scope": "full_dataset",
       "fallback_policy": "rule_fallback_allowed",
-      "quality_tier": "heuristic"
+      "quality_tier": "heuristic",
+      "result_scope_policy": "static"
     }
   ]
 }

@@ -141,5 +141,5 @@ def run_task(name: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"unsupported capability: {name}")
     validate_task_payload(name, payload)
     result = handler(payload)
-    validate_task_result(name, result)
+    validate_task_result(name, payload, result)
     return result

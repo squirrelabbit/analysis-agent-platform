@@ -144,17 +144,20 @@ def run_issue_trend_summary(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_trend_task_payload(payload)
     prior = rt._find_prior_artifact(payload.get("prior_artifacts"), "time_bucket_count")
     if prior:
+        artifact = rt._copy_artifact_fields(prior, "issue_trend_summary", normalized["step"].get("step_id"))
+        rt._inherit_scope_fields(artifact, payload)
         return {
             "notes": [
                 "issue_trend_summary reused time_bucket_count artifact",
                 f"dataset source: {normalized['dataset_name']}",
             ],
-            "artifact": rt._copy_artifact_fields(prior, "issue_trend_summary", normalized["step"].get("step_id")),
+            "artifact": artifact,
         }
 
     selected_rows = rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
     artifact = rt._build_time_bucket_artifact(normalized, selected_rows)
     artifact["skill_name"] = "issue_trend_summary"
+    rt._inherit_scope_fields(artifact, payload)
     return {
         "notes": [
             f"python-ai built {normalized['bucket']} trend",
@@ -168,17 +171,20 @@ def run_issue_breakdown_summary(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_breakdown_task_payload(payload)
     prior = rt._find_prior_artifact(payload.get("prior_artifacts"), "meta_group_count")
     if prior:
+        artifact = rt._copy_artifact_fields(prior, "issue_breakdown_summary", normalized["step"].get("step_id"))
+        rt._inherit_scope_fields(artifact, payload)
         return {
             "notes": [
                 "issue_breakdown_summary reused meta_group_count artifact",
                 f"dataset source: {normalized['dataset_name']}",
             ],
-            "artifact": rt._copy_artifact_fields(prior, "issue_breakdown_summary", normalized["step"].get("step_id")),
+            "artifact": artifact,
         }
 
     selected_rows = rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
     artifact = rt._build_meta_group_artifact(normalized, selected_rows)
     artifact["skill_name"] = "issue_breakdown_summary"
+    rt._inherit_scope_fields(artifact, payload)
     return {
         "notes": [
             f"python-ai grouped rows by {normalized['dimension_column']}",
@@ -255,9 +261,9 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
 
     documents_considered = total_documents
     total_dataset_documents = _total_dataset_documents(normalized["dataset_name"])
-    result_scope = "subset_filtered"
+    runtime_result_scope = "cluster_subset"
     if cluster_execution_meta["cluster_materialization_scope"] == "full_dataset" and documents_considered == total_dataset_documents:
-        result_scope = "full_dataset"
+        runtime_result_scope = "full_dataset"
     ranked_issues = [
         {
             "rank": int(cluster["rank"]),
@@ -274,7 +280,7 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
             f"issue_cluster_summary summarized {len(ranked_clusters)} clusters",
             f"dataset source: {normalized['dataset_name']}",
         ],
-        "artifact": {
+        "artifact": rt._set_scope_fields({
             "skill_name": "issue_cluster_summary",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -283,13 +289,12 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "cluster_materialization_scope": cluster_execution_meta["cluster_materialization_scope"],
             "cluster_materialized_ref_used": cluster_execution_meta["cluster_materialized_ref_used"],
             "cluster_fallback_reason": cluster_execution_meta["cluster_fallback_reason"],
-            "result_scope": result_scope,
             "quality_tier": _skill_quality_tier("issue_cluster_summary"),
             "coverage": _coverage_payload(documents_considered, total_dataset_documents),
             "ranked_issues": ranked_issues,
             "summary": summary,
             "clusters": ranked_clusters,
-        },
+        }, declared_result_scope="cluster_subset", runtime_result_scope=runtime_result_scope),
     }
 
 
@@ -341,7 +346,7 @@ def run_issue_period_compare(payload: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "notes": notes,
-        "artifact": {
+        "artifact": rt._inherit_scope_fields({
             "skill_name": "issue_period_compare",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -363,7 +368,7 @@ def run_issue_period_compare(payload: dict[str, Any]) -> dict[str, Any]:
                 "previous": rt._build_period_payload(previous_buckets, previous_documents, previous_terms, normalized["top_n"], normalized["sample_n"]),
             },
             "top_term_deltas": rt._build_term_deltas(current_terms, previous_terms, normalized["top_n"]),
-        },
+        }, payload),
     }
 
 
@@ -458,7 +463,7 @@ def run_issue_sentiment_summary(payload: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "notes": notes,
-        "artifact": {
+        "artifact": rt._inherit_scope_fields({
             "skill_name": "issue_sentiment_summary",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -467,7 +472,7 @@ def run_issue_sentiment_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "sentiment_column": normalized["sentiment_column"],
             "summary": summary,
             "breakdown": breakdown,
-        },
+        }, payload),
     }
 
 
@@ -493,13 +498,13 @@ def run_issue_taxonomy_summary(payload: dict[str, Any]) -> dict[str, Any]:
             f"issue_taxonomy_summary summarized {len(breakdown)} taxonomy groups",
             f"dataset source: {normalized['dataset_name']}",
         ],
-        "artifact": {
+        "artifact": rt._inherit_scope_fields({
             "skill_name": "issue_taxonomy_summary",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
             "summary": summary,
             "taxonomy_breakdown": breakdown,
-        },
+        }, payload),
     }
 
 
@@ -531,7 +536,7 @@ def _run_evidence_summary(payload: dict[str, Any], artifact_skill_name: str) -> 
         raise ValueError(f"{artifact_skill_name} presenter failed: {exc}") from exc
 
     llm_artifact = dict(llm_result.get("artifact") or {})
-    artifact = {
+    artifact = rt._inherit_scope_fields({
         "skill_name": artifact_skill_name,
         "step_id": normalized["step"].get("step_id"),
         "dataset_name": normalized["dataset_name"],
@@ -544,11 +549,10 @@ def _run_evidence_summary(payload: dict[str, Any], artifact_skill_name: str) -> 
         "evidence": list(llm_artifact.get("evidence") or []),
         "follow_up_questions": list(llm_artifact.get("follow_up_questions") or []),
         "usage": dict(llm_artifact.get("usage") or {}),
-        "result_scope": "sample_n",
         "quality_tier": _skill_quality_tier(artifact_skill_name),
         "llm_output_parsed_strictly": True,
         "coverage": _coverage_payload(len(selected), _total_dataset_documents(normalized["dataset_name"])),
-    }
+    }, payload)
     for key in ("prompt_compaction", "chunk_ref", "chunk_format"):
         if key in llm_artifact:
             artifact[key] = llm_artifact[key]
@@ -563,7 +567,7 @@ def run_unstructured_issue_summary(payload: dict[str, Any]) -> dict[str, Any]:
     documents = [item["text"] for item in selected_rows if item["text"]]
     total_dataset_documents = _total_dataset_documents(normalized["dataset_name"])
     documents_considered = len(documents)
-    result_scope = "full_dataset" if documents_considered == total_dataset_documents else "subset_filtered"
+    runtime_result_scope = "full_dataset" if documents_considered == total_dataset_documents else "document_subset"
     keyword_artifact = rt._find_prior_artifact(payload.get("prior_artifacts"), "keyword_frequency")
     sample_artifact = rt._find_prior_artifact(payload.get("prior_artifacts"), "document_sample")
     if keyword_artifact or sample_artifact:
@@ -586,18 +590,17 @@ def run_unstructured_issue_summary(payload: dict[str, Any]) -> dict[str, Any]:
                 "unstructured_issue_summary reused support skill artifacts",
                 f"dataset source: {normalized['dataset_name']}",
             ],
-            "artifact": {
+            "artifact": rt._set_scope_fields({
                 "skill_name": "unstructured_issue_summary",
                 "step_id": normalized["step"].get("step_id"),
                 "dataset_name": normalized["dataset_name"],
-                "result_scope": result_scope,
                 "quality_tier": _skill_quality_tier("unstructured_issue_summary"),
                 "coverage": _coverage_payload(documents_considered, total_dataset_documents),
                 "ranked_issues": _ranked_issues_from_top_terms(top_terms, samples),
                 "summary": summary,
                 "top_terms": top_terms,
                 "samples": samples,
-            },
+            }, declared_result_scope="document_subset", runtime_result_scope=runtime_result_scope),
         }
 
     tokens = Counter()
@@ -623,11 +626,10 @@ def run_unstructured_issue_summary(payload: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "notes": notes,
-        "artifact": {
+        "artifact": rt._set_scope_fields({
             "skill_name": "unstructured_issue_summary",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
-            "result_scope": result_scope,
             "quality_tier": _skill_quality_tier("unstructured_issue_summary"),
             "coverage": _coverage_payload(documents_considered, total_dataset_documents),
             "summary": {
@@ -638,5 +640,5 @@ def run_unstructured_issue_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "top_terms": top_terms,
             "ranked_issues": _ranked_issues_from_top_terms(top_terms, samples),
             "samples": samples,
-        },
+        }, declared_result_scope="document_subset", runtime_result_scope=runtime_result_scope),
     }
