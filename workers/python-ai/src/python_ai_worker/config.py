@@ -27,8 +27,8 @@ class WorkerConfig:
     llm_provider: str = "anthropic"
     anthropic_api_key: str | None = None
     anthropic_model: str = "claude-sonnet-4-6"
-    anthropic_prepare_model: str = "claude-3-5-haiku-latest"
-    anthropic_sentiment_model: str = "claude-3-5-haiku-latest"
+    anthropic_prepare_model: str = "claude-haiku-4-5"
+    anthropic_sentiment_model: str = "claude-haiku-4-5"
     anthropic_api_url: str = "https://api.anthropic.com/v1/messages"
     anthropic_version: str = "2023-06-01"
     anthropic_max_tokens: int = 2048
@@ -71,10 +71,10 @@ def load_config() -> WorkerConfig:
         llm_provider=os.getenv("PYTHON_AI_LLM_PROVIDER", "anthropic"),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
         anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-        anthropic_prepare_model=os.getenv("ANTHROPIC_PREPARE_MODEL", "claude-3-5-haiku-latest"),
+        anthropic_prepare_model=os.getenv("ANTHROPIC_PREPARE_MODEL", "claude-haiku-4-5"),
         anthropic_sentiment_model=os.getenv(
             "ANTHROPIC_SENTIMENT_MODEL",
-            os.getenv("ANTHROPIC_PREPARE_MODEL", "claude-3-5-haiku-latest"),
+            os.getenv("ANTHROPIC_PREPARE_MODEL", "claude-haiku-4-5"),
         ),
         anthropic_api_url=os.getenv("ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages"),
         anthropic_version=os.getenv("ANTHROPIC_VERSION", "2023-06-01"),

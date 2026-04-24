@@ -2,8 +2,11 @@ package workflows
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"go.temporal.io/sdk/temporal"
 )
 
 func TestDatasetBuildLimiterHonorsPerTypeConcurrency(t *testing.T) {
@@ -42,7 +45,7 @@ func TestDatasetBuildExecuteActivityOptionsUseBuildSpecificPolicy(t *testing.T) 
 	sentimentOptions := datasetBuildExecuteActivityOptions("sentiment")
 	embeddingOptions := datasetBuildExecuteActivityOptions("embedding")
 
-	if prepareOptions.StartToCloseTimeout != 20*time.Minute {
+	if prepareOptions.StartToCloseTimeout != 75*time.Minute {
 		t.Fatalf("unexpected prepare timeout: %s", prepareOptions.StartToCloseTimeout)
 	}
 	if sentimentOptions.StartToCloseTimeout != 45*time.Minute {
@@ -59,5 +62,16 @@ func TestDatasetBuildExecuteActivityOptionsUseBuildSpecificPolicy(t *testing.T) 
 	}
 	if embeddingOptions.RetryPolicy == nil || embeddingOptions.RetryPolicy.MaximumAttempts != 3 {
 		t.Fatalf("unexpected embedding retry policy: %+v", embeddingOptions.RetryPolicy)
+	}
+}
+
+func TestClassifyDatasetBuildErrorTreatsWorkerTimeoutAsNonRetryable(t *testing.T) {
+	err := classifyDatasetBuildError(context.DeadlineExceeded)
+	var appErr *temporal.ApplicationError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("expected temporal application error: %T", err)
+	}
+	if appErr.Type() != "worker_timeout" {
+		t.Fatalf("unexpected error type: %s", appErr.Type())
 	}
 }

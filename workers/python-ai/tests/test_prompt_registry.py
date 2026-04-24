@@ -81,7 +81,7 @@ class PromptRegistryTests(unittest.TestCase):
             client = _anthropic_prepare_client()
 
         self.assertIsNotNone(client)
-        self.assertEqual(client._config.model, "claude-3-5-haiku-latest")
+        self.assertEqual(client._config.model, "claude-haiku-4-5")
 
     def test_render_prepare_prompt_supports_multiple_versions(self) -> None:
         version, prompt = render_prepare_prompt("결제 오류가 반복 발생했습니다", version="dataset-prepare-anthropic-v2")

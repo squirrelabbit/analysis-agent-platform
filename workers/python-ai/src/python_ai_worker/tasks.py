@@ -10,7 +10,7 @@ from .skills.aggregate import (  # noqa: F401
     run_noun_frequency,
     run_time_bucket_count,
 )
-from .skills.dataset_build import run_dataset_cluster_build, run_dataset_prepare, run_embedding, run_sentiment_label  # noqa: F401
+from .skills.dataset_build import run_dataset_clean, run_dataset_cluster_build, run_dataset_prepare, run_embedding, run_sentiment_label  # noqa: F401
 from .skills.preprocess import (  # noqa: F401
     run_deduplicate_documents,
     run_document_filter,
@@ -51,6 +51,7 @@ __all__ = [
     "capability_names",
     "capability_payload",
     "run_cluster_label_candidates",
+    "run_dataset_clean",
     "run_dataset_cluster_build",
     "run_dataset_prepare",
     "run_deduplicate_documents",

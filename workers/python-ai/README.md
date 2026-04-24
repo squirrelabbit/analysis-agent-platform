@@ -1,7 +1,6 @@
 # Python AI Worker
 
 이 디렉터리는 현재 런타임에서 Python이 맡는 AI worker와 비정형 분석 task 구현체다.
-이 README는 입구 문서가 아니라 코드맵이다.
 
 ## 책임
 
@@ -75,11 +74,3 @@ PYTHONPATH=workers/python-ai/src python -m python_ai_worker.main --describe
 ```bash
 PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.evaluate_embedding_model --model intfloat/multilingual-e5-small --format markdown
 ```
-
-## 참고 문서
-
-- 루트 개요: [../../README.md](../../README.md)
-- 로컬 runbook: [../../docs/operations/local_runbook.md](../../docs/operations/local_runbook.md)
-- 테스트와 smoke: [../../docs/testing/smoke_and_checks.md](../../docs/testing/smoke_and_checks.md)
-- prompt 안내: [../../config/prompts/README.md](../../config/prompts/README.md)
-- skill 설명: [../../docs/skill/skill_registry.md](../../docs/skill/skill_registry.md)

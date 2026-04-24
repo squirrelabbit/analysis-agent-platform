@@ -42,6 +42,11 @@ from .rule_config import (
 _KIWI_INSTANCES: dict[str, Any] = {}
 _ROW_CACHE: "OrderedDict[tuple[str, int, int], list[dict[str, Any]]]" = OrderedDict()
 _ROW_CACHE_MAX_ENTRIES = 8
+PREPROCESS_SPECIFIC_PHRASES = [
+    "존재하지 않는 이미지입니다",
+    "존재하지 않는 스티커입니다",
+    "Previous imageNext image",
+]
 
 
 def _iter_documents(dataset_name: str, text_column: str) -> list[str]:
@@ -212,6 +217,46 @@ def _normalize_prepared_text(text: str) -> str:
     normalized = re.sub(r"[!?.]{2,}", ".", normalized)
     normalized = re.sub(r"[_\-=/]{3,}", " ", normalized)
     return normalized.strip()
+
+
+def _normalize_prepare_preprocess_options(value: Any) -> dict[str, bool]:
+    if not isinstance(value, dict):
+        return {
+            "remove_english": False,
+            "remove_numbers": False,
+            "remove_special": False,
+            "remove_monosyllables": False,
+        }
+    return {
+        "remove_english": bool(value.get("remove_english")),
+        "remove_numbers": bool(value.get("remove_numbers")),
+        "remove_special": bool(value.get("remove_special")),
+        "remove_monosyllables": bool(value.get("remove_monosyllables")),
+    }
+
+
+def _prepare_preprocess_text(text: Any, options: dict[str, bool]) -> str:
+    current = "" if text is None else str(text)
+    if not current:
+        return ""
+
+    phrase_pattern = re.compile("|".join(map(re.escape, PREPROCESS_SPECIFIC_PHRASES)))
+    current = phrase_pattern.sub("", current)
+
+    patterns: list[str] = []
+    if options.get("remove_english"):
+        patterns.append(r"[a-zA-Z]")
+    if options.get("remove_numbers"):
+        patterns.append(r"\d")
+    if options.get("remove_special"):
+        patterns.append(r"[\W_]")
+    if options.get("remove_monosyllables"):
+        patterns.append(r"[ㄱ-ㅎㅏ-ㅣ]+")
+
+    if patterns:
+        current = re.sub("|".join(patterns), " ", current)
+
+    return _normalize_prepared_text(current)
 
 
 def _normalize_prepare_regex_rule_names(value: Any) -> list[str]:
@@ -850,6 +895,7 @@ __all__ = [
     "_normalize_garbage_rule_names",
     "_normalize_pos_prefixes",
     "_normalize_prepared_text",
+    "_normalize_prepare_preprocess_options",
     "_normalize_prepare_regex_rule_names",
     "_normalize_stopwords",
     "_normalize_taxonomy_rules",
@@ -857,6 +903,7 @@ __all__ = [
     "_parse_timestamp",
     "_period_end",
     "_period_start",
+    "_prepare_preprocess_text",
     "_rank_documents",
     "_read_csv_rows",
     "_read_jsonl_rows",
