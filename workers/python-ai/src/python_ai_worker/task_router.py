@@ -5,6 +5,7 @@ from typing import Any
 
 from .planner import run_planner
 from .prompt_registry import prompt_catalog
+from .skill_contracts import validate_task_payload, validate_task_result
 from .skill_policy_registry import skill_policy_catalog, validate_skill_policies
 from .runtime.rule_config import (
     resolve_default_garbage_rule_names,
@@ -138,4 +139,7 @@ def run_task(name: str, payload: dict[str, Any]) -> dict[str, Any]:
     handler = task_handlers().get(name)
     if handler is None:
         raise ValueError(f"unsupported capability: {name}")
-    return handler(payload)
+    validate_task_payload(name, payload)
+    result = handler(payload)
+    validate_task_result(name, result)
+    return result

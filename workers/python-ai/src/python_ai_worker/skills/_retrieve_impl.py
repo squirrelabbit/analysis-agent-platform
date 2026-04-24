@@ -147,6 +147,8 @@ def _precomputed_cluster_matches_request(artifact: dict[str, Any], normalized: d
 def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_cluster_label_payload(payload)
     prior = rt._find_prior_artifact(payload.get("prior_artifacts"), "embedding_cluster")
+    if prior is None:
+        raise ValueError("cluster_label_candidates requires embedding_cluster prior artifact")
     clusters = []
     for cluster in list((prior or {}).get("clusters") or []):
         if not isinstance(cluster, dict):
@@ -664,4 +666,3 @@ def _fnv1a_64(value: str) -> int:
 
 def _pgvector_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{value:.8f}" for value in vector) + "]"
-

@@ -42,6 +42,17 @@ class SkillBundleContractTests(unittest.TestCase):
                 with self.subTest(sequence_name=sequence_name, skill_name=skill_name):
                     self.assertIn(skill_name, known)
 
+    def test_prior_skill_contracts_reference_known_bundle_skills(self) -> None:
+        known = {str(skill.get("name") or "").strip() for skill in capability_skills()}
+
+        for skill in capability_skills():
+            name = str(skill.get("name") or "").strip()
+            required_prior_skills = list(skill.get("requires_prior_skills") or [])
+            required_any_prior_skills = list(skill.get("requires_any_prior_skills") or [])
+            for prior_skill_name in required_prior_skills + required_any_prior_skills:
+                with self.subTest(skill_name=name, prior_skill_name=prior_skill_name):
+                    self.assertIn(prior_skill_name, known)
+
 
 if __name__ == "__main__":
     unittest.main()

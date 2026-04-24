@@ -333,6 +333,7 @@
       "plan_enabled": true,
       "task_path": "/tasks/cluster_label_candidates",
       "dataset_source": "request",
+      "requires_prior_skills": ["embedding_cluster"],
       "default_inputs": {
         "top_n": 5,
         "sample_n": 3
@@ -384,6 +385,7 @@
       "task_path": "/tasks/issue_cluster_summary",
       "dataset_source": "prepared",
       "requires_prepare": true,
+      "requires_any_prior_skills": ["cluster_label_candidates", "embedding_cluster"],
       "default_inputs": {
         "text_column": "text",
         "top_n": 5,

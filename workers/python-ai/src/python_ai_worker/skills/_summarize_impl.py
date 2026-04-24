@@ -114,6 +114,10 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_text_task_payload(payload)
     labeled_clusters = rt._find_prior_artifact(payload.get("prior_artifacts"), "cluster_label_candidates")
     embedded_clusters = rt._find_prior_artifact(payload.get("prior_artifacts"), "embedding_cluster")
+    if labeled_clusters is None and embedded_clusters is None:
+        raise ValueError(
+            "issue_cluster_summary requires cluster_label_candidates or embedding_cluster prior artifact"
+        )
     cluster_membership_ref = _cluster_membership_ref(labeled_clusters, embedded_clusters)
     cluster_execution_meta = _cluster_execution_meta(labeled_clusters, embedded_clusters)
 
@@ -139,30 +143,6 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
                     "rationale": rt._cluster_label_rationale(top_terms),
                 }
             )
-    else:
-        fallback = rt._cluster_embedding_records(
-            rt._build_embedding_records_from_rows(
-                rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
-            ),
-            rt.DEFAULT_CLUSTER_SIMILARITY_THRESHOLD,
-            normalized["sample_n"],
-            normalized["top_n"],
-        )
-        for item in fallback:
-            top_terms = list(item.get("top_terms") or [])
-            labels = rt._cluster_candidate_labels(top_terms)
-            clusters.append(
-                {
-                    "cluster_id": item.get("cluster_id"),
-                    "document_count": int(item.get("document_count") or 0),
-                    "label": labels[0] if labels else "기타 이슈",
-                    "candidate_labels": labels,
-                    "top_terms": top_terms[: normalized["top_n"]],
-                    "samples": list(item.get("sample_documents") or [])[: normalized["sample_n"]],
-                    "rationale": rt._cluster_label_rationale(top_terms),
-                }
-            )
-
     total_documents = sum(int(item.get("document_count") or 0) for item in clusters)
     ranked_clusters = []
     for rank, cluster in enumerate(
@@ -537,4 +517,3 @@ def run_unstructured_issue_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "samples": samples,
         },
     }
-

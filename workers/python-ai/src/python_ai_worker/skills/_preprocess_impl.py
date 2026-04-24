@@ -135,20 +135,21 @@ def run_document_filter(payload: dict[str, Any]) -> dict[str, Any]:
         selection_mode = "all_rows"
 
     if not matches:
-        for item in selected_rows:
-            text = item["text"]
-            if not text:
-                continue
-            matches.append(
-                {
-                    "rank": 0,
-                    "source_index": int(item["source_index"]),
-                    "score": 0,
-                    "text": text[:240],
-                }
-            )
         if query_tokens:
-            selection_mode = "fallback_all_rows"
+            selection_mode = "no_match"
+        else:
+            for item in selected_rows:
+                text = item["text"]
+                if not text:
+                    continue
+                matches.append(
+                    {
+                        "rank": 0,
+                        "source_index": int(item["source_index"]),
+                        "score": 0,
+                        "text": text[:240],
+                    }
+                )
 
     for rank, item in enumerate(matches, start=1):
         item["rank"] = rank
@@ -184,6 +185,8 @@ def run_document_filter(payload: dict[str, Any]) -> dict[str, Any]:
     ]
     if query_tokens:
         notes.append(f"match_mode: {normalized['match_mode']}")
+        if not filtered_indices:
+            notes.append("warning: query produced no lexical matches")
 
     return {
         "notes": notes,
@@ -477,4 +480,3 @@ def run_document_sample(payload: dict[str, Any]) -> dict[str, Any]:
             "samples": samples,
         },
     }
-

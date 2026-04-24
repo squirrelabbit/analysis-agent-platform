@@ -39,6 +39,7 @@ from python_ai_worker.tasks import (
     run_semantic_search,
     run_sentiment_label,
     run_sentence_split,
+    run_task,
     run_time_bucket_count,
 )
 
@@ -705,6 +706,30 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["summary"]["selection_mode"], "lexical_overlap_all")
         self.assertEqual(result["artifact"]["summary"]["filtered_row_count"], 1)
         self.assertEqual(result["artifact"]["matched_indices"], [0])
+
+    def test_document_filter_preserves_scope_when_query_has_no_matches(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "filter_no_match.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"text": "배송 문의가 계속 들어옵니다"})
+
+        result = run_document_filter(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "query": "환불 지연",
+                "sample_n": 3,
+            }
+        )
+
+        self.assertEqual(result["artifact"]["summary"]["selection_mode"], "no_match")
+        self.assertEqual(result["artifact"]["summary"]["filtered_row_count"], 0)
+        self.assertEqual(result["artifact"]["matched_indices"], [])
+        self.assertEqual(result["artifact"]["matches"], [])
+        self.assertIn("warning: query produced no lexical matches", result["notes"])
 
     def test_sentence_split_writes_sidecar_parquet_when_output_path_is_provided(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
@@ -1742,6 +1767,40 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(label_result["artifact"]["summary"]["cluster_count"], 3)
         self.assertEqual(summary_result["artifact"]["summary"]["dominant_cluster_count"], 2)
         self.assertIn("결제", summary_result["artifact"]["clusters"][0]["label"])
+
+    def test_cluster_label_candidates_requires_embedding_cluster_prior_artifact(self) -> None:
+        with self.assertRaisesRegex(ValueError, "embedding_cluster prior artifact"):
+            run_cluster_label_candidates(
+                {
+                    "dataset_name": "issues.csv",
+                    "sample_n": 2,
+                    "top_n": 3,
+                }
+            )
+
+    def test_issue_cluster_summary_requires_cluster_prior_artifact(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "cluster_label_candidates or embedding_cluster prior artifact",
+        ):
+            run_issue_cluster_summary(
+                {
+                    "dataset_name": "issues.csv",
+                    "sample_n": 2,
+                    "top_n": 3,
+                }
+            )
+
+    def test_run_task_rejects_missing_prior_artifact_contracts(self) -> None:
+        with self.assertRaisesRegex(ValueError, "embedding_cluster"):
+            run_task(
+                "cluster_label_candidates",
+                {
+                    "dataset_name": "issues.csv",
+                    "sample_n": 2,
+                    "top_n": 3,
+                },
+            )
 
     def test_issue_cluster_summary_uses_cluster_membership_to_expand_samples(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
