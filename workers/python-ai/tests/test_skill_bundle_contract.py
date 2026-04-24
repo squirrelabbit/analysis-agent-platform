@@ -5,6 +5,32 @@ import unittest
 from python_ai_worker.skill_bundle import capability_skills, skill_bundle
 from python_ai_worker.task_router import capability_names, task_handlers
 
+RESULT_KINDS = {
+    "preprocessing",
+    "evidence",
+    "summary_ranked",
+    "summary_narrative",
+    "metric_table",
+    "cluster_output",
+    "dataset_artifact",
+}
+RESULT_SCOPES = {
+    "full_dataset",
+    "subset_filtered",
+    "sample_n",
+    "single_record",
+}
+FALLBACK_POLICIES = {
+    "strict_fail",
+    "graceful_empty",
+    "rule_fallback_allowed",
+}
+QUALITY_TIERS = {
+    "deterministic",
+    "heuristic",
+    "llm_dependent",
+}
+
 
 class SkillBundleContractTests(unittest.TestCase):
     def test_worker_capabilities_only_advertise_runnable_tasks(self) -> None:
@@ -52,6 +78,15 @@ class SkillBundleContractTests(unittest.TestCase):
             for prior_skill_name in required_prior_skills + required_any_prior_skills:
                 with self.subTest(skill_name=name, prior_skill_name=prior_skill_name):
                     self.assertIn(prior_skill_name, known)
+
+    def test_bundle_skills_define_valid_result_contract_fields(self) -> None:
+        for skill in capability_skills():
+            name = str(skill.get("name") or "").strip()
+            with self.subTest(skill_name=name):
+                self.assertIn(str(skill.get("result_kind") or "").strip(), RESULT_KINDS)
+                self.assertIn(str(skill.get("result_scope") or "").strip(), RESULT_SCOPES)
+                self.assertIn(str(skill.get("fallback_policy") or "").strip(), FALLBACK_POLICIES)
+                self.assertIn(str(skill.get("quality_tier") or "").strip(), QUALITY_TIERS)
 
 
 if __name__ == "__main__":

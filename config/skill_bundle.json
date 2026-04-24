@@ -116,7 +116,11 @@
       "default_inputs": {
         "time_column": "date",
         "metric_column": "value"
-      }
+      },
+      "result_kind": "metric_table",
+      "result_scope": "full_dataset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic"
     },
     {
       "name": "garbage_filter",
@@ -137,7 +141,11 @@
           "platform_placeholder",
           "empty_or_noise"
         ]
-      }
+      },
+      "result_kind": "preprocessing",
+      "result_scope": "full_dataset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic"
     },
     {
       "name": "document_filter",
@@ -154,7 +162,11 @@
         "text_column": "text",
         "match_mode": "any",
         "sample_n": 5
-      }
+      },
+      "result_kind": "preprocessing",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic"
     },
     {
       "name": "deduplicate_documents",
@@ -170,7 +182,11 @@
         "text_column": "text",
         "sample_n": 3,
         "duplicate_threshold": 0.85
-      }
+      },
+      "result_kind": "preprocessing",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "heuristic"
     },
     {
       "name": "keyword_frequency",
@@ -185,7 +201,11 @@
       "default_inputs": {
         "text_column": "text",
         "top_n": 10
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic"
     },
     {
       "name": "noun_frequency",
@@ -205,7 +225,11 @@
         "allowed_pos_prefixes": [
           "N"
         ]
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "heuristic"
     },
     {
       "name": "sentence_split",
@@ -222,7 +246,11 @@
         "sample_n": 3,
         "language": "ko",
         "preview_sentences_per_row": 3
-      }
+      },
+      "result_kind": "preprocessing",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "heuristic"
     },
     {
       "name": "time_bucket_count",
@@ -244,7 +272,11 @@
         "bucket": "day",
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "metric_table",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic"
     },
     {
       "name": "meta_group_count",
@@ -264,7 +296,11 @@
         "dimension_column": "channel",
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "metric_table",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic"
     },
     {
       "name": "document_sample",
@@ -280,7 +316,11 @@
       "default_inputs": {
         "text_column": "text",
         "sample_n": 3
-      }
+      },
+      "result_kind": "evidence",
+      "result_scope": "sample_n",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "heuristic"
     },
     {
       "name": "dictionary_tagging",
@@ -297,7 +337,11 @@
         "top_n": 5,
         "sample_n": 3,
         "max_tags_per_document": 3
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic"
     },
     {
       "name": "embedding_cluster",
@@ -322,7 +366,11 @@
         "embedding_index_ref": "",
         "chunk_ref": "",
         "chunk_format": "parquet"
-      }
+      },
+      "result_kind": "cluster_output",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "strict_fail",
+      "quality_tier": "heuristic"
     },
     {
       "name": "cluster_label_candidates",
@@ -333,11 +381,17 @@
       "plan_enabled": true,
       "task_path": "/tasks/cluster_label_candidates",
       "dataset_source": "request",
-      "requires_prior_skills": ["embedding_cluster"],
+      "requires_prior_skills": [
+        "embedding_cluster"
+      ],
       "default_inputs": {
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "cluster_output",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "strict_fail",
+      "quality_tier": "deterministic"
     },
     {
       "name": "unstructured_issue_summary",
@@ -353,7 +407,11 @@
         "text_column": "text",
         "top_n": 10,
         "sample_n": 3
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "heuristic"
     },
     {
       "name": "issue_breakdown_summary",
@@ -373,7 +431,11 @@
         "dimension_column": "channel",
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "metric_table",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic"
     },
     {
       "name": "issue_cluster_summary",
@@ -385,12 +447,19 @@
       "task_path": "/tasks/issue_cluster_summary",
       "dataset_source": "prepared",
       "requires_prepare": true,
-      "requires_any_prior_skills": ["cluster_label_candidates", "embedding_cluster"],
+      "requires_any_prior_skills": [
+        "cluster_label_candidates",
+        "embedding_cluster"
+      ],
       "default_inputs": {
         "text_column": "text",
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "strict_fail",
+      "quality_tier": "heuristic"
     },
     {
       "name": "issue_trend_summary",
@@ -412,7 +481,11 @@
         "bucket": "day",
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "metric_table",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic"
     },
     {
       "name": "issue_period_compare",
@@ -435,7 +508,11 @@
         "window_size": 1,
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "metric_table",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic"
     },
     {
       "name": "issue_sentiment_summary",
@@ -460,7 +537,11 @@
         "row_id_column": "row_id",
         "source_row_index_column": "source_row_index",
         "sample_n": 3
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic"
     },
     {
       "name": "issue_taxonomy_summary",
@@ -477,7 +558,11 @@
         "top_n": 5,
         "sample_n": 3,
         "max_tags_per_document": 3
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "subset_filtered",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic"
     },
     {
       "name": "semantic_search",
@@ -502,7 +587,11 @@
         "embedding_index_ref": "",
         "chunk_ref": "",
         "chunk_format": "parquet"
-      }
+      },
+      "result_kind": "evidence",
+      "result_scope": "sample_n",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "heuristic"
     },
     {
       "name": "issue_evidence_summary",
@@ -518,7 +607,11 @@
       "default_inputs": {
         "text_column": "text",
         "sample_n": 3
-      }
+      },
+      "result_kind": "summary_narrative",
+      "result_scope": "sample_n",
+      "fallback_policy": "strict_fail",
+      "quality_tier": "llm_dependent"
     },
     {
       "name": "evidence_pack",
@@ -534,7 +627,11 @@
       "default_inputs": {
         "text_column": "text",
         "sample_n": 3
-      }
+      },
+      "result_kind": "evidence",
+      "result_scope": "sample_n",
+      "fallback_policy": "strict_fail",
+      "quality_tier": "llm_dependent"
     },
     {
       "name": "dataset_prepare",
@@ -544,7 +641,11 @@
       "category": "dataset_build",
       "plan_enabled": false,
       "task_path": "/tasks/dataset_prepare",
-      "dataset_source": "request"
+      "dataset_source": "request",
+      "result_kind": "dataset_artifact",
+      "result_scope": "full_dataset",
+      "fallback_policy": "rule_fallback_allowed",
+      "quality_tier": "llm_dependent"
     },
     {
       "name": "sentiment_label",
@@ -555,7 +656,11 @@
       "plan_enabled": false,
       "task_path": "/tasks/sentiment_label",
       "dataset_source": "prepared",
-      "requires_prepare": true
+      "requires_prepare": true,
+      "result_kind": "dataset_artifact",
+      "result_scope": "full_dataset",
+      "fallback_policy": "rule_fallback_allowed",
+      "quality_tier": "llm_dependent"
     },
     {
       "name": "embedding",
@@ -566,7 +671,11 @@
       "plan_enabled": false,
       "task_path": "/tasks/embedding",
       "dataset_source": "prepared",
-      "requires_prepare": true
+      "requires_prepare": true,
+      "result_kind": "dataset_artifact",
+      "result_scope": "full_dataset",
+      "fallback_policy": "rule_fallback_allowed",
+      "quality_tier": "heuristic"
     }
   ]
 }

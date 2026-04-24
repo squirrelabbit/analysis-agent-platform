@@ -1,0 +1,37 @@
+[
+  {
+    "query": "최근 결제 오류 이슈를 요약해줘",
+    "dataset_ref": "workers/python-ai/tests/fixtures/issues_summary.csv",
+    "expected_plan_shape": [
+      {
+        "skill_name": "document_filter",
+        "result_kind": "preprocessing"
+      },
+      {
+        "skill_name": "keyword_frequency",
+        "result_kind": "summary_ranked"
+      },
+      {
+        "skill_name": "document_sample",
+        "result_kind": "evidence"
+      },
+      {
+        "skill_name": "unstructured_issue_summary",
+        "result_kind": "summary_ranked"
+      },
+      {
+        "skill_name": "issue_evidence_summary",
+        "result_kind": "summary_narrative"
+      }
+    ],
+    "expected_output_keys": [
+      "ranked_issues",
+      "coverage",
+      "summary",
+      "evidence"
+    ],
+    "forbidden_keys": [
+      "fallback_all_rows"
+    ]
+  }
+]

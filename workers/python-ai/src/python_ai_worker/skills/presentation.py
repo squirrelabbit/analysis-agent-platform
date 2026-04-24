@@ -6,25 +6,27 @@ from typing import Any
 
 from .. import runtime as rt
 from ..config import load_config
+from ..obs import skill_handler
 
 
+@skill_handler("python-ai")
 def run_execution_final_answer(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_execution_final_answer_payload(payload)
     enriched = _enrich_execution_final_answer_payload(normalized)
     client = rt._anthropic_client()
 
-    if client is not None and client.is_enabled():
-        try:
-            result = rt._run_execution_final_answer_with_llm(client, enriched)
-            result["artifact"] = _artifact_view(result["answer"])
-            return result
-        except Exception as exc:
-            fallback = rt._run_execution_final_answer_fallback(enriched)
-            fallback["notes"].append(f"execution_final_answer fallback reason: {exc}")
-            fallback["artifact"] = _artifact_view(fallback["answer"])
-            return fallback
+    if client is None or not client.is_enabled():
+        raise ValueError("execution_final_answer requires llm presenter")
+    try:
+        result = rt._run_execution_final_answer_with_llm(client, enriched)
+    except Exception as exc:
+        raise ValueError(f"execution_final_answer presenter failed: {exc}") from exc
 
-    result = rt._run_execution_final_answer_fallback(enriched)
+    answer = dict(result.get("answer") or {})
+    answer["result_scope"] = "single_record"
+    answer["quality_tier"] = "llm_dependent"
+    answer["llm_output_parsed_strictly"] = True
+    result["answer"] = answer
     result["artifact"] = _artifact_view(result["answer"])
     return result
 

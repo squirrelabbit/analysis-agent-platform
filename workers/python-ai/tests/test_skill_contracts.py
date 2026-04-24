@@ -27,9 +27,31 @@ class SkillContractValidationTests(unittest.TestCase):
             {
                 "plan": {
                     "steps": [],
+                    "metadata": {
+                        "contains_llm_stage": False,
+                        "llm_stages": [],
+                    },
                 }
             },
         )
+
+    def test_validate_task_result_rejects_strict_fail_empty_cluster_summary(self) -> None:
+        with self.assertRaisesRegex(SkillOutputError, "strict_fail"):
+            validate_task_result(
+                "issue_cluster_summary",
+                {
+                    "artifact": {
+                        "skill_name": "issue_cluster_summary",
+                        "ranked_issues": [],
+                        "coverage": {
+                            "documents_considered": 0,
+                            "total_documents": 3,
+                        },
+                        "result_scope": "subset_filtered",
+                        "quality_tier": "heuristic",
+                    }
+                },
+            )
 
 
 if __name__ == "__main__":

@@ -106,75 +106,179 @@ class TaskTests(unittest.TestCase):
         ) -> AnthropicJSONResponse:
             raise RuntimeError("model unavailable")
 
-    def test_run_execution_final_answer_fallback(self) -> None:
-        result = run_execution_final_answer(
-            {
-                "execution_id": "exec-1",
-                "project_id": "project-1",
-                "question": "결제 오류 핵심을 알려줘",
-                "result_v1": {
-                    "status": "completed",
-                    "primary_skill_name": "issue_evidence_summary",
-                    "answer": {
-                        "summary": "결제 오류 이슈가 반복되고 있습니다.",
-                        "key_findings": ["결제 오류 VOC가 반복된다."],
-                        "evidence": [{"snippet": "결제 오류가 반복 발생했습니다."}],
-                        "follow_up_questions": ["결제 실패 구간을 더 볼까요?"],
-                    },
-                    "warnings": ["확인 필요: 샘플 수가 제한적입니다."],
-                    "step_results": [
-                        {
-                            "step_id": "step-1",
-                            "skill_name": "issue_evidence_summary",
-                            "status": "completed",
-                            "summary": "결제 오류 이슈가 반복되고 있습니다.",
-                        }
-                    ],
+    class _DummyEvidenceClient:
+        def __init__(
+            self,
+            summary: str = "결제 오류 관련 근거를 정리했습니다.",
+            evidence: list[dict[str, object]] | None = None,
+        ) -> None:
+            self._config = type("Config", (), {"model": "claude-test"})()
+            self._summary = summary
+            self._evidence = evidence or [
+                {
+                    "rank": 1,
+                    "source_index": 0,
+                    "snippet": "결제 오류가 반복 발생했습니다",
+                    "rationale": "질문과 직접 관련된 결제 오류 사례입니다.",
                 },
-            }
-        )
+                {
+                    "rank": 2,
+                    "source_index": 1,
+                    "snippet": "로그인이 자주 실패하고 오류가 보입니다",
+                    "rationale": "오류 관련 후속 사례입니다.",
+                },
+            ]
+
+        def is_enabled(self) -> bool:
+            return True
+
+        def create_json_response(
+            self,
+            *,
+            prompt: str,
+            schema: dict[str, object],
+            max_tokens: int | None = None,
+        ) -> AnthropicJSONResponse:
+            return AnthropicJSONResponse(
+                body={
+                    "summary": self._summary,
+                    "key_findings": ["결제 오류가 반복됩니다."],
+                    "evidence": self._evidence,
+                    "follow_up_questions": ["대표 원문을 더 볼까요?"],
+                },
+                usage={
+                    "input_tokens": 80,
+                    "output_tokens": 40,
+                },
+            )
+
+    class _DummyFinalAnswerClient:
+        def __init__(self, answer_text: str = "결제 오류 이슈가 반복되고 있습니다.") -> None:
+            self._config = type("Config", (), {"model": "claude-test"})()
+            self._answer_text = answer_text
+
+        def is_enabled(self) -> bool:
+            return True
+
+        def create_json_response(
+            self,
+            *,
+            prompt: str,
+            schema: dict[str, object],
+            max_tokens: int | None = None,
+        ) -> AnthropicJSONResponse:
+            return AnthropicJSONResponse(
+                body={
+                    "headline": "결제 오류 요약",
+                    "answer_text": self._answer_text,
+                    "key_points": ["결제 오류가 반복됩니다."],
+                    "caveats": ["샘플 기준 해석입니다."],
+                    "follow_up_questions": ["근거를 더 볼까요?"],
+                    "evidence_ref_ids": ["evidence-1"],
+                },
+                usage={
+                    "input_tokens": 60,
+                    "output_tokens": 30,
+                },
+            )
+
+    def test_run_execution_final_answer_fallback(self) -> None:
+        with patch(
+            "python_ai_worker.skills.presentation.rt._anthropic_client",
+            return_value=self._DummyFinalAnswerClient(),
+        ):
+            result = run_execution_final_answer(
+                {
+                    "execution_id": "exec-1",
+                    "project_id": "project-1",
+                    "question": "결제 오류 핵심을 알려줘",
+                    "result_v1": {
+                        "status": "completed",
+                        "primary_skill_name": "issue_evidence_summary",
+                        "answer": {
+                            "summary": "결제 오류 이슈가 반복되고 있습니다.",
+                            "key_findings": ["결제 오류 VOC가 반복된다."],
+                            "evidence": [{"snippet": "결제 오류가 반복 발생했습니다."}],
+                            "follow_up_questions": ["결제 실패 구간을 더 볼까요?"],
+                        },
+                        "warnings": ["확인 필요: 샘플 수가 제한적입니다."],
+                        "step_results": [
+                            {
+                                "step_id": "step-1",
+                                "skill_name": "issue_evidence_summary",
+                                "status": "completed",
+                                "summary": "결제 오류 이슈가 반복되고 있습니다.",
+                            }
+                        ],
+                    },
+                }
+            )
 
         answer = result["answer"]
         self.assertEqual(answer["schema_version"], "execution-final-answer-v1")
-        self.assertEqual(answer["generation_mode"], "fallback")
+        self.assertEqual(answer["generation_mode"], "llm")
         self.assertEqual(answer["answer_text"], "결제 오류 이슈가 반복되고 있습니다.")
-        self.assertEqual(answer["key_points"], ["결제 오류 VOC가 반복된다."])
-        self.assertIn("확인 필요: 샘플 수가 제한적입니다.", answer["caveats"])
+        self.assertEqual(answer["key_points"], ["결제 오류가 반복됩니다."])
+        self.assertEqual(answer["quality_tier"], "llm_dependent")
+        self.assertTrue(answer["llm_output_parsed_strictly"])
         artifact = result["artifact"]
         self.assertEqual(artifact["skill_name"], "execution_final_answer")
         self.assertEqual(artifact["answer_text"], "결제 오류 이슈가 반복되고 있습니다.")
 
     def test_run_execution_final_answer_fallback_derives_limits_from_sparse_evidence(self) -> None:
-        result = run_execution_final_answer(
-            {
-                "execution_id": "exec-2",
-                "project_id": "project-1",
-                "question": "로그인 오류 핵심을 알려줘",
-                "result_v1": {
-                    "status": "completed",
-                    "primary_skill_name": "issue_cluster_summary",
-                    "answer": {
-                        "summary": "로그인 오류 군집이 가장 크게 나타났습니다.",
-                        "evidence": [{"snippet": "로그인이 자주 실패합니다."}],
+        with patch(
+            "python_ai_worker.skills.presentation.rt._anthropic_client",
+            return_value=self._DummyFinalAnswerClient("로그인 오류 군집이 가장 크게 나타났습니다."),
+        ):
+            result = run_execution_final_answer(
+                {
+                    "execution_id": "exec-2",
+                    "project_id": "project-1",
+                    "question": "로그인 오류 핵심을 알려줘",
+                    "result_v1": {
+                        "status": "completed",
+                        "primary_skill_name": "issue_cluster_summary",
+                        "answer": {
+                            "summary": "로그인 오류 군집이 가장 크게 나타났습니다.",
+                            "evidence": [{"snippet": "로그인이 자주 실패합니다."}],
+                        },
+                        "warnings": [],
+                        "step_results": [
+                            {
+                                "step_id": "step-1",
+                                "skill_name": "issue_cluster_summary",
+                                "status": "completed",
+                                "summary": "로그인 오류 군집이 12건으로 가장 큽니다.",
+                            }
+                        ],
                     },
-                    "warnings": [],
-                    "step_results": [
-                        {
-                            "step_id": "step-1",
-                            "skill_name": "issue_cluster_summary",
-                            "status": "completed",
-                            "summary": "로그인 오류 군집이 12건으로 가장 큽니다.",
-                        }
-                    ],
-                },
-            }
-        )
+                }
+            )
 
         answer = result["answer"]
-        self.assertEqual(answer["generation_mode"], "fallback")
-        self.assertEqual(answer["key_points"], ["로그인 오류 군집이 12건으로 가장 큽니다."])
-        self.assertIn("확인 필요: 현재 final_answer 근거 후보가 1건뿐이라 해석 범위가 제한적입니다.", answer["caveats"])
+        self.assertEqual(answer["generation_mode"], "llm")
+        self.assertEqual(answer["quality_tier"], "llm_dependent")
+        self.assertTrue(answer["llm_output_parsed_strictly"])
+        self.assertEqual(answer["result_scope"], "single_record")
         self.assertTrue(answer["follow_up_questions"])
+
+    def test_run_execution_final_answer_requires_llm_presenter(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires llm presenter"):
+            run_execution_final_answer(
+                {
+                    "execution_id": "exec-3",
+                    "project_id": "project-1",
+                    "question": "결제 오류 핵심을 알려줘",
+                    "result_v1": {
+                        "status": "completed",
+                        "primary_skill_name": "issue_evidence_summary",
+                        "answer": {
+                            "summary": "결제 오류 이슈가 반복되고 있습니다.",
+                            "evidence": [{"snippet": "결제 오류가 반복 발생했습니다."}],
+                        },
+                    },
+                }
+            )
 
     def test_dataset_cluster_build_materializes_cluster_artifact_and_embedding_cluster_reads_it(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
@@ -354,6 +458,8 @@ class TaskTests(unittest.TestCase):
             ["document_filter", "keyword_frequency", "document_sample", "unstructured_issue_summary", "issue_evidence_summary"],
         )
         self.assertEqual(result["plan"]["steps"][-1]["inputs"]["query"], "VOC 이슈를 요약해줘")
+        self.assertTrue(result["plan"]["metadata"]["contains_llm_stage"])
+        self.assertEqual(result["plan"]["metadata"]["llm_stages"], ["issue_evidence_summary"])
 
     def test_rule_based_planner_builds_issue_trend_summary(self) -> None:
         with patch.dict(
@@ -397,6 +503,8 @@ class TaskTests(unittest.TestCase):
             [step["skill_name"] for step in result["plan"]["steps"]],
             ["document_filter", "noun_frequency"],
         )
+        self.assertFalse(result["plan"]["metadata"]["contains_llm_stage"])
+        self.assertEqual(result["plan"]["metadata"]["llm_stages"], [])
 
     def test_rule_based_planner_builds_sentence_split_sequence(self) -> None:
         with patch.dict(
@@ -592,6 +700,34 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(keyword_result["artifact"]["top_terms"][0]["term"], "결제")
         self.assertEqual(sample_result["artifact"]["summary"]["sample_count"], 2)
         self.assertEqual(sample_result["artifact"]["samples"][0]["source_index"], 0)
+
+    def test_unstructured_issue_summary_exposes_ranked_issues_and_coverage(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_summary.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"text": "결제 승인 오류가 다시 발생했습니다"})
+            writer.writerow({"text": "배송 문의가 계속 들어옵니다"})
+
+        result = run_task(
+            "unstructured_issue_summary",
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "top_n": 3,
+                "sample_n": 2,
+            },
+        )
+
+        artifact = result["artifact"]
+        self.assertEqual(artifact["quality_tier"], "heuristic")
+        self.assertEqual(artifact["coverage"]["documents_considered"], 3)
+        self.assertEqual(artifact["coverage"]["total_documents"], 3)
+        self.assertEqual(artifact["result_scope"], "full_dataset")
+        self.assertTrue(artifact["ranked_issues"])
+        self.assertEqual(artifact["ranked_issues"][0]["rank"], 1)
 
     def test_garbage_filter_removes_ad_and_placeholder_rows(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
@@ -1767,6 +1903,9 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(label_result["artifact"]["summary"]["cluster_count"], 3)
         self.assertEqual(summary_result["artifact"]["summary"]["dominant_cluster_count"], 2)
         self.assertIn("결제", summary_result["artifact"]["clusters"][0]["label"])
+        self.assertEqual(summary_result["artifact"]["quality_tier"], "heuristic")
+        self.assertTrue(summary_result["artifact"]["ranked_issues"])
+        self.assertEqual(summary_result["artifact"]["coverage"]["documents_considered"], 5)
 
     def test_cluster_label_candidates_requires_embedding_cluster_prior_artifact(self) -> None:
         with self.assertRaisesRegex(ValueError, "embedding_cluster prior artifact"):
@@ -2469,7 +2608,10 @@ class TaskTests(unittest.TestCase):
             writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
             writer.writerow({"text": "로그인이 자주 실패하고 오류가 보입니다"})
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+        with patch(
+            "python_ai_worker.skills._summarize_impl.rt._anthropic_client",
+            return_value=self._DummyEvidenceClient(),
+        ):
             result = run_issue_evidence_summary(
                 {
                     "dataset_name": str(csv_path),
@@ -2481,6 +2623,25 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["skill_name"], "issue_evidence_summary")
         self.assertEqual(len(result["artifact"]["evidence"]), 2)
         self.assertEqual(result["artifact"]["analysis_context"], [])
+        self.assertEqual(result["artifact"]["quality_tier"], "llm_dependent")
+        self.assertTrue(result["artifact"]["llm_output_parsed_strictly"])
+
+    def test_issue_evidence_summary_requires_llm_presenter(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues_requires_llm.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+
+        with self.assertRaisesRegex(ValueError, "requires llm presenter"):
+            run_issue_evidence_summary(
+                {
+                    "dataset_name": str(csv_path),
+                    "query": "결제 오류 관련 근거를 보여줘",
+                    "sample_n": 2,
+                }
+            )
 
     def test_issue_evidence_summary_includes_prior_analysis_context(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
@@ -2492,7 +2653,10 @@ class TaskTests(unittest.TestCase):
             writer.writerow({"text": "결제 승인 오류가 다시 발생했습니다"})
             writer.writerow({"text": "로그인이 자주 실패하고 오류가 보입니다"})
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+        with patch(
+            "python_ai_worker.skills._summarize_impl.rt._anthropic_client",
+            return_value=self._DummyEvidenceClient("issue_period_compare 기반 결제 오류 증가 근거입니다."),
+        ):
             result = run_issue_evidence_summary(
                 {
                     "dataset_name": str(csv_path),
@@ -2593,7 +2757,10 @@ class TaskTests(unittest.TestCase):
             }
         )
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+        with patch(
+            "python_ai_worker.skills._summarize_impl.rt._anthropic_client",
+            return_value=self._DummyEvidenceClient("주요 이슈 군집 근거를 정리했습니다."),
+        ):
             result = run_issue_evidence_summary(
                 {
                     "dataset_name": str(csv_path),
@@ -2651,12 +2818,15 @@ class TaskTests(unittest.TestCase):
             patch.dict(
                 "os.environ",
                 {
-                    "ANTHROPIC_API_KEY": "",
                     "EVIDENCE_CONTEXT_MAX_ENTRIES": "2",
                     "EVIDENCE_CONTEXT_MAX_CHARS": "80",
                     "EVIDENCE_CONTEXT_ENTRY_MAX_CHARS": "40",
                 },
                 clear=False,
+            ),
+            patch(
+                "python_ai_worker.skills._summarize_impl.rt._anthropic_client",
+                return_value=self._DummyEvidenceClient(),
             ),
         ):
             result = run_issue_evidence_summary(
@@ -2675,7 +2845,7 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["prompt_compaction"]["analysis_context"]["output_entry_count"], 2)
         self.assertTrue(any("analysis_context compacted" in note for note in result["notes"]))
 
-    def test_evidence_pack_fallback(self) -> None:
+    def test_evidence_pack_uses_llm_presenter(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues.csv"
         with csv_path.open("w", encoding="utf-8", newline="") as handle:
@@ -2685,7 +2855,10 @@ class TaskTests(unittest.TestCase):
             writer.writerow({"text": "로그인이 자주 실패하고 오류가 보입니다"})
             writer.writerow({"text": "배송 문의가 계속 들어옵니다"})
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+        with patch(
+            "python_ai_worker.skills._summarize_impl.rt._anthropic_client",
+            return_value=self._DummyEvidenceClient("오류 관련 이슈 근거를 정리했습니다."),
+        ):
             result = run_evidence_pack(
                 {
                     "dataset_name": str(csv_path),
@@ -2699,6 +2872,7 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["skill_name"], "evidence_pack")
         self.assertEqual(len(result["artifact"]["evidence"]), 2)
         self.assertTrue(result["artifact"]["summary"])
+        self.assertTrue(result["artifact"]["llm_output_parsed_strictly"])
 
     def test_evidence_pack_uses_semantic_search_candidates(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
@@ -2711,7 +2885,25 @@ class TaskTests(unittest.TestCase):
             writer.writerow({"text": "배송 문의가 계속 들어옵니다"})
             writer.writerow({"text": "로그인이 자주 실패합니다"})
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+        with patch(
+            "python_ai_worker.skills._summarize_impl.rt._anthropic_client",
+            return_value=self._DummyEvidenceClient(
+                evidence=[
+                    {
+                        "rank": 1,
+                        "source_index": 2,
+                        "snippet": "로그인이 자주 실패합니다",
+                        "rationale": "semantic search 최상위 후보입니다.",
+                    },
+                    {
+                        "rank": 2,
+                        "source_index": 0,
+                        "snippet": "결제 오류가 반복 발생했습니다",
+                        "rationale": "후속 결제 오류 후보입니다.",
+                    },
+                ],
+            ),
+        ):
             result = run_evidence_pack(
                 {
                     "dataset_name": str(csv_path),
@@ -2771,7 +2963,10 @@ class TaskTests(unittest.TestCase):
             writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
             writer.writerow({"text": "배송 문의가 계속 들어옵니다"})
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+        with patch(
+            "python_ai_worker.skills._summarize_impl.rt._anthropic_client",
+            return_value=self._DummyEvidenceClient("결제 오류 근거를 정리했습니다."),
+        ):
             result = run_issue_evidence_summary(
                 {
                     "dataset_name": str(csv_path),

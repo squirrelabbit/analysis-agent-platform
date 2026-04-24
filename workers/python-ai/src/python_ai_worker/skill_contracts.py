@@ -3,6 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from . import runtime as rt
+from .skills._contract_models import (
+    validate_execution_final_answer,
+    validate_issue_evidence_artifact,
+    validate_ranked_issue_summary_artifact,
+)
 from .skill_bundle import skill_definition
 
 
@@ -16,6 +21,16 @@ class SkillPreconditionError(SkillContractError):
 
 class SkillOutputError(SkillContractError):
     """Raised when a task returns a malformed output payload."""
+
+
+_PRESENTER_SKILL_META = {
+    "execution_final_answer": {
+        "fallback_policy": "strict_fail",
+        "quality_tier": "llm_dependent",
+        "result_kind": "summary_narrative",
+        "result_scope": "single_record",
+    }
+}
 
 
 def validate_task_payload(name: str, payload: dict[str, Any]) -> None:
@@ -59,6 +74,9 @@ def validate_task_result(name: str, result: dict[str, Any]) -> None:
         steps = plan.get("steps")
         if not isinstance(steps, list):
             raise SkillOutputError("planner result must contain plan.steps")
+        metadata = plan.get("metadata")
+        if not isinstance(metadata, dict):
+            raise SkillOutputError("planner result must contain plan.metadata")
         return
 
     artifact = result.get("artifact")
@@ -73,8 +91,46 @@ def validate_task_result(name: str, result: dict[str, Any]) -> None:
             f"{name} artifact skill_name mismatch: {artifact_skill_name}"
         )
 
-    if name == "execution_final_answer" and not isinstance(result.get("answer"), dict):
-        raise SkillOutputError("execution_final_answer result must contain an answer object")
+    definition = _skill_contract_meta(name)
+    fallback_policy = str(definition.get("fallback_policy") or "").strip()
+    if fallback_policy == "strict_fail" and _looks_gracefully_empty(name, result, artifact):
+        raise SkillOutputError(f"{name} returned an empty result despite strict_fail contract")
+
+    if name in {"unstructured_issue_summary", "issue_cluster_summary"}:
+        validate_ranked_issue_summary_artifact(artifact)
+    elif name in {"issue_evidence_summary", "evidence_pack"}:
+        validate_issue_evidence_artifact(artifact)
+    elif name == "execution_final_answer":
+        answer = result.get("answer")
+        if not isinstance(answer, dict):
+            raise SkillOutputError("execution_final_answer result must contain an answer object")
+        validate_execution_final_answer(answer)
+
+
+def _skill_contract_meta(name: str) -> dict[str, Any]:
+    definition = skill_definition(name)
+    if definition:
+        return definition
+    return dict(_PRESENTER_SKILL_META.get(name) or {})
+
+
+def _looks_gracefully_empty(name: str, result: dict[str, Any], artifact: dict[str, Any]) -> bool:
+    if name in {"cluster_label_candidates", "embedding_cluster"}:
+        return len(list(artifact.get("clusters") or [])) == 0
+    if name in {"unstructured_issue_summary", "issue_cluster_summary"}:
+        return len(list(artifact.get("ranked_issues") or [])) == 0
+    if name in {"issue_evidence_summary", "evidence_pack"}:
+        return (
+            not str(artifact.get("summary") or "").strip()
+            or len(list(artifact.get("evidence") or [])) == 0
+        )
+    if name == "execution_final_answer":
+        answer = result.get("answer") or {}
+        return (
+            not str(answer.get("answer_text") or "").strip()
+            or len(list(answer.get("evidence") or [])) == 0
+        )
+    return False
 
 
 def _string_list(value: Any) -> list[str]:

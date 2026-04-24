@@ -6,6 +6,7 @@ from collections import Counter
 from typing import Any
 
 from .. import runtime as rt
+from ..skill_bundle import skill_definition
 
 def _cluster_membership_ref(*artifacts: dict[str, Any] | None) -> str:
     for artifact in artifacts:
@@ -60,6 +61,83 @@ def _cluster_samples_from_membership(cluster_membership_ref: str, cluster_id: st
         if len(samples) >= sample_n:
             break
     return samples
+
+
+def _skill_quality_tier(skill_name: str) -> str:
+    definition = skill_definition(skill_name) or {}
+    return str(definition.get("quality_tier") or "").strip()
+
+
+def _total_dataset_documents(dataset_name: str) -> int:
+    return len(rt._indexed_rows(dataset_name))
+
+
+def _coverage_payload(documents_considered: int, total_documents: int) -> dict[str, Any]:
+    return {
+        "documents_considered": max(0, int(documents_considered)),
+        "total_documents": max(0, int(total_documents)),
+    }
+
+
+def _representative_samples(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    representative: list[dict[str, Any]] = []
+    for item in samples:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or item.get("snippet") or "").strip()
+        if not text:
+            continue
+        representative.append(
+            {
+                "text": text[:240],
+                "source_index": (
+                    int(item.get("source_index"))
+                    if item.get("source_index") not in {None, ""}
+                    else None
+                ),
+                "row_id": str(item.get("row_id") or "").strip() or None,
+                "chunk_id": str(item.get("chunk_id") or "").strip() or None,
+            }
+        )
+    return representative
+
+
+def _date_range_payload() -> dict[str, Any]:
+    return {
+        "start": None,
+        "end": None,
+    }
+
+
+def _citation_mode(selected: list[dict[str, Any]]) -> str:
+    if any(str(item.get("chunk_id") or "").strip() for item in selected if isinstance(item, dict)):
+        return "chunk"
+    return "row"
+
+
+def _ranked_issues_from_top_terms(
+    top_terms: list[dict[str, Any]],
+    samples: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    representative_samples = _representative_samples(samples[:3])
+    ranked: list[dict[str, Any]] = []
+    for rank, item in enumerate(top_terms, start=1):
+        if not isinstance(item, dict):
+            continue
+        term = str(item.get("term") or "").strip()
+        count = int(item.get("count") or item.get("document_frequency") or 0)
+        if not term:
+            continue
+        ranked.append(
+            {
+                "rank": rank,
+                "label": term,
+                "count": count,
+                "representative_samples": representative_samples,
+                "date_range": _date_range_payload(),
+            }
+        )
+    return ranked
 
 
 def run_issue_trend_summary(payload: dict[str, Any]) -> dict[str, Any]:
@@ -175,6 +253,22 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
         summary["dominant_cluster_label"] = ranked_clusters[0]["label"]
         summary["dominant_cluster_count"] = ranked_clusters[0]["document_count"]
 
+    documents_considered = total_documents
+    total_dataset_documents = _total_dataset_documents(normalized["dataset_name"])
+    result_scope = "subset_filtered"
+    if cluster_execution_meta["cluster_materialization_scope"] == "full_dataset" and documents_considered == total_dataset_documents:
+        result_scope = "full_dataset"
+    ranked_issues = [
+        {
+            "rank": int(cluster["rank"]),
+            "label": str(cluster["label"] or "").strip(),
+            "count": int(cluster["document_count"] or 0),
+            "representative_samples": _representative_samples(list(cluster.get("samples") or [])),
+            "date_range": _date_range_payload(),
+        }
+        for cluster in ranked_clusters
+    ]
+
     return {
         "notes": [
             f"issue_cluster_summary summarized {len(ranked_clusters)} clusters",
@@ -189,6 +283,10 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "cluster_materialization_scope": cluster_execution_meta["cluster_materialization_scope"],
             "cluster_materialized_ref_used": cluster_execution_meta["cluster_materialized_ref_used"],
             "cluster_fallback_reason": cluster_execution_meta["cluster_fallback_reason"],
+            "result_scope": result_scope,
+            "quality_tier": _skill_quality_tier("issue_cluster_summary"),
+            "coverage": _coverage_payload(documents_considered, total_dataset_documents),
+            "ranked_issues": ranked_issues,
             "summary": summary,
             "clusters": ranked_clusters,
         },
@@ -418,41 +516,59 @@ def _run_evidence_summary(payload: dict[str, Any], artifact_skill_name: str) -> 
     selected, selection_source = rt._select_evidence_candidates(payload, normalized)
     analysis_context = rt._analysis_context_entries(payload.get("prior_artifacts"))
     client = rt._anthropic_client()
-    if client and client.is_enabled():
-        try:
-            return rt._run_evidence_pack_with_llm(
-                client,
-                normalized,
-                selected,
-                selection_source,
-                artifact_skill_name,
-                analysis_context,
-            )
-        except Exception as exc:
-            fallback = rt._run_evidence_pack_fallback(
-                normalized,
-                selected,
-                selection_source,
-                artifact_skill_name,
-                analysis_context,
-            )
-            fallback["notes"].append(f"anthropic evidence fallback: {exc}")
-            return fallback
-    return rt._run_evidence_pack_fallback(
-        normalized,
-        selected,
-        selection_source,
-        artifact_skill_name,
-        analysis_context,
-    )
+    if not client or not client.is_enabled():
+        raise ValueError(f"{artifact_skill_name} requires llm presenter")
+    try:
+        llm_result = rt._run_evidence_pack_with_llm(
+            client,
+            normalized,
+            selected,
+            selection_source,
+            artifact_skill_name,
+            analysis_context,
+        )
+    except Exception as exc:
+        raise ValueError(f"{artifact_skill_name} presenter failed: {exc}") from exc
+
+    llm_artifact = dict(llm_result.get("artifact") or {})
+    artifact = {
+        "skill_name": artifact_skill_name,
+        "step_id": normalized["step"].get("step_id"),
+        "dataset_name": normalized["dataset_name"],
+        "query": normalized["query"],
+        "selection_source": selection_source,
+        "citation_mode": str(llm_artifact.get("citation_mode") or _citation_mode(selected)).strip(),
+        "analysis_context": list(llm_artifact.get("analysis_context") or analysis_context),
+        "summary": str(llm_artifact.get("summary") or "").strip(),
+        "key_findings": list(llm_artifact.get("key_findings") or []),
+        "evidence": list(llm_artifact.get("evidence") or []),
+        "follow_up_questions": list(llm_artifact.get("follow_up_questions") or []),
+        "usage": dict(llm_artifact.get("usage") or {}),
+        "result_scope": "sample_n",
+        "quality_tier": _skill_quality_tier(artifact_skill_name),
+        "llm_output_parsed_strictly": True,
+        "coverage": _coverage_payload(len(selected), _total_dataset_documents(normalized["dataset_name"])),
+    }
+    for key in ("prompt_compaction", "chunk_ref", "chunk_format"):
+        if key in llm_artifact:
+            artifact[key] = llm_artifact[key]
+    return {
+        "notes": list(llm_result.get("notes") or []),
+        "artifact": artifact,
+    }
 
 def run_unstructured_issue_summary(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_text_task_payload(payload)
+    selected_rows = rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
+    documents = [item["text"] for item in selected_rows if item["text"]]
+    total_dataset_documents = _total_dataset_documents(normalized["dataset_name"])
+    documents_considered = len(documents)
+    result_scope = "full_dataset" if documents_considered == total_dataset_documents else "subset_filtered"
     keyword_artifact = rt._find_prior_artifact(payload.get("prior_artifacts"), "keyword_frequency")
     sample_artifact = rt._find_prior_artifact(payload.get("prior_artifacts"), "document_sample")
     if keyword_artifact or sample_artifact:
         summary = {
-            "document_count": int((((keyword_artifact or {}).get("summary") or {}).get("document_count") or 0)),
+            "document_count": documents_considered,
             "unique_terms": int((((keyword_artifact or {}).get("summary") or {}).get("unique_terms") or 0)),
             "total_terms": int((((keyword_artifact or {}).get("summary") or {}).get("total_terms") or 0)),
         }
@@ -474,13 +590,16 @@ def run_unstructured_issue_summary(payload: dict[str, Any]) -> dict[str, Any]:
                 "skill_name": "unstructured_issue_summary",
                 "step_id": normalized["step"].get("step_id"),
                 "dataset_name": normalized["dataset_name"],
+                "result_scope": result_scope,
+                "quality_tier": _skill_quality_tier("unstructured_issue_summary"),
+                "coverage": _coverage_payload(documents_considered, total_dataset_documents),
+                "ranked_issues": _ranked_issues_from_top_terms(top_terms, samples),
                 "summary": summary,
                 "top_terms": top_terms,
                 "samples": samples,
             },
         }
 
-    documents = [item["text"] for item in rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts")) if item["text"]]
     tokens = Counter()
     samples: list[dict[str, Any]] = []
     total_terms = 0
@@ -508,12 +627,16 @@ def run_unstructured_issue_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "skill_name": "unstructured_issue_summary",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
+            "result_scope": result_scope,
+            "quality_tier": _skill_quality_tier("unstructured_issue_summary"),
+            "coverage": _coverage_payload(documents_considered, total_dataset_documents),
             "summary": {
                 "document_count": len(documents),
                 "unique_terms": len(tokens),
                 "total_terms": total_terms,
             },
             "top_terms": top_terms,
+            "ranked_issues": _ranked_issues_from_top_terms(top_terms, samples),
             "samples": samples,
         },
     }
