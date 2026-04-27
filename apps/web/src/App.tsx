@@ -1,29 +1,41 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+} from "react-router-dom";
 import AppLayout from "./layout/AppLayout";
 import { ChatPage } from "./pages/ChatPage";
-import ProjectsPage from "./routes/ProjectsPage";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import ProjectPage from './pages/ProjectPage'
+import ProjectLayout from "./layout/ProjectLayout";
+import DatasetPage from "./pages/DatasetPage";
+import ScenarioPage from "./routes/ScenarioPage";
+import DatasetVersionPage from "./features/dataset/pages/DatasetVersionPage";
+import ProjectPage from "./pages/ProjectPage";
 
 function App() {
-  const apiBaseUrl =
-    import.meta.env.VITE_API_BASE_URL?.trim() || "http://127.0.0.1:18080";
-
   const queryClient = new QueryClient();
   return (
-    <BrowserRouter>
-      <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
         <AppLayout>
           <Routes>
-            <Route path="/projects" element={<ProjectsPage />} />
-            <Route path="/projects/:id" element={<ProjectsPage />} />
-            <Route path="/" element={<Navigate to="/chat" replace />} />
-            <Route path="/chat" element={<ChatPage />} />
-            <Route path="/project" element={<ProjectPage />} />
+            <Route path="/" element={<Navigate to="/chats" replace />} />
+            <Route path="/chats" element={<ChatPage />} />
+            <Route path="/projects" element={<ProjectPage />} />
+            <Route path="/projects/:projectId" element={<ProjectLayout />}>
+              <Route index  element={<Navigate to="datasets" replace />} />
+              <Route path="datasets" element={<DatasetPage />} />
+              <Route path="datasets/:datasetId">
+              <Route index element={<Navigate to="versions" replace />} />
+              <Route path="versions" element={<DatasetVersionPage />} />
+              </Route>
+              <Route path="scenarios" element={<ScenarioPage />} />
+            </Route>
           </Routes>
         </AppLayout>
-      </QueryClientProvider>
-    </BrowserRouter>
+      </BrowserRouter>
+    </QueryClientProvider>
   );
 }
 
