@@ -1,13 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { datasetKeys } from "../constants/queryKeys";
 import { datasetsApi } from "../api/dataset.api";
 import { mapDataset } from "../api/dataset.mapper";
-import type { CreateDatasetRequest } from "../types/dataset.dto";
 
-export const useDataset = (projectId: string) => {
-  const queryClient = useQueryClient();
-
-  const query = useQuery({
+export const useDataset = (projectId: string) =>
+  useQuery({
     queryKey: datasetKeys.lists(),
     queryFn: async () => {
       const data = await datasetsApi.getDatasets(projectId);
@@ -15,29 +12,11 @@ export const useDataset = (projectId: string) => {
     },
   });
 
-  const create = useMutation({
-    mutationFn: ({
-      projectId,
-      req,
-    }: {
-      projectId: string;
-      req: CreateDatasetRequest;
-    }) => datasetsApi.createDataset(projectId, req),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["datasets"] });
+export const useDatasetDetail = (projectId: string, datasetId: string) =>
+  useQuery({
+    queryKey: datasetKeys.detail(projectId),
+    queryFn: async () =>{
+      return mapDataset(await datasetsApi.getDatasetById(projectId, datasetId))
     },
+    enabled: !!projectId || !!datasetId,
   });
-
-  const remove = useMutation({
-    mutationFn: datasetsApi.deleteDataset,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["datasets"] });
-    },
-  });
-
-  return {
-    ...query,
-    create,
-    remove,
-  };
-};

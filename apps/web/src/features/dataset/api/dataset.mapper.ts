@@ -1,9 +1,9 @@
+import type { DatasetFormValues } from "../schcema/dataset.schcema";
 import type { Dataset } from "../types/dataset";
 import type {
   CreateDatasetRequest,
   DatasetResponse,
 } from "../types/dataset.dto";
-import type { DatasetForm } from "../types/dataset.form";
 
 export const mapDataset = (dto: DatasetResponse): Dataset => ({
   id: dto.dataset_id,
@@ -12,12 +12,16 @@ export const mapDataset = (dto: DatasetResponse): Dataset => ({
   description: dto.description,
   dataType: dto.data_type,
   activeDatasetVersionId: dto.active_dataset_version_id,
+  activeVersionUpdatedAt: dto.active_version_updated_at,
+  createdAt: dto.created_at
 });
 
 export const mapDatasetFormToRequest = (
-  form: DatasetForm,
+  form: DatasetFormValues,
 ): CreateDatasetRequest => ({
   name: form.name,
   description: form.description,
-  data_type: form.dataType, // camel → snake 변환
+  data_type: form.dataType,
 });
+
+

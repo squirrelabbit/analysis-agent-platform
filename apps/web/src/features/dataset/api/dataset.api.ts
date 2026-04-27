@@ -3,7 +3,6 @@ import type {
   CreateDatasetRequest,
   DatasetListResponse,
   DatasetResponse,
-  SetActiveVersionRequest,
 } from "../types/dataset.dto";
 
 export const datasetsApi = {
@@ -25,25 +24,5 @@ export const datasetsApi = {
   deleteDataset: (projectId: string) =>
     apiClient
       .delete<void>(`/projects/${projectId}/datasets`)
-      .then((r) => r.data),
-
-  setActiveVersion: (
-    projectId: string,
-    datasetId: string,
-    req: SetActiveVersionRequest,
-  ) =>
-    apiClient
-      .put<DatasetResponse>(
-        `/projects/${projectId}/datasets/${datasetId}/active_version`,
-        req,
-      )
-      .then((r) => r.data),
-      
-  // Clear active dataset version for a dataset
-  clearActiveVersion: (projectId: string, datasetId: string) =>
-    apiClient
-      .delete<void>(
-        `/projects/${projectId}/datasets/${datasetId}/active_version`,
-      )
       .then((r) => r.data),
 };

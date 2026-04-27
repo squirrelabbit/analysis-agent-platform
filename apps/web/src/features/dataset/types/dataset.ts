@@ -4,8 +4,8 @@ export interface Dataset {
   projectId: string,
   name: string,
   description: string,
-  dataType: string,
+  dataType: 'structured' | 'unstructured',
   activeDatasetVersionId: string,
-  // activeVersionUpdatedAt: string,
-  // createdAt: string
+  activeVersionUpdatedAt: string,
+  createdAt: string
 }
