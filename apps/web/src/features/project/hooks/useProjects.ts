@@ -1,36 +1,23 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { projectsApi } from "../api/project.api";
 import { projectKeys } from "../constants/queryKeys";
 import { mapProject } from "../api/project.mapper";
 
-export const useProjects = () => {
-  const queryClient = useQueryClient();
-
-  const query = useQuery({
+export const useProjects = () =>
+  useQuery({
     queryKey: projectKeys.lists(),
     queryFn: async () => {
-      const data = await projectsApi.getProjects()
-      return data.map(mapProject)
+      const data = await projectsApi.getProjects();
+      return data.map(mapProject);
     },
   });
 
-  const create = useMutation({
-    mutationFn: projectsApi.createProject,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
+export const useProjectDetail = (id: string) =>
+  useQuery({
+    queryKey: projectKeys.detail(id),
+    queryFn: async () => {
+      const data = await projectsApi.getProjectById(id);
+      return mapProject(data);
     },
+    enabled: !!id,
   });
-
-  const remove = useMutation({
-    mutationFn: projectsApi.deleteProject,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-    },
-  });
-
-  return {
-    ...query,
-    create,
-    remove,
-  };
-};

@@ -1,57 +1,31 @@
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Plus, Search } from "lucide-react";
-import { useState } from "react";
-import { CreateProjectDialog } from "./CreateProjectDialog";
+import CreateDialog from "@/components/common/dialogs/CreateDialog";
+import { useCreateProjectMutation } from "../hooks/useProjectsMutation";
+import CreateProjectForm from "./CreateProjectForm";
 
-interface Props {
-  search: string;
-  onChangeSearch: (v: string) => void;
-  filteredCount: number;
-  totalCount: number;
-  onCreate: (name: string, description: string) => void;
-}
-
-export default function ProjectHeader({
-  search,
-  onChangeSearch,
-  filteredCount,
-  totalCount,
-  onCreate,
-}: Props) {
-  const [open, setOpen] = useState(false);
+export default function ProjectHeader({}) {
+  const create = useCreateProjectMutation();
 
   return (
-    <div>
-      <div className="pb-3 flex justify-between items-center">
-        <div>
-          <h1 className="text-sm font-semibold text-zinc-800">전체 프로젝트</h1>
-          <p className="text-[11px] text-zinc-400 mt-0.5">
-            <span className="text-violet-500 font-medium">
-              {filteredCount}개
-            </span>
-            {" / "}전체 {totalCount}개
-          </p>
-        </div>
-        <Button onClick={() => setOpen(true)} className="text-xs">
-          <Plus className="w-3.5 h-3.5" />
-          프로젝트 등록
-        </Button>
+    <header className="flex justify-between">
+      <div>
+        <h2 className="mb-1 text-xl font-bold text-[#16192b]">프로젝트</h2>
+        <p className="text-sm text-[#9399b0]">
+          분석 단위 프로젝트를 생성하고 선택합니다.
+        </p>
       </div>
-      <div className="relative">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
-        <Input
-          placeholder="Search..."
-          value={search}
-          onChange={(e) => onChangeSearch(e.target.value)}
-          className="h-8 pl-8 text-xs rounded-lg border-zinc-200 bg-zinc-50 focus-visible:ring-violet-300"
-        />
+      <div>
+        <CreateDialog title="프로젝트" formId="project-form">
+          {(close) => (
+            <CreateProjectForm
+              formId="project-form"
+              onSubmit={async (data) => {
+                await create.mutateAsync(data);
+              }}
+              onSuccess={close}
+            />
+          )}
+        </CreateDialog>
       </div>
-      <CreateProjectDialog
-        open={open}
-        onClose={() => setOpen(false)}
-        onCreate={onCreate}
-      />
-    </div>
+    </header>
   );
 }

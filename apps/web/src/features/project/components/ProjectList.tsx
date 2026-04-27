@@ -1,21 +1,14 @@
-import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Project } from "../types/project";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, LayoutGrid, Rows3 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ProjectItem from "./ProjectItem";
 
-interface Props {
+interface ProjectListProps {
   total: number;
   projects: Project[];
-  selectedId: string | null;
-  onRemove: (id: string) => void;
 }
 
-export default function ProjectList({
-  total,
-  projects,
-  selectedId,
-  onRemove,
-}: Props) {
+export default function ProjectList({ total, projects }: ProjectListProps) {
   if (projects.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-1.5 py-16 text-center px-4">
@@ -35,20 +28,29 @@ export default function ProjectList({
   }
 
   return (
-    <ScrollArea className="h-full">
-      <div className="flex flex-col gap-2">
-        {projects.map((p, idx) => {
-          const isActive = selectedId === p.id;
-          return (
-            <ProjectItem
-              key={idx}
-              project={p}
-              isActive={isActive}
-              onDelete={onRemove}
-            />
-          );
-        })}
-      </div>
-    </ScrollArea>
+    <Tabs defaultValue="row">
+      <TabsList>
+        <TabsTrigger value="row">
+          <Rows3 />
+        </TabsTrigger>
+        <TabsTrigger value="grid">
+          <LayoutGrid />
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="row">
+        <div className="flex flex-col gap-2">
+          {projects.map((project) => (
+            <ProjectItem key={project.id} {...project} />
+          ))}
+        </div>
+      </TabsContent>
+      <TabsContent value="grid">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {projects.map((project) => (
+            <ProjectItem key={project.id} {...project} />
+          ))}
+        </div>
+      </TabsContent>
+    </Tabs>
   );
 }
