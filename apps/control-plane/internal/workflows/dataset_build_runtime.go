@@ -32,6 +32,7 @@ type DatasetBuildWorkflowInput struct {
 	DatasetID        string    `json:"dataset_id"`
 	DatasetVersionID string    `json:"dataset_version_id"`
 	BuildType        string    `json:"build_type"`
+	RequestID        string    `json:"request_id,omitempty"`
 	RequestedAt      time.Time `json:"requested_at"`
 }
 
@@ -110,6 +111,7 @@ func RegisterDatasetBuildRuntime(registrar RuntimeRegistrar, activities *Dataset
 func DatasetBuildWorkflow(ctx workflow.Context, input DatasetBuildWorkflowInput) (DatasetBuildLifecycleResult, error) {
 	wfInfo := workflow.GetInfo(ctx)
 	wfLogger := obs.Logger.With(
+		"request_id", normalizeDatasetBuildRequestID(input.RequestID, input.JobID),
 		"job_id", input.JobID,
 		"project_id", input.ProjectID,
 		"dataset_version_id", input.DatasetVersionID,
@@ -182,7 +184,7 @@ func DatasetBuildWorkflow(ctx workflow.Context, input DatasetBuildWorkflowInput)
 
 func (a *DatasetBuildActivities) MarkDatasetBuildJobRunning(ctx context.Context, input DatasetBuildWorkflowInput) (result DatasetBuildLifecycleResult, err error) {
 	actInfo := obs.GetActivityLogInfo(ctx)
-	ctx = obs.EnrichActivityContext(ctx, "", "", actInfo)
+	ctx = obs.EnrichActivityContext(ctx, normalizeDatasetBuildRequestID(input.RequestID, input.JobID), "", actInfo)
 	startedAt := obs.LogActivityStarted(ctx, MarkDatasetBuildJobRunningActivityName, actInfo)
 	defer func() {
 		if err != nil {
@@ -227,7 +229,7 @@ func (a *DatasetBuildActivities) MarkDatasetBuildJobRunning(ctx context.Context,
 
 func (a *DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, input DatasetBuildWorkflowInput) (err error) {
 	actInfo := obs.GetActivityLogInfo(ctx)
-	ctx = obs.EnrichActivityContext(ctx, "", "", actInfo)
+	ctx = obs.EnrichActivityContext(ctx, normalizeDatasetBuildRequestID(input.RequestID, input.JobID), "", actInfo)
 	startedAt := obs.LogActivityStarted(ctx, ExecuteDatasetBuildJobActivityName, actInfo)
 	defer func() {
 		if err != nil {
@@ -307,7 +309,7 @@ func (a *DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, inp
 
 func (a *DatasetBuildActivities) MarkDatasetBuildJobCompleted(ctx context.Context, input DatasetBuildWorkflowInput) (result DatasetBuildLifecycleResult, err error) {
 	actInfo := obs.GetActivityLogInfo(ctx)
-	ctx = obs.EnrichActivityContext(ctx, "", "", actInfo)
+	ctx = obs.EnrichActivityContext(ctx, normalizeDatasetBuildRequestID(input.RequestID, input.JobID), "", actInfo)
 	startedAt := obs.LogActivityStarted(ctx, MarkDatasetBuildJobCompletedActivityName, actInfo)
 	defer func() {
 		if err != nil {
@@ -345,7 +347,7 @@ func (a *DatasetBuildActivities) MarkDatasetBuildJobCompleted(ctx context.Contex
 
 func (a *DatasetBuildActivities) MarkDatasetBuildJobFailed(ctx context.Context, payload DatasetBuildFailureInput) (result DatasetBuildLifecycleResult, err error) {
 	actInfo := obs.GetActivityLogInfo(ctx)
-	ctx = obs.EnrichActivityContext(ctx, "", "", actInfo)
+	ctx = obs.EnrichActivityContext(ctx, normalizeDatasetBuildRequestID(payload.WorkflowInput.RequestID, payload.WorkflowInput.JobID), "", actInfo)
 	startedAt := obs.LogActivityStarted(ctx, MarkDatasetBuildJobFailedActivityName, actInfo)
 	defer func() {
 		if err != nil {
@@ -390,7 +392,7 @@ func (a *DatasetBuildActivities) MarkDatasetBuildJobFailed(ctx context.Context, 
 
 func (a *DatasetBuildActivities) ResumeWaitingExecutionsForDatasetVersion(ctx context.Context, input DatasetBuildWorkflowInput) (result DatasetBuildLifecycleResult, err error) {
 	actInfo := obs.GetActivityLogInfo(ctx)
-	ctx = obs.EnrichActivityContext(ctx, "", "", actInfo)
+	ctx = obs.EnrichActivityContext(ctx, normalizeDatasetBuildRequestID(input.RequestID, input.JobID), "", actInfo)
 	startedAt := obs.LogActivityStarted(ctx, ResumeWaitingExecutionsActivityName, actInfo)
 	defer func() {
 		if err != nil {
@@ -494,6 +496,18 @@ func datasetBuildExecuteActivityOptions(buildType string) workflow.ActivityOptio
 			},
 		},
 	}
+}
+
+func normalizeDatasetBuildRequestID(requestID, jobID string) string {
+	requestID = strings.TrimSpace(requestID)
+	if requestID != "" {
+		return requestID
+	}
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return ""
+	}
+	return "dataset-build-request-" + jobID
 }
 
 func classifyDatasetBuildError(err error) error {

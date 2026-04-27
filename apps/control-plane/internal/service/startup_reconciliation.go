@@ -75,6 +75,7 @@ func (s *DatasetService) requeueDatasetBuildJob(job domain.DatasetBuildJob) erro
 			DatasetID:        job.DatasetID,
 			DatasetVersionID: job.DatasetVersionID,
 			BuildType:        job.BuildType,
+			RequestID:        normalizeDatasetBuildRequestID("", job.JobID),
 		})
 		if err != nil {
 			return err

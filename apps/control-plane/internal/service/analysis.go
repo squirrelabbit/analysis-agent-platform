@@ -28,11 +28,11 @@ type AnalysisService struct {
 }
 
 type executionDependencyBuilder interface {
-	CreateCleanJob(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest, triggeredBy string) (domain.DatasetBuildJob, error)
-	CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy string) (domain.DatasetBuildJob, error)
-	CreateSentimentJob(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
-	CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
-	CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
+	CreateCleanJob(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error)
+	CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error)
+	CreateSentimentJob(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error)
+	CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error)
+	CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error)
 }
 
 func NewAnalysisService(repository store.Repository, starter workflows.Starter, planGenerator planner.Planner) *AnalysisService {
@@ -307,11 +307,11 @@ func (s *AnalysisService) ensureExecutionDependencies(projectID string, plan dom
 		return err
 	}
 
-	_, err = s.ensureExecutionDependenciesForVersion(projectID, version, plan.Plan, "analysis_execute")
+	_, err = s.ensureExecutionDependenciesForVersion(projectID, version, plan.Plan, plan.RequestID, "analysis_execute")
 	return err
 }
 
-func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string, version domain.DatasetVersion, plan domain.SkillPlan, triggeredBy string) (domain.DatasetVersion, error) {
+func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string, version domain.DatasetVersion, plan domain.SkillPlan, requestID, triggeredBy string) (domain.DatasetVersion, error) {
 	if s.dependencyBuilder == nil {
 		return version, nil
 	}
@@ -324,7 +324,7 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 	clusterRequest, hasMaterializedClusterRequest := domain.ClusterMaterializationRequestForPlan(plan)
 
 	if planNeedsTextBuildDependency(plan) && shouldBuildCleanDependency(version) {
-		if _, err := s.dependencyBuilder.CreateCleanJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetCleanRequest{}, triggeredBy); err != nil {
+		if _, err := s.dependencyBuilder.CreateCleanJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetCleanRequest{}, triggeredBy, requestID); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
@@ -334,7 +334,7 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 		return latest, nil
 	}
 	if needsPrepare && requiresPrepare(version) && !datasetPrepareReady(version) {
-		if _, err := s.dependencyBuilder.CreatePrepareJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, triggeredBy); err != nil {
+		if _, err := s.dependencyBuilder.CreatePrepareJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, triggeredBy, requestID); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
@@ -344,7 +344,7 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 		return latest, nil
 	}
 	if needsSentiment && !datasetSentimentReady(version) {
-		if _, err := s.dependencyBuilder.CreateSentimentJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}, triggeredBy); err != nil {
+		if _, err := s.dependencyBuilder.CreateSentimentJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}, triggeredBy, requestID); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
@@ -354,7 +354,7 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 		return latest, nil
 	}
 	if needsEmbedding && !datasetEmbeddingReady(version) {
-		if _, err := s.dependencyBuilder.CreateEmbeddingJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}, triggeredBy); err != nil {
+		if _, err := s.dependencyBuilder.CreateEmbeddingJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}, triggeredBy, requestID); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
@@ -364,7 +364,7 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 		return latest, nil
 	}
 	if needsCluster && hasMaterializedClusterRequest && clusterRequest != nil && !domain.ClusterRequestMatchesMetadata(*clusterRequest, version.Metadata) {
-		if _, err := s.dependencyBuilder.CreateClusterJob(projectID, version.DatasetID, version.DatasetVersionID, *clusterRequest, triggeredBy); err != nil {
+		if _, err := s.dependencyBuilder.CreateClusterJob(projectID, version.DatasetID, version.DatasetVersionID, *clusterRequest, triggeredBy, requestID); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
@@ -1775,7 +1775,7 @@ func (s *AnalysisService) ResumeWaitingExecutionsForDatasetVersion(projectID, da
 			}
 			return resumedCount, err
 		}
-		version, err = s.ensureExecutionDependenciesForVersion(projectID, version, execution.Plan, triggeredBy)
+		version, err = s.ensureExecutionDependenciesForVersion(projectID, version, execution.Plan, execution.RequestID, triggeredBy)
 		if err != nil {
 			return resumedCount, err
 		}

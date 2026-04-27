@@ -22,7 +22,7 @@ type fakeExecutionDependencyBuilder struct {
 	clusterRequests []domain.DatasetClusterBuildRequest
 }
 
-func (b *fakeExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetCleanRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *fakeExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetCleanRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "clean")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -43,7 +43,7 @@ func (b *fakeExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, da
 	return domain.DatasetBuildJob{JobID: "job-clean", BuildType: "clean", Status: status}, nil
 }
 
-func (b *fakeExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *fakeExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "prepare")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -64,7 +64,7 @@ func (b *fakeExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, 
 	return domain.DatasetBuildJob{JobID: "job-prepare", BuildType: "prepare", Status: version.PrepareStatus}, nil
 }
 
-func (b *fakeExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *fakeExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "sentiment")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -81,7 +81,7 @@ func (b *fakeExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID
 	return domain.DatasetBuildJob{JobID: "job-sentiment", BuildType: "sentiment", Status: version.SentimentStatus}, nil
 }
 
-func (b *fakeExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *fakeExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "embedding")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -100,7 +100,7 @@ func (b *fakeExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID
 	return domain.DatasetBuildJob{JobID: "job-embedding", BuildType: "embedding", Status: version.EmbeddingStatus}, nil
 }
 
-func (b *fakeExecutionDependencyBuilder) CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *fakeExecutionDependencyBuilder) CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "cluster")
 	b.clusterRequests = append(b.clusterRequests, input)
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
@@ -143,7 +143,7 @@ func builderStatusOrDefault(status string) string {
 	return status
 }
 
-func (b *lazyExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetCleanRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *lazyExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetCleanRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "clean")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -159,7 +159,7 @@ func (b *lazyExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, da
 	return domain.DatasetBuildJob{JobID: "job-clean", BuildType: "clean", Status: "queued"}, nil
 }
 
-func (b *lazyExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *lazyExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "prepare")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -172,7 +172,7 @@ func (b *lazyExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, 
 	return domain.DatasetBuildJob{JobID: "job-prepare", BuildType: "prepare", Status: version.PrepareStatus}, nil
 }
 
-func (b *lazyExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *lazyExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "sentiment")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -185,7 +185,7 @@ func (b *lazyExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID
 	return domain.DatasetBuildJob{JobID: "job-sentiment", BuildType: "sentiment", Status: version.SentimentStatus}, nil
 }
 
-func (b *lazyExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *lazyExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "embedding")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -198,7 +198,7 @@ func (b *lazyExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID
 	return domain.DatasetBuildJob{JobID: "job-embedding", BuildType: "embedding", Status: version.EmbeddingStatus}, nil
 }
 
-func (b *lazyExecutionDependencyBuilder) CreateClusterJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetClusterBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *lazyExecutionDependencyBuilder) CreateClusterJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetClusterBuildRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "cluster")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {

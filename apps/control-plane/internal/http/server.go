@@ -920,6 +920,7 @@ func (s *Server) handleCreateCleanJob(w stdhttp.ResponseWriter, r *stdhttp.Reque
 		r.PathValue("version_id"),
 		payload,
 		"api",
+		obs.RequestIDFromContext(r.Context()),
 	)
 	if err != nil {
 		s.writeServiceError(w, err)
@@ -959,6 +960,7 @@ func (s *Server) handleCreatePrepareJob(w stdhttp.ResponseWriter, r *stdhttp.Req
 		r.PathValue("version_id"),
 		payload,
 		"api",
+		obs.RequestIDFromContext(r.Context()),
 	)
 	if err != nil {
 		s.writeServiceError(w, err)
@@ -1066,6 +1068,7 @@ func (s *Server) handleCreateEmbeddingJob(w stdhttp.ResponseWriter, r *stdhttp.R
 		r.PathValue("version_id"),
 		payload,
 		"api",
+		obs.RequestIDFromContext(r.Context()),
 	)
 	if err != nil {
 		s.writeServiceError(w, err)
@@ -1086,6 +1089,7 @@ func (s *Server) handleCreateClusterJob(w stdhttp.ResponseWriter, r *stdhttp.Req
 		r.PathValue("version_id"),
 		payload,
 		"api",
+		obs.RequestIDFromContext(r.Context()),
 	)
 	if err != nil {
 		s.writeServiceError(w, err)
@@ -1156,6 +1160,7 @@ func (s *Server) handleCreateSentimentJob(w stdhttp.ResponseWriter, r *stdhttp.R
 		r.PathValue("version_id"),
 		payload,
 		"api",
+		obs.RequestIDFromContext(r.Context()),
 	)
 	if err != nil {
 		s.writeServiceError(w, err)

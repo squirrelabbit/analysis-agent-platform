@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/obs"
 )
 
 func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
@@ -312,6 +313,48 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 	}
 	if !strings.Contains(evidenceArtifact, `"summary":"대표 이슈 근거를 모았습니다"`) {
 		t.Fatalf("unexpected evidence artifact: %s", evidenceArtifact)
+	}
+}
+
+func TestPythonAIClientPropagatesRequestIDHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Request-ID"); got != "request-123" {
+			t.Fatalf("unexpected request id header: %q", got)
+		}
+		_, _ = w.Write([]byte(`{
+			"artifact":{
+				"skill_name":"unstructured_issue_summary",
+				"summary":{"document_count":1},
+				"top_terms":[{"term":"error","count":1}]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client := PythonAIClient{
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	}
+	ctx := obs.WithRequestID(context.Background(), "request-123")
+
+	_, err := client.Run(ctx, domain.ExecutionSummary{
+		ExecutionID: "exec-1",
+		ProjectID:   "project-1",
+		Plan: domain.SkillPlan{
+			Steps: []domain.SkillPlanStep{
+				{
+					StepID:      "step-1",
+					SkillName:   "unstructured_issue_summary",
+					DatasetName: "/tmp/issues.csv",
+					Inputs: map[string]any{
+						"text_column": "text",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -212,7 +212,7 @@ func TestCreateDatasetVersionAutoCreatesSentimentJobAfterPrepare(t *testing.T) {
 	waitForDatasetBuildJobStatus(t, service, project.ProjectID, cleanJob.JobID, "completed")
 	waitForDatasetVersionCleanReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
 
-	prepareJobCreated, err := service.CreatePrepareJob(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "test")
+	prepareJobCreated, err := service.CreatePrepareJob(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "test", "")
 	if err != nil {
 		t.Fatalf("unexpected create prepare job error: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestCreateDatasetVersionAutoCreatesEmbeddingJobAfterPrepare(t *testing.T) {
 	waitForDatasetBuildJobStatus(t, service, project.ProjectID, cleanJob.JobID, "completed")
 	waitForDatasetVersionCleanReady(t, service, project.ProjectID, dataset.DatasetID, version.DatasetVersionID)
 
-	prepareJobCreated, err := service.CreatePrepareJob(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "test")
+	prepareJobCreated, err := service.CreatePrepareJob(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "test", "")
 	if err != nil {
 		t.Fatalf("unexpected create prepare job error: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestCreatePrepareJobCompletesAndStoresStatus(t *testing.T) {
 	defer server.Close()
 	service.pythonAIWorkerURL = server.URL
 
-	job, err := service.CreatePrepareJob(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "test")
+	job, err := service.CreatePrepareJob(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "test", "")
 	if err != nil {
 		t.Fatalf("unexpected create prepare job error: %v", err)
 	}
@@ -469,7 +469,7 @@ func TestCreatePrepareJobStartsTemporalWorkflowWhenStarterConfigured(t *testing.
 		t.Fatalf("unexpected save dataset version error: %v", err)
 	}
 
-	job, err := service.CreatePrepareJob(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "test")
+	job, err := service.CreatePrepareJob(project.ProjectID, dataset.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, "test", "")
 	if err != nil {
 		t.Fatalf("unexpected create prepare job error: %v", err)
 	}
@@ -478,6 +478,9 @@ func TestCreatePrepareJobStartsTemporalWorkflowWhenStarterConfigured(t *testing.
 	}
 	if starter.startCalls[0].JobID != job.JobID || starter.startCalls[0].BuildType != "prepare" {
 		t.Fatalf("unexpected start input: %+v", starter.startCalls[0])
+	}
+	if starter.startCalls[0].RequestID != "dataset-build-request-"+job.JobID {
+		t.Fatalf("expected synthetic request id for dataset build workflow, got %+v", starter.startCalls[0])
 	}
 	stored, err := service.GetDatasetBuildJob(project.ProjectID, job.JobID)
 	if err != nil {

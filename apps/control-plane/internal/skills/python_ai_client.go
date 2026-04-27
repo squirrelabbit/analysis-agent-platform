@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/obs"
 	"analysis-support-platform/control-plane/internal/registry"
 )
 
@@ -99,6 +100,9 @@ func (c PythonAIClient) Run(ctx context.Context, execution domain.ExecutionSumma
 			return ExecutionRunResult{}, err
 		}
 		req.Header.Set("Content-Type", "application/json")
+		if rid := obs.RequestIDFromContext(ctx); rid != "" {
+			req.Header.Set("X-Request-ID", rid)
+		}
 
 		resp, err := httpClient.Do(req)
 		if err != nil {
