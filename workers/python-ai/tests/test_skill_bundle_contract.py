@@ -7,7 +7,15 @@ from python_ai_worker._migration_targets import (
     LEGACY_SKILL_NAMES,
     canonical_skill_name,
 )
-from python_ai_worker.skill_bundle import capability_skills, planner_recommendations, planner_visible_skill_names, skill_bundle
+from python_ai_worker.skill_bundle import (
+    LAYER_PRECEDENCE,
+    capability_skills,
+    layer_for_skill,
+    planner_recommendations,
+    planner_visible_skill_names,
+    skill_bundle,
+    skills_by_layer,
+)
 from python_ai_worker.task_router import capability_names, task_handlers
 
 RESULT_KINDS = {
@@ -39,6 +47,15 @@ QUALITY_TIERS = {
     "deterministic",
     "heuristic",
     "llm_dependent",
+}
+LAYERS = {
+    "preprocess",
+    "aggregate",
+    "retrieve",
+    "summarize",
+    "presentation",
+    "structured",
+    "dataset_build",
 }
 
 
@@ -107,11 +124,34 @@ class SkillBundleContractTests(unittest.TestCase):
                 self.assertIn(str(skill.get("result_scope_policy") or "").strip(), RESULT_SCOPE_POLICIES)
                 self.assertIn(str(skill.get("fallback_policy") or "").strip(), FALLBACK_POLICIES)
                 self.assertIn(str(skill.get("quality_tier") or "").strip(), QUALITY_TIERS)
+                self.assertIn(str(skill.get("layer") or "").strip(), LAYERS)
                 if str(skill.get("result_scope_policy") or "").strip() == "dynamic":
                     allowed_runtime_scopes = list(skill.get("allowed_runtime_result_scopes") or [])
                     self.assertTrue(allowed_runtime_scopes)
                     for runtime_scope in allowed_runtime_scopes:
                         self.assertIn(str(runtime_scope or "").strip(), RESULT_SCOPES)
+
+    def test_layer_accessor_returns_declared_layer(self) -> None:
+        for skill in capability_skills():
+            name = str(skill.get("name") or "").strip()
+            layer = str(skill.get("layer") or "").strip()
+            with self.subTest(skill_name=name):
+                self.assertEqual(layer_for_skill(name), layer)
+
+    def test_skills_by_layer_returns_only_matching_entries(self) -> None:
+        bundle_skills = capability_skills()
+        for layer in LAYERS:
+            expected = sorted(
+                str(skill.get("name") or "").strip()
+                for skill in bundle_skills
+                if str(skill.get("layer") or "").strip() == layer
+            )
+            with self.subTest(layer=layer):
+                actual = sorted(str(skill.get("name") or "").strip() for skill in skills_by_layer(layer))
+                self.assertEqual(actual, expected)
+
+    def test_layer_precedence_covers_all_layer_enums(self) -> None:
+        self.assertEqual(set(LAYER_PRECEDENCE.keys()), LAYERS)
 
     def test_legacy_skill_names_match_audit_inventory(self) -> None:
         """ADR-009 F4: the canonical migration scope is exactly 17 names

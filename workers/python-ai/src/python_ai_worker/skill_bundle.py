@@ -6,6 +6,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+LAYER_PRECEDENCE = {
+    "preprocess": 0,
+    "aggregate": 1,
+    "retrieve": 1,
+    "structured": 1,
+    "summarize": 2,
+    "presentation": 3,
+    "dataset_build": -1,
+}
+
 
 def bundle_version() -> str:
     return str(skill_bundle().get("version") or "").strip()
@@ -59,6 +69,26 @@ def task_path_for_skill(name: str) -> str | None:
         return None
     task_path = str(skill.get("task_path") or "").strip()
     return task_path or None
+
+
+def layer_for_skill(name: str) -> str | None:
+    skill = skill_definition(name)
+    if not skill:
+        return None
+    layer = str(skill.get("layer") or "").strip()
+    return layer or None
+
+
+def skills_by_layer(layer: str) -> list[dict[str, Any]]:
+    normalized = str(layer or "").strip()
+    if not normalized:
+        return []
+    skills: list[dict[str, Any]] = []
+    for skill in capability_skills():
+        if str(skill.get("layer") or "").strip() != normalized:
+            continue
+        skills.append(dict(skill))
+    return skills
 
 
 def default_plan_skills(data_type: str) -> list[str]:

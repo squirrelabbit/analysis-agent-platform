@@ -39,10 +39,22 @@
 - `heuristic`: 휴리스틱/모델/유사도 로직이 포함되지만 재현 가능한 계산
 - `llm_dependent`: LLM 응답 품질에 의존하는 결과
 
+### `layer`
+
+- `preprocess`: 문서 정제, 필터링, 샘플링, 문장 분리
+- `aggregate`: 빈도, 버킷, breakdown, taxonomy tagging 같은 집계
+- `retrieve`: semantic search, embedding cluster, cluster label 후보 조회
+- `summarize`: 이슈 요약, 비교, 추세, 감성, 근거 요약
+- `presentation`: 최종 사용자-facing answer 생성
+- `structured`: duckdb 기반 structured KPI 분석
+- `dataset_build`: dataset version build 전용 task
+
 ## Validation Rule
 
 - planner prompt에서 skill 설명은 각 skill의 `description`을 사용한다.
 - planner prompt에서 deprecated alias(`deprecated_alias_of`가 있는 entry)는 기본적으로 노출하지 않는다.
+- 모든 skill entry는 `layer`를 가진다.
+- `workers/python-ai/src/python_ai_worker/skill_bundle.py`의 `LAYER_PRECEDENCE`는 planner가 layer ordering을 검증할 때 쓰는 기준이다.
 - `planner_recommendations`는 LLM planner의 추천 sequence 문구 source다.
   - `sequence_name`: `planner_sequences`의 key
   - `when`: 해당 sequence를 추천하는 영어 문장
