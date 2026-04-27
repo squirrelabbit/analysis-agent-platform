@@ -55,6 +55,10 @@
 - planner prompt에서 deprecated alias(`deprecated_alias_of`가 있는 entry)는 기본적으로 노출하지 않는다.
 - 모든 skill entry는 `layer`를 가진다.
 - `workers/python-ai/src/python_ai_worker/skill_bundle.py`의 `LAYER_PRECEDENCE`는 planner가 layer ordering을 검증할 때 쓰는 기준이다.
+- `planner_layer_hints`는 rule planner / meta-planner가 질문에서 active layer 또는 기본 sequence를 추론할 때 쓰는 source다.
+  - `sequence_name`: 현재 query가 가장 먼저 매핑될 기본 planner sequence
+  - `trigger`: case-insensitive substring match 목록
+  - `layers`: query가 활성화해야 할 runtime layer subset
 - `planner_recommendations`는 LLM planner의 추천 sequence 문구 source다.
   - `sequence_name`: `planner_sequences`의 key
   - `when`: 해당 sequence를 추천하는 영어 문장

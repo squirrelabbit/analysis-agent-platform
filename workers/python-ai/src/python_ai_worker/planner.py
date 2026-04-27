@@ -7,7 +7,7 @@ from typing import Any
 
 from . import runtime as rt
 from .obs import get
-from .skill_bundle import default_inputs_for_skill, planner_sequence, skill_definition
+from .skill_bundle import default_inputs_for_skill, planner_layer_hints, planner_sequence, skill_definition
 
 _LOG = get("planner")
 
@@ -55,33 +55,8 @@ def _run_rule_based_planner(payload: dict[str, Any]) -> dict[str, Any]:
 
     if data_type in {"mixed", "both"}:
         sequence_name = "mixed_default"
-    elif data_type == "unstructured" and rt._looks_sentence_split_goal(goal):
-        sequence_name = "unstructured_sentence_split"
-    elif data_type == "unstructured" and rt._looks_noun_frequency_goal(goal):
-        sequence_name = "unstructured_noun_frequency"
-    elif data_type == "unstructured" and rt._looks_cluster_goal(goal):
-        if rt._looks_cluster_subset_goal(goal):
-            sequence_name = "unstructured_cluster_subset"
-        else:
-            sequence_name = "unstructured_cluster_materialized"
-    elif data_type == "unstructured" and rt._looks_taxonomy_goal(goal):
-        sequence_name = "unstructured_taxonomy"
-    elif data_type == "unstructured" and rt._looks_duplicate_goal(goal):
-        sequence_name = "unstructured_duplicate"
-    elif data_type == "unstructured" and rt._looks_sentiment_goal(goal):
-        sequence_name = "unstructured_sentiment"
-    elif data_type == "unstructured" and rt._looks_semantic_search_goal(goal):
-        sequence_name = "unstructured_semantic_search"
-    elif data_type == "unstructured" and rt._looks_compare_goal(goal):
-        sequence_name = "unstructured_compare"
-    elif data_type == "unstructured" and rt._looks_breakdown_goal(goal):
-        sequence_name = "unstructured_breakdown"
-    elif data_type == "unstructured" and rt._looks_trend_goal(goal):
-        sequence_name = "unstructured_trend"
-    elif data_type == "unstructured" or rt._looks_unstructured(goal):
-        sequence_name = "unstructured_default"
     else:
-        sequence_name = "structured_default"
+        sequence_name = _sequence_name_from_rule_hints(data_type, goal)
 
     skills = planner_sequence(sequence_name)
 
@@ -117,6 +92,21 @@ def _plan_metadata(skills: list[str]) -> dict[str, Any]:
         "contains_llm_stage": bool(llm_stages),
         "llm_stages": llm_stages,
     }
+
+
+def _sequence_name_from_rule_hints(data_type: str, goal: str) -> str:
+    if data_type == "unstructured" or rt._looks_unstructured(goal):
+        normalized_goal = str(goal or "").strip().lower()
+        for hint in planner_layer_hints():
+            triggers = [str(trigger or "").strip().lower() for trigger in list(hint.get("trigger") or [])]
+            if not triggers:
+                continue
+            if any(trigger and trigger in normalized_goal for trigger in triggers):
+                sequence_name = str(hint.get("sequence_name") or "").strip()
+                if sequence_name:
+                    return sequence_name
+        return "unstructured_default"
+    return "structured_default"
 
 
 def _attach_plan_metadata(result: dict[str, Any]) -> dict[str, Any]:

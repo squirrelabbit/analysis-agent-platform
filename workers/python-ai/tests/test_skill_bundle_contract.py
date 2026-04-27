@@ -104,6 +104,21 @@ class SkillBundleContractTests(unittest.TestCase):
                 self.assertIn(recommendation["sequence_name"], known_sequences)
                 self.assertTrue(recommendation["when"])
 
+    def test_planner_layer_hints_reference_known_sequences_and_layers(self) -> None:
+        bundle = skill_bundle()
+        known_sequences = set((bundle.get("planner_sequences") or {}).keys())
+
+        for hint in list(bundle.get("planner_layer_hints") or []):
+            sequence_name = str(hint.get("sequence_name") or "").strip()
+            triggers = list(hint.get("trigger") or [])
+            layers = list(hint.get("layers") or [])
+            with self.subTest(sequence_name=sequence_name):
+                self.assertIn(sequence_name, known_sequences)
+                self.assertTrue(triggers)
+                self.assertTrue(layers)
+                for layer in layers:
+                    self.assertIn(str(layer or "").strip(), LAYERS)
+
     def test_prior_skill_contracts_reference_known_bundle_skills(self) -> None:
         known = {str(skill.get("name") or "").strip() for skill in capability_skills()}
 

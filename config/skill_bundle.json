@@ -162,6 +162,63 @@
       "when": "For trend, increase, decrease, or time-series issue analysis."
     }
   ],
+  "planner_layer_hints": [
+    {
+      "sequence_name": "unstructured_sentence_split",
+      "trigger": ["sentence split", "sentence-level", "문장 분리", "문장단위", "문장 단위", "문장별", "문장으로 나눠"],
+      "layers": ["preprocess"]
+    },
+    {
+      "sequence_name": "unstructured_noun_frequency",
+      "trigger": ["noun", "nouns", "명사", "명사 추출", "명사 빈도", "명사 키워드"],
+      "layers": ["preprocess", "aggregate"]
+    },
+    {
+      "sequence_name": "unstructured_cluster_subset",
+      "trigger": ["최근 문의 중", "subset cluster", "filtered cluster", "군집 subset"],
+      "layers": ["preprocess", "retrieve", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_cluster_materialized",
+      "trigger": ["cluster", "clustering", "theme", "topic group", "군집", "클러스터", "토픽", "주제별", "묶음"],
+      "layers": ["preprocess", "retrieve", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_taxonomy",
+      "trigger": ["taxonomy", "tag", "category", "categorize", "분류", "분류체계", "카테고리", "태그"],
+      "layers": ["preprocess", "aggregate", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_duplicate",
+      "trigger": ["duplicate", "dedup", "중복", "반복 문서", "같은 이슈", "유사 문서"],
+      "layers": ["preprocess"]
+    },
+    {
+      "sequence_name": "unstructured_sentiment",
+      "trigger": ["sentiment", "positive", "negative", "neutral", "긍정", "부정", "중립", "감성", "감정", "호감", "불만", "만족"],
+      "layers": ["preprocess", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_semantic_search",
+      "trigger": ["search", "evidence", "find", "relevant", "근거", "찾아", "검색", "관련 문서"],
+      "layers": ["preprocess", "retrieve", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_compare",
+      "trigger": ["compare", "versus", "vs", "difference", "period compare", "전주", "전월", "지난주", "지난달", "대비", "비교", "달라졌", "얼마나 달라"],
+      "layers": ["preprocess", "aggregate", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_breakdown",
+      "trigger": ["breakdown", "group by", "channel", "source", "product", "region", "채널별", "제품별", "상태별", "분해", "어디서", "어느 채널"],
+      "layers": ["preprocess", "aggregate", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_trend",
+      "trigger": ["trend", "increase", "decrease", "change", "recent", "over time", "추세", "증가", "감소", "변화", "급증", "최근"],
+      "layers": ["preprocess", "aggregate", "summarize"]
+    }
+  ],
   "skills": [
     {
       "name": "structured_kpi_summary",

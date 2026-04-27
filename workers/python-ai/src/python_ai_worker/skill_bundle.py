@@ -123,6 +123,34 @@ def planner_recommendations() -> list[dict[str, Any]]:
     return recommendations
 
 
+def planner_layer_hints() -> list[dict[str, Any]]:
+    hints: list[dict[str, Any]] = []
+    for item in list(skill_bundle().get("planner_layer_hints") or []):
+        if not isinstance(item, dict):
+            continue
+        sequence_name = str(item.get("sequence_name") or "").strip()
+        layers = [
+            str(layer or "").strip()
+            for layer in list(item.get("layers") or [])
+            if str(layer or "").strip()
+        ]
+        triggers = [
+            str(trigger or "").strip()
+            for trigger in list(item.get("trigger") or [])
+            if str(trigger or "").strip()
+        ]
+        if not sequence_name or not layers or not triggers:
+            continue
+        hints.append(
+            {
+                "sequence_name": sequence_name,
+                "layers": layers,
+                "trigger": triggers,
+            }
+        )
+    return hints
+
+
 def default_inputs_for_skill(skill_name: str, *, goal: str = "") -> dict[str, Any]:
     skill = skill_definition(skill_name)
     if not skill:
