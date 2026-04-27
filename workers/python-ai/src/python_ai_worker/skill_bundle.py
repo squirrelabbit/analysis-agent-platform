@@ -29,6 +29,26 @@ def plan_skill_names() -> list[str]:
     return names
 
 
+def planner_visible_skills() -> list[dict[str, Any]]:
+    skills: list[dict[str, Any]] = []
+    for skill in capability_skills():
+        if not bool(skill.get("plan_enabled")):
+            continue
+        if str(skill.get("deprecated_alias_of") or "").strip():
+            continue
+        skills.append(dict(skill))
+    return skills
+
+
+def planner_visible_skill_names() -> list[str]:
+    names: list[str] = []
+    for skill in planner_visible_skills():
+        name = str(skill.get("name") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
 def skill_definition(name: str) -> dict[str, Any] | None:
     return dict(skills_by_name().get(str(name).strip()) or {}) or None
 
@@ -53,6 +73,24 @@ def planner_sequence(name: str) -> list[str]:
     sequences = skill_bundle().get("planner_sequences") or {}
     selected = list(sequences.get(str(name).strip()) or [])
     return [str(skill_name).strip() for skill_name in selected if str(skill_name).strip()]
+
+
+def planner_recommendations() -> list[dict[str, Any]]:
+    recommendations: list[dict[str, Any]] = []
+    for item in list(skill_bundle().get("planner_recommendations") or []):
+        if not isinstance(item, dict):
+            continue
+        sequence_name = str(item.get("sequence_name") or "").strip()
+        when = str(item.get("when") or "").strip()
+        if not sequence_name or not when:
+            continue
+        recommendations.append(
+            {
+                "sequence_name": sequence_name,
+                "when": when,
+            }
+        )
+    return recommendations
 
 
 def default_inputs_for_skill(skill_name: str, *, goal: str = "") -> dict[str, Any]:

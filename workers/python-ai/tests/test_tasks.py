@@ -456,7 +456,7 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["planner_model"], "rule-based-v1")
         self.assertEqual(
             [step["skill_name"] for step in result["plan"]["steps"]],
-            ["document_filter", "keyword_frequency", "document_sample", "unstructured_issue_summary", "issue_evidence_summary"],
+            ["document_filter", "term_frequency", "document_sample", "unstructured_issue_summary", "issue_evidence_summary"],
         )
         self.assertEqual(result["plan"]["steps"][-1]["inputs"]["query"], "VOC 이슈를 요약해줘")
         self.assertTrue(result["plan"]["metadata"]["contains_llm_stage"])

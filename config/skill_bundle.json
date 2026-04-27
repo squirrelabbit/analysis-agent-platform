@@ -28,14 +28,14 @@
     "mixed_default": [
       "structured_kpi_summary",
       "document_filter",
-      "keyword_frequency",
+      "term_frequency",
       "document_sample",
       "unstructured_issue_summary",
       "issue_evidence_summary"
     ],
     "unstructured_default": [
       "document_filter",
-      "keyword_frequency",
+      "term_frequency",
       "document_sample",
       "unstructured_issue_summary",
       "issue_evidence_summary"
@@ -104,6 +104,64 @@
       "issue_evidence_summary"
     ]
   },
+  "planner_recommendations": [
+    {
+      "sequence_name": "structured_default",
+      "when": "For numeric KPI, metric, or tabular analysis."
+    },
+    {
+      "sequence_name": "mixed_default",
+      "when": "For mixed structured and unstructured analysis that needs both KPI context and text evidence."
+    },
+    {
+      "sequence_name": "unstructured_default",
+      "when": "For general unstructured text analysis."
+    },
+    {
+      "sequence_name": "unstructured_noun_frequency",
+      "when": "For noun extraction or morphology-focused keyword analysis."
+    },
+    {
+      "sequence_name": "unstructured_sentence_split",
+      "when": "For sentence splitting, sentence-unit evidence preparation, or sentence-by-sentence review."
+    },
+    {
+      "sequence_name": "unstructured_cluster_materialized",
+      "when": "For cluster analysis when the full dataset should be grouped with precomputed embeddings."
+    },
+    {
+      "sequence_name": "unstructured_cluster_subset",
+      "when": "For cluster analysis after filtering or deduplicating a subset first."
+    },
+    {
+      "sequence_name": "unstructured_taxonomy",
+      "when": "For taxonomy or category distribution analysis."
+    },
+    {
+      "sequence_name": "unstructured_duplicate",
+      "when": "For duplicate-focused evidence review before summarization."
+    },
+    {
+      "sequence_name": "unstructured_sentiment",
+      "when": "For sentiment distribution or positive, negative, and neutral analysis."
+    },
+    {
+      "sequence_name": "unstructured_semantic_search",
+      "when": "For evidence lookup or finding semantically related documents."
+    },
+    {
+      "sequence_name": "unstructured_compare",
+      "when": "For current versus previous period comparison."
+    },
+    {
+      "sequence_name": "unstructured_breakdown",
+      "when": "For channel, product, region, or metadata breakdown analysis."
+    },
+    {
+      "sequence_name": "unstructured_trend",
+      "when": "For trend, increase, decrease, or time-series issue analysis."
+    }
+  ],
   "skills": [
     {
       "name": "structured_kpi_summary",
@@ -215,7 +273,7 @@
     },
     {
       "name": "term_frequency",
-      "description": "Count top terms from filtered unstructured rows. Canonical replacement for keyword_frequency (ADR-009 F1).",
+      "description": "Count top terms from filtered unstructured rows.",
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",

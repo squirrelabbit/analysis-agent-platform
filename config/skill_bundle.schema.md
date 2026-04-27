@@ -41,6 +41,11 @@
 
 ## Validation Rule
 
+- planner prompt에서 skill 설명은 각 skill의 `description`을 사용한다.
+- planner prompt에서 deprecated alias(`deprecated_alias_of`가 있는 entry)는 기본적으로 노출하지 않는다.
+- `planner_recommendations`는 LLM planner의 추천 sequence 문구 source다.
+  - `sequence_name`: `planner_sequences`의 key
+  - `when`: 해당 sequence를 추천하는 영어 문장
 - 모든 skill artifact 는 `result_scope` 와 `runtime_result_scope` 를 함께 가진다.
 - `result_scope` 는 선언값이고, `runtime_result_scope` 는 실제 provenance 다.
 - `result_scope_policy=static` 인 skill 은 `runtime_result_scope == result_scope` 여야 한다.

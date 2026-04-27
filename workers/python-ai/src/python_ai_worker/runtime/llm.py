@@ -5,6 +5,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from .._migration_targets import canonical_skill_name
 from ..anthropic_client import AnthropicClient, AnthropicConfig
 from ..config import load_config
 from ..prompt_registry import (
@@ -14,7 +15,7 @@ from ..prompt_registry import (
     render_sentiment_batch_prompt,
     render_sentiment_prompt,
 )
-from ..skill_bundle import plan_skill_names
+from ..skill_bundle import planner_recommendations, planner_sequence, planner_visible_skill_names, planner_visible_skills
 from .common import (
     _coerce_string_list,
     _evidence_rationale,
@@ -95,63 +96,63 @@ def _anthropic_sentiment_client(model_override: str = "", *, llm_mode: str = "de
     )
 
 
+def _planner_skill_description_lines() -> list[str]:
+    lines: list[str] = []
+    for skill in planner_visible_skills():
+        name = str(skill.get("name") or "").strip()
+        description = str(skill.get("description") or "").strip()
+        if not name or not description:
+            continue
+        lines.append(f"- {name}: {description}")
+        goal_input = str(skill.get("goal_input") or "").strip()
+        if goal_input:
+            lines.append(f"  When {name} is used, set inputs.{goal_input} to the user goal.")
+    return lines
+
+
+def _planner_recommendation_lines() -> list[str]:
+    lines: list[str] = []
+    for recommendation in planner_recommendations():
+        sequence_name = str(recommendation.get("sequence_name") or "").strip()
+        when = str(recommendation.get("when") or "").strip()
+        if not sequence_name or not when:
+            continue
+        sequence = planner_sequence(sequence_name)
+        if not sequence:
+            continue
+        lines.append(f"{when} Prefer {', '.join(sequence)}.")
+    return lines
+
+
+def _build_planner_system_prompt(payload: dict[str, Any]) -> str:
+    allowed_skills = ", ".join(planner_visible_skill_names())
+    sections = [
+        "You are an analysis planner for a deterministic execution platform.",
+        "Choose the smallest valid skill plan for the request.",
+        f"Allowed skills: {allowed_skills}.",
+        "Skill descriptions:",
+        *_planner_skill_description_lines(),
+        "Recommended sequences:",
+        *_planner_recommendation_lines(),
+        "Return only a plan that can be replayed without extra reasoning.",
+        "",
+        f"dataset_name: {payload.get('dataset_name') or 'dataset_from_version'}",
+        f"dataset_version_id: {payload.get('dataset_version_id') or ''}",
+        f"data_type: {payload.get('data_type') or ''}",
+        f"goal: {payload.get('goal') or ''}",
+        f"constraints: {json.dumps(payload.get('constraints') or [], ensure_ascii=False)}",
+        f"context: {json.dumps(payload.get('context') or {}, ensure_ascii=False)}",
+    ]
+    return "\n".join(sections)
+
+
 def _run_planner_with_llm(
     client: AnthropicClient,
     payload: dict[str, Any],
     *,
     fallback_planner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    allowed_skills = ", ".join(plan_skill_names())
-    prompt = "\n".join(
-        [
-            "You are an analysis planner for a deterministic execution platform.",
-            "Choose the smallest valid skill plan for the request.",
-            f"Allowed skills: {allowed_skills}.",
-            "Use structured_kpi_summary for numeric KPI/tabular analysis.",
-            "Use garbage_filter to remove ad, promotion, placeholder, or noise-only rows before downstream text analysis when the dataset likely contains garbage SNS content.",
-            "Use document_filter first for replayable lexical narrowing before downstream text analysis.",
-            "Use deduplicate_documents to collapse repeated or near-identical documents.",
-            "Use keyword_frequency to count top terms after document filtering.",
-            "Use noun_frequency when the user asks for noun-focused keyword extraction, Korean noun counts, or morphology-based top terms.",
-            "Use sentence_split when the user explicitly asks for sentence-level splitting, sentence-unit evidence preparation, or sentence-by-sentence review.",
-            "Use time_bucket_count to aggregate filtered rows by time bucket.",
-            "Use meta_group_count to aggregate filtered rows by metadata dimension.",
-            "Use document_sample to select representative documents for downstream summaries.",
-            "Use dictionary_tagging when the user asks for category or taxonomy-based classification.",
-            "Use embedding_cluster to group similar issues with precomputed embeddings.",
-            "Use cluster_label_candidates after embedding_cluster to propose deterministic cluster labels.",
-            "Use unstructured_issue_summary for VOC/document/text analysis.",
-            "Use issue_breakdown_summary when the user asks which channel, product, region, or metadata group has more issues.",
-            "Use issue_cluster_summary when the user asks for major themes, clusters, or grouped issues.",
-            "Use issue_trend_summary when the user asks about changes, increases, decreases, or time-based trends in text issues.",
-            "Use issue_period_compare when the user asks to compare current vs previous periods in text issues.",
-            "Use issue_sentiment_summary when the user asks about positive, negative, neutral, or sentiment distribution.",
-            "Use issue_taxonomy_summary when the user asks for tagged categories or taxonomy distribution.",
-            "Use semantic_search when the user asks to find relevant evidence or related documents.",
-            "Use issue_evidence_summary to return representative snippets and follow-up questions for text analysis.",
-            "For general unstructured text analysis, prefer unstructured_issue_summary followed by issue_evidence_summary.",
-            "For general unstructured text analysis, prefer document_filter, keyword_frequency, document_sample, unstructured_issue_summary, then issue_evidence_summary.",
-            "For noun extraction requests, prefer document_filter followed by noun_frequency.",
-            "For sentence splitting requests, prefer document_filter followed by sentence_split.",
-            "For cluster analysis, prefer document_filter, deduplicate_documents, embedding_cluster, cluster_label_candidates, issue_cluster_summary, then issue_evidence_summary.",
-            "For taxonomy analysis, prefer document_filter, dictionary_tagging, issue_taxonomy_summary, then issue_evidence_summary.",
-            "For breakdown analysis, prefer document_filter, meta_group_count, document_sample, issue_breakdown_summary, then issue_evidence_summary.",
-            "For trend analysis, prefer document_filter, time_bucket_count, document_sample, issue_trend_summary, then issue_evidence_summary.",
-            "For period comparison, prefer document_filter, document_sample, issue_period_compare, then issue_evidence_summary.",
-            "For sentiment analysis, prefer document_filter, document_sample, issue_sentiment_summary, then issue_evidence_summary.",
-            "For evidence lookup, prefer semantic_search followed by issue_evidence_summary.",
-            "When issue_evidence_summary is used, set inputs.query to the user goal.",
-            "When semantic_search is used, set inputs.query to the user goal.",
-            "Return only a plan that can be replayed without extra reasoning.",
-            "",
-            f"dataset_name: {payload.get('dataset_name') or 'dataset_from_version'}",
-            f"dataset_version_id: {payload.get('dataset_version_id') or ''}",
-            f"data_type: {payload.get('data_type') or ''}",
-            f"goal: {payload.get('goal') or ''}",
-            f"constraints: {json.dumps(payload.get('constraints') or [], ensure_ascii=False)}",
-            f"context: {json.dumps(payload.get('context') or {}, ensure_ascii=False)}",
-        ]
-    )
+    prompt = _build_planner_system_prompt(payload)
     response = client.create_json(prompt=prompt, schema=_planner_schema(), max_tokens=1200)
     return _normalize_planner_response(
         response,
@@ -1305,10 +1306,10 @@ def _normalize_planner_response(
     dataset_name = str(payload.get("dataset_name") or "dataset_from_version").strip()
     raw_plan = response.get("plan") or {}
     raw_steps = raw_plan.get("steps") or []
-    allowed_skills = set(plan_skill_names())
+    allowed_skills = set(planner_visible_skill_names())
     steps = []
     for raw_step in raw_steps:
-        skill_name = str(raw_step.get("skill_name") or "").strip()
+        skill_name = canonical_skill_name(str(raw_step.get("skill_name") or "").strip())
         if skill_name not in allowed_skills:
             continue
         inputs = raw_step.get("inputs") or {}
@@ -1336,7 +1337,7 @@ def _normalize_planner_response(
         },
         "planner_type": "anthropic",
         "planner_model": planner_model,
-        "planner_prompt_version": "planner-anthropic-v1",
+        "planner_prompt_version": "planner-anthropic-v2",
     }
 
 
@@ -1357,6 +1358,7 @@ __all__ = [
     "_label_sentiment_with_llm",
     "_matches_sentiment_term",
     "_merge_usage_records",
+    "_build_planner_system_prompt",
     "_normalize_planner_response",
     "_planner_schema",
     "_prepare_row",

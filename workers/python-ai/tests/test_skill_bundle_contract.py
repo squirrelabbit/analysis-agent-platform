@@ -7,7 +7,7 @@ from python_ai_worker._migration_targets import (
     LEGACY_SKILL_NAMES,
     canonical_skill_name,
 )
-from python_ai_worker.skill_bundle import capability_skills, skill_bundle
+from python_ai_worker.skill_bundle import capability_skills, planner_recommendations, planner_visible_skill_names, skill_bundle
 from python_ai_worker.task_router import capability_names, task_handlers
 
 RESULT_KINDS = {
@@ -77,6 +77,15 @@ class SkillBundleContractTests(unittest.TestCase):
             for skill_name in skill_names:
                 with self.subTest(sequence_name=sequence_name, skill_name=skill_name):
                     self.assertIn(skill_name, known)
+
+    def test_planner_recommendations_reference_known_sequences(self) -> None:
+        bundle = skill_bundle()
+        known_sequences = set((bundle.get("planner_sequences") or {}).keys())
+
+        for recommendation in planner_recommendations():
+            with self.subTest(sequence_name=recommendation["sequence_name"]):
+                self.assertIn(recommendation["sequence_name"], known_sequences)
+                self.assertTrue(recommendation["when"])
 
     def test_prior_skill_contracts_reference_known_bundle_skills(self) -> None:
         known = {str(skill.get("name") or "").strip() for skill in capability_skills()}
@@ -158,6 +167,14 @@ class SkillBundleContractTests(unittest.TestCase):
                 self.assertEqual(canonical_skill_name(deprecated), canonical)
         self.assertEqual(canonical_skill_name("noun_frequency"), "noun_frequency")
         self.assertEqual(canonical_skill_name("totally_unrelated"), "totally_unrelated")
+
+    def test_planner_visible_skill_names_hide_deprecated_aliases(self) -> None:
+        visible = set(planner_visible_skill_names())
+
+        self.assertIn("term_frequency", visible)
+        self.assertIn("issue_evidence_summary", visible)
+        self.assertNotIn("keyword_frequency", visible)
+        self.assertNotIn("evidence_pack", visible)
 
 
 if __name__ == "__main__":
