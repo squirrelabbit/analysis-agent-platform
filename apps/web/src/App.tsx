@@ -9,7 +9,7 @@ import { ChatPage } from "./pages/ChatPage";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ProjectLayout from "./layout/ProjectLayout";
 import DatasetPage from "./pages/DatasetPage";
-import ScenarioPage from "./routes/ScenarioPage";
+import ScenarioPage from "./pages/ScenarioPage";
 import DatasetVersionPage from "./features/dataset/pages/DatasetVersionPage";
 import ProjectPage from "./pages/ProjectPage";
 
