@@ -5,6 +5,8 @@ go 1.25.0
 require (
 	github.com/jackc/pgx/v5 v5.9.1
 	github.com/marcboeker/go-duckdb v1.8.5
+	github.com/oklog/ulid/v2 v2.1.1
+	go.temporal.io/api v1.62.2
 	go.temporal.io/sdk v1.41.1
 )
 
@@ -32,7 +34,6 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
-	go.temporal.io/api v1.62.2 // indirect
 	golang.org/x/exp v0.0.0-20250128182459-e0ece0dbea4c // indirect
 	golang.org/x/mod v0.27.0 // indirect
 	golang.org/x/net v0.43.0 // indirect
