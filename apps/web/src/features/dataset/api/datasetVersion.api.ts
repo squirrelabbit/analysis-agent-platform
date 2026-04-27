@@ -1,7 +1,6 @@
 import { apiClient } from "@/api/client";
 import {
   type PreparePreviewResponse,
-  type CreateDatasetVersionRequest,
   type DatasetVersionListResponse,
   type DatasetVersionResponse,
   type UploadDatasetVersionRequest,
@@ -27,6 +26,18 @@ export const datasetVersionsApi = {
       )
       .then((r) => r.data),
 
+  activeDatasetVersion: (
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+  ) =>
+    apiClient
+      .put<void>(
+        `/projects/${projectId}/datasets/${datasetId}/active_version`,
+        { dataset_version_id: versionId },
+      )
+      .then((r) => r.data),
+
   uploadDatasetVersion: (
     projectId: string,
     datasetId: string,
@@ -35,18 +46,6 @@ export const datasetVersionsApi = {
     apiClient
       .post<DatasetVersionResponse>(
         `/projects/${projectId}/datasets/${datasetId}/uploads`,
-        req,
-      )
-      .then((r) => r.data),
-
-  createDatasetVersion: (
-    projectId: string,
-    datasetId: string,
-    req: CreateDatasetVersionRequest,
-  ) =>
-    apiClient
-      .post<DatasetVersionResponse>(
-        `/projects/${projectId}/datasets/${datasetId}/versions`,
         req,
       )
       .then((r) => r.data),
@@ -62,7 +61,7 @@ export const datasetVersionsApi = {
       )
       .then((r) => r.data),
 
-  downloadDatasetVersion: (
+  downloadSourceFile: (
     projectId: string,
     datasetId: string,
     versionId: string,
@@ -70,6 +69,41 @@ export const datasetVersionsApi = {
     apiClient
       .get<void>(
         `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/source_download`,
+      )
+      .then((r) => r.data),
+
+  downloadCleanFile: (
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+  ) =>
+    apiClient
+      .get<void>(
+        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/clean_download`,
+      )
+      .then((r) => r.data),
+
+  runDatasetVersion: (
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+    type: "prepare" | "sentiment",
+  ) =>
+    apiClient
+      .post<void>(
+        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/${type}`,
+      )
+      .then((r) => r.data),
+
+  runDatasetVersionSample: (
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+    type: "prepare" | "sentiment",
+  ) =>
+    apiClient
+      .post<void>(
+        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/${type}_sample`,
       )
       .then((r) => r.data),
 

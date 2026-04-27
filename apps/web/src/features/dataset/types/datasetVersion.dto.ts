@@ -1,5 +1,13 @@
 import type { LLMMode } from "./datasetVersion";
 
+export interface PrepareSummaryResponse {
+  input_row_count: number;
+  output_row_count: number;
+  kept_count: number;
+  review_count: number;
+  dropped_count: number;
+}
+
 export interface DatasetVersionResponse {
   dataset_version_id: string;
   dataset_id: string;
@@ -15,7 +23,6 @@ export interface DatasetVersionResponse {
   prepare_prompt_version: string;
   prepare_uri: string;
   prepared_at: string;
-  prepare_summary: Record<string, any>;
   sentiment_status: string;
   sentiment_llm_mode: string; // default
   sentiment_model: string;
@@ -24,6 +31,7 @@ export interface DatasetVersionResponse {
   sentiment_prompt_version: string;
   embedding_status: string;
   embedding_model: string;
+  prepare_summary: PrepareSummaryResponse
   embedding_uri: string;
   is_active: boolean;
   created_at: string;
@@ -37,17 +45,12 @@ export interface DatasetVersionListResponse {
 export interface UploadDatasetVersionRequest {
   file: File;
   data_type?: string,
-  record_count?: number,
   metadata?: Record<string, any>;
   activate_on_create?: boolean;
   prepare_required?: boolean;
   prepare_llm_mode?: LLMMode;
   sentiment_required?: boolean;
   sentiment_llm_mode?: LLMMode;
-  embedding_required?: boolean;
-  prepare_model?: string;
-  sentiment_model?: string
-  embedding_model?: string
 }
 
 export interface CreateDatasetVersionRequest {
@@ -56,18 +59,6 @@ export interface CreateDatasetVersionRequest {
   record_count: number;
   metadata: Record<string, any>;
   profile: Record<string, any>;
-  // "profile": {
-  //   "profile_id": "string",
-  //   "prepare_prompt_version": "string",
-  //   "sentiment_prompt_version": "string",
-  //   "regex_rule_names": [
-  //     "string"
-  //   ],
-  //   "garbage_rule_names": [
-  //     "string"
-  //   ],
-  //   "embedding_model": "string"
-  // },
   activate_on_create: boolean;
   prepare_required: boolean;
   prepare_llm_mode: LLMMode;

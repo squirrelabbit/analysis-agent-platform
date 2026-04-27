@@ -16,7 +16,7 @@ export interface DatasetVersion {
   preparePromptVersion: string,
   prepareUri: string,
   preparedAt: string,
-  prepareSummary: Record<string, any>,
+  prepareSummary: PrepareSummary,
   sentimentStatus: string,
   sentimentLLMMode: string, // default
   sentimentModel: string,
@@ -29,4 +29,21 @@ export interface DatasetVersion {
   isActive: boolean,
   createdAt: string,
   readyAt: string
+}
+
+
+export interface PrepareSummary {
+  inputRowCount: number;
+  outputRowCount: number;
+  keptCount: number;
+  reviewCount: number;
+  droppedCount: number;
+}
+
+export interface SentimentSummary {
+  inputRowCount: number;
+  labeledRowCount: number;
+  textColumn: string;
+  sentimenBatchSize: number
+  label_counts: any
 }

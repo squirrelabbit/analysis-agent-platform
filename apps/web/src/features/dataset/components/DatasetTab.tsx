@@ -1,7 +1,7 @@
 import { useDataset } from "../hooks/useDataset";
 import DatasetList from "./DatasetList";
 import CreateDialog from "@/components/common/dialogs/CreateDialog";
-import CreateDatasetForm from "./CreateDatasetForm";
+import CreateDatasetForm from "./dataset/CreateDatasetForm";
 import { useState } from "react";
 import type { DatasetForm } from "../types/dataset.form";
 import { mapDatasetFormToRequest } from "../api/dataset.mapper";
