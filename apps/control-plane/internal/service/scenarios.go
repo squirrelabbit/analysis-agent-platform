@@ -9,6 +9,7 @@ import (
 
 	"analysis-support-platform/control-plane/internal/domain"
 	"analysis-support-platform/control-plane/internal/id"
+	"analysis-support-platform/control-plane/internal/planner"
 	"analysis-support-platform/control-plane/internal/registry"
 	"analysis-support-platform/control-plane/internal/store"
 )
@@ -309,7 +310,7 @@ func buildScenarioPlan(scenario domain.Scenario, goal string) (domain.SkillPlan,
 		planSteps = append(planSteps, domain.SkillPlanStep{
 			StepID:      id.New(),
 			SkillName:   skillName,
-			DatasetName: "dataset_from_version",
+			DatasetName: planner.DatasetFromVersion,
 			Inputs:      inputs,
 		})
 	}

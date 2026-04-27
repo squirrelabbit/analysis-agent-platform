@@ -1127,6 +1127,70 @@ func TestSubmitAnalysisEnrichesEmbeddingClusterInputs(t *testing.T) {
 	}
 }
 
+func TestSubmitAnalysisUsesBundleDefaultPlanWhenPlannerMissing(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		PrepareStatus:    "ready",
+		PrepareURI:       stringPtr("issues.prepared.parquet"),
+		Metadata: map[string]any{
+			"prepared_text_column": "normalized_text",
+			"raw_text_column":      "text",
+		},
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
+
+	dataType := "unstructured"
+	datasetID := dataset.DatasetID
+	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "VOC 이슈를 요약해줘",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	if response.Plan.PlannerType == nil || *response.Plan.PlannerType != "stub" {
+		t.Fatalf("unexpected planner type: %+v", response.Plan.PlannerType)
+	}
+	if len(response.Plan.Plan.Steps) != 2 {
+		t.Fatalf("unexpected default plan steps: %+v", response.Plan.Plan.Steps)
+	}
+	if response.Plan.Plan.Steps[0].SkillName != "unstructured_issue_summary" {
+		t.Fatalf("unexpected first skill: %+v", response.Plan.Plan.Steps[0])
+	}
+	if response.Plan.Plan.Steps[0].DatasetName != "issues.prepared.parquet" {
+		t.Fatalf("expected normalized dataset source, got %+v", response.Plan.Plan.Steps[0])
+	}
+	if got := response.Plan.Plan.Steps[0].Inputs["text_column"]; got != "normalized_text" {
+		t.Fatalf("unexpected text column: %+v", response.Plan.Plan.Steps[0].Inputs)
+	}
+	if response.Plan.Plan.Steps[1].SkillName != "issue_evidence_summary" {
+		t.Fatalf("unexpected second skill: %+v", response.Plan.Plan.Steps[1])
+	}
+	if got := response.Plan.Plan.Steps[1].Inputs["query"]; got != "VOC 이슈를 요약해줘" {
+		t.Fatalf("unexpected goal input: %+v", response.Plan.Plan.Steps[1].Inputs)
+	}
+}
+
 func TestSubmitAnalysisEnrichesSemanticSearchChunkInputs(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, fakePlanner{
