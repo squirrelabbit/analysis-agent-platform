@@ -7,6 +7,7 @@ from typing import Any
 
 from . import runtime as rt
 from .obs import get
+from .planner_compose import compose_plan
 from .planner_meta import MetaPlanResult, select_active_layers
 from .skill_bundle import default_inputs_for_skill, planner_layer_hints, planner_sequence, skill_definition
 
@@ -36,6 +37,7 @@ def run_planner(payload: dict[str, Any]) -> dict[str, Any]:
                 rt._run_planner_with_llm(client, planner_payload, fallback_planner=_run_rule_based_planner),
                 meta_plan=meta_plan,
             )
+            _compose_planner_result(result, meta_plan=meta_plan, goal=goal)
             _log_planner_completed("llm", result, started_at)
             return result
         except Exception as exc:
@@ -45,6 +47,7 @@ def run_planner(payload: dict[str, Any]) -> dict[str, Any]:
             fallback["planner_prompt_version"] = "planner-fallback-v1"
             fallback["notes"] = [f"anthropic planner fallback: {exc}"]
             _attach_plan_metadata(fallback, meta_plan=meta_plan)
+            _compose_planner_result(fallback, meta_plan=meta_plan, goal=goal)
             _LOG.warning(
                 "planner.fallback",
                 planner_model=client._config.model,
@@ -55,6 +58,7 @@ def run_planner(payload: dict[str, Any]) -> dict[str, Any]:
             return fallback
     result = _run_rule_based_planner(planner_payload)
     _attach_plan_metadata(result, meta_plan=meta_plan)
+    _compose_planner_result(result, meta_plan=meta_plan, goal=goal)
     _log_planner_completed("rule", result, started_at)
     return result
 
@@ -178,6 +182,27 @@ def _select_meta_plan(payload: dict[str, Any], *, anthropic_client=None) -> Meta
         active_layers=frozenset(sorted(active_layers)),
         confidence=result.confidence,
         trigger_matches=result.trigger_matches,
+    )
+
+
+def _compose_planner_result(result: dict[str, Any], *, meta_plan: MetaPlanResult, goal: str) -> None:
+    plan = result.get("plan")
+    if not isinstance(plan, dict):
+        return
+    steps = list(plan.get("steps") or [])
+    composed = compose_plan(
+        steps,
+        meta_plan.active_layers,
+        goal=goal,
+    )
+    plan["steps"] = composed.steps
+    _attach_plan_metadata(
+        result,
+        meta_plan=MetaPlanResult(
+            active_layers=composed.active_layers,
+            confidence=meta_plan.confidence,
+            trigger_matches=meta_plan.trigger_matches,
+        ),
     )
 
 
