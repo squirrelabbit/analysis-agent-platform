@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from .._migration_targets import canonical_skill_name
 from .common import (
     _bucket_label,
     _duplicate_similarity,
@@ -227,8 +228,10 @@ def _iter_prior_artifacts(prior_artifacts: Any) -> list[dict[str, Any]]:
 
 
 def _find_prior_artifact(prior_artifacts: Any, skill_name: str) -> dict[str, Any] | None:
+    requested_name = canonical_skill_name(str(skill_name or "").strip())
     for artifact in reversed(_iter_prior_artifacts(prior_artifacts)):
-        if str(artifact.get("skill_name") or "").strip() == skill_name:
+        artifact_name = canonical_skill_name(str(artifact.get("skill_name") or "").strip())
+        if artifact_name == requested_name:
             return artifact
     return None
 
@@ -276,11 +279,12 @@ def _analysis_context_entry(artifact: dict[str, Any]) -> dict[str, Any] | None:
 
 def _analysis_context_summary(artifact: dict[str, Any]) -> str:
     skill_name = str(artifact.get("skill_name") or "").strip()
+    canonical_name = canonical_skill_name(skill_name)
     summary = artifact.get("summary") or {}
     if not isinstance(summary, dict):
         summary = {}
 
-    if skill_name in {"issue_trend_summary", "time_bucket_count"}:
+    if canonical_name in {"issue_trend_summary", "time_bucket_count"}:
         peak_bucket = str(summary.get("peak_bucket") or "").strip()
         peak_count = int(summary.get("peak_count") or 0)
         bucket = str(artifact.get("bucket") or summary.get("bucket_type") or "").strip()
@@ -289,7 +293,7 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
             return f"{prefix}피크 구간은 {peak_bucket}({peak_count}건)이다."
         return ""
 
-    if skill_name in {"issue_breakdown_summary", "meta_group_count"}:
+    if canonical_name in {"issue_breakdown_summary", "meta_group_count"}:
         top_group = str(summary.get("top_group") or "").strip()
         top_group_count = int(summary.get("top_group_count") or 0)
         dimension = str(summary.get("dimension_column") or artifact.get("dimension_column") or "").strip()
@@ -298,7 +302,7 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
             return f"{prefix}최다 그룹은 {top_group}({top_group_count}건)이다."
         return ""
 
-    if skill_name == "issue_period_compare":
+    if canonical_name == "issue_period_compare":
         current_count = int(summary.get("current_count") or 0)
         previous_count = int(summary.get("previous_count") or 0)
         count_delta = int(summary.get("count_delta") or 0)
@@ -310,14 +314,14 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
             return f"현재 기간과 이전 기간이 모두 {current_count}건으로 동일하다."
         return ""
 
-    if skill_name == "issue_cluster_summary":
+    if canonical_name == "issue_cluster_summary":
         label = str(summary.get("dominant_cluster_label") or "").strip()
         count = int(summary.get("dominant_cluster_count") or 0)
         if label and count > 0:
             return f"가장 큰 군집은 {label}이며 {count}건이다."
         return ""
 
-    if skill_name == "cluster_label_candidates":
+    if canonical_name == "cluster_label_candidates":
         clusters = artifact.get("clusters") or []
         if isinstance(clusters, list):
             for cluster in clusters:
@@ -329,7 +333,7 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
                     return f"가장 큰 군집 후보 라벨은 {label}이며 {count}건이다."
         return ""
 
-    if skill_name == "embedding_cluster":
+    if canonical_name == "embedding_cluster":
         clusters = artifact.get("clusters") or []
         if isinstance(clusters, list):
             for cluster in clusters:
@@ -342,7 +346,7 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
                     return f"대표 군집 top term은 {', '.join(terms[:2])}이고 {count}건이다."
         return ""
 
-    if skill_name in {"issue_taxonomy_summary", "dictionary_tagging"}:
+    if canonical_name in {"issue_taxonomy_summary", "dictionary_tagging"}:
         label = str(summary.get("dominant_taxonomy_label") or "").strip()
         count = int(summary.get("dominant_taxonomy_count") or 0)
         if not label:
@@ -356,14 +360,14 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
             return f"가장 큰 taxonomy는 {label}이며 {count}건이다."
         return ""
 
-    if skill_name == "issue_sentiment_summary":
+    if canonical_name == "issue_sentiment_summary":
         label = str(summary.get("dominant_label") or "").strip()
         count = int(summary.get("dominant_label_count") or 0)
         if label and count > 0:
             return f"지배적인 감성은 {label}이며 {count}건이다."
         return ""
 
-    if skill_name == "unstructured_issue_summary":
+    if canonical_name == "unstructured_issue_summary":
         top_terms = [str(item.get("term") or "").strip() for item in list(artifact.get("top_terms") or []) if isinstance(item, dict)]
         top_terms = [term for term in top_terms if term]
         document_count = int(summary.get("document_count") or 0)
@@ -371,7 +375,7 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
             return f"주요 키워드는 {', '.join(top_terms[:3])}이며 문서 수는 {document_count}건이다."
         return ""
 
-    if skill_name == "keyword_frequency":
+    if canonical_name == "term_frequency":
         top_terms = [str(item.get("term") or "").strip() for item in list(artifact.get("top_terms") or []) if isinstance(item, dict)]
         top_terms = [term for term in top_terms if term]
         if top_terms:
