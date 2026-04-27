@@ -8,7 +8,7 @@
         "result_kind": "preprocessing"
       },
       {
-        "skill_name": "keyword_frequency",
+        "skill_name": "term_frequency",
         "result_kind": "summary_ranked"
       },
       {

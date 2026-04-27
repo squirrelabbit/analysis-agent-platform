@@ -17,7 +17,7 @@
 | `garbage_filter` | 룰베이스 필터 | 안정 | sidecar parquet 저장 지원 |
 | `document_filter` | lexical overlap 필터 | 안정 | semantic retrieval은 아님 |
 | `deduplicate_documents` | 휴리스틱 dedup | 중간 | threshold 민감 |
-| `keyword_frequency` | 토큰 카운팅 | 안정 | 단순 집계 |
+| `term_frequency` | 토큰 카운팅 | 안정 | 기본 canonical 이름. `keyword_frequency`는 deprecated alias |
 | `noun_frequency` | Kiwi 우선, regex fallback | 중간 | 형태소 backend 영향 |
 | `sentence_split` | `kss` 우선, regex fallback | 중간 | 문장 span 저장 가능 |
 | `time_bucket_count` | deterministic bucket 집계 | 안정 | 추세 요약 upstream |
@@ -27,7 +27,6 @@
 | `embedding_cluster` | materialized cluster 우선, subset fallback | 주의 | mode와 threshold 민감 |
 | `cluster_label_candidates` | top term + sample 기반 라벨 후보 | 주의 | label 품질 보정 필요 |
 | `semantic_search` | pgvector 우선, sidecar fallback | 중간 | 인덱스 품질 의존 |
-| `evidence_pack` | grounded LLM presenter | LLM 의존 | evidence 선택 품질 중요 |
 | `unstructured_issue_summary` | prior artifact 재사용 | 중간 | fallback 존재 |
 | `issue_breakdown_summary` | `meta_group_count` 재사용 | 안정 | deterministic 위주 |
 | `issue_cluster_summary` | cluster + membership 요약 | 주의 | cluster upstream 영향 큼 |
@@ -35,7 +34,7 @@
 | `issue_period_compare` | bucket 비교 | 안정 | period 해석만 주의 |
 | `issue_sentiment_summary` | sentiment artifact 집계 | 중간 | label 품질 영향 |
 | `issue_taxonomy_summary` | dictionary tagging 집계 | 중간 | taxonomy coverage 영향 |
-| `issue_evidence_summary` | evidence selection + LLM/fallback | LLM 의존 | 사용자 체감 영향 큼 |
+| `issue_evidence_summary` | evidence selection + LLM/fallback | LLM 의존 | 사용자 체감 영향 큼. `evidence_pack`는 deprecated alias |
 
 ## dataset build / presentation 지원 상태
 
@@ -53,11 +52,11 @@
 ## 지금 우선적으로 볼 축
 
 - 가장 안정적인 축
-  - `structured_kpi_summary`, `garbage_filter`, `keyword_frequency`, `time_bucket_count`, `meta_group_count`
+  - `structured_kpi_summary`, `garbage_filter`, `term_frequency`, `time_bucket_count`, `meta_group_count`
 - 품질 보정이 가장 필요한 축
   - `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`
 - 모델/프롬프트 의존 축
-  - `dataset_prepare`, `sentiment_label`, `issue_evidence_summary`, `evidence_pack`, final answer presentation
+  - `dataset_prepare`, `sentiment_label`, `issue_evidence_summary` (`evidence_pack`는 deprecated alias), final answer presentation
 
 ## 운영 메모
 
