@@ -17,7 +17,7 @@ from ..prompt_registry import (
     render_sentiment_batch_prompt,
     render_sentiment_prompt,
 )
-from ..skill_bundle import planner_recommendations, planner_sequence, planner_visible_skill_names, planner_visible_skills
+from ..skill_bundle import planner_recommendations, planner_sequence, planner_visible_skills, skill_definition
 from .common import (
     _coerce_string_list,
     _evidence_rationale,
@@ -182,21 +182,23 @@ def _anthropic_sentiment_client(model_override: str = "", *, llm_mode: str = "de
     )
 
 
-def _planner_skill_description_lines() -> list[str]:
+def _planner_skill_description_lines(active_layers: set[str] | None = None) -> list[str]:
     lines: list[str] = []
-    for skill in planner_visible_skills():
+    for skill in _planner_visible_skills_for_layers(active_layers):
         name = str(skill.get("name") or "").strip()
         description = str(skill.get("description") or "").strip()
         if not name or not description:
             continue
-        lines.append(f"- {name}: {description}")
+        result_kind = str(skill.get("result_kind") or "").strip()
+        prior_signal = _planner_prior_signal(skill)
+        lines.append(f"- {name}: {description} (result_kind={result_kind or 'unknown'}, prior_artifacts={prior_signal})")
         goal_input = str(skill.get("goal_input") or "").strip()
         if goal_input:
             lines.append(f"  When {name} is used, set inputs.{goal_input} to the user goal.")
     return lines
 
 
-def _planner_recommendation_lines() -> list[str]:
+def _planner_recommendation_lines(active_layers: set[str] | None = None) -> list[str]:
     lines: list[str] = []
     for recommendation in planner_recommendations():
         sequence_name = str(recommendation.get("sequence_name") or "").strip()
@@ -206,20 +208,25 @@ def _planner_recommendation_lines() -> list[str]:
         sequence = planner_sequence(sequence_name)
         if not sequence:
             continue
+        if active_layers and not _sequence_is_visible_for_layers(sequence, active_layers):
+            continue
         lines.append(f"{when} Prefer {', '.join(sequence)}.")
     return lines
 
 
 def _build_planner_system_prompt(payload: dict[str, Any]) -> str:
-    allowed_skills = ", ".join(planner_visible_skill_names())
+    active_layers = _active_layer_set(payload.get("active_layers"))
+    visible_skills = _planner_visible_skills_for_layers(active_layers)
+    allowed_skills = ", ".join(str(skill.get("name") or "").strip() for skill in visible_skills if str(skill.get("name") or "").strip())
     sections = [
         "You are an analysis planner for a deterministic execution platform.",
         "Choose the smallest valid skill plan for the request.",
         f"Allowed skills: {allowed_skills}.",
+        f"Active runtime layers: {', '.join(sorted(active_layers)) if active_layers else 'all planner-visible layers'}.",
         "Skill descriptions:",
-        *_planner_skill_description_lines(),
+        *_planner_skill_description_lines(active_layers),
         "Recommended sequences:",
-        *_planner_recommendation_lines(),
+        *_planner_recommendation_lines(active_layers),
         "Return only a plan that can be replayed without extra reasoning.",
         "",
         f"dataset_name: {payload.get('dataset_name') or 'dataset_from_version'}",
@@ -1438,7 +1445,11 @@ def _normalize_planner_response(
     dataset_name = str(payload.get("dataset_name") or "dataset_from_version").strip()
     raw_plan = response.get("plan") or {}
     raw_steps = raw_plan.get("steps") or []
-    allowed_skills = set(planner_visible_skill_names())
+    allowed_skills = {
+        str(skill.get("name") or "").strip()
+        for skill in _planner_visible_skills_for_layers(_active_layer_set(payload.get("active_layers")))
+        if str(skill.get("name") or "").strip()
+    }
     steps = []
     for raw_step in raw_steps:
         skill_name = canonical_skill_name(str(raw_step.get("skill_name") or "").strip())
@@ -1471,6 +1482,51 @@ def _normalize_planner_response(
         "planner_model": planner_model,
         "planner_prompt_version": "planner-anthropic-v2",
     }
+
+
+def _active_layer_set(raw_layers: Any) -> set[str]:
+    return {
+        str(layer or "").strip()
+        for layer in list(raw_layers or [])
+        if str(layer or "").strip()
+    }
+
+
+def _planner_visible_skills_for_layers(active_layers: set[str] | None = None) -> list[dict[str, Any]]:
+    skills: list[dict[str, Any]] = []
+    for skill in planner_visible_skills():
+        layer = str(skill.get("layer") or "").strip()
+        if active_layers and layer and layer not in active_layers:
+            continue
+        skills.append(skill)
+    return skills
+
+
+def _planner_prior_signal(skill: dict[str, Any]) -> str:
+    required_prior_skills = [
+        str(name or "").strip()
+        for name in list(skill.get("requires_prior_skills") or [])
+        if str(name or "").strip()
+    ]
+    if required_prior_skills:
+        return f"all({', '.join(required_prior_skills)})"
+    required_any_prior_skills = [
+        str(name or "").strip()
+        for name in list(skill.get("requires_any_prior_skills") or [])
+        if str(name or "").strip()
+    ]
+    if required_any_prior_skills:
+        return f"any({', '.join(required_any_prior_skills)})"
+    return "none"
+
+
+def _sequence_is_visible_for_layers(sequence: list[str], active_layers: set[str]) -> bool:
+    for skill_name in sequence:
+        skill = skill_definition(skill_name) or {}
+        layer = str(skill.get("layer") or "").strip()
+        if layer and layer not in active_layers:
+            return False
+    return True
 
 
 __all__ = [
