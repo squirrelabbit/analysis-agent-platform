@@ -4,16 +4,17 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"mime/multipart"
 	stdhttp "net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"analysis-support-platform/control-plane/internal/config"
 	"analysis-support-platform/control-plane/internal/displaytime"
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/obs"
 	"analysis-support-platform/control-plane/internal/planner"
 	"analysis-support-platform/control-plane/internal/registry"
 	"analysis-support-platform/control-plane/internal/service"
@@ -65,10 +66,11 @@ func NewServer(cfg config.Config) *Server {
 }
 
 func (s *Server) Handler() stdhttp.Handler {
-	return s.withCORS(s.mux)
+	return obs.Middleware(s.withCORS(s.mux))
 }
 
 func (s *Server) RunStartupReconciliation() error {
+	startedAt := time.Now()
 	buildJobsRequeued, err := s.datasetService.ReconcileStartupBuildJobs()
 	if err != nil {
 		return err
@@ -78,12 +80,7 @@ func (s *Server) RunStartupReconciliation() error {
 		return err
 	}
 	summary.BuildJobsRequeued = buildJobsRequeued
-	log.Printf(
-		"startup reconciliation completed: build_jobs_requeued=%d executions_reenqueued=%d waiting_executions_resumed=%d",
-		summary.BuildJobsRequeued,
-		summary.ExecutionsReenqueued,
-		summary.WaitingExecutionsResumed,
-	)
+	service.LogBootReconciled(summary, time.Since(startedAt).Milliseconds())
 	return nil
 }
 

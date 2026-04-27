@@ -3,13 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
 	"analysis-support-platform/control-plane/internal/id"
+	"analysis-support-platform/control-plane/internal/obs"
 )
 
 type sentimentBuildTextSelection struct {
@@ -179,13 +179,14 @@ func (s *DatasetService) BuildSentiment(projectID, datasetID, datasetVersionID s
 	}
 	clearLLMFallbackMetadata(version.Metadata, "sentiment")
 	if fallbackInfo := applyLLMFallbackMetadata(sentimentMetadata, "sentiment", response.Artifact); fallbackInfo.Fallback {
-		log.Printf(
-			"dataset build llm fallback: build_type=sentiment project_id=%s dataset_id=%s dataset_version_id=%s model=%s reason=%s",
-			projectID,
-			datasetID,
-			version.DatasetVersionID,
-			fallbackInfo.Model,
-			fallbackInfo.Reason,
+		obs.Logger.Warn("dataset build llm fallback",
+			"event", "llm.fallback.triggered",
+			"build_type", "sentiment",
+			"project_id", projectID,
+			"dataset_id", datasetID,
+			"dataset_version_id", version.DatasetVersionID,
+			"model", fallbackInfo.Model,
+			"reason", fallbackInfo.Reason,
 		)
 	}
 	version.Metadata = mergeStringAny(version.Metadata, sentimentMetadata)

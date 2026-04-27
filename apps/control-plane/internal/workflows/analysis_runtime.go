@@ -9,6 +9,7 @@ import (
 
 	"analysis-support-platform/control-plane/internal/domain"
 	"analysis-support-platform/control-plane/internal/executionresult"
+	"analysis-support-platform/control-plane/internal/obs"
 	"analysis-support-platform/control-plane/internal/registry"
 	"analysis-support-platform/control-plane/internal/skills"
 	"analysis-support-platform/control-plane/internal/store"
@@ -115,13 +116,16 @@ func NewAnalysisActivities() AnalysisActivities {
 }
 
 func AnalysisExecutionWorkflow(ctx workflow.Context, input AnalysisWorkflowInput) (AnalysisWorkflowResult, error) {
-	logger := workflow.GetLogger(ctx)
-	logger.Info(
-		"analysis execution workflow started",
-		"execution_id", input.ExecutionID,
-		"project_id", input.ProjectID,
+	wfInfo := workflow.GetInfo(ctx)
+	wfLogger := obs.Logger.With(
 		"request_id", input.RequestID,
-		"plan_id", input.PlanID,
+		"execution_id", input.ExecutionID,
+		"workflow_id", wfInfo.WorkflowExecution.ID,
+	)
+	wfStartedAt := workflow.Now(ctx)
+	wfLogger.Info("workflow started",
+		"event", "workflow.started",
+		"workflow_name", AnalysisExecutionWorkflowName,
 	)
 
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
@@ -149,6 +153,12 @@ func AnalysisExecutionWorkflow(ctx workflow.Context, input AnalysisWorkflowInput
 		).Get(ctx, &waiting); err != nil {
 			return AnalysisWorkflowResult{}, err
 		}
+		wfLogger.Info("workflow completed",
+			"event", "workflow.completed",
+			"workflow_name", AnalysisExecutionWorkflowName,
+			"status", waiting.Status,
+			"duration_ms", workflow.Now(ctx).Sub(wfStartedAt).Milliseconds(),
+		)
 		return AnalysisWorkflowResult{
 			ExecutionID: input.ExecutionID,
 			Status:      waiting.Status,
@@ -172,6 +182,12 @@ func AnalysisExecutionWorkflow(ctx workflow.Context, input AnalysisWorkflowInput
 		).Get(ctx, &failed); markErr != nil {
 			return AnalysisWorkflowResult{}, fmt.Errorf("execute structured plan: %w; mark failed: %v", err, markErr)
 		}
+		wfLogger.Error("workflow failed",
+			"event", "workflow.failed",
+			"workflow_name", AnalysisExecutionWorkflowName,
+			"duration_ms", workflow.Now(ctx).Sub(wfStartedAt).Milliseconds(),
+			"error", err.Error(),
+		)
 		return AnalysisWorkflowResult{}, err
 	}
 
@@ -187,6 +203,12 @@ func AnalysisExecutionWorkflow(ctx workflow.Context, input AnalysisWorkflowInput
 		return AnalysisWorkflowResult{}, err
 	}
 
+	wfLogger.Info("workflow completed",
+		"event", "workflow.completed",
+		"workflow_name", AnalysisExecutionWorkflowName,
+		"status", completed.Status,
+		"duration_ms", workflow.Now(ctx).Sub(wfStartedAt).Milliseconds(),
+	)
 	return AnalysisWorkflowResult{
 		ExecutionID: input.ExecutionID,
 		Status:      completed.Status,
@@ -197,7 +219,18 @@ func AnalysisExecutionWorkflow(ctx workflow.Context, input AnalysisWorkflowInput
 	}, nil
 }
 
-func (a AnalysisActivities) MarkExecutionRunning(ctx context.Context, input AnalysisWorkflowInput) (ExecutionLifecycleResult, error) {
+func (a AnalysisActivities) MarkExecutionRunning(ctx context.Context, input AnalysisWorkflowInput) (result ExecutionLifecycleResult, err error) {
+	actInfo := obs.GetActivityLogInfo(ctx)
+	ctx = obs.EnrichActivityContext(ctx, input.RequestID, input.ExecutionID, actInfo)
+	startedAt := obs.LogActivityStarted(ctx, MarkExecutionRunningActivityName, actInfo)
+	defer func() {
+		if err != nil {
+			obs.LogActivityFailed(ctx, MarkExecutionRunningActivityName, startedAt, err)
+		} else {
+			obs.LogActivityCompleted(ctx, MarkExecutionRunningActivityName, startedAt)
+		}
+	}()
+
 	repo, err := a.requireRepo()
 	if err != nil {
 		return ExecutionLifecycleResult{}, err
@@ -236,7 +269,18 @@ func (a AnalysisActivities) MarkExecutionRunning(ctx context.Context, input Anal
 	}, nil
 }
 
-func (a AnalysisActivities) CheckExecutionReadiness(ctx context.Context, input AnalysisWorkflowInput) (ExecutionReadinessResult, error) {
+func (a AnalysisActivities) CheckExecutionReadiness(ctx context.Context, input AnalysisWorkflowInput) (result ExecutionReadinessResult, err error) {
+	actInfo := obs.GetActivityLogInfo(ctx)
+	ctx = obs.EnrichActivityContext(ctx, input.RequestID, input.ExecutionID, actInfo)
+	startedAt := obs.LogActivityStarted(ctx, CheckExecutionReadinessActivityName, actInfo)
+	defer func() {
+		if err != nil {
+			obs.LogActivityFailed(ctx, CheckExecutionReadinessActivityName, startedAt, err)
+		} else {
+			obs.LogActivityCompleted(ctx, CheckExecutionReadinessActivityName, startedAt)
+		}
+	}()
+
 	repo, err := a.requireRepo()
 	if err != nil {
 		return ExecutionReadinessResult{}, err
@@ -319,7 +363,18 @@ func (a AnalysisActivities) CheckExecutionReadiness(ctx context.Context, input A
 	}, nil
 }
 
-func (a AnalysisActivities) MarkExecutionWaiting(ctx context.Context, input WaitingExecutionInput) (ExecutionLifecycleResult, error) {
+func (a AnalysisActivities) MarkExecutionWaiting(ctx context.Context, input WaitingExecutionInput) (result ExecutionLifecycleResult, err error) {
+	actInfo := obs.GetActivityLogInfo(ctx)
+	ctx = obs.EnrichActivityContext(ctx, input.WorkflowInput.RequestID, input.WorkflowInput.ExecutionID, actInfo)
+	startedAt := obs.LogActivityStarted(ctx, MarkExecutionWaitingActivityName, actInfo)
+	defer func() {
+		if err != nil {
+			obs.LogActivityFailed(ctx, MarkExecutionWaitingActivityName, startedAt, err)
+		} else {
+			obs.LogActivityCompleted(ctx, MarkExecutionWaitingActivityName, startedAt)
+		}
+	}()
+
 	repo, err := a.requireRepo()
 	if err != nil {
 		return ExecutionLifecycleResult{}, err
@@ -356,7 +411,18 @@ func (a AnalysisActivities) MarkExecutionWaiting(ctx context.Context, input Wait
 	}, nil
 }
 
-func (a AnalysisActivities) ExecutePlan(ctx context.Context, input AnalysisWorkflowInput) (skills.ExecutionRunResult, error) {
+func (a AnalysisActivities) ExecutePlan(ctx context.Context, input AnalysisWorkflowInput) (result skills.ExecutionRunResult, err error) {
+	actInfo := obs.GetActivityLogInfo(ctx)
+	ctx = obs.EnrichActivityContext(ctx, input.RequestID, input.ExecutionID, actInfo)
+	startedAt := obs.LogActivityStarted(ctx, ExecutePlanActivityName, actInfo)
+	defer func() {
+		if err != nil {
+			obs.LogActivityFailed(ctx, ExecutePlanActivityName, startedAt, err)
+		} else {
+			obs.LogActivityCompleted(ctx, ExecutePlanActivityName, startedAt)
+		}
+	}()
+
 	repo, err := a.requireRepo()
 	if err != nil {
 		return skills.ExecutionRunResult{}, err
@@ -380,7 +446,18 @@ func (a AnalysisActivities) ExecutePlan(ctx context.Context, input AnalysisWorkf
 	return a.Runner.Run(ctx, execution)
 }
 
-func (a AnalysisActivities) MarkExecutionCompleted(ctx context.Context, input CompleteExecutionInput) (ExecutionLifecycleResult, error) {
+func (a AnalysisActivities) MarkExecutionCompleted(ctx context.Context, input CompleteExecutionInput) (result ExecutionLifecycleResult, err error) {
+	actInfo := obs.GetActivityLogInfo(ctx)
+	ctx = obs.EnrichActivityContext(ctx, input.WorkflowInput.RequestID, input.WorkflowInput.ExecutionID, actInfo)
+	startedAt := obs.LogActivityStarted(ctx, MarkExecutionCompletedActivityName, actInfo)
+	defer func() {
+		if err != nil {
+			obs.LogActivityFailed(ctx, MarkExecutionCompletedActivityName, startedAt, err)
+		} else {
+			obs.LogActivityCompleted(ctx, MarkExecutionCompletedActivityName, startedAt)
+		}
+	}()
+
 	repo, err := a.requireRepo()
 	if err != nil {
 		return ExecutionLifecycleResult{}, err
@@ -505,7 +582,18 @@ func optionalString(value *string) string {
 	return *value
 }
 
-func (a AnalysisActivities) MarkExecutionFailed(ctx context.Context, input FailExecutionInput) (ExecutionLifecycleResult, error) {
+func (a AnalysisActivities) MarkExecutionFailed(ctx context.Context, input FailExecutionInput) (result ExecutionLifecycleResult, err error) {
+	actInfo := obs.GetActivityLogInfo(ctx)
+	ctx = obs.EnrichActivityContext(ctx, input.WorkflowInput.RequestID, input.WorkflowInput.ExecutionID, actInfo)
+	startedAt := obs.LogActivityStarted(ctx, MarkExecutionFailedActivityName, actInfo)
+	defer func() {
+		if err != nil {
+			obs.LogActivityFailed(ctx, MarkExecutionFailedActivityName, startedAt, err)
+		} else {
+			obs.LogActivityCompleted(ctx, MarkExecutionFailedActivityName, startedAt)
+		}
+	}()
+
 	repo, err := a.requireRepo()
 	if err != nil {
 		return ExecutionLifecycleResult{}, err

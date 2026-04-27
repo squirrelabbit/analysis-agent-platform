@@ -3,13 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
 	"analysis-support-platform/control-plane/internal/id"
+	"analysis-support-platform/control-plane/internal/obs"
 )
 
 func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest) (domain.DatasetVersion, error) {
@@ -204,13 +204,14 @@ func (s *DatasetService) BuildPrepare(projectID, datasetID, datasetVersionID str
 	}
 	clearLLMFallbackMetadata(version.Metadata, "prepare")
 	if fallbackInfo := applyLLMFallbackMetadata(prepareMetadata, "prepare", response.Artifact); fallbackInfo.Fallback {
-		log.Printf(
-			"dataset build llm fallback: build_type=prepare project_id=%s dataset_id=%s dataset_version_id=%s model=%s reason=%s",
-			projectID,
-			datasetID,
-			version.DatasetVersionID,
-			fallbackInfo.Model,
-			fallbackInfo.Reason,
+		obs.Logger.Warn("dataset build llm fallback",
+			"event", "llm.fallback.triggered",
+			"build_type", "prepare",
+			"project_id", projectID,
+			"dataset_id", datasetID,
+			"dataset_version_id", version.DatasetVersionID,
+			"model", fallbackInfo.Model,
+			"reason", fallbackInfo.Reason,
 		)
 	}
 	version.Metadata = mergeStringAny(version.Metadata, prepareMetadata)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/obs"
 	"analysis-support-platform/control-plane/internal/store"
 
 	"go.temporal.io/sdk/activity"
@@ -78,8 +79,8 @@ type DatasetBuildConcurrencyLimits struct {
 	Cluster   int `json:"cluster"`
 }
 
-func RegisterDatasetBuildRuntime(registrar RuntimeRegistrar, activities DatasetBuildActivities) {
-	handler := &activities
+func RegisterDatasetBuildRuntime(registrar RuntimeRegistrar, activities *DatasetBuildActivities) {
+	handler := activities
 	registrar.RegisterWorkflowWithOptions(
 		DatasetBuildWorkflow,
 		workflow.RegisterOptions{Name: DatasetBuildWorkflowName},
@@ -107,13 +108,18 @@ func RegisterDatasetBuildRuntime(registrar RuntimeRegistrar, activities DatasetB
 }
 
 func DatasetBuildWorkflow(ctx workflow.Context, input DatasetBuildWorkflowInput) (DatasetBuildLifecycleResult, error) {
-	logger := workflow.GetLogger(ctx)
-	logger.Info(
-		"dataset build workflow started",
+	wfInfo := workflow.GetInfo(ctx)
+	wfLogger := obs.Logger.With(
 		"job_id", input.JobID,
 		"project_id", input.ProjectID,
 		"dataset_version_id", input.DatasetVersionID,
 		"build_type", input.BuildType,
+		"workflow_id", wfInfo.WorkflowExecution.ID,
+	)
+	wfStartedAt := workflow.Now(ctx)
+	wfLogger.Info("workflow started",
+		"event", "workflow.started",
+		"workflow_name", DatasetBuildWorkflowName,
 	)
 
 	lifecycleCtx := workflow.WithActivityOptions(ctx, datasetBuildLifecycleActivityOptions())
@@ -135,6 +141,12 @@ func DatasetBuildWorkflow(ctx workflow.Context, input DatasetBuildWorkflowInput)
 		if markErr := workflow.ExecuteActivity(lifecycleCtx, MarkDatasetBuildJobFailedActivityName, failInput).Get(ctx, &failed); markErr != nil {
 			return DatasetBuildLifecycleResult{}, fmt.Errorf("execute dataset build job: %w; mark failed: %v", err, markErr)
 		}
+		wfLogger.Error("workflow failed",
+			"event", "workflow.failed",
+			"workflow_name", DatasetBuildWorkflowName,
+			"duration_ms", workflow.Now(ctx).Sub(wfStartedAt).Milliseconds(),
+			"error", err.Error(),
+		)
 		return failed, err
 	}
 
@@ -145,14 +157,41 @@ func DatasetBuildWorkflow(ctx workflow.Context, input DatasetBuildWorkflowInput)
 
 	var resumed DatasetBuildLifecycleResult
 	if err := workflow.ExecuteActivity(resumeCtx, ResumeWaitingExecutionsActivityName, input).Get(ctx, &resumed); err != nil {
-		logger.Error("resume waiting executions failed", "job_id", input.JobID, "error", err)
+		wfLogger.Error("resume waiting executions failed",
+			"event", "workflow.partial_failure",
+			"workflow_name", DatasetBuildWorkflowName,
+			"error", err.Error(),
+		)
+		wfLogger.Info("workflow completed",
+			"event", "workflow.completed",
+			"workflow_name", DatasetBuildWorkflowName,
+			"status", completed.Status,
+			"duration_ms", workflow.Now(ctx).Sub(wfStartedAt).Milliseconds(),
+		)
 		return completed, nil
 	}
 	completed.Executions = resumed.Executions
+	wfLogger.Info("workflow completed",
+		"event", "workflow.completed",
+		"workflow_name", DatasetBuildWorkflowName,
+		"status", completed.Status,
+		"duration_ms", workflow.Now(ctx).Sub(wfStartedAt).Milliseconds(),
+	)
 	return completed, nil
 }
 
-func (a *DatasetBuildActivities) MarkDatasetBuildJobRunning(ctx context.Context, input DatasetBuildWorkflowInput) (DatasetBuildLifecycleResult, error) {
+func (a *DatasetBuildActivities) MarkDatasetBuildJobRunning(ctx context.Context, input DatasetBuildWorkflowInput) (result DatasetBuildLifecycleResult, err error) {
+	actInfo := obs.GetActivityLogInfo(ctx)
+	ctx = obs.EnrichActivityContext(ctx, "", "", actInfo)
+	startedAt := obs.LogActivityStarted(ctx, MarkDatasetBuildJobRunningActivityName, actInfo)
+	defer func() {
+		if err != nil {
+			obs.LogActivityFailed(ctx, MarkDatasetBuildJobRunningActivityName, startedAt, err)
+		} else {
+			obs.LogActivityCompleted(ctx, MarkDatasetBuildJobRunningActivityName, startedAt)
+		}
+	}()
+
 	repo, err := a.requireRepo()
 	if err != nil {
 		return DatasetBuildLifecycleResult{}, err
@@ -186,7 +225,18 @@ func (a *DatasetBuildActivities) MarkDatasetBuildJobRunning(ctx context.Context,
 	}, nil
 }
 
-func (a *DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, input DatasetBuildWorkflowInput) error {
+func (a *DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, input DatasetBuildWorkflowInput) (err error) {
+	actInfo := obs.GetActivityLogInfo(ctx)
+	ctx = obs.EnrichActivityContext(ctx, "", "", actInfo)
+	startedAt := obs.LogActivityStarted(ctx, ExecuteDatasetBuildJobActivityName, actInfo)
+	defer func() {
+		if err != nil {
+			obs.LogActivityFailed(ctx, ExecuteDatasetBuildJobActivityName, startedAt, err)
+		} else {
+			obs.LogActivityCompleted(ctx, ExecuteDatasetBuildJobActivityName, startedAt)
+		}
+	}()
+
 	repo, err := a.requireRepo()
 	if err != nil {
 		return err
@@ -255,7 +305,18 @@ func (a *DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, inp
 	}
 }
 
-func (a *DatasetBuildActivities) MarkDatasetBuildJobCompleted(ctx context.Context, input DatasetBuildWorkflowInput) (DatasetBuildLifecycleResult, error) {
+func (a *DatasetBuildActivities) MarkDatasetBuildJobCompleted(ctx context.Context, input DatasetBuildWorkflowInput) (result DatasetBuildLifecycleResult, err error) {
+	actInfo := obs.GetActivityLogInfo(ctx)
+	ctx = obs.EnrichActivityContext(ctx, "", "", actInfo)
+	startedAt := obs.LogActivityStarted(ctx, MarkDatasetBuildJobCompletedActivityName, actInfo)
+	defer func() {
+		if err != nil {
+			obs.LogActivityFailed(ctx, MarkDatasetBuildJobCompletedActivityName, startedAt, err)
+		} else {
+			obs.LogActivityCompleted(ctx, MarkDatasetBuildJobCompletedActivityName, startedAt)
+		}
+	}()
+
 	repo, err := a.requireRepo()
 	if err != nil {
 		return DatasetBuildLifecycleResult{}, err
@@ -282,7 +343,18 @@ func (a *DatasetBuildActivities) MarkDatasetBuildJobCompleted(ctx context.Contex
 	}, nil
 }
 
-func (a *DatasetBuildActivities) MarkDatasetBuildJobFailed(ctx context.Context, payload DatasetBuildFailureInput) (DatasetBuildLifecycleResult, error) {
+func (a *DatasetBuildActivities) MarkDatasetBuildJobFailed(ctx context.Context, payload DatasetBuildFailureInput) (result DatasetBuildLifecycleResult, err error) {
+	actInfo := obs.GetActivityLogInfo(ctx)
+	ctx = obs.EnrichActivityContext(ctx, "", "", actInfo)
+	startedAt := obs.LogActivityStarted(ctx, MarkDatasetBuildJobFailedActivityName, actInfo)
+	defer func() {
+		if err != nil {
+			obs.LogActivityFailed(ctx, MarkDatasetBuildJobFailedActivityName, startedAt, err)
+		} else {
+			obs.LogActivityCompleted(ctx, MarkDatasetBuildJobFailedActivityName, startedAt)
+		}
+	}()
+
 	repo, err := a.requireRepo()
 	if err != nil {
 		return DatasetBuildLifecycleResult{}, err
@@ -316,7 +388,18 @@ func (a *DatasetBuildActivities) MarkDatasetBuildJobFailed(ctx context.Context, 
 	}, nil
 }
 
-func (a *DatasetBuildActivities) ResumeWaitingExecutionsForDatasetVersion(ctx context.Context, input DatasetBuildWorkflowInput) (DatasetBuildLifecycleResult, error) {
+func (a *DatasetBuildActivities) ResumeWaitingExecutionsForDatasetVersion(ctx context.Context, input DatasetBuildWorkflowInput) (result DatasetBuildLifecycleResult, err error) {
+	actInfo := obs.GetActivityLogInfo(ctx)
+	ctx = obs.EnrichActivityContext(ctx, "", "", actInfo)
+	startedAt := obs.LogActivityStarted(ctx, ResumeWaitingExecutionsActivityName, actInfo)
+	defer func() {
+		if err != nil {
+			obs.LogActivityFailed(ctx, ResumeWaitingExecutionsActivityName, startedAt, err)
+		} else {
+			obs.LogActivityCompleted(ctx, ResumeWaitingExecutionsActivityName, startedAt)
+		}
+	}()
+
 	if a.Resumer == nil {
 		return DatasetBuildLifecycleResult{
 			JobID:     input.JobID,

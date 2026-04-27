@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/obs"
 	"analysis-support-platform/control-plane/internal/store"
 	"analysis-support-platform/control-plane/internal/workflows"
 )
@@ -15,6 +16,18 @@ type StartupReconciliationSummary struct {
 	BuildJobsRequeued        int `json:"build_jobs_requeued"`
 	ExecutionsReenqueued     int `json:"executions_reenqueued"`
 	WaitingExecutionsResumed int `json:"waiting_executions_resumed"`
+}
+
+// LogBootReconciled emits the service.boot.reconciled structured event.
+// Call from server startup after all reconciliation steps complete.
+func LogBootReconciled(summary StartupReconciliationSummary, durationMs int64) {
+	obs.Logger.Info("startup reconciliation completed",
+		"event", "service.boot.reconciled",
+		"duration_ms", durationMs,
+		"restored_dataset", summary.BuildJobsRequeued,
+		"restored_execution", summary.ExecutionsReenqueued,
+		"restored_waiting", summary.WaitingExecutionsResumed,
+	)
 }
 
 func (s *DatasetService) ReconcileStartupBuildJobs() (int, error) {
