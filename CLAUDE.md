@@ -148,6 +148,7 @@ PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.evaluate_em
 
 - `docs/api/openapi.yaml` — 전체 HTTP API 계약 (기준 문서)
 - `docs/api/openapi.frontend.yaml` — 프론트 필수 API 계약
+- `docs/observability.md` — 현재 observability 구현 범위와 Request ID 정책
 - `docs/skill/skill_registry.md` — runtime skill 계약 요약
 - `docs/skill/skill_implementation_status.md` — skill별 구현 방식과 안정도
 - `docs/architecture/language_roles.md` — 언어별 책임 경계 상세
@@ -156,10 +157,14 @@ PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.evaluate_em
 
 ## 현재 트랙 메모
 
+- T1 Observability:
+  - Phase 1~2 완료
+  - Go control plane / Temporal / Python worker까지 Request ID 전파와 structured logging 연결 완료
+  - `apps/control-plane/dev/smoke.sh` 실제 실행으로 canonical skill surface와 cross-language request correlation 확인
 - T4 Skill Surface Consolidation:
-  - Phase 1~4 완료
-  - Phase 5에서 consumer/caller surface canonical 전환과 alias 종료 시점 문서화 진행 중
-- T4 후속 우선순위:
-  1. T1 observability Phase 2 dirty 정리 및 재개
-  2. Go `buildDefaultPlan()` 정리 sub-track
-  3. T3 eval set / architecture evolution
+  - Phase 1~5 완료
+  - ADR-009 closed, 남은 것은 ADR-010(alias 제거 시점) 판단
+- 다음 우선순위:
+  1. Go `buildDefaultPlan()` 정리 sub-track
+  2. T3 eval set / architecture evolution
+  3. ADR-010 alias 제거 시점 결정
