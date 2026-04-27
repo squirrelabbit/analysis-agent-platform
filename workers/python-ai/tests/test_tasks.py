@@ -2677,6 +2677,31 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["quality_tier"], "llm_dependent")
         self.assertTrue(result["artifact"]["llm_output_parsed_strictly"])
 
+    def test_evidence_pack_alias_dispatches_to_issue_evidence_summary(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "issues.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"text": "로그인이 자주 실패하고 오류가 보입니다"})
+
+        payload = {
+            "dataset_name": str(csv_path),
+            "query": "결제 오류 관련 근거를 보여줘",
+            "sample_n": 2,
+        }
+
+        with patch(
+            "python_ai_worker.skills._summarize_impl.rt._anthropic_client",
+            return_value=self._DummyEvidenceClient(),
+        ):
+            canonical_result = run_task("issue_evidence_summary", dict(payload))
+            alias_result = run_task("evidence_pack", dict(payload))
+
+        self.assertEqual(canonical_result["artifact"], alias_result["artifact"])
+        self.assertEqual(canonical_result["artifact"]["skill_name"], "issue_evidence_summary")
+
     def test_issue_evidence_summary_requires_llm_presenter(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues_requires_llm.csv"

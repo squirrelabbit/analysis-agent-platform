@@ -50,6 +50,7 @@ LEGACY_SKILL_NAMES: frozenset[str] = frozenset(
 # as more renames land.
 DEPRECATED_ALIASES: Mapping[str, str] = {
     "keyword_frequency": "term_frequency",
+    "evidence_pack": "issue_evidence_summary",
 }
 
 

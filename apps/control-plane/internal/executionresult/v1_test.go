@@ -79,3 +79,25 @@ func TestBuildV1MatchesAliasArtifactKeyForStep(t *testing.T) {
 		t.Fatalf("unexpected artifact key: %+v", result.StepResults[0])
 	}
 }
+
+func TestBuildV1CanonicalizesEvidenceAliasPrimarySkill(t *testing.T) {
+	execution := domain.ExecutionSummary{
+		ExecutionID: "exec-evidence-alias",
+		Status:      "completed",
+		Plan: domain.SkillPlan{
+			PlanID: "plan-evidence-alias",
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "evidence_pack"},
+			},
+			CreatedAt: time.Now().UTC(),
+		},
+		Artifacts: map[string]string{
+			"step:step-1:evidence_pack": `{"skill_name":"evidence_pack","summary":"근거 요약","evidence":[{"snippet":"근거"}]}`,
+		},
+	}
+
+	result := BuildV1(execution)
+	if result.PrimarySkillName == nil || *result.PrimarySkillName != "issue_evidence_summary" {
+		t.Fatalf("expected canonical primary skill name, got %+v", result.PrimarySkillName)
+	}
+}

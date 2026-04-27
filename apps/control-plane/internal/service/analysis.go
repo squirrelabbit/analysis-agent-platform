@@ -461,7 +461,6 @@ func (s *AnalysisService) BuildExecutionResult(projectID, executionID string) (d
 		"evidence_artifact_keys": filterArtifactKeysBySkills(
 			sortedArtifactKeys(execution.Artifacts),
 			"issue_evidence_summary",
-			"evidence_pack",
 		),
 		"reproducibility": map[string]any{
 			"params_hash":          execution.ParamsHash,
@@ -924,7 +923,7 @@ func buildStepArtifactPreview(artifact map[string]any) map[string]any {
 		return nil
 	}
 	preview := map[string]any{
-		"skill_name": strings.TrimSpace(artifactStringValue(artifact["skill_name"])),
+		"skill_name": skillruntime.CanonicalSkillName(artifactStringValue(artifact["skill_name"])),
 	}
 	if summary := strings.TrimSpace(executionArtifactSummary(artifact)); summary != "" {
 		preview["summary"] = summary
@@ -1252,7 +1251,6 @@ func decodeExecutionArtifacts(artifacts map[string]string) map[string]map[string
 func selectPrimaryExecutionArtifact(decoded map[string]map[string]any, plan domain.SkillPlan) (string, map[string]any) {
 	priority := []string{
 		"issue_evidence_summary",
-		"evidence_pack",
 		"issue_cluster_summary",
 		"issue_taxonomy_summary",
 		"issue_sentiment_summary",
@@ -1303,7 +1301,7 @@ func buildExecutionAnswerV1(primaryArtifact map[string]any, decoded map[string]m
 		answer.Summary = "실행은 완료됐지만 대표 요약을 생성하지 못했습니다."
 	}
 	if len(answer.Evidence) == 0 {
-		if evidenceKey, evidenceArtifact := selectPrimaryBySkills(decoded, "issue_evidence_summary", "evidence_pack"); evidenceKey != "" {
+		if evidenceKey, evidenceArtifact := selectPrimaryBySkills(decoded, "issue_evidence_summary"); evidenceKey != "" {
 			answer.Evidence = executionArtifactEvidence(evidenceArtifact)
 			if answer.SelectionSource == "" {
 				answer.SelectionSource = strings.TrimSpace(artifactStringValue(evidenceArtifact["selection_source"]))

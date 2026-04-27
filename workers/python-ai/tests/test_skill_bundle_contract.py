@@ -143,6 +143,15 @@ class SkillBundleContractTests(unittest.TestCase):
                 self.assertIn(canonical, handlers)
                 self.assertIs(handlers[deprecated], handlers[canonical])
 
+    def test_deprecated_alias_inventory_matches_current_phases(self) -> None:
+        self.assertEqual(
+            DEPRECATED_ALIASES,
+            {
+                "keyword_frequency": "term_frequency",
+                "evidence_pack": "issue_evidence_summary",
+            },
+        )
+
     def test_canonical_skill_name_resolves_alias(self) -> None:
         for deprecated, canonical in DEPRECATED_ALIASES.items():
             with self.subTest(deprecated=deprecated):

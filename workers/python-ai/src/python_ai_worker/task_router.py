@@ -36,7 +36,6 @@ from .skills.retrieve import (
     run_semantic_search,
 )
 from .skills.summarize import (
-    run_evidence_pack,
     run_issue_breakdown_summary,
     run_issue_cluster_summary,
     run_issue_evidence_summary,
@@ -133,7 +132,9 @@ def task_handlers() -> dict[str, Any]:
         "issue_taxonomy_summary": run_issue_taxonomy_summary,
         "semantic_search": run_semantic_search,
         "issue_evidence_summary": run_issue_evidence_summary,
-        "evidence_pack": run_evidence_pack,
+        # ADR-009 F2: evidence_pack is a deprecated alias of
+        # issue_evidence_summary during the transition period.
+        "evidence_pack": run_issue_evidence_summary,
         "unstructured_issue_summary": run_unstructured_issue_summary,
     }
 

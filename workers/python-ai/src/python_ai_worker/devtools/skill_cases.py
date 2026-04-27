@@ -915,35 +915,7 @@ def _issue_evidence_summary_case(ctx: SkillCaseContext) -> dict[str, Any]:
 
 
 def _evidence_pack_case(ctx: SkillCaseContext) -> dict[str, Any]:
-    csv_path = ctx.write_csv("issues.csv", ["occurred_at", "channel", "text"], _issue_rows())
-    embedding = ctx.run(
-        "embedding",
-        {
-            "dataset_name": str(csv_path),
-            "text_column": "text",
-            "output_path": str(ctx.temp_dir / "issues.embeddings.jsonl"),
-        },
-    )
-    semantic = ctx.run(
-        "semantic_search",
-        {
-            "dataset_name": str(csv_path),
-            "text_column": "text",
-            "query": "결제 오류 관련 근거를 보여줘",
-            "sample_n": 2,
-            "embedding_uri": embedding["artifact"]["embedding_uri"],
-        },
-    )
-    return ctx.run(
-        "evidence_pack",
-        {
-            "dataset_name": str(csv_path),
-            "text_column": "text",
-            "query": "결제 오류 관련 근거를 보여줘",
-            "sample_n": 2,
-            "prior_artifacts": _prior(("step:semantic", semantic)),
-        },
-    )
+    return _issue_evidence_summary_case(ctx)
 
 
 def _execution_final_answer_case(ctx: SkillCaseContext) -> dict[str, Any]:
@@ -1012,7 +984,7 @@ SKILL_CASES: dict[str, SkillCase] = {
     "issue_sentiment_summary": SkillCase("issue_sentiment_summary", "summarize sentiment label distribution", _issue_sentiment_summary_case),
     "issue_taxonomy_summary": SkillCase("issue_taxonomy_summary", "summarize taxonomy-tagged issues", _issue_taxonomy_summary_case),
     "issue_evidence_summary": SkillCase("issue_evidence_summary", "build final evidence summary from sampled rows", _issue_evidence_summary_case),
-    "evidence_pack": SkillCase("evidence_pack", "build reusable evidence bundle from semantic candidates", _evidence_pack_case),
+    "evidence_pack": SkillCase("evidence_pack", "deprecated alias of issue_evidence_summary during ADR-009 F2", _evidence_pack_case),
     "execution_final_answer": SkillCase("execution_final_answer", "rewrite result_v1 into grounded final answer", _execution_final_answer_case),
 }
 

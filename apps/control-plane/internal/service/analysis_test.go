@@ -1335,7 +1335,7 @@ func TestBuildExecutionResultIncludesUsageSummary(t *testing.T) {
 	if result.ResultV1.Answer == nil {
 		t.Fatalf("expected result v1 answer: %+v", result.ResultV1)
 	}
-	if result.ResultV1.PrimarySkillName == nil || *result.ResultV1.PrimarySkillName != "evidence_pack" {
+	if result.ResultV1.PrimarySkillName == nil || *result.ResultV1.PrimarySkillName != "issue_evidence_summary" {
 		t.Fatalf("unexpected primary skill: %+v", result.ResultV1)
 	}
 	if result.ResultV1.UsageSummary["total_tokens"] != 210 {

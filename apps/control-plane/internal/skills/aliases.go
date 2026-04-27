@@ -6,6 +6,7 @@ import "strings"
 // treat deprecated skill names the same way as the Python runtime.
 var DeprecatedAliases = map[string]string{
 	"keyword_frequency": "term_frequency",
+	"evidence_pack":     "issue_evidence_summary",
 }
 
 // CanonicalSkillName resolves a deprecated skill name to its canonical name.

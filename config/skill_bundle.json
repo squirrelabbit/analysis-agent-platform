@@ -671,6 +671,7 @@
     },
     {
       "name": "evidence_pack",
+      "deprecated_alias_of": "issue_evidence_summary",
       "description": "Build evidence bundles for final outputs.",
       "engine": "python-ai",
       "kind": "plan",

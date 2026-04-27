@@ -26,7 +26,7 @@ func BuildV1(execution domain.ExecutionSummary) domain.ExecutionResultV1 {
 	if primaryArtifactKey != "" {
 		result.PrimaryArtifactKey = stringPointer(primaryArtifactKey)
 	}
-	if primarySkillName := strings.TrimSpace(artifactStringValue(primaryArtifact["skill_name"])); primarySkillName != "" {
+	if primarySkillName := skillruntime.CanonicalSkillName(artifactStringValue(primaryArtifact["skill_name"])); primarySkillName != "" {
 		result.PrimarySkillName = stringPointer(primarySkillName)
 	}
 	if answer := buildExecutionAnswerV1(primaryArtifact, decodedArtifacts); answer != nil {
@@ -56,7 +56,6 @@ func decodeExecutionArtifacts(artifacts map[string]string) map[string]map[string
 func selectPrimaryExecutionArtifact(decoded map[string]map[string]any, plan domain.SkillPlan) (string, map[string]any) {
 	priority := []string{
 		"issue_evidence_summary",
-		"evidence_pack",
 		"issue_cluster_summary",
 		"issue_taxonomy_summary",
 		"issue_sentiment_summary",
@@ -107,7 +106,7 @@ func buildExecutionAnswerV1(primaryArtifact map[string]any, decoded map[string]m
 		answer.Summary = "실행은 완료됐지만 대표 요약을 생성하지 못했습니다."
 	}
 	if len(answer.Evidence) == 0 {
-		if evidenceKey, evidenceArtifact := selectPrimaryBySkills(decoded, "issue_evidence_summary", "evidence_pack"); evidenceKey != "" {
+		if evidenceKey, evidenceArtifact := selectPrimaryBySkills(decoded, "issue_evidence_summary"); evidenceKey != "" {
 			answer.Evidence = executionArtifactEvidence(evidenceArtifact)
 			if answer.SelectionSource == "" {
 				answer.SelectionSource = strings.TrimSpace(artifactStringValue(evidenceArtifact["selection_source"]))

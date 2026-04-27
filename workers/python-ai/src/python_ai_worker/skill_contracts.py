@@ -111,9 +111,11 @@ def validate_task_result(name: str, payload: dict[str, Any], result: dict[str, A
     if fallback_policy == "strict_fail" and _looks_gracefully_empty(name, result, artifact):
         raise SkillOutputError(f"{name} returned an empty result despite strict_fail contract")
 
-    if name in {"unstructured_issue_summary", "issue_cluster_summary"}:
+    canonical_name = canonical_skill_name(name)
+
+    if canonical_name in {"unstructured_issue_summary", "issue_cluster_summary"}:
         validate_ranked_issue_summary_artifact(artifact)
-    elif name in {"issue_evidence_summary", "evidence_pack"}:
+    elif canonical_name == "issue_evidence_summary":
         validate_issue_evidence_artifact(artifact)
     elif name == "execution_final_answer":
         answer = result.get("answer")
@@ -210,11 +212,12 @@ def _skill_contract_meta(name: str) -> dict[str, Any]:
 
 
 def _looks_gracefully_empty(name: str, result: dict[str, Any], artifact: dict[str, Any]) -> bool:
-    if name in {"cluster_label_candidates", "embedding_cluster"}:
+    canonical_name = canonical_skill_name(name)
+    if canonical_name in {"cluster_label_candidates", "embedding_cluster"}:
         return len(list(artifact.get("clusters") or [])) == 0
-    if name in {"unstructured_issue_summary", "issue_cluster_summary"}:
+    if canonical_name in {"unstructured_issue_summary", "issue_cluster_summary"}:
         return len(list(artifact.get("ranked_issues") or [])) == 0
-    if name in {"issue_evidence_summary", "evidence_pack"}:
+    if canonical_name == "issue_evidence_summary":
         return (
             not str(artifact.get("summary") or "").strip()
             or len(list(artifact.get("evidence") or [])) == 0
