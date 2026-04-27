@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -13,16 +14,68 @@ import (
 )
 
 const (
+	datasetBuildTypeClean     = "clean"
 	datasetBuildTypePrepare   = "prepare"
 	datasetBuildTypeSentiment = "sentiment"
 	datasetBuildTypeEmbedding = "embedding"
 	datasetBuildTypeCluster   = "cluster"
 )
 
+func (s *DatasetService) CreateCleanJob(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest, triggeredBy string) (domain.DatasetBuildJob, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if version.DataType == "structured" {
+		return domain.DatasetBuildJob{}, ErrInvalidArgument{Message: "dataset clean requires unstructured or mixed dataset version"}
+	}
+	if len(resolveDatasetBuildTextSelection(version.Metadata, input.TextColumns).Columns) == 0 {
+		return domain.DatasetBuildJob{}, ErrInvalidArgument{Message: "text_columns is required for dataset clean"}
+	}
+	if active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, datasetBuildTypeClean); err != nil {
+		return domain.DatasetBuildJob{}, err
+	} else if active != nil {
+		return *active, nil
+	}
+
+	job := domain.DatasetBuildJob{
+		JobID:            id.New(),
+		ProjectID:        projectID,
+		DatasetID:        datasetID,
+		DatasetVersionID: datasetVersionID,
+		BuildType:        datasetBuildTypeClean,
+		Status:           "queued",
+		Request:          requestToMap(input),
+		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
+		CreatedAt:        time.Now().UTC(),
+	}
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.CleanStatus = "queued"
+	version.Metadata["clean_status"] = "queued"
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := s.store.SaveDatasetBuildJob(job); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := s.dispatchDatasetBuildJob(job, func() error {
+		_, err := s.BuildClean(projectID, datasetID, datasetVersionID, input)
+		return err
+	}); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	return job, nil
+}
+
 func (s *DatasetService) CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy string) (domain.DatasetBuildJob, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
 		return domain.DatasetBuildJob{}, err
+	}
+	if status := cleanStatus(version); status == "queued" || status == "cleaning" || status == "failed" || status == "stale" {
+		return domain.DatasetBuildJob{}, ErrInvalidArgument{Message: "dataset clean must be ready before prepare"}
 	}
 	if active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, datasetBuildTypePrepare); err != nil {
 		return domain.DatasetBuildJob{}, err
@@ -188,6 +241,9 @@ func (s *DatasetService) GetDatasetBuildJob(projectID, jobID string) (domain.Dat
 		}
 		return domain.DatasetBuildJob{}, err
 	}
+	if version, versionErr := s.store.GetDatasetVersion(projectID, job.DatasetVersionID); versionErr == nil {
+		return withBuildJobDiagnosticsForVersion(job, version), nil
+	}
 	return withBuildJobDiagnostics(job), nil
 }
 
@@ -201,9 +257,51 @@ func (s *DatasetService) ListDatasetBuildJobs(projectID, datasetID, datasetVersi
 		return domain.DatasetBuildJobListResponse{}, err
 	}
 	for index := range items {
-		items[index] = withBuildJobDiagnostics(items[index])
+		items[index] = withBuildJobDiagnosticsForVersion(items[index], version)
 	}
 	return domain.DatasetBuildJobListResponse{Items: items}, nil
+}
+
+func (s *DatasetService) latestDatasetVersionBuildJobStatuses(projectID string, version domain.DatasetVersion) ([]domain.DatasetVersionBuildJobStatus, error) {
+	items, err := s.store.ListDatasetBuildJobs(projectID, version.DatasetVersionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, nil
+	}
+	latestByType := latestDatasetBuildJobsByType(items)
+	orderedTypes := []string{
+		datasetBuildTypeClean,
+		datasetBuildTypePrepare,
+		datasetBuildTypeSentiment,
+		datasetBuildTypeEmbedding,
+		datasetBuildTypeCluster,
+	}
+	result := make([]domain.DatasetVersionBuildJobStatus, 0, len(latestByType))
+	for _, buildType := range orderedTypes {
+		job, ok := latestByType[buildType]
+		if !ok {
+			continue
+		}
+		result = append(result, datasetVersionBuildJobStatus(withBuildJobDiagnosticsForVersion(job, version)))
+	}
+	return result, nil
+}
+
+func datasetVersionBuildJobStatus(job domain.DatasetBuildJob) domain.DatasetVersionBuildJobStatus {
+	return domain.DatasetVersionBuildJobStatus{
+		JobID:        job.JobID,
+		BuildType:    job.BuildType,
+		Status:       job.Status,
+		TriggeredBy:  job.TriggeredBy,
+		Attempt:      job.Attempt,
+		CreatedAt:    job.CreatedAt,
+		StartedAt:    job.StartedAt,
+		CompletedAt:  job.CompletedAt,
+		ErrorMessage: job.ErrorMessage,
+		Diagnostics:  job.Diagnostics,
+	}
 }
 
 func (s *DatasetService) findActiveDatasetBuildJob(projectID, datasetVersionID, buildType string) (*domain.DatasetBuildJob, error) {
@@ -326,6 +424,112 @@ func withBuildJobDiagnostics(job domain.DatasetBuildJob) domain.DatasetBuildJob 
 		ResumedExecutionCount: job.ResumedExecutionCount,
 	}
 	return job
+}
+
+func withBuildJobDiagnosticsForVersion(job domain.DatasetBuildJob, version domain.DatasetVersion) domain.DatasetBuildJob {
+	job = withBuildJobDiagnostics(job)
+	enrichBuildJobDiagnosticsFromVersion(&job, version)
+	return job
+}
+
+func enrichBuildJobDiagnosticsFromVersion(job *domain.DatasetBuildJob, version domain.DatasetVersion) {
+	prefix := buildJobMetadataPrefix(job.BuildType)
+	if prefix == "" || version.Metadata == nil {
+		return
+	}
+	if job.Diagnostics == nil {
+		job.Diagnostics = &domain.BuildJobDiagnostics{}
+	}
+	if progress := loadBuildJobProgress(version.Metadata, prefix); progress != nil {
+		job.Diagnostics.Progress = progress
+	}
+	if !metadataBool(version.Metadata, prefix+"_llm_fallback") {
+		return
+	}
+	job.Diagnostics.LLMFallback = true
+	if count, ok := anyToInt(version.Metadata[prefix+"_llm_fallback_count"]); ok {
+		job.Diagnostics.LLMFallbackCount = count
+	}
+	if reason := metadataString(version.Metadata, prefix+"_llm_fallback_reason", ""); reason != "" {
+		job.Diagnostics.LLMFallbackReason = stringPointer(reason)
+	}
+	if provider := metadataString(version.Metadata, prefix+"_llm_provider", ""); provider != "" {
+		job.Diagnostics.LLMProvider = stringPointer(provider)
+	}
+	if model := metadataString(version.Metadata, prefix+"_llm_model", ""); model != "" {
+		job.Diagnostics.LLMModel = stringPointer(model)
+	}
+	if warning := metadataString(version.Metadata, prefix+"_warning", ""); warning != "" {
+		job.Diagnostics.Warnings = append(job.Diagnostics.Warnings, warning)
+	}
+}
+
+type buildJobProgressFile struct {
+	Percent        float64  `json:"percent"`
+	ProcessedRows  int      `json:"processed_rows"`
+	TotalRows      int      `json:"total_rows"`
+	ElapsedSeconds float64  `json:"elapsed_seconds"`
+	ETASeconds     *float64 `json:"eta_seconds"`
+	Message        string   `json:"message"`
+	UpdatedAt      string   `json:"updated_at"`
+}
+
+func loadBuildJobProgress(metadata map[string]any, prefix string) *domain.BuildJobProgress {
+	progressRef := strings.TrimSpace(metadataString(metadata, prefix+"_progress_ref", ""))
+	if progressRef == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(progressRef)
+	if err != nil {
+		return nil
+	}
+	var decoded buildJobProgressFile
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil
+	}
+	progress := &domain.BuildJobProgress{
+		Percent:        decoded.Percent,
+		ProcessedRows:  decoded.ProcessedRows,
+		TotalRows:      decoded.TotalRows,
+		ElapsedSeconds: decoded.ElapsedSeconds,
+		ETASeconds:     decoded.ETASeconds,
+		Message:        strings.TrimSpace(decoded.Message),
+	}
+	if parsedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(decoded.UpdatedAt)); err == nil {
+		progress.UpdatedAt = &parsedAt
+	}
+	return progress
+}
+
+func buildJobMetadataPrefix(buildType string) string {
+	switch strings.TrimSpace(buildType) {
+	case datasetBuildTypeClean:
+		return "clean"
+	case datasetBuildTypePrepare:
+		return "prepare"
+	case datasetBuildTypeSentiment:
+		return "sentiment"
+	default:
+		return ""
+	}
+}
+
+func metadataBool(metadata map[string]any, key string) bool {
+	if metadata == nil {
+		return false
+	}
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
 }
 
 func cloneStringPointer(value *string) *string {

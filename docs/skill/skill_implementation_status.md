@@ -37,15 +37,18 @@
 | `issue_taxonomy_summary` | dictionary tagging 집계 | 중간 | taxonomy coverage 영향 |
 | `issue_evidence_summary` | evidence selection + LLM/fallback | LLM 의존 | 사용자 체감 영향 큼 |
 
-## dataset build / presentation
+## dataset build / presentation 지원 상태
+
+아래 항목은 plan skill이 아니라 dataset build 또는 presentation runtime 지원 작업이다.
+`dataset_prepare`, `sentiment_label`, `embedding`은 `config/skill_bundle.json`에 `kind=dataset_build`로 등록되어 있고, cluster materialization과 final answer는 별도 runtime 경로로 동작한다.
 
 | Task | 구현 방식 | 안정도 | 메모 |
 | --- | --- | --- | --- |
 | `dataset_prepare` | regex 정제 + LLM prepare/fallback | LLM 의존 | 비정형 파이프라인 입구 |
 | `sentiment_label` | batch sentiment labeling | LLM 의존 | labeled parquet 생성 |
 | `embedding` | dense embedding + token-overlap fallback | 중간 | dense unavailable 시 fallback |
-| `dataset_cluster_build` | materialized clustering | 중간 | `summary JSON + membership parquet` 생성 |
-| `execution_final_answer` | LLM 후처리 + fallback summarizer | LLM 의존 | 최종 답변 레이어 |
+| cluster materialization | materialized clustering | 중간 | `summary JSON + membership parquet` 생성. 현재 skill bundle 항목은 아님 |
+| final answer presentation | LLM 후처리 + fallback summarizer | LLM 의존 | 최종 답변 레이어. 현재 skill bundle 항목은 아님 |
 
 ## 지금 우선적으로 볼 축
 
@@ -54,7 +57,7 @@
 - 품질 보정이 가장 필요한 축
   - `embedding_cluster`, `cluster_label_candidates`, `issue_cluster_summary`
 - 모델/프롬프트 의존 축
-  - `dataset_prepare`, `sentiment_label`, `issue_evidence_summary`, `evidence_pack`, `execution_final_answer`
+  - `dataset_prepare`, `sentiment_label`, `issue_evidence_summary`, `evidence_pack`, final answer presentation
 
 ## 운영 메모
 

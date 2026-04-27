@@ -1,47 +1,45 @@
-import DetailPanel from "@/components/projects/DetailPanel";
-import ProjectHead from "@/components/projects/ProjectHead";
-import ProjectList from "@/components/projects/ProjectList";
-import { Separator } from "@/components/ui/separator";
-import { useProjects } from "@/hooks/useProject";
-import { memo } from "react";
-
-// searchQuery 바뀔 때 DetailPanel 리렌더링 차단
-const MemoDetailPanel = memo(DetailPanel);
+import { Input } from "@/components/ui/input";
+import ProjectHeader from "@/features/project/components/ProjectHeader";
+import ProjectList from "@/features/project/components/ProjectList";
+import ProjectListSkeleton from "@/features/project/components/ProjectListSkeleton";
+import { useProjects } from "@/features/project/hooks/useProjects";
+import { Search } from "lucide-react";
+import { useState } from "react";
 
 export default function ProjectPage() {
-  const {
-    projects,
-    filtered,
-    selectedProject,
-    selectedId,
-    selectProject,
-    searchQuery,
-    setSearchQuery,
-    addProject
-  } = useProjects();
+  const { data: projects = [], isLoading } = useProjects();
+
+  const [search, setSearch] = useState("");
+  const filtered = projects.filter(
+    ({ name, description }) =>
+      name.toLowerCase().trim().includes(search.toLowerCase().trim()) ||
+      description.toLowerCase().trim().includes(search.toLowerCase().trim()),
+  );
 
   return (
-    <div className="flex gap-3">
-      <div className="flex-1">
-        <ProjectHead
-          total={projects?.length || 0}
-          filteredCount={filtered?.length || 0}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          onAddProject={addProject}
-        />
-        <ProjectList
-          filtered={filtered}
-          isExist={projects?.length == 0}
-          selectedId={selectedId}
-          onClick={(p) => selectProject(p)}
-        />
-      </div>
-      {selectedProject && <Separator orientation="vertical" />}
-      {selectedProject && (
-        <div className="flex-2">
-          <MemoDetailPanel {...selectedProject} />
+    <div className="p-8">
+      <ProjectHeader />
+      <div className="flex justify-between items-center py-3">
+        <div className="relative w-100">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+          <Input
+            placeholder="Search..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-9 pl-8 text-xs rounded-md border-zinc-200 bg-white focus-visible:ring-indigo-300"
+          />
         </div>
+        <p className="text-xs text-zinc-400">
+          <span className="text-indigo-500 font-medium">
+            {filtered.length}개
+          </span>
+          {" / "}전체 {projects.length}개
+        </p>
+      </div>
+      {isLoading ? (
+        <ProjectListSkeleton />
+      ) : (
+        <ProjectList total={projects.length} projects={filtered} />
       )}
     </div>
   );

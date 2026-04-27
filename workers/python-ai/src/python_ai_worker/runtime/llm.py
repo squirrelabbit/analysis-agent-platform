@@ -765,6 +765,16 @@ def _prepare_rows(
                     fallback = _prepare_row_fallback(raw_text)
                     fallback["quality_flags"] = list(fallback["quality_flags"]) + [f"llm_batch_fallback:{exc}"]
                     prepared_rows.append(fallback)
+                    usage_records.append(
+                        _free_usage_metadata(
+                            provider="deterministic-fallback",
+                            model="dataset-prepare-fallback-v1",
+                            operation="dataset_prepare",
+                            request_count=1,
+                            input_text_count=1,
+                            cost_status="free_fallback",
+                        )
+                    )
         return prepared_rows, _merge_usage_records(usage_records)
     prepared_rows: list[dict[str, Any]] = []
     for raw_text in raw_texts:
