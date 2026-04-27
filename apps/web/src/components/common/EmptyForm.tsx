@@ -13,6 +13,7 @@ type EmptyFormProps = {
   description: string;
   icon: JSX.Element;
   children?: React.ReactNode;
+  props?: React.ComponentProps<"div">
 };
 
 export function EmptyForm({
@@ -20,9 +21,10 @@ export function EmptyForm({
   description,
   icon,
   children,
+  props
 }: EmptyFormProps) {
   return (
-    <Empty className="border border-dashed">
+    <Empty {...props}>
       <EmptyHeader>
         <EmptyMedia variant="icon">{icon}</EmptyMedia>
         <EmptyTitle>{title}</EmptyTitle>
