@@ -486,7 +486,7 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"issues.csv","data_type":"unstructured"}`,
+		`{"storage_uri":"issues.csv","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&version,
 	)
@@ -500,7 +500,7 @@ func TestListAndProfileValidationEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"issues_v2.csv","data_type":"unstructured"}`,
+		`{"storage_uri":"issues_v2.csv","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&map[string]any{},
 	)
@@ -753,6 +753,86 @@ func TestProjectPromptEndpoints(t *testing.T) {
 	}
 }
 
+func TestGlobalPromptEndpoints(t *testing.T) {
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+	})
+	handler := server.Handler()
+
+	created := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/prompts",
+		`{
+		  "version":"dataset-prepare-managed-v1",
+		  "operation":"prepare",
+		  "content":"---\ntitle: 글로벌 전처리\noperation: prepare\nstatus: active\nsummary: 글로벌 전처리 템플릿\n---\n{{raw_text}}\n"
+		}`,
+		http.StatusCreated,
+		&created,
+	)
+	promptID := created["prompt_id"].(string)
+	if created["version"] != "dataset-prepare-managed-v1" || created["operation"] != "prepare" {
+		t.Fatalf("unexpected created global prompt: %+v", created)
+	}
+
+	secondCreated := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/prompts",
+		`{
+		  "version":"dataset-sentiment-managed-v1",
+		  "operation":"sentiment",
+		  "content":"---\ntitle: 글로벌 감성\noperation: sentiment\nstatus: active\nsummary: 글로벌 감성 템플릿\n---\n{{text}}\n"
+		}`,
+		http.StatusCreated,
+		&secondCreated,
+	)
+
+	filtered := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/prompts?operation=prepare", "", http.StatusOK, &filtered)
+	items, ok := filtered["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one prepare prompt: %+v", filtered)
+	}
+	if items[0].(map[string]any)["prompt_id"] != promptID {
+		t.Fatalf("unexpected filtered prompt list: %+v", filtered)
+	}
+
+	loaded := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/prompts/"+promptID, "", http.StatusOK, &loaded)
+	if loaded["title"] != "글로벌 전처리" {
+		t.Fatalf("unexpected prompt detail response: %+v", loaded)
+	}
+
+	updated := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPatch,
+		"/prompts/"+promptID,
+		`{
+		  "content":"---\ntitle: 글로벌 전처리 수정\noperation: prepare\nstatus: experimental\nsummary: 수정된 글로벌 전처리 템플릿\n---\n{{raw_text}}\n"
+		}`,
+		http.StatusOK,
+		&updated,
+	)
+	if updated["title"] != "글로벌 전처리 수정" || updated["status"] != "experimental" {
+		t.Fatalf("expected updated prompt metadata: %+v", updated)
+	}
+
+	readJSONResponse(t, handler, http.MethodDelete, "/prompts/"+promptID, "", http.StatusNoContent, nil)
+
+	deleted := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/prompts/"+promptID, "", http.StatusNotFound, &deleted)
+}
+
 func TestScenarioPlanEndpoint(t *testing.T) {
 	server := NewServer(config.Config{
 		BindAddr:       ":0",
@@ -812,7 +892,7 @@ func TestScenarioPlanEndpoint(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"festival.csv","data_type":"unstructured"}`,
+		`{"storage_uri":"festival.csv","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&version,
 	)
@@ -974,7 +1054,7 @@ func TestScenarioExecuteEndpoint(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"festival.csv","data_type":"unstructured"}`,
+		`{"storage_uri":"festival.csv","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&version,
 	)
@@ -1071,7 +1151,7 @@ func TestUploadDatasetCreatesStoredVersion(t *testing.T) {
 	if err := writer.WriteField("sentiment_llm_mode", "enabled"); err != nil {
 		t.Fatalf("unexpected write field error: %v", err)
 	}
-	if err := writer.WriteField("metadata", `{"text_column":"text"}`); err != nil {
+	if err := writer.WriteField("metadata", `{"text_columns":["text"]}`); err != nil {
 		t.Fatalf("unexpected write field error: %v", err)
 	}
 	fileWriter, err := writer.CreateFormFile("file", "issues.csv")
@@ -1134,6 +1214,19 @@ func TestUploadDatasetCreatesStoredVersion(t *testing.T) {
 	if loadedDataset["active_dataset_version_id"] != version["dataset_version_id"] {
 		t.Fatalf("expected uploaded version to become active: %+v", loadedDataset)
 	}
+
+	req = httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+version["dataset_version_id"].(string)+"/source_download", nil)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected source download status: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if disposition := recorder.Header().Get("Content-Disposition"); !strings.Contains(disposition, "attachment; filename=") || !strings.Contains(disposition, "issues.csv") {
+		t.Fatalf("unexpected content-disposition: %s", disposition)
+	}
+	if got := recorder.Body.String(); got != "text\n결제 오류가 반복 발생했습니다\n" {
+		t.Fatalf("unexpected source download body: %q", got)
+	}
 }
 
 func TestDatasetActiveVersionEndpoints(t *testing.T) {
@@ -1158,7 +1251,7 @@ func TestDatasetActiveVersionEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"issues-v1.csv","data_type":"unstructured"}`,
+		`{"storage_uri":"issues-v1.csv","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&firstVersion,
 	)
@@ -1169,7 +1262,7 @@ func TestDatasetActiveVersionEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"issues-v2.csv","data_type":"unstructured","activate_on_create":false}`,
+		`{"storage_uri":"issues-v2.csv","data_type":"unstructured","metadata":{"text_columns":["text"]},"activate_on_create":false}`,
 		http.StatusCreated,
 		&secondVersion,
 	)
@@ -1231,17 +1324,216 @@ func TestDatasetActiveVersionEndpoints(t *testing.T) {
 	}
 }
 
+func TestDeleteDatasetVersionEndpoint(t *testing.T) {
+	uploadRoot := t.TempDir()
+	artifactRoot := t.TempDir()
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+		UploadRoot:     uploadRoot,
+		ArtifactRoot:   artifactRoot,
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"delete-version-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	dataset := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects/"+projectID+"/datasets", `{"name":"delete-version-dataset","data_type":"unstructured"}`, http.StatusCreated, &dataset)
+	datasetID := dataset["dataset_id"].(string)
+
+	version := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"delete-version-source.jsonl","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
+		http.StatusCreated,
+		&version,
+	)
+	versionID := version["dataset_version_id"].(string)
+
+	uploadVersionPath := filepath.Join(uploadRoot, "projects", projectID, "datasets", datasetID, "versions", versionID)
+	artifactVersionPath := filepath.Join(artifactRoot, "projects", projectID, "datasets", datasetID, "versions", versionID)
+	if err := os.MkdirAll(filepath.Join(uploadVersionPath, "source"), 0o755); err != nil {
+		t.Fatalf("failed to seed version upload path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(artifactVersionPath, "prepare"), 0o755); err != nil {
+		t.Fatalf("failed to seed version artifact path: %v", err)
+	}
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodDelete,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID,
+		"",
+		http.StatusNoContent,
+		nil,
+	)
+
+	deletedVersion := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID,
+		"",
+		http.StatusNotFound,
+		&deletedVersion,
+	)
+	loadedDataset := map[string]any{}
+	readJSONResponse(t, handler, http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID, "", http.StatusOK, &loadedDataset)
+	if _, ok := loadedDataset["active_dataset_version_id"]; ok {
+		t.Fatalf("expected active version to be cleared after deleting active version: %+v", loadedDataset)
+	}
+	if _, err := os.Stat(uploadVersionPath); !os.IsNotExist(err) {
+		t.Fatalf("expected upload version path to be removed: %v", err)
+	}
+	if _, err := os.Stat(artifactVersionPath); !os.IsNotExist(err) {
+		t.Fatalf("expected artifact version path to be removed: %v", err)
+	}
+}
+
+func TestDeleteProjectAndDatasetEndpoints(t *testing.T) {
+	uploadRoot := t.TempDir()
+	artifactRoot := t.TempDir()
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+		UploadRoot:     uploadRoot,
+		ArtifactRoot:   artifactRoot,
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"delete-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	dataset := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets",
+		`{"name":"delete-dataset","data_type":"unstructured"}`,
+		http.StatusCreated,
+		&dataset,
+	)
+	datasetID := dataset["dataset_id"].(string)
+
+	version := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
+		`{"storage_uri":"delete-source.jsonl","data_type":"unstructured","metadata":{"text_columns":["text"]}}`,
+		http.StatusCreated,
+		&version,
+	)
+
+	datasetPath := filepath.Join(uploadRoot, "projects", projectID, "datasets", datasetID)
+	artifactPath := filepath.Join(artifactRoot, "projects", projectID, "datasets", datasetID)
+	if err := os.MkdirAll(filepath.Join(datasetPath, "stub"), 0o755); err != nil {
+		t.Fatalf("failed to seed dataset upload path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(artifactPath, "stub"), 0o755); err != nil {
+		t.Fatalf("failed to seed dataset artifact path: %v", err)
+	}
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodDelete,
+		"/projects/"+projectID+"/datasets/"+datasetID,
+		"",
+		http.StatusNoContent,
+		nil,
+	)
+
+	deletedDataset := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/datasets/"+datasetID,
+		"",
+		http.StatusNotFound,
+		&deletedDataset,
+	)
+	if _, err := os.Stat(datasetPath); !os.IsNotExist(err) {
+		t.Fatalf("expected upload dataset path to be removed: %v", err)
+	}
+	if _, err := os.Stat(artifactPath); !os.IsNotExist(err) {
+		t.Fatalf("expected artifact dataset path to be removed: %v", err)
+	}
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodDelete,
+		"/projects/"+projectID,
+		"",
+		http.StatusNoContent,
+		nil,
+	)
+
+	deletedProject := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID,
+		"",
+		http.StatusNotFound,
+		&deletedProject,
+	)
+	projectPath := filepath.Join(uploadRoot, "projects", projectID)
+	projectArtifactPath := filepath.Join(artifactRoot, "projects", projectID)
+	if _, err := os.Stat(projectPath); !os.IsNotExist(err) {
+		t.Fatalf("expected project upload path to be removed: %v", err)
+	}
+	if _, err := os.Stat(projectArtifactPath); !os.IsNotExist(err) {
+		t.Fatalf("expected project artifact path to be removed: %v", err)
+	}
+}
+
 func TestDatasetBuildJobEndpoints(t *testing.T) {
 	artifactRoot := t.TempDir()
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"artifact": map[string]any{
-				"prepare_uri":          filepath.Join(artifactRoot, "prepared.parquet"),
-				"prepared_ref":         filepath.Join(artifactRoot, "prepared.parquet"),
-				"prepare_format":       "parquet",
-				"prepared_text_column": "normalized_text",
-			},
-		})
+		switch r.URL.Path {
+		case "/tasks/dataset_clean":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"clean_uri":           filepath.Join(artifactRoot, "cleaned.parquet"),
+					"cleaned_ref":         filepath.Join(artifactRoot, "cleaned.parquet"),
+					"clean_format":        "parquet",
+					"cleaned_text_column": "cleaned_text",
+					"row_id_column":       "row_id",
+					"summary": map[string]any{
+						"input_row_count":  3,
+						"output_row_count": 3,
+						"kept_count":       3,
+					},
+				},
+			})
+		case "/tasks/dataset_prepare":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"prepare_uri":          filepath.Join(artifactRoot, "prepared.parquet"),
+					"prepared_ref":         filepath.Join(artifactRoot, "prepared.parquet"),
+					"prepare_format":       "parquet",
+					"prepared_text_column": "normalized_text",
+				},
+			})
+		default:
+			t.Fatalf("unexpected worker path: %s", r.URL.Path)
+		}
 	}))
 	defer worker.Close()
 
@@ -1268,11 +1560,28 @@ func TestDatasetBuildJobEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"issues.csv","data_type":"unstructured","prepare_required":false}`,
+		`{"storage_uri":"issues.csv","data_type":"unstructured","prepare_required":false,"metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&version,
 	)
 	versionID := version["dataset_version_id"].(string)
+
+	initialJobs := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/build_jobs",
+		"",
+		http.StatusOK,
+		&initialJobs,
+	)
+	initialItems := initialJobs["items"].([]any)
+	if len(initialItems) != 1 || initialItems[0].(map[string]any)["build_type"] != "clean" {
+		t.Fatalf("expected initial clean build job: %+v", initialJobs)
+	}
+	cleanJobID := initialItems[0].(map[string]any)["job_id"].(string)
+	waitForBuildJobStatusHTTP(t, handler, projectID, cleanJobID, "completed")
 
 	job := map[string]any{}
 	readJSONResponse(
@@ -1280,7 +1589,7 @@ func TestDatasetBuildJobEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/prepare_jobs",
-		`{}`,
+		`{"text_columns":["text"]}`,
 		http.StatusAccepted,
 		&job,
 	)
@@ -1308,38 +1617,55 @@ func TestDatasetBuildJobEndpoints(t *testing.T) {
 		&listResponse,
 	)
 	items := listResponse["items"].([]any)
-	if len(items) != 1 {
+	if len(items) != 2 {
 		t.Fatalf("unexpected build job list: %+v", listResponse)
 	}
-	if diagnostics, ok := items[0].(map[string]any)["diagnostics"].(map[string]any); !ok || diagnostics["retry_count"] == nil {
-		t.Fatalf("expected build job diagnostics in list: %+v", listResponse)
+	if diagnostics, ok := items[1].(map[string]any)["diagnostics"].(map[string]any); !ok || diagnostics["retry_count"] == nil {
+		t.Fatalf("expected prepare build job diagnostics in list: %+v", listResponse)
 	}
 }
 
 func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 	artifactRoot := t.TempDir()
+	cleanedPath := filepath.Join(artifactRoot, "cleaned.parquet")
 	preparedPath := ""
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"artifact": map[string]any{
-				"prepare_uri":          preparedPath,
-				"prepared_ref":         preparedPath,
-				"prepare_format":       "parquet",
-				"prepared_text_column": "normalized_text",
-				"row_id_column":        "row_id",
-				"summary": map[string]any{
-					"input_row_count":  3,
-					"output_row_count": 2,
-					"kept_count":       1,
-					"review_count":     1,
-					"dropped_count":    1,
-					"prepare_regex_rule_hits": map[string]any{
-						"html_artifact": 1,
-						"url_cleanup":   1,
+		switch r.URL.Path {
+		case "/tasks/dataset_clean":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"clean_uri":           cleanedPath,
+					"cleaned_ref":         cleanedPath,
+					"clean_format":        "parquet",
+					"cleaned_text_column": "cleaned_text",
+					"row_id_column":       "row_id",
+					"summary": map[string]any{
+						"input_row_count":  3,
+						"output_row_count": 3,
+						"kept_count":       3,
 					},
 				},
-			},
-		})
+			})
+		case "/tasks/dataset_prepare":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"artifact": map[string]any{
+					"prepare_uri":          preparedPath,
+					"prepared_ref":         preparedPath,
+					"prepare_format":       "parquet",
+					"prepared_text_column": "normalized_text",
+					"row_id_column":        "row_id",
+					"summary": map[string]any{
+						"input_row_count":  3,
+						"output_row_count": 2,
+						"kept_count":       1,
+						"review_count":     1,
+						"dropped_count":    1,
+					},
+				},
+			})
+		default:
+			t.Fatalf("unexpected worker path: %s", r.URL.Path)
+		}
 	}))
 	defer worker.Close()
 
@@ -1366,11 +1692,69 @@ func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions",
-		`{"storage_uri":"issues.csv","data_type":"unstructured","prepare_required":false}`,
+		`{"storage_uri":"issues.csv","data_type":"unstructured","prepare_required":false,"metadata":{"text_columns":["text"]}}`,
 		http.StatusCreated,
 		&version,
 	)
 	versionID := version["dataset_version_id"].(string)
+
+	buildJobs := map[string]any{}
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodGet,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/build_jobs",
+		"",
+		http.StatusOK,
+		&buildJobs,
+	)
+	jobs := buildJobs["items"].([]any)
+	if len(jobs) != 1 || jobs[0].(map[string]any)["build_type"] != "clean" {
+		t.Fatalf("expected initial clean build job: %+v", buildJobs)
+	}
+	waitForBuildJobStatusHTTP(t, handler, projectID, jobs[0].(map[string]any)["job_id"].(string), "completed")
+	writeCleanedParquetForHTTP(t, cleanedPath, []map[string]any{
+		{
+			"source_row_index":  0,
+			"row_id":            "row-0",
+			"raw_text":          "결제 오류가 반복 발생했습니다!!!",
+			"cleaned_text":      "결제 오류가 반복 발생했습니다.",
+			"clean_disposition": "keep",
+			"clean_reason":      "noise removed",
+		},
+		{
+			"source_row_index":  1,
+			"row_id":            "row-1",
+			"raw_text":          "존재하지 않는 이미지입니다",
+			"cleaned_text":      "",
+			"clean_disposition": "drop",
+			"clean_reason":      "empty after clean",
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/clean_download", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected clean download status: got=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "text/csv; charset=utf-8" {
+		t.Fatalf("unexpected clean content-type: %s", contentType)
+	}
+	if disposition := recorder.Header().Get("Content-Disposition"); !strings.Contains(disposition, "attachment; filename=") || !strings.Contains(disposition, "cleaned.csv") {
+		t.Fatalf("unexpected clean content-disposition: %s", disposition)
+	}
+	body := recorder.Body.Bytes()
+	if len(body) < 3 || !bytes.Equal(body[:3], []byte{0xEF, 0xBB, 0xBF}) {
+		t.Fatalf("expected utf-8 bom in clean csv export: %v", body)
+	}
+	csvBody := string(body[3:])
+	if !strings.Contains(csvBody, "source_row_index,row_id,raw_text,cleaned_text,clean_disposition,clean_reason") {
+		t.Fatalf("unexpected clean csv header: %s", csvBody)
+	}
+	if !strings.Contains(csvBody, "row-0") || !strings.Contains(csvBody, "row-1") {
+		t.Fatalf("unexpected clean csv rows: %s", csvBody)
+	}
 
 	preparedPath = filepath.Join(artifactRoot, "projects", projectID, "datasets", datasetID, "versions", versionID, "prepare", "prepared.parquet")
 	if err := os.MkdirAll(filepath.Dir(preparedPath), 0o755); err != nil {
@@ -1448,8 +1832,8 @@ func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 		t.Fatalf("unexpected warning_panel payload: %+v", preview)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/prepare_download", nil)
-	recorder := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/prepare_download", nil)
+	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("unexpected download status: got=%d body=%s", recorder.Code, recorder.Body.String())
@@ -1460,11 +1844,11 @@ func TestPreparePreviewAndDownloadEndpoints(t *testing.T) {
 	if disposition := recorder.Header().Get("Content-Disposition"); !strings.Contains(disposition, "attachment; filename=") || !strings.Contains(disposition, "prepared.csv") {
 		t.Fatalf("unexpected content-disposition: %s", disposition)
 	}
-	body := recorder.Body.Bytes()
+	body = recorder.Body.Bytes()
 	if len(body) < 3 || !bytes.Equal(body[:3], []byte{0xEF, 0xBB, 0xBF}) {
 		t.Fatalf("expected utf-8 bom in csv export: %v", body)
 	}
-	csvBody := string(body[3:])
+	csvBody = string(body[3:])
 	if !strings.Contains(csvBody, "source_row_index,row_id,raw_text,normalized_text,prepare_disposition,prepare_reason") {
 		t.Fatalf("unexpected csv header: %s", csvBody)
 	}
@@ -1566,12 +1950,26 @@ func TestSentimentPreviewAndDownloadEndpoints(t *testing.T) {
 		},
 	})
 
+	invalidSentiment := map[string]any{}
 	readJSONResponse(
 		t,
 		handler,
 		http.MethodPost,
 		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/sentiment",
 		`{}`,
+		http.StatusBadRequest,
+		&invalidSentiment,
+	)
+	if invalidSentiment["detail"] != "text_columns is required" {
+		t.Fatalf("unexpected invalid sentiment response: %+v", invalidSentiment)
+	}
+
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodPost,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/versions/"+versionID+"/sentiment",
+		`{"text_columns":["text"]}`,
 		http.StatusAccepted,
 		nil,
 	)
@@ -1629,15 +2027,20 @@ func TestSentimentPreviewAndDownloadEndpoints(t *testing.T) {
 func TestOpenAPIDocumentAndSwaggerUI(t *testing.T) {
 	openapiDir := t.TempDir()
 	openapiPath := filepath.Join(openapiDir, "openapi.yaml")
+	frontendOpenAPIPath := filepath.Join(openapiDir, "openapi.frontend.yaml")
 	if err := os.WriteFile(openapiPath, []byte("openapi: 3.1.0\ninfo:\n  title: test\n  version: 0.1.0\n"), 0o644); err != nil {
 		t.Fatalf("unexpected openapi write error: %v", err)
 	}
+	if err := os.WriteFile(frontendOpenAPIPath, []byte("openapi: 3.1.0\ninfo:\n  title: frontend-test\n  version: 0.1.0\n"), 0o644); err != nil {
+		t.Fatalf("unexpected frontend openapi write error: %v", err)
+	}
 
 	server := NewServer(config.Config{
-		BindAddr:       ":0",
-		StoreBackend:   "memory",
-		WorkflowEngine: "noop",
-		OpenAPIPath:    openapiPath,
+		BindAddr:            ":0",
+		StoreBackend:        "memory",
+		WorkflowEngine:      "noop",
+		OpenAPIPath:         openapiPath,
+		FrontendOpenAPIPath: frontendOpenAPIPath,
 	})
 	handler := server.Handler()
 
@@ -1652,6 +2055,16 @@ func TestOpenAPIDocumentAndSwaggerUI(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/openapi.frontend.yaml", nil)
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected frontend openapi status: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "frontend-test") {
+		t.Fatalf("unexpected frontend openapi body: %s", recorder.Body.String())
+	}
+
+	recorder = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/swagger", nil)
 	handler.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusOK {
@@ -1663,6 +2076,20 @@ func TestOpenAPIDocumentAndSwaggerUI(t *testing.T) {
 	}
 	if !strings.Contains(body, "/openapi.yaml") {
 		t.Fatalf("swagger html missing openapi url")
+	}
+
+	recorder = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/swagger/frontend", nil)
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unexpected frontend swagger status: %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	body = recorder.Body.String()
+	if !strings.Contains(body, "SwaggerUIBundle") {
+		t.Fatalf("frontend swagger html missing bundle bootstrap")
+	}
+	if !strings.Contains(body, "/openapi.frontend.yaml") {
+		t.Fatalf("frontend swagger html missing frontend openapi url")
 	}
 }
 
@@ -1786,6 +2213,37 @@ func waitForBuildJobStatusHTTP(t *testing.T, handler http.Handler, projectID, jo
 	)
 	t.Fatalf("expected build job %s status %s, got %+v", jobID, expectedStatus, job)
 	return nil
+}
+
+func writeCleanedParquetForHTTP(t *testing.T, path string, rows []map[string]any) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "clean-preview-http.duckdb")
+	db, err := sql.Open("duckdb", dbPath)
+	if err != nil {
+		t.Fatalf("unexpected duckdb open error: %v", err)
+	}
+	defer db.Close()
+
+	selects := make([]string, 0, len(rows))
+	for _, row := range rows {
+		selects = append(selects, fmt.Sprintf(
+			`SELECT %d AS source_row_index, '%s' AS row_id, '%s' AS raw_text, '%s' AS cleaned_text, '%s' AS clean_disposition, '%s' AS clean_reason`,
+			row["source_row_index"].(int),
+			escapeDuckDBLiteralForHTTP(row["row_id"].(string)),
+			escapeDuckDBLiteralForHTTP(row["raw_text"].(string)),
+			escapeDuckDBLiteralForHTTP(row["cleaned_text"].(string)),
+			escapeDuckDBLiteralForHTTP(row["clean_disposition"].(string)),
+			escapeDuckDBLiteralForHTTP(row["clean_reason"].(string)),
+		))
+	}
+	query := fmt.Sprintf(
+		`COPY (%s) TO '%s' (FORMAT PARQUET)`,
+		strings.Join(selects, " UNION ALL "),
+		escapeDuckDBLiteralForHTTP(path),
+	)
+	if _, err := db.Exec(query); err != nil {
+		t.Fatalf("unexpected parquet write error: %v", err)
+	}
 }
 
 func writePreparedPreviewParquetForHTTP(t *testing.T, path string, rows []map[string]any) {

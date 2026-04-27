@@ -179,6 +179,28 @@ def _garbage_rows() -> list[dict[str, Any]]:
     ]
 
 
+def _dataset_clean_case(ctx: SkillCaseContext) -> dict[str, Any]:
+    csv_path = ctx.write_csv(
+        "issues_raw.csv",
+        ["channel", "title", "body"],
+        [
+            {"channel": "app", "title": "결제 오류", "body": "결제 오류가 반복 발생했습니다!!! 존재하지 않는 이미지입니다"},
+            {"channel": "web", "title": "   ", "body": "   "},
+            {"channel": "call", "title": "로그인", "body": "로그인이 자주 실패하고 오류가 보입니다"},
+        ],
+    )
+    return ctx.run(
+        "dataset_clean",
+        {
+            "dataset_version_id": "version-skill-case",
+            "dataset_name": str(csv_path),
+            "text_columns": ["title", "body"],
+            "output_path": str(ctx.temp_dir / "issues_raw.cleaned.parquet"),
+            "preprocess_options": {"remove_monosyllables": True},
+        },
+    )
+
+
 def _dataset_prepare_case(ctx: SkillCaseContext) -> dict[str, Any]:
     csv_path = ctx.write_csv(
         "issues_raw.csv",
@@ -957,6 +979,7 @@ def _execution_final_answer_case(ctx: SkillCaseContext) -> dict[str, Any]:
 
 SKILL_CASES: dict[str, SkillCase] = {
     "planner": SkillCase("planner", "rule-based planner fallback case", _planner_case),
+    "dataset_clean": SkillCase("dataset_clean", "clean raw text rows before LLM prepare", _dataset_clean_case),
     "dataset_prepare": SkillCase("dataset_prepare", "prepare raw rows into normalized jsonl", _dataset_prepare_case),
     "sentiment_label": SkillCase("sentiment_label", "label prepared rows with fallback sentiment", _sentiment_label_case),
     "embedding": SkillCase("embedding", "build dense-or-token embedding sidecar", _embedding_case),
