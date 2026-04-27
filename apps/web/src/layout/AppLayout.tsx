@@ -1,33 +1,12 @@
-import { SidebarProvider } from "@/components/ui/sidebar"
-import Topbar from "./Topbar"
-import { AppSidebar } from "../components/AppSidebar"
+import Topbar from "./Topbar";
 
-export default function AppLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <SidebarProvider>
-      <div className="w-full h-screen flex">
-
-        {/* Sidebar */}
-        <AppSidebar />
-
-        {/* 오른쪽 영역 */}
-        <div className="flex flex-col flex-1">
-
-          {/* Topbar */}
-          <Topbar />
-
-          {/* Content */}
-          <main className="flex-1 overflow-y-auto">
-            {children}
-          </main>
-
-        </div>
-
-      </div>
-    </SidebarProvider>
-  )
+    <div className="min-h-screen bg-[#f0f2f6]">
+      <Topbar />
+      <main className="mx-auto w-full overflow-hidden">
+        {children}
+      </main>
+    </div>
+  );
 }
