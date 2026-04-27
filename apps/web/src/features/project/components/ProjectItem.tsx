@@ -1,6 +1,6 @@
 import {
   Item,
-  // ItemActions,
+  ItemActions,
   ItemContent,
   ItemDescription,
   ItemHeader,
@@ -10,12 +10,12 @@ import type { Project } from "../types/project";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-// import DeleteDialog from "@/components/common/dialogs/DeleteDialog";
-// import { useRemoveProjectMutation } from "../hooks/useProjectsMutation";
+import DeleteDialog from "@/components/common/dialogs/DeleteDialog";
+import { useRemoveProjectMutation } from "../hooks/useProjectsMutation";
 
 export default function ProjectItem(props: Project) {
   const navigate = useNavigate();
-  // const { mutate } = useRemoveProjectMutation();
+  const { mutate } = useRemoveProjectMutation();
   const { id, name, description, datasetCount, scenarioCount, promptCount } =
     props;
 
@@ -39,11 +39,11 @@ export default function ProjectItem(props: Project) {
             {description}
           </ItemDescription>
         </ItemContent>
-        {/* <ItemActions onClick={(e) => e.stopPropagation()}>
+        <ItemActions onClick={(e) => e.stopPropagation()}>
           <DeleteDialog onDelete={() => mutate(id)} title="프로젝트">
             <div>프로젝트 이름 : {name}</div>
           </DeleteDialog>
-        </ItemActions> */}
+        </ItemActions>
       </ItemHeader>
       <ItemContent>
         <div className="flex gap-1.5 flex-wrap">
