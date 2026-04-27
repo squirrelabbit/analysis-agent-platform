@@ -992,6 +992,9 @@ SKILL_CASES: dict[str, SkillCase] = {
     "document_filter": SkillCase("document_filter", "lexical narrowing over issue rows", _document_filter_case),
     "deduplicate_documents": SkillCase("deduplicate_documents", "collapse duplicate or near-duplicate rows", _deduplicate_documents_case),
     "keyword_frequency": SkillCase("keyword_frequency", "count top terms from filtered rows", _keyword_frequency_case),
+    # ADR-009 F1: term_frequency reuses the keyword_frequency case during the
+    # alias deprecation period. The handler is unchanged in Phase 1.
+    "term_frequency": SkillCase("term_frequency", "count top terms from filtered rows (alias of keyword_frequency)", _keyword_frequency_case),
     "noun_frequency": SkillCase("noun_frequency", "count noun-focused top terms from filtered rows", _noun_frequency_case),
     "sentence_split": SkillCase("sentence_split", "split filtered rows into sentence-level spans", _sentence_split_case),
     "time_bucket_count": SkillCase("time_bucket_count", "bucket filtered rows by time", _time_bucket_count_case),

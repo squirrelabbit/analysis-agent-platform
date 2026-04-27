@@ -702,6 +702,55 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(sample_result["artifact"]["summary"]["sample_count"], 2)
         self.assertEqual(sample_result["artifact"]["samples"][0]["source_index"], 0)
 
+    def test_term_frequency_alias_dispatches_to_keyword_frequency(self) -> None:
+        """ADR-009 F1: routing /tasks/term_frequency must produce the same
+        artifact as /tasks/keyword_frequency, modulo the skill_name field
+        which is allowed to lag the rename during the deprecation period."""
+
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "alias_issues.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+            writer.writerow({"text": "결제 승인 오류가 늘었습니다"})
+            writer.writerow({"text": "배송 문의가 계속 들어옵니다"})
+
+        filter_result = run_document_filter(
+            {
+                "dataset_name": str(csv_path),
+                "text_column": "text",
+                "query": "결제 오류",
+                "sample_n": 2,
+            }
+        )
+        prior_artifacts = {
+            "step:filter:document_filter": json.dumps(filter_result["artifact"], ensure_ascii=False),
+        }
+
+        canonical_payload = {
+            "dataset_name": str(csv_path),
+            "text_column": "text",
+            "top_n": 3,
+            "prior_artifacts": prior_artifacts,
+        }
+        alias_payload = dict(canonical_payload)
+
+        canonical_result = run_task("keyword_frequency", canonical_payload)
+        alias_result = run_task("term_frequency", alias_payload)
+
+        # The skill_name field is allowed to lag the rename in Phase 1
+        # (handler still produces "keyword_frequency"). Strip it before
+        # comparing the rest of the artifact.
+        canonical_artifact = dict(canonical_result["artifact"])
+        alias_artifact = dict(alias_result["artifact"])
+        canonical_artifact.pop("skill_name", None)
+        alias_artifact.pop("skill_name", None)
+
+        self.assertEqual(canonical_artifact, alias_artifact)
+        self.assertEqual(canonical_result["artifact"]["summary"]["document_count"], 2)
+        self.assertEqual(alias_result["artifact"]["summary"]["document_count"], 2)
+
     def test_unstructured_issue_summary_exposes_ranked_issues_and_coverage(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues_summary.csv"

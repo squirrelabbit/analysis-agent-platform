@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import unittest
 
+from python_ai_worker._migration_targets import (
+    DEPRECATED_ALIASES,
+    LEGACY_SKILL_NAMES,
+    canonical_skill_name,
+)
 from python_ai_worker.skill_bundle import capability_skills, skill_bundle
 from python_ai_worker.task_router import capability_names, task_handlers
 
@@ -98,6 +103,52 @@ class SkillBundleContractTests(unittest.TestCase):
                     self.assertTrue(allowed_runtime_scopes)
                     for runtime_scope in allowed_runtime_scopes:
                         self.assertIn(str(runtime_scope or "").strip(), RESULT_SCOPES)
+
+    def test_legacy_skill_names_match_audit_inventory(self) -> None:
+        """ADR-009 F4: the canonical migration scope is exactly 17 names
+        (the audit's actual inventory, not the prompt's 14)."""
+
+        self.assertEqual(len(LEGACY_SKILL_NAMES), 17)
+
+    def test_legacy_skill_names_exist_in_bundle(self) -> None:
+        """Every name in LEGACY_SKILL_NAMES must currently exist as a
+        bundle entry — the migration target list cannot reference a name
+        that has already been removed without an explicit drop record."""
+
+        bundle_names = {str(skill.get("name") or "").strip() for skill in capability_skills()}
+        missing = LEGACY_SKILL_NAMES - bundle_names
+        self.assertFalse(missing, f"legacy names missing from bundle: {sorted(missing)}")
+
+    def test_deprecated_aliases_are_well_formed(self) -> None:
+        """For each (deprecated → canonical) pair: the deprecated entry
+        carries `deprecated_alias_of` pointing at the canonical, the
+        canonical entry exists in the bundle, and both task_router
+        handlers resolve to the same callable."""
+
+        bundle_by_name = {
+            str(skill.get("name") or "").strip(): skill
+            for skill in capability_skills()
+        }
+        handlers = task_handlers()
+
+        for deprecated, canonical in DEPRECATED_ALIASES.items():
+            with self.subTest(deprecated=deprecated, canonical=canonical):
+                self.assertIn(deprecated, bundle_by_name)
+                self.assertIn(canonical, bundle_by_name)
+                self.assertEqual(
+                    str(bundle_by_name[deprecated].get("deprecated_alias_of") or "").strip(),
+                    canonical,
+                )
+                self.assertIn(deprecated, handlers)
+                self.assertIn(canonical, handlers)
+                self.assertIs(handlers[deprecated], handlers[canonical])
+
+    def test_canonical_skill_name_resolves_alias(self) -> None:
+        for deprecated, canonical in DEPRECATED_ALIASES.items():
+            with self.subTest(deprecated=deprecated):
+                self.assertEqual(canonical_skill_name(deprecated), canonical)
+        self.assertEqual(canonical_skill_name("noun_frequency"), "noun_frequency")
+        self.assertEqual(canonical_skill_name("totally_unrelated"), "totally_unrelated")
 
 
 if __name__ == "__main__":

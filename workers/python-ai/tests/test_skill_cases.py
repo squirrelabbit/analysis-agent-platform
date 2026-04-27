@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from python_ai_worker._migration_targets import canonical_skill_name
 from python_ai_worker.devtools.skill_cases import available_skill_cases, run_skill_case
 from python_ai_worker.skill_contracts import SkillOutputError
 from python_ai_worker.task_router import task_handlers
@@ -87,7 +88,13 @@ class SkillCaseTests(unittest.TestCase):
                         continue
 
                     self.assertIn("artifact", final_result)
-                    self.assertEqual(final_result["artifact"]["skill_name"], skill_name)
+                    # ADR-009 F1: during the deprecation period, deprecated and
+                    # canonical names share a handler — compare by canonical
+                    # identity rather than raw equality.
+                    self.assertEqual(
+                        canonical_skill_name(final_result["artifact"]["skill_name"]),
+                        canonical_skill_name(skill_name),
+                    )
 
 
 if __name__ == "__main__":

@@ -114,6 +114,9 @@ def task_handlers() -> dict[str, Any]:
         "document_filter": run_document_filter,
         "deduplicate_documents": run_deduplicate_documents,
         "keyword_frequency": run_keyword_frequency,
+        # ADR-009 F1: term_frequency is the canonical replacement; keyword_frequency
+        # is retained as a deprecated alias during the T4 deprecation period.
+        "term_frequency": run_keyword_frequency,
         "noun_frequency": run_noun_frequency,
         "sentence_split": run_sentence_split,
         "time_bucket_count": run_time_bucket_count,
