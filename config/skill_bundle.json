@@ -215,7 +215,7 @@
     },
     {
       "sequence_name": "unstructured_trend",
-      "trigger": ["trend", "increase", "decrease", "change", "recent", "over time", "추세", "증가", "감소", "변화", "급증", "최근"],
+      "trigger": ["trend", "increase", "decrease", "change", "over time", "추세", "증가", "감소", "변화", "급증"],
       "layers": ["preprocess", "aggregate", "summarize"]
     }
   ],
