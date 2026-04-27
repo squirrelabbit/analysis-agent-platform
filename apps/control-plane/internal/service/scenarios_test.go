@@ -157,8 +157,8 @@ func TestBuildScenarioAnalysisSubmitRequestMapsFunctionNames(t *testing.T) {
 	if submitRequest.RequestedPlan.Steps[0].SkillName != "garbage_filter" {
 		t.Fatalf("expected garbage_filter first, got %+v", submitRequest.RequestedPlan.Steps)
 	}
-	if submitRequest.RequestedPlan.Steps[1].SkillName != "keyword_frequency" {
-		t.Fatalf("expected keyword_frequency second, got %+v", submitRequest.RequestedPlan.Steps)
+	if submitRequest.RequestedPlan.Steps[1].SkillName != "term_frequency" {
+		t.Fatalf("expected term_frequency second, got %+v", submitRequest.RequestedPlan.Steps)
 	}
 	if submitRequest.RequestedPlan.Steps[1].Inputs["top_n"] != 10 {
 		t.Fatalf("expected parsed top_n input, got %+v", submitRequest.RequestedPlan.Steps[1].Inputs)

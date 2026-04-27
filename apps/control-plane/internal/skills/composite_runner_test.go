@@ -45,7 +45,7 @@ func TestCompositeRunnerRunsStructuredAndUnstructured(t *testing.T) {
 			Steps: []domain.SkillPlanStep{
 				{StepID: "step-1", SkillName: "structured_kpi_summary"},
 				{StepID: "step-2", SkillName: "document_filter"},
-				{StepID: "step-3", SkillName: "keyword_frequency"},
+				{StepID: "step-3", SkillName: "term_frequency"},
 				{StepID: "step-4", SkillName: "issue_breakdown_summary"},
 				{StepID: "step-5", SkillName: "issue_period_compare"},
 				{StepID: "step-6", SkillName: "issue_sentiment_summary"},
@@ -85,7 +85,7 @@ func TestCompositeRunnerFailsWhenUnstructuredRunnerIsMissing(t *testing.T) {
 	_, err := runner.Run(context.Background(), domain.ExecutionSummary{
 		Plan: domain.SkillPlan{
 			Steps: []domain.SkillPlanStep{
-				{StepID: "step-2", SkillName: "evidence_pack"},
+				{StepID: "step-2", SkillName: "issue_evidence_summary"},
 			},
 		},
 	})

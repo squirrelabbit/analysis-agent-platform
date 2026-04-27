@@ -66,7 +66,7 @@ PY
 
 plan_json="$(DATASET_VERSION_ID="$version_id" GOAL="$GOAL" post_json POST "/projects/${project_id}/analysis_requests" "$analysis_payload")"
 printf '%s\n' "$plan_json"
-printf '%s' "$plan_json" | python3 -c 'import json,sys; steps=[step["skill_name"] for step in json.load(sys.stdin)["plan"]["plan"]["steps"]]; expected=["document_filter","keyword_frequency","document_sample","unstructured_issue_summary","issue_evidence_summary"]; assert steps == expected, steps; print(json.dumps({"plan_steps": steps}, ensure_ascii=False))'
+printf '%s' "$plan_json" | python3 -c 'import json,sys; steps=[step["skill_name"] for step in json.load(sys.stdin)["plan"]["plan"]["steps"]]; expected=["document_filter","term_frequency","document_sample","unstructured_issue_summary","issue_evidence_summary"]; assert steps == expected, steps; print(json.dumps({"plan_steps": steps}, ensure_ascii=False))'
 printf '\n'
 plan_id="$(printf '%s' "$plan_json" | python -c 'import json,sys; print(json.load(sys.stdin)["plan"]["plan_id"])')"
 

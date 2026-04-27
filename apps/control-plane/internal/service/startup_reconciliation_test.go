@@ -144,7 +144,7 @@ func TestAnalysisServiceReconcileStartupExecutionsRequeuesInflightAndResumesWait
 		Steps: []domain.SkillPlanStep{
 			{
 				StepID:      "step-1",
-				SkillName:   "keyword_frequency",
+				SkillName:   "term_frequency",
 				DatasetName: "issues.csv",
 				Inputs:      map[string]any{"text_column": "text"},
 			},

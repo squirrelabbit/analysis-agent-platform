@@ -1293,13 +1293,13 @@ func TestBuildExecutionResultIncludesUsageSummary(t *testing.T) {
 		Status:      "completed",
 		Artifacts: map[string]string{
 			"step:step-1:unstructured_issue_summary": `{"skill_name":"unstructured_issue_summary","usage":{"provider":"anthropic","model":"claude-haiku","operation":"unstructured_issue_summary","request_count":1,"input_tokens":100,"output_tokens":20,"total_tokens":120,"cost_estimation_status":"not_configured"}}`,
-			"step:step-2:evidence_pack":              `{"skill_name":"evidence_pack","usage":{"provider":"anthropic","model":"claude-haiku","operation":"evidence_pack","request_count":1,"input_tokens":60,"output_tokens":30,"total_tokens":90,"cost_estimation_status":"not_configured"}}`,
+			"step:step-2:issue_evidence_summary":     `{"skill_name":"issue_evidence_summary","usage":{"provider":"anthropic","model":"claude-haiku","operation":"issue_evidence_summary","request_count":1,"input_tokens":60,"output_tokens":30,"total_tokens":90,"cost_estimation_status":"not_configured"}}`,
 		},
 		Plan: domain.SkillPlan{
 			PlanID: "plan-usage",
 			Steps: []domain.SkillPlanStep{
 				{StepID: "step-1", SkillName: "unstructured_issue_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
-				{StepID: "step-2", SkillName: "evidence_pack", DatasetName: "issues.csv", Inputs: map[string]any{}},
+				{StepID: "step-2", SkillName: "issue_evidence_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
 			},
 		},
 		Events: []domain.ExecutionEvent{},
@@ -2021,7 +2021,7 @@ func TestExecutePlanCopiesDatasetProfileSnapshot(t *testing.T) {
 		Plan: domain.SkillPlan{
 			PlanID: "plan-1",
 			Steps: []domain.SkillPlanStep{
-				{StepID: "step-1", SkillName: "keyword_frequency", DatasetName: "issues.csv", Inputs: map[string]any{}},
+				{StepID: "step-1", SkillName: "term_frequency", DatasetName: "issues.csv", Inputs: map[string]any{}},
 			},
 		},
 		Status:    "draft",

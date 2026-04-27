@@ -54,7 +54,7 @@ class ResultScopePolicyTests(unittest.TestCase):
 
     def test_inherits_scope_uses_prior_runtime_scope(self) -> None:
         validate_task_result(
-            "keyword_frequency",
+            "term_frequency",
             {
                 "prior_artifacts": {
                     "step:cluster": {
@@ -66,7 +66,7 @@ class ResultScopePolicyTests(unittest.TestCase):
             },
             {
                 "artifact": {
-                    "skill_name": "keyword_frequency",
+                    "skill_name": "term_frequency",
                     "result_scope": "document_subset",
                     "runtime_result_scope": "cluster_subset",
                 }

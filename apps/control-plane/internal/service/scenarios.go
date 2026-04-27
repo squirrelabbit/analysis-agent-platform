@@ -441,8 +441,8 @@ func normalizeScenarioBucket(value any) any {
 var scenarioFunctionSkillAliases = map[string]string{
 	"가비지 필터링":      "garbage_filter",
 	"광고/가비지 제거":    "garbage_filter",
-	"빈도 기반 키워드 추출": "keyword_frequency",
-	"키워드 추출":       "keyword_frequency",
+	"빈도 기반 키워드 추출": "term_frequency",
+	"키워드 추출":       "term_frequency",
 	"명사 기반 키워드 추출": "noun_frequency",
 	"명사 빈도 추출":     "noun_frequency",
 	"문장 분리":        "sentence_split",
