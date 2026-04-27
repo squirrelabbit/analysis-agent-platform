@@ -414,6 +414,53 @@ func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 	}
 }
 
+func TestPythonAIClientDispatchesTermFrequencyAlias(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/tasks/term_frequency":
+			_, _ = w.Write([]byte(`{
+				"notes":["term frequency alias completed"],
+				"artifact":{
+					"skill_name":"keyword_frequency",
+					"summary":{"document_count":2},
+					"top_terms":[{"term":"결제","count":2}]
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := PythonAIClient{
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	}
+
+	result, err := client.Run(context.Background(), domain.ExecutionSummary{
+		ExecutionID: "exec-term-frequency",
+		ProjectID:   "project-1",
+		Plan: domain.SkillPlan{
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "term_frequency", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "top_n": 3}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	artifact, ok := result.Artifacts["step:step-1:term_frequency"]
+	if !ok {
+		t.Fatalf("expected term_frequency artifact key, got %+v", result.Artifacts)
+	}
+	if !strings.Contains(artifact, `"skill_name":"keyword_frequency"`) {
+		t.Fatalf("expected alias artifact to preserve legacy skill_name during transition: %s", artifact)
+	}
+	if !strings.Contains(artifact, `"결제"`) {
+		t.Fatalf("unexpected term_frequency artifact: %s", artifact)
+	}
+}
+
 func TestPythonAIClientStoresGarbageFilterAsSidecarRefButKeepsRuntimeArtifactForNextStep(t *testing.T) {
 	artifactRoot := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

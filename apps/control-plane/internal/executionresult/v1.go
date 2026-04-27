@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	skillruntime "analysis-support-platform/control-plane/internal/skills"
 )
 
 func BuildV1(execution domain.ExecutionSummary) domain.ExecutionResultV1 {
@@ -69,7 +70,7 @@ func selectPrimaryExecutionArtifact(decoded map[string]map[string]any, plan doma
 	keys := sortedArtifactKeysFromDecoded(decoded)
 	for _, skillName := range priority {
 		for _, step := range plan.Steps {
-			if step.SkillName != skillName {
+			if !skillruntime.IsAliasFor(step.SkillName, skillName) {
 				continue
 			}
 			key := artifactKeyForStep(keys, step.StepID, skillName)
@@ -79,7 +80,7 @@ func selectPrimaryExecutionArtifact(decoded map[string]map[string]any, plan doma
 			return key, decoded[key]
 		}
 		for _, key := range keys {
-			if strings.HasSuffix(key, ":"+skillName) {
+			if artifactKeyMatchesSkillName(key, skillName) {
 				return key, decoded[key]
 			}
 		}
@@ -276,7 +277,7 @@ func executionArtifactSummary(artifact map[string]any) string {
 			return summaryText
 		}
 	}
-	skillName := strings.TrimSpace(artifactStringValue(artifact["skill_name"]))
+	skillName := skillruntime.CanonicalSkillName(artifactStringValue(artifact["skill_name"]))
 	summary, _ := artifact["summary"].(map[string]any)
 	switch skillName {
 	case "issue_cluster_summary":
@@ -375,7 +376,7 @@ func executionArtifactKeyFindings(artifact map[string]any) []string {
 }
 
 func deriveExecutionFindings(artifact map[string]any) []string {
-	skillName := strings.TrimSpace(artifactStringValue(artifact["skill_name"]))
+	skillName := skillruntime.CanonicalSkillName(artifactStringValue(artifact["skill_name"]))
 	summary, _ := artifact["summary"].(map[string]any)
 	findings := make([]string, 0)
 	switch skillName {
@@ -449,7 +450,7 @@ func executionArtifactEvidence(artifact map[string]any) []map[string]any {
 	if len(items) > 0 {
 		return items
 	}
-	skillName := strings.TrimSpace(artifactStringValue(artifact["skill_name"]))
+	skillName := skillruntime.CanonicalSkillName(artifactStringValue(artifact["skill_name"]))
 	switch skillName {
 	case "issue_cluster_summary":
 		clusters := executionArtifactMapSlice(artifact["clusters"], 1)
@@ -557,9 +558,13 @@ func sortedArtifactKeysFromDecoded(decoded map[string]map[string]any) []string {
 }
 
 func artifactKeyForStep(keys []string, stepID, skillName string) string {
-	prefix := "step:" + strings.TrimSpace(stepID) + ":" + strings.TrimSpace(skillName)
+	prefix := "step:" + strings.TrimSpace(stepID) + ":"
 	for _, key := range keys {
-		if key == prefix {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		candidate := strings.TrimPrefix(key, prefix)
+		if skillruntime.IsAliasFor(candidate, skillName) {
 			return key
 		}
 	}
@@ -570,12 +575,20 @@ func selectPrimaryBySkills(decoded map[string]map[string]any, skillNames ...stri
 	keys := sortedArtifactKeysFromDecoded(decoded)
 	for _, skillName := range skillNames {
 		for _, key := range keys {
-			if strings.HasSuffix(key, ":"+skillName) {
+			if artifactKeyMatchesSkillName(key, skillName) {
 				return key, decoded[key]
 			}
 		}
 	}
 	return "", nil
+}
+
+func artifactKeyMatchesSkillName(key, skillName string) bool {
+	index := strings.LastIndex(strings.TrimSpace(key), ":")
+	if index < 0 || index == len(strings.TrimSpace(key))-1 {
+		return false
+	}
+	return skillruntime.IsAliasFor(key[index+1:], skillName)
 }
 
 func uniqueNonEmptyStrings(items []string) []string {
