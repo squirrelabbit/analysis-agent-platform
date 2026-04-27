@@ -1,37 +1,86 @@
 [
   {
-    "query": "최근 결제 오류 이슈를 요약해줘",
-    "dataset_ref": "workers/python-ai/tests/fixtures/issues_summary.csv",
-    "expected_plan_shape": [
-      {
-        "skill_name": "document_filter",
-        "result_kind": "preprocessing"
-      },
-      {
-        "skill_name": "term_frequency",
-        "result_kind": "summary_ranked"
-      },
-      {
-        "skill_name": "document_sample",
-        "result_kind": "evidence"
-      },
-      {
-        "skill_name": "unstructured_issue_summary",
-        "result_kind": "summary_ranked"
-      },
-      {
-        "skill_name": "issue_evidence_summary",
-        "result_kind": "summary_narrative"
-      }
-    ],
-    "expected_output_keys": [
-      "ranked_issues",
-      "coverage",
-      "summary",
-      "evidence"
-    ],
-    "forbidden_keys": [
-      "fallback_all_rows"
-    ]
+    "query": "VOC 이슈를 요약해줘",
+    "dataset_ref": "issues.csv",
+    "data_type": "unstructured",
+    "expected_layers": ["aggregate", "preprocess", "summarize"],
+    "expected_step_family": [["document_filter"], ["term_frequency"], ["document_sample"], ["unstructured_issue_summary"], ["issue_evidence_summary"]]
+  },
+  {
+    "query": "최근 결제 오류 추세를 보여줘",
+    "dataset_ref": "issues_trend.csv",
+    "data_type": "unstructured",
+    "expected_layers": ["aggregate", "preprocess", "summarize"],
+    "expected_step_family": [["document_filter"], ["time_bucket_count"], ["document_sample"], ["issue_trend_summary"], ["issue_evidence_summary"]]
+  },
+  {
+    "query": "결제 오류 관련 명사 키워드를 추출해줘",
+    "dataset_ref": "issues.csv",
+    "data_type": "unstructured",
+    "expected_layers": ["aggregate", "preprocess"],
+    "expected_step_family": [["document_filter"], ["noun_frequency"]]
+  },
+  {
+    "query": "문장 단위로 나눠서 보여줘",
+    "dataset_ref": "issues.csv",
+    "data_type": "unstructured",
+    "expected_layers": ["preprocess"],
+    "expected_step_family": [["document_filter"], ["sentence_split"]]
+  },
+  {
+    "query": "전주 대비 결제 오류가 얼마나 달라졌는지 비교해줘",
+    "dataset_ref": "issues_compare.csv",
+    "data_type": "unstructured",
+    "expected_layers": ["aggregate", "preprocess", "summarize"],
+    "expected_step_family": [["document_filter"], ["document_sample"], ["issue_period_compare"], ["issue_evidence_summary"]]
+  },
+  {
+    "query": "채널별 이슈를 분해해서 보여줘",
+    "dataset_ref": "issues_breakdown.csv",
+    "data_type": "unstructured",
+    "expected_layers": ["aggregate", "preprocess", "summarize"],
+    "expected_step_family": [["document_filter"], ["meta_group_count"], ["document_sample"], ["issue_breakdown_summary"], ["issue_evidence_summary"]]
+  },
+  {
+    "query": "긍정 부정 감성 분포를 보여줘",
+    "dataset_ref": "issues_sentiment.jsonl",
+    "data_type": "unstructured",
+    "expected_layers": ["preprocess", "summarize"],
+    "expected_step_family": [["document_filter"], ["document_sample"], ["issue_sentiment_summary"], ["issue_evidence_summary"]]
+  },
+  {
+    "query": "주요 이슈 군집을 묶어서 보여줘",
+    "dataset_ref": "issues_cluster.csv",
+    "data_type": "unstructured",
+    "expected_layers": ["preprocess", "retrieve", "summarize"],
+    "expected_step_family": [["embedding_cluster"], ["cluster_label_candidates"], ["issue_cluster_summary"], ["issue_evidence_summary"]]
+  },
+  {
+    "query": "최근 문의 중에서 주요 이슈 군집을 묶어서 보여줘",
+    "dataset_ref": "issues_cluster.csv",
+    "data_type": "unstructured",
+    "expected_layers": ["preprocess", "retrieve", "summarize"],
+    "expected_step_family": [["document_filter"], ["deduplicate_documents"], ["embedding_cluster"], ["cluster_label_candidates"], ["issue_cluster_summary"], ["issue_evidence_summary"]]
+  },
+  {
+    "query": "카테고리 태그 기준으로 이슈를 분류해줘",
+    "dataset_ref": "issues_taxonomy.csv",
+    "data_type": "unstructured",
+    "expected_layers": ["aggregate", "preprocess", "summarize"],
+    "expected_step_family": [["document_filter"], ["dictionary_tagging"], ["issue_taxonomy_summary"], ["issue_evidence_summary"]]
+  },
+  {
+    "query": "중복된 문의를 정리해서 근거를 보여줘",
+    "dataset_ref": "issues_duplicate.csv",
+    "data_type": "unstructured",
+    "expected_layers": ["preprocess", "retrieve", "summarize"],
+    "expected_step_family": [["document_filter"], ["deduplicate_documents"], ["issue_evidence_summary"]]
+  },
+  {
+    "query": "결제 오류와 관련된 근거 문서를 찾아줘",
+    "dataset_ref": "issues_search.csv",
+    "data_type": "unstructured",
+    "expected_layers": ["preprocess", "retrieve", "summarize"],
+    "expected_step_family": [["semantic_search"], ["issue_evidence_summary"]]
   }
 ]
