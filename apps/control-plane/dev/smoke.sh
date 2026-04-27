@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 API_BASE="${API_BASE:-http://127.0.0.1:18080}"
+WORKER_BASE="${WORKER_BASE:-http://127.0.0.1:18090}"
 DEFAULT_DATASET_PATH="${REPO_ROOT}/data/issues.csv"
 if [[ -f /workspace/data/issues.csv ]]; then
   DEFAULT_DATASET_PATH="/workspace/data/issues.csv"
@@ -24,6 +25,22 @@ post_json() {
   fi
 }
 
+wait_for_health() {
+  local base="$1"
+  local label="$2"
+  for _ in $(seq 1 30); do
+    if curl -fsS "${base}/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "${label} health check failed" >&2
+  return 1
+}
+
+wait_for_health "${API_BASE}" "control-plane"
+wait_for_health "${WORKER_BASE}" "python-ai-worker"
+
 project_json="$(post_json POST /projects '{"name":"dev-stack-smoke","description":"compose smoke"}')"
 project_id="$(printf '%s' "$project_json" | python -c 'import json,sys; print(json.load(sys.stdin)["project_id"])')"
 
@@ -33,7 +50,7 @@ dataset_id="$(printf '%s' "$dataset_json" | python -c 'import json,sys; print(js
 upload_metadata="$(python - <<'PY'
 import json
 print(json.dumps({
-    "text_column": "text",
+    "text_columns": ["text"],
 }, ensure_ascii=False))
 PY
 )"
@@ -43,10 +60,42 @@ version_json="$(curl -sS -X POST "${API_BASE}/projects/${project_id}/datasets/${
   -F "metadata=${upload_metadata}")"
 version_id="$(printf '%s' "$version_json" | python -c 'import json,sys; print(json.load(sys.stdin)["dataset_version_id"])')"
 
+for _ in $(seq 1 30); do
+  current_version_json="$(post_json GET "/projects/${project_id}/datasets/${dataset_id}/versions/${version_id}")"
+  clean_status="$(
+    CURRENT_VERSION_JSON="$current_version_json" python - <<'PY'
+import json
+import os
+
+data = json.loads(os.environ["CURRENT_VERSION_JSON"])
+status = str(data.get("clean_status") or "").strip()
+if not status:
+    status = next(
+        (
+            str(item.get("status") or "").strip()
+            for item in (data.get("build_stages") or [])
+            if str(item.get("stage") or "").strip() == "clean"
+        ),
+        "",
+    )
+print(status)
+PY
+  )"
+  if [[ "$clean_status" == "ready" ]]; then
+    break
+  fi
+  if [[ "$clean_status" == "failed" ]]; then
+    printf '%s\n' "$current_version_json"
+    echo "clean stage failed before prepare" >&2
+    exit 1
+  fi
+  sleep 1
+done
+
 prepare_payload="$(python - <<'PY'
 import json
 print(json.dumps({
-    "text_column": "text",
+    "text_columns": ["text"],
 }, ensure_ascii=False))
 PY
 )"
