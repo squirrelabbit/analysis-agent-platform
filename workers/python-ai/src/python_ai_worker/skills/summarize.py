@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from ..config import load_config
+from ..obs import skill_handler
 from ..runtime import artifacts as rt_artifacts
 from ..skill_policy_registry import (
     load_cluster_label_policy,
@@ -16,12 +17,12 @@ from . import _summarize_impl as _impl
 from ._policy_utils import annotate_result_policy, requested_policy_version
 from .retrieve import _cluster_label_candidates_from_terms, _cluster_label_rationale
 
-run_issue_breakdown_summary = _impl.run_issue_breakdown_summary
-run_issue_period_compare = _impl.run_issue_period_compare
-run_issue_sentiment_summary = _impl.run_issue_sentiment_summary
-run_issue_taxonomy_summary = _impl.run_issue_taxonomy_summary
-run_issue_trend_summary = _impl.run_issue_trend_summary
-run_unstructured_issue_summary = _impl.run_unstructured_issue_summary
+run_issue_breakdown_summary = skill_handler("python-ai")(_impl.run_issue_breakdown_summary)
+run_issue_period_compare = skill_handler("python-ai")(_impl.run_issue_period_compare)
+run_issue_sentiment_summary = skill_handler("python-ai")(_impl.run_issue_sentiment_summary)
+run_issue_taxonomy_summary = skill_handler("python-ai")(_impl.run_issue_taxonomy_summary)
+run_issue_trend_summary = skill_handler("python-ai")(_impl.run_issue_trend_summary)
+run_unstructured_issue_summary = skill_handler("python-ai")(_impl.run_unstructured_issue_summary)
 
 
 @contextmanager
@@ -106,6 +107,7 @@ def _bind_issue_evidence_policy(policy: dict[str, Any]) -> Iterator[None]:
         _impl.rt._select_evidence_candidates = original_selector
 
 
+@skill_handler("python-ai")
 def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
     config = load_config()
     label_policy = load_cluster_label_policy(
@@ -127,6 +129,7 @@ def run_issue_cluster_summary(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+@skill_handler("python-ai")
 def run_issue_evidence_summary(payload: dict[str, Any]) -> dict[str, Any]:
     config = load_config()
     policy = load_issue_evidence_summary_policy(
@@ -149,6 +152,7 @@ def run_issue_evidence_summary(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+@skill_handler("python-ai")
 def run_evidence_pack(payload: dict[str, Any]) -> dict[str, Any]:
     config = load_config()
     policy = load_issue_evidence_summary_policy(

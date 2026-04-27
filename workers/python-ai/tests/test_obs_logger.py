@@ -9,6 +9,7 @@ from python_ai_worker.obs import logger as obs_logger
 
 def _reset_logger_state() -> None:
     obs_logger._initialized = False
+    obs_logger._service_name = ""
     structlog.reset_defaults()
 
 

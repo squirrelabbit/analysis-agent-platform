@@ -13,6 +13,8 @@ from typing import Union
 
 import structlog.contextvars
 
+from .logger import service_name
+
 
 def bind_request_context(headers: Union[HTTPMessage, dict]) -> str:
     """Extract X-Request-ID from headers (or generate a UUID4) and bind to structlog context.
@@ -26,7 +28,11 @@ def bind_request_context(headers: Union[HTTPMessage, dict]) -> str:
     request_id = request_id.strip()
     if not request_id:
         request_id = str(uuid.uuid4())
-    structlog.contextvars.bind_contextvars(request_id=request_id)
+    service = service_name()
+    if service:
+        structlog.contextvars.bind_contextvars(service=service, request_id=request_id)
+    else:
+        structlog.contextvars.bind_contextvars(request_id=request_id)
     return request_id
 
 

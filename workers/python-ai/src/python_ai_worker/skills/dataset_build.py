@@ -3,7 +3,6 @@ from __future__ import annotations
 """Dataset preparation and enrichment skill handlers."""
 
 import json
-import logging
 import time
 from collections import Counter
 from datetime import UTC, datetime
@@ -11,8 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from .. import runtime as rt
+from ..obs import get, skill_handler
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = get(__name__)
 
 
 def _stable_source_index(row: dict[str, Any], fallback_index: int) -> int:
@@ -344,6 +344,7 @@ def _split_text_chunks(
     return chunks
 
 
+@skill_handler("python-ai")
 def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_dataset_clean_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
@@ -488,6 +489,7 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@skill_handler("python-ai")
 def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_prepare_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
@@ -637,11 +639,12 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
         fallback_note = f"llm fallback used: count={llm_fallback_count}, model={attempted_llm_model}, reason={llm_fallback_reason}"
         notes.append(fallback_note)
         LOGGER.warning(
-            "dataset prepare llm fallback used dataset_version_id=%s model=%s fallback_count=%s reason=%s",
-            normalized["dataset_version_id"],
-            attempted_llm_model,
-            llm_fallback_count,
-            llm_fallback_reason,
+            "llm.fallback.triggered",
+            skill_name="dataset_prepare",
+            dataset_version_id=normalized["dataset_version_id"],
+            model=attempted_llm_model,
+            fallback_count=llm_fallback_count,
+            reason=llm_fallback_reason,
         )
 
     prompt_version = "dataset-prepare-fallback-v1"
@@ -816,6 +819,7 @@ def _cluster_records_from_index(index_rows: list[dict[str, Any]], chunk_lookup: 
     return records
 
 
+@skill_handler("python-ai")
 def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_cluster_build_payload(payload)
     summary_path = Path(normalized["output_path"])
@@ -931,6 +935,7 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@skill_handler("python-ai")
 def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_embedding_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
@@ -1083,6 +1088,7 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@skill_handler("python-ai")
 def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_sentiment_build_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
@@ -1195,11 +1201,12 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
         fallback_note = f"llm fallback used: count={llm_fallback_count}, model={attempted_llm_model}, reason={llm_fallback_reason}"
         notes.append(fallback_note)
         LOGGER.warning(
-            "sentiment label llm fallback used dataset_version_id=%s model=%s fallback_count=%s reason=%s",
-            normalized["dataset_version_id"],
-            attempted_llm_model,
-            llm_fallback_count,
-            llm_fallback_reason,
+            "llm.fallback.triggered",
+            skill_name="sentiment_label",
+            dataset_version_id=normalized["dataset_version_id"],
+            model=attempted_llm_model,
+            fallback_count=llm_fallback_count,
+            reason=llm_fallback_reason,
         )
 
     runtime_result_scope = (

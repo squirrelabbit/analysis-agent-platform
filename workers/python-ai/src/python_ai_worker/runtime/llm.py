@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -8,6 +9,7 @@ from typing import Any, Callable
 from .._migration_targets import canonical_skill_name
 from ..anthropic_client import AnthropicClient, AnthropicConfig
 from ..config import load_config
+from ..obs import get
 from ..prompt_registry import (
     render_execution_final_answer_prompt,
     render_prepare_batch_prompt,
@@ -28,6 +30,8 @@ from .common import (
 from .constants import NEGATIVE_SENTIMENT_TERMS, POSITIVE_SENTIMENT_TERMS, SENTIMENT_LABELS
 from .payloads import _normalize_inputs
 
+_LOG = get("runtime.llm")
+
 
 def _normalize_runtime_llm_mode(mode: str) -> str:
     normalized = str(mode or "default").strip().lower()
@@ -40,6 +44,88 @@ def _normalize_runtime_llm_mode(mode: str) -> str:
 
 def _llm_mode_disables_remote(mode: str) -> bool:
     return _normalize_runtime_llm_mode(mode) == "disabled"
+
+
+def _create_json_logged(
+    client: AnthropicClient,
+    *,
+    operation: str,
+    prompt: str,
+    schema: dict[str, Any],
+    max_tokens: int,
+    batch_size: int = 1,
+) -> dict[str, Any]:
+    started_at = time.monotonic()
+    _LOG.info(
+        "llm.call.started",
+        operation=operation,
+        model=client._config.model,
+        max_tokens=max_tokens,
+        batch_size=batch_size,
+    )
+    try:
+        response = client.create_json(prompt=prompt, schema=schema, max_tokens=max_tokens)
+    except Exception as exc:
+        _LOG.error(
+            "llm.call.failed",
+            operation=operation,
+            model=client._config.model,
+            batch_size=batch_size,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            error_category=type(exc).__name__,
+        )
+        raise
+    _LOG.info(
+        "llm.call.completed",
+        operation=operation,
+        model=client._config.model,
+        batch_size=batch_size,
+        duration_ms=int((time.monotonic() - started_at) * 1000),
+    )
+    return response
+
+
+def _create_json_response_logged(
+    client: AnthropicClient,
+    *,
+    operation: str,
+    prompt: str,
+    schema: dict[str, Any],
+    max_tokens: int,
+    batch_size: int = 1,
+) -> Any:
+    started_at = time.monotonic()
+    _LOG.info(
+        "llm.call.started",
+        operation=operation,
+        model=client._config.model,
+        max_tokens=max_tokens,
+        batch_size=batch_size,
+    )
+    try:
+        response = client.create_json_response(prompt=prompt, schema=schema, max_tokens=max_tokens)
+    except Exception as exc:
+        _LOG.error(
+            "llm.call.failed",
+            operation=operation,
+            model=client._config.model,
+            batch_size=batch_size,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            error_category=type(exc).__name__,
+        )
+        raise
+    usage = dict(getattr(response, "usage", {}) or {})
+    _LOG.info(
+        "llm.call.completed",
+        operation=operation,
+        model=client._config.model,
+        batch_size=batch_size,
+        duration_ms=int((time.monotonic() - started_at) * 1000),
+        input_tokens=int(usage.get("input_tokens") or 0),
+        output_tokens=int(usage.get("output_tokens") or 0),
+        total_tokens=int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0),
+    )
+    return response
 
 
 def _anthropic_client() -> AnthropicClient | None:
@@ -153,7 +239,13 @@ def _run_planner_with_llm(
     fallback_planner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     prompt = _build_planner_system_prompt(payload)
-    response = client.create_json(prompt=prompt, schema=_planner_schema(), max_tokens=1200)
+    response = _create_json_logged(
+        client,
+        operation="planner",
+        prompt=prompt,
+        schema=_planner_schema(),
+        max_tokens=1200,
+    )
     return _normalize_planner_response(
         response,
         payload,
@@ -189,7 +281,14 @@ def _run_evidence_pack_with_llm(
             json.dumps(prompt_documents, ensure_ascii=False),
         ]
     )
-    response = client.create_json_response(prompt=prompt, schema=_evidence_schema(), max_tokens=1400)
+    response = _create_json_response_logged(
+        client,
+        operation=artifact_skill_name,
+        prompt=prompt,
+        schema=_evidence_schema(),
+        max_tokens=1400,
+        batch_size=len(prompt_documents),
+    )
     evidence = _merge_evidence_citations(response.body.get("evidence") or [], selected_documents)
     artifact = {
         "skill_name": artifact_skill_name,
@@ -418,7 +517,14 @@ def _run_execution_final_answer_with_llm(
         evidence_json=json.dumps(evidence_candidates, ensure_ascii=False),
         version=normalized["prompt_version"],
     )
-    response = client.create_json_response(prompt=prompt, schema=_execution_final_answer_schema(), max_tokens=1200)
+    response = _create_json_response_logged(
+        client,
+        operation="execution_final_answer",
+        prompt=prompt,
+        schema=_execution_final_answer_schema(),
+        max_tokens=1200,
+        batch_size=len(evidence_candidates),
+    )
     selected_ids = _unique_strings(_coerce_string_list(response.body.get("evidence_ref_ids")))
     evidence = [dict(evidence_lookup[item_id]) for item_id in selected_ids if item_id in evidence_lookup]
     answer = {
@@ -804,7 +910,13 @@ def _prepare_row_with_llm(
         version=prompt_version_override or config.anthropic_prepare_prompt_version,
         template_override=prompt_template_override,
     )
-    response = client.create_json_response(prompt=prompt, schema=_prepare_schema(), max_tokens=600)
+    response = _create_json_response_logged(
+        client,
+        operation="dataset_prepare",
+        prompt=prompt,
+        schema=_prepare_schema(),
+        max_tokens=600,
+    )
     return (
         _normalize_prepare_response(response.body, raw_text, prompt_version=prompt_version),
         _anthropic_usage_metadata(
@@ -828,7 +940,14 @@ def _prepare_rows_with_llm(
         version=prompt_version_override or config.anthropic_prepare_batch_prompt_version,
         template_override=prompt_template_override,
     )
-    response = client.create_json_response(prompt=prompt, schema=_prepare_batch_schema(), max_tokens=max(800, 280 * len(raw_texts)))
+    response = _create_json_response_logged(
+        client,
+        operation="dataset_prepare",
+        prompt=prompt,
+        schema=_prepare_batch_schema(),
+        max_tokens=max(800, 280 * len(raw_texts)),
+        batch_size=len(raw_texts),
+    )
     prepared_rows = response.body.get("rows")
     if not isinstance(prepared_rows, list) or len(prepared_rows) != len(raw_texts):
         raise ValueError("prepare batch response row count mismatch")
@@ -967,7 +1086,13 @@ def _label_sentiment_with_llm(
         version=prompt_version_override or config.anthropic_sentiment_prompt_version,
         template_override=prompt_template_override,
     )
-    response = client.create_json_response(prompt=prompt, schema=_sentiment_schema(), max_tokens=400)
+    response = _create_json_response_logged(
+        client,
+        operation="sentiment_label",
+        prompt=prompt,
+        schema=_sentiment_schema(),
+        max_tokens=400,
+    )
     label = str(response.body.get("label") or "unknown").strip().lower()
     if label not in SENTIMENT_LABELS:
         label = "unknown"
@@ -1028,7 +1153,14 @@ def _label_sentiments_with_llm(
             version=prompt_version_override or config.anthropic_sentiment_batch_prompt_version,
             template_override=batch_prompt_template_override,
         )
-        response = client.create_json_response(prompt=prompt, schema=_sentiment_batch_schema(), max_tokens=800)
+        response = _create_json_response_logged(
+            client,
+            operation="sentiment_label",
+            prompt=prompt,
+            schema=_sentiment_batch_schema(),
+            max_tokens=800,
+            batch_size=len(batch),
+        )
         rows = list(response.body.get("rows") or [])
         if len(rows) != len(batch):
             raise ValueError(f"sentiment batch rows mismatch: expected {len(batch)}, got {len(rows)}")

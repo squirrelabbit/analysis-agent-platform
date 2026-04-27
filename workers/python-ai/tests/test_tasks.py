@@ -751,6 +751,30 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(canonical_result["artifact"]["summary"]["document_count"], 2)
         self.assertEqual(alias_result["artifact"]["summary"]["document_count"], 2)
 
+    def test_keyword_frequency_alias_logs_deprecation_warning(self) -> None:
+        temp_dir = Path(tempfile.mkdtemp())
+        csv_path = temp_dir / "keyword_alias.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["text"])
+            writer.writeheader()
+            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
+
+        with patch("python_ai_worker.task_router._LOG.warning") as warning:
+            run_task(
+                "keyword_frequency",
+                {
+                    "dataset_name": str(csv_path),
+                    "text_column": "text",
+                    "top_n": 2,
+                },
+            )
+
+        warning.assert_called_once_with(
+            "deprecated_skill_alias_called",
+            skill_name="keyword_frequency",
+            canonical="term_frequency",
+        )
+
     def test_unstructured_issue_summary_exposes_ranked_issues_and_coverage(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues_summary.csv"

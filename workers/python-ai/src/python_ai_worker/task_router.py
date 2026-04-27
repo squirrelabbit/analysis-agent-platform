@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ._migration_targets import DEPRECATED_ALIASES
+from .obs import get
 from .planner import run_planner
 from .prompt_registry import prompt_catalog
 from .skill_contracts import validate_task_payload, validate_task_result
@@ -45,6 +47,8 @@ from .skills.summarize import (
     run_issue_trend_summary,
     run_unstructured_issue_summary,
 )
+
+_LOG = get("task_router")
 
 
 @dataclass(frozen=True)
@@ -142,8 +146,29 @@ def task_handlers() -> dict[str, Any]:
 def run_task(name: str, payload: dict[str, Any]) -> dict[str, Any]:
     handler = task_handlers().get(name)
     if handler is None:
+        _LOG.error("task.dispatch.unsupported", skill_name=name)
         raise ValueError(f"unsupported capability: {name}")
+    if name in DEPRECATED_ALIASES:
+        _LOG.warning(
+            "deprecated_skill_alias_called",
+            skill_name=name,
+            canonical=DEPRECATED_ALIASES[name],
+        )
+    _LOG.info("task.dispatch.started", skill_name=name)
     validate_task_payload(name, payload)
-    result = handler(payload)
+    try:
+        result = handler(payload)
+    except Exception as exc:
+        _LOG.error(
+            "task.dispatch.failed",
+            skill_name=name,
+            error_category=type(exc).__name__,
+        )
+        raise
     validate_task_result(name, payload, result)
+    _LOG.info(
+        "task.dispatch.completed",
+        skill_name=name,
+        response_keys=sorted(result.keys()) if isinstance(result, dict) else [],
+    )
     return result

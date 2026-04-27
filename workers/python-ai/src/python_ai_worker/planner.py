@@ -2,26 +2,50 @@ from __future__ import annotations
 
 """Planner entrypoints for the python-ai worker."""
 
+import time
 from typing import Any
 
 from . import runtime as rt
+from .obs import get
 from .skill_bundle import default_inputs_for_skill, planner_sequence, skill_definition
 
+_LOG = get("planner")
+
 def run_planner(payload: dict[str, Any]) -> dict[str, Any]:
+    started_at = time.monotonic()
+    goal = str(payload.get("goal") or "").strip()
+    data_type = str(payload.get("data_type") or "").strip().lower()
+    _LOG.info(
+        "planner.started",
+        goal=goal,
+        data_type=data_type,
+        dataset_name=str(payload.get("dataset_name") or "dataset_from_version").strip(),
+    )
     client = rt._anthropic_client()
     if client and client.is_enabled():
         try:
-            return _attach_plan_metadata(
+            result = _attach_plan_metadata(
                 rt._run_planner_with_llm(client, payload, fallback_planner=_run_rule_based_planner)
             )
+            _log_planner_completed("llm", result, started_at)
+            return result
         except Exception as exc:
             fallback = _run_rule_based_planner(payload)
             fallback["planner_type"] = "python-ai-fallback"
             fallback["planner_model"] = "rule-based-v1"
             fallback["planner_prompt_version"] = "planner-fallback-v1"
             fallback["notes"] = [f"anthropic planner fallback: {exc}"]
+            _LOG.warning(
+                "planner.fallback",
+                planner_model=client._config.model,
+                error_category=type(exc).__name__,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+            )
+            _log_planner_completed("fallback", fallback, started_at)
             return fallback
-    return _run_rule_based_planner(payload)
+    result = _run_rule_based_planner(payload)
+    _log_planner_completed("rule", result, started_at)
+    return result
 
 def _run_rule_based_planner(payload: dict[str, Any]) -> dict[str, Any]:
     dataset_name = str(payload.get("dataset_name") or "dataset_from_version").strip()
@@ -107,3 +131,15 @@ def _attach_plan_metadata(result: dict[str, Any]) -> dict[str, Any]:
     ]
     plan["metadata"] = _plan_metadata(skill_names)
     return result
+
+
+def _log_planner_completed(mode: str, result: dict[str, Any], started_at: float) -> None:
+    plan = result.get("plan") if isinstance(result, dict) else {}
+    steps = list(plan.get("steps") or []) if isinstance(plan, dict) else []
+    _LOG.info(
+        "planner.completed",
+        planner_mode=mode,
+        planner_type=str(result.get("planner_type") or "").strip() if isinstance(result, dict) else "",
+        step_count=len(steps),
+        duration_ms=int((time.monotonic() - started_at) * 1000),
+    )

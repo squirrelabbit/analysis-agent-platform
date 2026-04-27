@@ -6,6 +6,7 @@ import os
 import structlog
 
 _initialized = False
+_service_name = ""
 
 
 def init(service: str) -> None:
@@ -14,7 +15,7 @@ def init(service: str) -> None:
     Reads LOG_LEVEL env var (DEBUG|INFO|WARNING|ERROR); defaults to INFO.
     Idempotent — safe to call multiple times.
     """
-    global _initialized
+    global _initialized, _service_name
     if _initialized:
         return
 
@@ -32,6 +33,7 @@ def init(service: str) -> None:
         logger_factory=structlog.PrintLoggerFactory(),
         cache_logger_on_first_use=True,
     )
+    _service_name = service
     structlog.contextvars.bind_contextvars(service=service)
     _initialized = True
 
@@ -39,3 +41,8 @@ def init(service: str) -> None:
 def get(name: str = "") -> structlog.stdlib.BoundLogger:
     """Return a bound logger for the given name."""
     return structlog.get_logger(name)
+
+
+def service_name() -> str:
+    """Return the configured service label for request-context rebinding."""
+    return _service_name
