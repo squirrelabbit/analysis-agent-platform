@@ -122,7 +122,7 @@ def _build_dependency_chain(
 
 
 def _dependency_edges(steps: list[dict[str, Any]]) -> dict[str, set[str]]:
-    edges: dict[str, set[str]] = {step["skill_name"]: set() for step in steps}
+    edges: dict[str, set[str]] = {step["skill_name"]: set() for step in steps if "skill_name" in step}
     present = {step["skill_name"] for step in steps}
     for step in steps:
         skill_name = step["skill_name"]

@@ -90,6 +90,9 @@ def _select_layers_with_llm(anthropic_client, question: str) -> MetaPlanResult |
         },
         max_tokens=200,
     )
+    if not isinstance(response, dict):
+        logger.warning("llm.meta_planner.response_malformed", response=repr(response))
+        return None
     selected = _valid_layer_values(list((response or {}).get("layers") or []))
     if not selected:
         return None

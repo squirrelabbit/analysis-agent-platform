@@ -77,6 +77,9 @@ func LogActivityCompleted(ctx context.Context, activityName string, startedAt ti
 
 // LogActivityFailed emits workflow.activity.failed.
 func LogActivityFailed(ctx context.Context, activityName string, startedAt time.Time, err error) {
+	if err == nil {
+		return
+	}
 	FromContext(ctx).Error("activity failed",
 		"event", "workflow.activity.failed",
 		"activity_name", activityName,
