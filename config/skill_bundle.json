@@ -28,14 +28,14 @@
     "mixed_default": [
       "structured_kpi_summary",
       "document_filter",
-      "keyword_frequency",
+      "term_frequency",
       "document_sample",
       "unstructured_issue_summary",
       "issue_evidence_summary"
     ],
     "unstructured_default": [
       "document_filter",
-      "keyword_frequency",
+      "term_frequency",
       "document_sample",
       "unstructured_issue_summary",
       "issue_evidence_summary"
@@ -104,6 +104,121 @@
       "issue_evidence_summary"
     ]
   },
+  "planner_recommendations": [
+    {
+      "sequence_name": "structured_default",
+      "when": "For numeric KPI, metric, or tabular analysis."
+    },
+    {
+      "sequence_name": "mixed_default",
+      "when": "For mixed structured and unstructured analysis that needs both KPI context and text evidence."
+    },
+    {
+      "sequence_name": "unstructured_default",
+      "when": "For general unstructured text analysis."
+    },
+    {
+      "sequence_name": "unstructured_noun_frequency",
+      "when": "For noun extraction or morphology-focused keyword analysis."
+    },
+    {
+      "sequence_name": "unstructured_sentence_split",
+      "when": "For sentence splitting, sentence-unit evidence preparation, or sentence-by-sentence review."
+    },
+    {
+      "sequence_name": "unstructured_cluster_materialized",
+      "when": "For cluster analysis when the full dataset should be grouped with precomputed embeddings."
+    },
+    {
+      "sequence_name": "unstructured_cluster_subset",
+      "when": "For cluster analysis after filtering or deduplicating a subset first."
+    },
+    {
+      "sequence_name": "unstructured_taxonomy",
+      "when": "For taxonomy or category distribution analysis."
+    },
+    {
+      "sequence_name": "unstructured_duplicate",
+      "when": "For duplicate-focused evidence review before summarization."
+    },
+    {
+      "sequence_name": "unstructured_sentiment",
+      "when": "For sentiment distribution or positive, negative, and neutral analysis."
+    },
+    {
+      "sequence_name": "unstructured_semantic_search",
+      "when": "For evidence lookup or finding semantically related documents."
+    },
+    {
+      "sequence_name": "unstructured_compare",
+      "when": "For current versus previous period comparison."
+    },
+    {
+      "sequence_name": "unstructured_breakdown",
+      "when": "For channel, product, region, or metadata breakdown analysis."
+    },
+    {
+      "sequence_name": "unstructured_trend",
+      "when": "For trend, increase, decrease, or time-series issue analysis."
+    }
+  ],
+  "planner_layer_hints": [
+    {
+      "sequence_name": "unstructured_sentence_split",
+      "trigger": ["sentence split", "sentence-level", "문장 분리", "문장단위", "문장 단위", "문장별", "문장으로 나눠"],
+      "layers": ["preprocess"]
+    },
+    {
+      "sequence_name": "unstructured_noun_frequency",
+      "trigger": ["noun", "nouns", "명사", "명사 추출", "명사 빈도", "명사 키워드"],
+      "layers": ["preprocess", "aggregate"]
+    },
+    {
+      "sequence_name": "unstructured_cluster_subset",
+      "trigger": ["최근 문의 중", "subset cluster", "filtered cluster", "군집 subset"],
+      "layers": ["preprocess", "retrieve", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_cluster_materialized",
+      "trigger": ["cluster", "clustering", "theme", "topic group", "군집", "클러스터", "토픽", "주제별", "묶음"],
+      "layers": ["preprocess", "retrieve", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_taxonomy",
+      "trigger": ["taxonomy", "tag", "category", "categorize", "분류", "분류체계", "카테고리", "태그"],
+      "layers": ["preprocess", "aggregate", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_duplicate",
+      "trigger": ["duplicate", "dedup", "중복", "반복 문서", "같은 이슈", "유사 문서"],
+      "layers": ["preprocess"]
+    },
+    {
+      "sequence_name": "unstructured_sentiment",
+      "trigger": ["sentiment", "positive", "negative", "neutral", "긍정", "부정", "중립", "감성", "감정", "호감", "불만", "만족"],
+      "layers": ["preprocess", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_semantic_search",
+      "trigger": ["search", "evidence", "find", "relevant", "근거", "찾아", "검색", "관련 문서"],
+      "layers": ["preprocess", "retrieve", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_compare",
+      "trigger": ["compare", "versus", "vs", "difference", "period compare", "전주", "전월", "지난주", "지난달", "대비", "비교", "달라졌", "얼마나 달라"],
+      "layers": ["preprocess", "aggregate", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_breakdown",
+      "trigger": ["breakdown", "group by", "channel", "source", "product", "region", "채널별", "제품별", "상태별", "분해", "어디서", "어느 채널"],
+      "layers": ["preprocess", "aggregate", "summarize"]
+    },
+    {
+      "sequence_name": "unstructured_trend",
+      "trigger": ["trend", "increase", "decrease", "change", "over time", "추세", "증가", "감소", "변화", "급증"],
+      "layers": ["preprocess", "aggregate", "summarize"]
+    }
+  ],
   "skills": [
     {
       "name": "structured_kpi_summary",
@@ -111,12 +226,18 @@
       "engine": "duckdb",
       "kind": "plan",
       "category": "structured_core",
+      "layer": "structured",
       "plan_enabled": true,
       "dataset_source": "request",
       "default_inputs": {
         "time_column": "date",
         "metric_column": "value"
-      }
+      },
+      "result_kind": "metric_table",
+      "result_scope": "full_dataset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "static"
     },
     {
       "name": "garbage_filter",
@@ -124,6 +245,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "preprocess",
       "plan_enabled": true,
       "task_path": "/tasks/garbage_filter",
       "dataset_source": "prepared",
@@ -137,7 +259,12 @@
           "platform_placeholder",
           "empty_or_noise"
         ]
-      }
+      },
+      "result_kind": "preprocessing",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "document_filter",
@@ -145,6 +272,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "preprocess",
       "plan_enabled": true,
       "task_path": "/tasks/document_filter",
       "dataset_source": "prepared",
@@ -154,7 +282,12 @@
         "text_column": "text",
         "match_mode": "any",
         "sample_n": 5
-      }
+      },
+      "result_kind": "preprocessing",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "deduplicate_documents",
@@ -162,6 +295,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "preprocess",
       "plan_enabled": true,
       "task_path": "/tasks/deduplicate_documents",
       "dataset_source": "prepared",
@@ -170,22 +304,33 @@
         "text_column": "text",
         "sample_n": 3,
         "duplicate_threshold": 0.85
-      }
+      },
+      "result_kind": "preprocessing",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "heuristic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
-      "name": "keyword_frequency",
-      "description": "Count top keywords from filtered unstructured rows.",
+      "name": "term_frequency",
+      "description": "Count top terms from filtered unstructured rows.",
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "aggregate",
       "plan_enabled": true,
-      "task_path": "/tasks/keyword_frequency",
+      "task_path": "/tasks/term_frequency",
       "dataset_source": "prepared",
       "requires_prepare": true,
       "default_inputs": {
         "text_column": "text",
         "top_n": 10
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "noun_frequency",
@@ -193,6 +338,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "aggregate",
       "plan_enabled": true,
       "task_path": "/tasks/noun_frequency",
       "dataset_source": "prepared",
@@ -205,7 +351,12 @@
         "allowed_pos_prefixes": [
           "N"
         ]
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "heuristic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "sentence_split",
@@ -213,6 +364,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "preprocess",
       "plan_enabled": true,
       "task_path": "/tasks/sentence_split",
       "dataset_source": "prepared",
@@ -222,7 +374,12 @@
         "sample_n": 3,
         "language": "ko",
         "preview_sentences_per_row": 3
-      }
+      },
+      "result_kind": "preprocessing",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "heuristic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "time_bucket_count",
@@ -230,6 +387,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "aggregate",
       "plan_enabled": true,
       "task_path": "/tasks/time_bucket_count",
       "dataset_source": "prepared",
@@ -244,7 +402,12 @@
         "bucket": "day",
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "metric_table",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "meta_group_count",
@@ -252,6 +415,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "aggregate",
       "plan_enabled": true,
       "task_path": "/tasks/meta_group_count",
       "dataset_source": "prepared",
@@ -264,7 +428,12 @@
         "dimension_column": "channel",
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "metric_table",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "document_sample",
@@ -272,6 +441,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "preprocess",
       "plan_enabled": true,
       "task_path": "/tasks/document_sample",
       "dataset_source": "prepared",
@@ -280,7 +450,12 @@
       "default_inputs": {
         "text_column": "text",
         "sample_n": 3
-      }
+      },
+      "result_kind": "evidence",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "heuristic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "dictionary_tagging",
@@ -288,6 +463,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "aggregate",
       "plan_enabled": true,
       "task_path": "/tasks/dictionary_tagging",
       "dataset_source": "prepared",
@@ -297,7 +473,12 @@
         "top_n": 5,
         "sample_n": 3,
         "max_tags_per_document": 3
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "embedding_cluster",
@@ -305,6 +486,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "retrieve",
       "plan_enabled": true,
       "task_path": "/tasks/embedding_cluster",
       "dataset_source": "prepared",
@@ -322,7 +504,16 @@
         "embedding_index_ref": "",
         "chunk_ref": "",
         "chunk_format": "parquet"
-      }
+      },
+      "result_kind": "cluster_output",
+      "result_scope": "cluster_subset",
+      "fallback_policy": "strict_fail",
+      "quality_tier": "heuristic",
+      "result_scope_policy": "dynamic",
+      "allowed_runtime_result_scopes": [
+        "full_dataset",
+        "cluster_subset"
+      ]
     },
     {
       "name": "cluster_label_candidates",
@@ -330,13 +521,22 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "retrieve",
       "plan_enabled": true,
       "task_path": "/tasks/cluster_label_candidates",
       "dataset_source": "request",
+      "requires_prior_skills": [
+        "embedding_cluster"
+      ],
       "default_inputs": {
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "cluster_output",
+      "result_scope": "document_subset",
+      "fallback_policy": "strict_fail",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "unstructured_issue_summary",
@@ -344,6 +544,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_core",
+      "layer": "summarize",
       "plan_enabled": true,
       "task_path": "/tasks/unstructured_issue_summary",
       "dataset_source": "prepared",
@@ -352,7 +553,16 @@
         "text_column": "text",
         "top_n": 10,
         "sample_n": 3
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "heuristic",
+      "result_scope_policy": "dynamic",
+      "allowed_runtime_result_scopes": [
+        "full_dataset",
+        "document_subset"
+      ]
     },
     {
       "name": "issue_breakdown_summary",
@@ -360,6 +570,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_core",
+      "layer": "summarize",
       "plan_enabled": true,
       "task_path": "/tasks/issue_breakdown_summary",
       "dataset_source": "prepared",
@@ -372,7 +583,12 @@
         "dimension_column": "channel",
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "metric_table",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "issue_cluster_summary",
@@ -380,15 +596,29 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_core",
+      "layer": "summarize",
       "plan_enabled": true,
       "task_path": "/tasks/issue_cluster_summary",
       "dataset_source": "prepared",
       "requires_prepare": true,
+      "requires_any_prior_skills": [
+        "cluster_label_candidates",
+        "embedding_cluster"
+      ],
       "default_inputs": {
         "text_column": "text",
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "cluster_subset",
+      "fallback_policy": "strict_fail",
+      "quality_tier": "heuristic",
+      "result_scope_policy": "dynamic",
+      "allowed_runtime_result_scopes": [
+        "full_dataset",
+        "cluster_subset"
+      ]
     },
     {
       "name": "issue_trend_summary",
@@ -396,6 +626,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_core",
+      "layer": "summarize",
       "plan_enabled": true,
       "task_path": "/tasks/issue_trend_summary",
       "dataset_source": "prepared",
@@ -410,7 +641,12 @@
         "bucket": "day",
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "metric_table",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "issue_period_compare",
@@ -418,6 +654,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_core",
+      "layer": "summarize",
       "plan_enabled": true,
       "task_path": "/tasks/issue_period_compare",
       "dataset_source": "prepared",
@@ -433,7 +670,12 @@
         "window_size": 1,
         "top_n": 5,
         "sample_n": 3
-      }
+      },
+      "result_kind": "metric_table",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "issue_sentiment_summary",
@@ -441,6 +683,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_core",
+      "layer": "summarize",
       "plan_enabled": true,
       "task_path": "/tasks/issue_sentiment_summary",
       "dataset_source": "sentiment",
@@ -458,7 +701,12 @@
         "row_id_column": "row_id",
         "source_row_index_column": "source_row_index",
         "sample_n": 3
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "issue_taxonomy_summary",
@@ -466,6 +714,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_core",
+      "layer": "summarize",
       "plan_enabled": true,
       "task_path": "/tasks/issue_taxonomy_summary",
       "dataset_source": "prepared",
@@ -475,7 +724,12 @@
         "top_n": 5,
         "sample_n": 3,
         "max_tags_per_document": 3
-      }
+      },
+      "result_kind": "summary_ranked",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "semantic_search",
@@ -483,6 +737,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_support",
+      "layer": "retrieve",
       "plan_enabled": true,
       "task_path": "/tasks/semantic_search",
       "dataset_source": "prepared",
@@ -500,7 +755,13 @@
         "embedding_index_ref": "",
         "chunk_ref": "",
         "chunk_format": "parquet"
-      }
+      },
+      "result_kind": "evidence",
+      "result_scope": "document_subset",
+      "fallback_policy": "graceful_empty",
+      "quality_tier": "heuristic",
+      "result_scope_policy": "inherits_from_input",
+      "follow_up": "pgvector path does not honor prior_artifacts (TODO)"
     },
     {
       "name": "issue_evidence_summary",
@@ -508,6 +769,7 @@
       "engine": "python-ai",
       "kind": "plan",
       "category": "unstructured_core",
+      "layer": "summarize",
       "plan_enabled": true,
       "task_path": "/tasks/issue_evidence_summary",
       "dataset_source": "prepared",
@@ -516,23 +778,12 @@
       "default_inputs": {
         "text_column": "text",
         "sample_n": 3
-      }
-    },
-    {
-      "name": "evidence_pack",
-      "description": "Build evidence bundles for final outputs.",
-      "engine": "python-ai",
-      "kind": "plan",
-      "category": "unstructured_support",
-      "plan_enabled": true,
-      "task_path": "/tasks/evidence_pack",
-      "dataset_source": "prepared",
-      "requires_prepare": true,
-      "goal_input": "query",
-      "default_inputs": {
-        "text_column": "text",
-        "sample_n": 3
-      }
+      },
+      "result_kind": "summary_narrative",
+      "result_scope": "document_subset",
+      "fallback_policy": "strict_fail",
+      "quality_tier": "llm_dependent",
+      "result_scope_policy": "inherits_from_input"
     },
     {
       "name": "dataset_prepare",
@@ -540,9 +791,19 @@
       "engine": "python-ai",
       "kind": "dataset_build",
       "category": "dataset_build",
+      "layer": "dataset_build",
       "plan_enabled": false,
       "task_path": "/tasks/dataset_prepare",
-      "dataset_source": "request"
+      "dataset_source": "request",
+      "result_kind": "dataset_artifact",
+      "result_scope": "full_dataset",
+      "fallback_policy": "rule_fallback_allowed",
+      "quality_tier": "llm_dependent",
+      "result_scope_policy": "dynamic",
+      "allowed_runtime_result_scopes": [
+        "full_dataset",
+        "partial_build"
+      ]
     },
     {
       "name": "sentiment_label",
@@ -550,10 +811,20 @@
       "engine": "python-ai",
       "kind": "dataset_build",
       "category": "dataset_build",
+      "layer": "dataset_build",
       "plan_enabled": false,
       "task_path": "/tasks/sentiment_label",
       "dataset_source": "prepared",
-      "requires_prepare": true
+      "requires_prepare": true,
+      "result_kind": "dataset_artifact",
+      "result_scope": "full_dataset",
+      "fallback_policy": "rule_fallback_allowed",
+      "quality_tier": "llm_dependent",
+      "result_scope_policy": "dynamic",
+      "allowed_runtime_result_scopes": [
+        "full_dataset",
+        "partial_build"
+      ]
     },
     {
       "name": "embedding",
@@ -561,10 +832,16 @@
       "engine": "python-ai",
       "kind": "dataset_build",
       "category": "dataset_build",
+      "layer": "dataset_build",
       "plan_enabled": false,
       "task_path": "/tasks/embedding",
       "dataset_source": "prepared",
-      "requires_prepare": true
+      "requires_prepare": true,
+      "result_kind": "dataset_artifact",
+      "result_scope": "full_dataset",
+      "fallback_policy": "rule_fallback_allowed",
+      "quality_tier": "heuristic",
+      "result_scope_policy": "static"
     }
   ]
 }

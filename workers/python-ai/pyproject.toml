@@ -5,10 +5,17 @@ description = "AI worker scaffold for planning, embeddings, semantic search, and
 requires-python = ">=3.11"
 dependencies = [
   "fastembed>=0.8,<0.9",
+  "pydantic>=2.8,<3.0",
   "pyarrow>=21,<22",
   "psycopg[binary]>=3.2,<3.3",
+  "structlog>=24,<26",
 ]
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

@@ -919,7 +919,7 @@ func TestScenarioPlanEndpoint(t *testing.T) {
 	if steps[0].(map[string]any)["skill_name"] != "garbage_filter" {
 		t.Fatalf("unexpected first skill: %+v", steps[0])
 	}
-	if steps[1].(map[string]any)["skill_name"] != "keyword_frequency" {
+	if steps[1].(map[string]any)["skill_name"] != "term_frequency" {
 		t.Fatalf("unexpected second skill: %+v", steps[1])
 	}
 	scenarioContext := request["context"].(map[string]any)["scenario"].(map[string]any)

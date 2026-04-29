@@ -22,7 +22,7 @@ type fakeExecutionDependencyBuilder struct {
 	clusterRequests []domain.DatasetClusterBuildRequest
 }
 
-func (b *fakeExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetCleanRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *fakeExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetCleanRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "clean")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -43,7 +43,7 @@ func (b *fakeExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, da
 	return domain.DatasetBuildJob{JobID: "job-clean", BuildType: "clean", Status: status}, nil
 }
 
-func (b *fakeExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *fakeExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "prepare")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -64,7 +64,7 @@ func (b *fakeExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, 
 	return domain.DatasetBuildJob{JobID: "job-prepare", BuildType: "prepare", Status: version.PrepareStatus}, nil
 }
 
-func (b *fakeExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *fakeExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "sentiment")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -81,7 +81,7 @@ func (b *fakeExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID
 	return domain.DatasetBuildJob{JobID: "job-sentiment", BuildType: "sentiment", Status: version.SentimentStatus}, nil
 }
 
-func (b *fakeExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *fakeExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "embedding")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -100,7 +100,7 @@ func (b *fakeExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID
 	return domain.DatasetBuildJob{JobID: "job-embedding", BuildType: "embedding", Status: version.EmbeddingStatus}, nil
 }
 
-func (b *fakeExecutionDependencyBuilder) CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *fakeExecutionDependencyBuilder) CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "cluster")
 	b.clusterRequests = append(b.clusterRequests, input)
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
@@ -143,7 +143,7 @@ func builderStatusOrDefault(status string) string {
 	return status
 }
 
-func (b *lazyExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetCleanRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *lazyExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetCleanRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "clean")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -159,7 +159,7 @@ func (b *lazyExecutionDependencyBuilder) CreateCleanJob(projectID, datasetID, da
 	return domain.DatasetBuildJob{JobID: "job-clean", BuildType: "clean", Status: "queued"}, nil
 }
 
-func (b *lazyExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *lazyExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetPrepareRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "prepare")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -172,7 +172,7 @@ func (b *lazyExecutionDependencyBuilder) CreatePrepareJob(projectID, datasetID, 
 	return domain.DatasetBuildJob{JobID: "job-prepare", BuildType: "prepare", Status: version.PrepareStatus}, nil
 }
 
-func (b *lazyExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *lazyExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetSentimentBuildRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "sentiment")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -185,7 +185,7 @@ func (b *lazyExecutionDependencyBuilder) CreateSentimentJob(projectID, datasetID
 	return domain.DatasetBuildJob{JobID: "job-sentiment", BuildType: "sentiment", Status: version.SentimentStatus}, nil
 }
 
-func (b *lazyExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *lazyExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetEmbeddingBuildRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "embedding")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -198,7 +198,7 @@ func (b *lazyExecutionDependencyBuilder) CreateEmbeddingJob(projectID, datasetID
 	return domain.DatasetBuildJob{JobID: "job-embedding", BuildType: "embedding", Status: version.EmbeddingStatus}, nil
 }
 
-func (b *lazyExecutionDependencyBuilder) CreateClusterJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetClusterBuildRequest, _ string) (domain.DatasetBuildJob, error) {
+func (b *lazyExecutionDependencyBuilder) CreateClusterJob(projectID, datasetID, datasetVersionID string, _ domain.DatasetClusterBuildRequest, _, _ string) (domain.DatasetBuildJob, error) {
 	b.calls = append(b.calls, "cluster")
 	version, err := b.repo.GetDatasetVersion(projectID, datasetVersionID)
 	if err != nil {
@@ -1127,6 +1127,70 @@ func TestSubmitAnalysisEnrichesEmbeddingClusterInputs(t *testing.T) {
 	}
 }
 
+func TestSubmitAnalysisUsesBundleDefaultPlanWhenPlannerMissing(t *testing.T) {
+	repository := store.NewMemoryStore()
+	service := NewAnalysisService(repository, workflows.NoopStarter{}, nil)
+
+	project := domain.Project{ProjectID: "project-1", Name: "demo"}
+	if err := repository.SaveProject(project); err != nil {
+		t.Fatalf("unexpected save project error: %v", err)
+	}
+	dataset := domain.Dataset{DatasetID: "dataset-1", ProjectID: project.ProjectID, Name: "issues", DataType: "unstructured"}
+	if err := repository.SaveDataset(dataset); err != nil {
+		t.Fatalf("unexpected save dataset error: %v", err)
+	}
+	version := domain.DatasetVersion{
+		DatasetVersionID: "version-1",
+		DatasetID:        dataset.DatasetID,
+		ProjectID:        project.ProjectID,
+		StorageURI:       "issues.csv",
+		DataType:         "unstructured",
+		PrepareStatus:    "ready",
+		PrepareURI:       stringPtr("issues.prepared.parquet"),
+		Metadata: map[string]any{
+			"prepared_text_column": "normalized_text",
+			"raw_text_column":      "text",
+		},
+	}
+	if err := repository.SaveDatasetVersion(version); err != nil {
+		t.Fatalf("unexpected save dataset version error: %v", err)
+	}
+	setDatasetActiveVersion(t, repository, dataset, version.DatasetVersionID)
+
+	dataType := "unstructured"
+	datasetID := dataset.DatasetID
+	response, err := service.SubmitAnalysis(project.ProjectID, domain.AnalysisSubmitRequest{
+		DatasetID: &datasetID,
+		DataType:  &dataType,
+		Goal:      "VOC 이슈를 요약해줘",
+	})
+	if err != nil {
+		t.Fatalf("unexpected submit error: %v", err)
+	}
+
+	if response.Plan.PlannerType == nil || *response.Plan.PlannerType != "stub" {
+		t.Fatalf("unexpected planner type: %+v", response.Plan.PlannerType)
+	}
+	if len(response.Plan.Plan.Steps) != 2 {
+		t.Fatalf("unexpected default plan steps: %+v", response.Plan.Plan.Steps)
+	}
+	if response.Plan.Plan.Steps[0].SkillName != "unstructured_issue_summary" {
+		t.Fatalf("unexpected first skill: %+v", response.Plan.Plan.Steps[0])
+	}
+	if response.Plan.Plan.Steps[0].DatasetName != "issues.prepared.parquet" {
+		t.Fatalf("expected normalized dataset source, got %+v", response.Plan.Plan.Steps[0])
+	}
+	if got := response.Plan.Plan.Steps[0].Inputs["text_column"]; got != "normalized_text" {
+		t.Fatalf("unexpected text column: %+v", response.Plan.Plan.Steps[0].Inputs)
+	}
+	if response.Plan.Plan.Steps[1].SkillName != "issue_evidence_summary" {
+		t.Fatalf("unexpected second skill: %+v", response.Plan.Plan.Steps[1])
+	}
+	if got := response.Plan.Plan.Steps[1].Inputs["query"]; got != "VOC 이슈를 요약해줘" {
+		t.Fatalf("unexpected goal input: %+v", response.Plan.Plan.Steps[1].Inputs)
+	}
+}
+
 func TestSubmitAnalysisEnrichesSemanticSearchChunkInputs(t *testing.T) {
 	repository := store.NewMemoryStore()
 	service := NewAnalysisService(repository, workflows.NoopStarter{}, fakePlanner{
@@ -1293,13 +1357,13 @@ func TestBuildExecutionResultIncludesUsageSummary(t *testing.T) {
 		Status:      "completed",
 		Artifacts: map[string]string{
 			"step:step-1:unstructured_issue_summary": `{"skill_name":"unstructured_issue_summary","usage":{"provider":"anthropic","model":"claude-haiku","operation":"unstructured_issue_summary","request_count":1,"input_tokens":100,"output_tokens":20,"total_tokens":120,"cost_estimation_status":"not_configured"}}`,
-			"step:step-2:evidence_pack":              `{"skill_name":"evidence_pack","usage":{"provider":"anthropic","model":"claude-haiku","operation":"evidence_pack","request_count":1,"input_tokens":60,"output_tokens":30,"total_tokens":90,"cost_estimation_status":"not_configured"}}`,
+			"step:step-2:issue_evidence_summary":     `{"skill_name":"issue_evidence_summary","usage":{"provider":"anthropic","model":"claude-haiku","operation":"issue_evidence_summary","request_count":1,"input_tokens":60,"output_tokens":30,"total_tokens":90,"cost_estimation_status":"not_configured"}}`,
 		},
 		Plan: domain.SkillPlan{
 			PlanID: "plan-usage",
 			Steps: []domain.SkillPlanStep{
 				{StepID: "step-1", SkillName: "unstructured_issue_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
-				{StepID: "step-2", SkillName: "evidence_pack", DatasetName: "issues.csv", Inputs: map[string]any{}},
+				{StepID: "step-2", SkillName: "issue_evidence_summary", DatasetName: "issues.csv", Inputs: map[string]any{}},
 			},
 		},
 		Events: []domain.ExecutionEvent{},
@@ -1335,7 +1399,7 @@ func TestBuildExecutionResultIncludesUsageSummary(t *testing.T) {
 	if result.ResultV1.Answer == nil {
 		t.Fatalf("expected result v1 answer: %+v", result.ResultV1)
 	}
-	if result.ResultV1.PrimarySkillName == nil || *result.ResultV1.PrimarySkillName != "evidence_pack" {
+	if result.ResultV1.PrimarySkillName == nil || *result.ResultV1.PrimarySkillName != "issue_evidence_summary" {
 		t.Fatalf("unexpected primary skill: %+v", result.ResultV1)
 	}
 	if result.ResultV1.UsageSummary["total_tokens"] != 210 {
@@ -2021,7 +2085,7 @@ func TestExecutePlanCopiesDatasetProfileSnapshot(t *testing.T) {
 		Plan: domain.SkillPlan{
 			PlanID: "plan-1",
 			Steps: []domain.SkillPlanStep{
-				{StepID: "step-1", SkillName: "keyword_frequency", DatasetName: "issues.csv", Inputs: map[string]any{}},
+				{StepID: "step-1", SkillName: "term_frequency", DatasetName: "issues.csv", Inputs: map[string]any{}},
 			},
 		},
 		Status:    "draft",

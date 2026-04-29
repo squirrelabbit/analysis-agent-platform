@@ -6,6 +6,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+LAYER_PRECEDENCE = {
+    "preprocess": 0,
+    "aggregate": 1,
+    "retrieve": 1,
+    "structured": 1,
+    "summarize": 2,
+    "presentation": 3,
+    "dataset_build": -1,
+}
+
 
 def bundle_version() -> str:
     return str(skill_bundle().get("version") or "").strip()
@@ -29,6 +39,26 @@ def plan_skill_names() -> list[str]:
     return names
 
 
+def planner_visible_skills() -> list[dict[str, Any]]:
+    skills: list[dict[str, Any]] = []
+    for skill in capability_skills():
+        if not bool(skill.get("plan_enabled")):
+            continue
+        if str(skill.get("deprecated_alias_of") or "").strip():
+            continue
+        skills.append(dict(skill))
+    return skills
+
+
+def planner_visible_skill_names() -> list[str]:
+    names: list[str] = []
+    for skill in planner_visible_skills():
+        name = str(skill.get("name") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
 def skill_definition(name: str) -> dict[str, Any] | None:
     return dict(skills_by_name().get(str(name).strip()) or {}) or None
 
@@ -39,6 +69,26 @@ def task_path_for_skill(name: str) -> str | None:
         return None
     task_path = str(skill.get("task_path") or "").strip()
     return task_path or None
+
+
+def layer_for_skill(name: str) -> str | None:
+    skill = skill_definition(name)
+    if not skill:
+        return None
+    layer = str(skill.get("layer") or "").strip()
+    return layer or None
+
+
+def skills_by_layer(layer: str) -> list[dict[str, Any]]:
+    normalized = str(layer or "").strip()
+    if not normalized:
+        return []
+    skills: list[dict[str, Any]] = []
+    for skill in capability_skills():
+        if str(skill.get("layer") or "").strip() != normalized:
+            continue
+        skills.append(dict(skill))
+    return skills
 
 
 def default_plan_skills(data_type: str) -> list[str]:
@@ -53,6 +103,52 @@ def planner_sequence(name: str) -> list[str]:
     sequences = skill_bundle().get("planner_sequences") or {}
     selected = list(sequences.get(str(name).strip()) or [])
     return [str(skill_name).strip() for skill_name in selected if str(skill_name).strip()]
+
+
+def planner_recommendations() -> list[dict[str, Any]]:
+    recommendations: list[dict[str, Any]] = []
+    for item in list(skill_bundle().get("planner_recommendations") or []):
+        if not isinstance(item, dict):
+            continue
+        sequence_name = str(item.get("sequence_name") or "").strip()
+        when = str(item.get("when") or "").strip()
+        if not sequence_name or not when:
+            continue
+        recommendations.append(
+            {
+                "sequence_name": sequence_name,
+                "when": when,
+            }
+        )
+    return recommendations
+
+
+def planner_layer_hints() -> list[dict[str, Any]]:
+    hints: list[dict[str, Any]] = []
+    for item in list(skill_bundle().get("planner_layer_hints") or []):
+        if not isinstance(item, dict):
+            continue
+        sequence_name = str(item.get("sequence_name") or "").strip()
+        layers = [
+            str(layer or "").strip()
+            for layer in list(item.get("layers") or [])
+            if str(layer or "").strip()
+        ]
+        triggers = [
+            str(trigger or "").strip()
+            for trigger in list(item.get("trigger") or [])
+            if str(trigger or "").strip()
+        ]
+        if not sequence_name or not layers or not triggers:
+            continue
+        hints.append(
+            {
+                "sequence_name": sequence_name,
+                "layers": layers,
+                "trigger": triggers,
+            }
+        )
+    return hints
 
 
 def default_inputs_for_skill(skill_name: str, *, goal: str = "") -> dict[str, Any]:

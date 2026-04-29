@@ -3,7 +3,6 @@ from __future__ import annotations
 """Dataset preparation and enrichment skill handlers."""
 
 import json
-import logging
 import time
 from collections import Counter
 from datetime import UTC, datetime
@@ -11,8 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from .. import runtime as rt
+from ..obs import get, skill_handler
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = get(__name__)
 
 
 def _stable_source_index(row: dict[str, Any], fallback_index: int) -> int:
@@ -344,6 +344,7 @@ def _split_text_chunks(
     return chunks
 
 
+@skill_handler("python-ai")
 def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_dataset_clean_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
@@ -463,7 +464,7 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
             f"cleaned output: {output_path}",
             f"clean regex rules: {', '.join(normalized['regex_rule_names'])}",
         ],
-        "artifact": {
+        "artifact": rt._set_scope_fields({
             "skill_name": "dataset_clean",
             "dataset_version_id": normalized["dataset_version_id"],
             "source_dataset_name": normalized["dataset_name"],
@@ -484,10 +485,11 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
             "clean_reduced_char_count": max(0, source_input_char_count - cleaned_input_char_count),
             "clean_regex_rule_names": list(normalized["regex_rule_names"]),
             "summary": summary,
-        },
+        }, declared_result_scope="full_dataset", runtime_result_scope="full_dataset"),
     }
 
 
+@skill_handler("python-ai")
 def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_prepare_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
@@ -637,11 +639,12 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
         fallback_note = f"llm fallback used: count={llm_fallback_count}, model={attempted_llm_model}, reason={llm_fallback_reason}"
         notes.append(fallback_note)
         LOGGER.warning(
-            "dataset prepare llm fallback used dataset_version_id=%s model=%s fallback_count=%s reason=%s",
-            normalized["dataset_version_id"],
-            attempted_llm_model,
-            llm_fallback_count,
-            llm_fallback_reason,
+            "llm.fallback.triggered",
+            skill_name="dataset_prepare",
+            dataset_version_id=normalized["dataset_version_id"],
+            model=attempted_llm_model,
+            fallback_count=llm_fallback_count,
+            reason=llm_fallback_reason,
         )
 
     prompt_version = "dataset-prepare-fallback-v1"
@@ -657,9 +660,14 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
         else:
             prepare_strategy = "anthropic-batch" if normalized["prepare_batch_size"] > 1 else "anthropic-row"
 
+    runtime_result_scope = (
+        "partial_build"
+        if 0 < normalized["max_rows"] < source_row_count
+        else "full_dataset"
+    )
     return {
         "notes": notes,
-        "artifact": {
+        "artifact": rt._set_scope_fields({
             "skill_name": "dataset_prepare",
             "dataset_version_id": normalized["dataset_version_id"],
             "source_dataset_name": normalized["dataset_name"],
@@ -698,7 +706,7 @@ def run_dataset_prepare(payload: dict[str, Any]) -> dict[str, Any]:
                 "prepare_batch_size": normalized["prepare_batch_size"],
             },
             "usage": usage,
-        },
+        }, declared_result_scope="full_dataset", runtime_result_scope=runtime_result_scope),
     }
 
 
@@ -811,6 +819,7 @@ def _cluster_records_from_index(index_rows: list[dict[str, Any]], chunk_lookup: 
     return records
 
 
+@skill_handler("python-ai")
 def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_cluster_build_payload(payload)
     summary_path = Path(normalized["output_path"])
@@ -865,7 +874,7 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
         summary_cluster.pop("members", None)
         summary_clusters.append(summary_cluster)
 
-    cluster_artifact = {
+    cluster_artifact = rt._set_scope_fields({
         "skill_name": "embedding_cluster",
         "dataset_name": normalized["dataset_name"],
         "embedding_source_backend": "embedding-index-parquet",
@@ -894,7 +903,7 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
             "cluster_membership_row_count": len(membership_rows),
         },
         "clusters": summary_clusters,
-    }
+    }, declared_result_scope="cluster_subset", runtime_result_scope="full_dataset")
     summary_path.write_text(json.dumps(cluster_artifact, ensure_ascii=False), encoding="utf-8")
     rt._write_parquet_rows(membership_path, membership_rows, schema=_cluster_membership_output_schema())
 
@@ -907,7 +916,7 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
             f"cluster_count: {len(summary_clusters)}",
             f"similarity_backend: {similarity_backend}",
         ],
-        "artifact": {
+        "artifact": rt._set_scope_fields({
             "skill_name": "dataset_cluster_build",
             "dataset_version_id": normalized["dataset_version_id"],
             "cluster_execution_mode": "materialized_build",
@@ -922,10 +931,11 @@ def run_dataset_cluster_build(payload: dict[str, Any]) -> dict[str, Any]:
             "cluster_source_embedding_ref": normalized["embedding_index_source_ref"],
             "chunk_ref": normalized["chunk_ref"],
             "summary": cluster_artifact["summary"],
-        },
+        }, declared_result_scope="full_dataset", runtime_result_scope="full_dataset"),
     }
 
 
+@skill_handler("python-ai")
 def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_embedding_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
@@ -1049,7 +1059,7 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "notes": notes,
-        "artifact": {
+        "artifact": rt._set_scope_fields({
             "skill_name": "embedding",
             "dataset_name": normalized["dataset_name"],
             "embedding_uri": str(embedding_path) if embedding_path is not None else "",
@@ -1074,10 +1084,11 @@ def run_embedding(payload: dict[str, Any]) -> dict[str, Any]:
             "chunking_strategy": "text-window-v1",
             "storage_contract_version": "unstructured-storage-v1",
             "usage": usage,
-        },
+        }, declared_result_scope="full_dataset", runtime_result_scope="full_dataset"),
     }
 
 
+@skill_handler("python-ai")
 def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_sentiment_build_payload(payload)
     rows = rt._iter_rows(normalized["dataset_name"])
@@ -1190,16 +1201,22 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
         fallback_note = f"llm fallback used: count={llm_fallback_count}, model={attempted_llm_model}, reason={llm_fallback_reason}"
         notes.append(fallback_note)
         LOGGER.warning(
-            "sentiment label llm fallback used dataset_version_id=%s model=%s fallback_count=%s reason=%s",
-            normalized["dataset_version_id"],
-            attempted_llm_model,
-            llm_fallback_count,
-            llm_fallback_reason,
+            "llm.fallback.triggered",
+            skill_name="sentiment_label",
+            dataset_version_id=normalized["dataset_version_id"],
+            model=attempted_llm_model,
+            fallback_count=llm_fallback_count,
+            reason=llm_fallback_reason,
         )
 
+    runtime_result_scope = (
+        "partial_build"
+        if 0 < normalized["max_rows"] < source_row_count
+        else "full_dataset"
+    )
     return {
         "notes": notes,
-        "artifact": {
+        "artifact": rt._set_scope_fields({
             "skill_name": "sentiment_label",
             "dataset_version_id": normalized["dataset_version_id"],
             "source_dataset_name": normalized["dataset_name"],
@@ -1236,7 +1253,7 @@ def run_sentiment_label(payload: dict[str, Any]) -> dict[str, Any]:
                 "label_counts": dict(sorted(label_counts.items())),
             },
             "usage": usage,
-        },
+        }, declared_result_scope="full_dataset", runtime_result_scope=runtime_result_scope),
     }
 
 

@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ._migration_targets import DEPRECATED_ALIASES
+from .obs import get
 from .planner import run_planner
 from .prompt_registry import prompt_catalog
+from .skill_contracts import validate_task_payload, validate_task_result
 from .skill_policy_registry import skill_policy_catalog, validate_skill_policies
 from .runtime.rule_config import (
     resolve_default_garbage_rule_names,
@@ -15,9 +18,9 @@ from .runtime.rule_config import (
 from .skill_bundle import bundle_version, capability_skills
 from .skills.aggregate import (
     run_dictionary_tagging,
-    run_keyword_frequency,
     run_meta_group_count,
     run_noun_frequency,
+    run_term_frequency,
     run_time_bucket_count,
 )
 from .skills.dataset_build import run_dataset_clean, run_dataset_cluster_build, run_dataset_prepare, run_embedding, run_sentiment_label
@@ -35,7 +38,6 @@ from .skills.retrieve import (
     run_semantic_search,
 )
 from .skills.summarize import (
-    run_evidence_pack,
     run_issue_breakdown_summary,
     run_issue_cluster_summary,
     run_issue_evidence_summary,
@@ -45,6 +47,8 @@ from .skills.summarize import (
     run_issue_trend_summary,
     run_unstructured_issue_summary,
 )
+
+_LOG = get("task_router")
 
 
 @dataclass(frozen=True)
@@ -112,7 +116,7 @@ def task_handlers() -> dict[str, Any]:
         "garbage_filter": run_garbage_filter,
         "document_filter": run_document_filter,
         "deduplicate_documents": run_deduplicate_documents,
-        "keyword_frequency": run_keyword_frequency,
+        "term_frequency": run_term_frequency,
         "noun_frequency": run_noun_frequency,
         "sentence_split": run_sentence_split,
         "time_bucket_count": run_time_bucket_count,
@@ -129,7 +133,6 @@ def task_handlers() -> dict[str, Any]:
         "issue_taxonomy_summary": run_issue_taxonomy_summary,
         "semantic_search": run_semantic_search,
         "issue_evidence_summary": run_issue_evidence_summary,
-        "evidence_pack": run_evidence_pack,
         "unstructured_issue_summary": run_unstructured_issue_summary,
     }
 
@@ -137,5 +140,29 @@ def task_handlers() -> dict[str, Any]:
 def run_task(name: str, payload: dict[str, Any]) -> dict[str, Any]:
     handler = task_handlers().get(name)
     if handler is None:
+        _LOG.error("task.dispatch.unsupported", skill_name=name)
         raise ValueError(f"unsupported capability: {name}")
-    return handler(payload)
+    if name in DEPRECATED_ALIASES:
+        _LOG.warning(
+            "deprecated_skill_alias_called",
+            skill_name=name,
+            canonical=DEPRECATED_ALIASES[name],
+        )
+    _LOG.info("task.dispatch.started", skill_name=name)
+    validate_task_payload(name, payload)
+    try:
+        result = handler(payload)
+    except Exception as exc:
+        _LOG.error(
+            "task.dispatch.failed",
+            skill_name=name,
+            error_category=type(exc).__name__,
+        )
+        raise
+    validate_task_result(name, payload, result)
+    _LOG.info(
+        "task.dispatch.completed",
+        skill_name=name,
+        response_keys=sorted(result.keys()) if isinstance(result, dict) else [],
+    )
+    return result
