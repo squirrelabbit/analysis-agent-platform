@@ -52,19 +52,19 @@ func TestBuildV1SuppressesStaleWaitingStateAfterCompletion(t *testing.T) {
 	}
 }
 
-func TestBuildV1MatchesAliasArtifactKeyForStep(t *testing.T) {
+func TestBuildV1MatchesCanonicalArtifactKeyForStep(t *testing.T) {
 	execution := domain.ExecutionSummary{
-		ExecutionID: "exec-alias",
+		ExecutionID: "exec-term",
 		Status:      "completed",
 		Plan: domain.SkillPlan{
-			PlanID: "plan-alias",
+			PlanID: "plan-term",
 			Steps: []domain.SkillPlanStep{
-				{StepID: "step-1", SkillName: "keyword_frequency"},
+				{StepID: "step-1", SkillName: "term_frequency"},
 			},
 			CreatedAt: time.Now().UTC(),
 		},
 		Artifacts: map[string]string{
-			"step:step-1:term_frequency": `{"skill_name":"keyword_frequency","summary":"상위 용어를 집계했습니다.","top_terms":[{"term":"결제","count":2}]}`,
+			"step:step-1:term_frequency": `{"skill_name":"term_frequency","summary":"상위 용어를 집계했습니다.","top_terms":[{"term":"결제","count":2}]}`,
 		},
 	}
 
@@ -73,26 +73,26 @@ func TestBuildV1MatchesAliasArtifactKeyForStep(t *testing.T) {
 		t.Fatalf("unexpected step result count: %+v", result.StepResults)
 	}
 	if result.StepResults[0].Status != "completed" {
-		t.Fatalf("expected alias artifact key to resolve for step: %+v", result.StepResults[0])
+		t.Fatalf("expected artifact key to resolve for step: %+v", result.StepResults[0])
 	}
 	if result.StepResults[0].ArtifactKey == nil || *result.StepResults[0].ArtifactKey != "step:step-1:term_frequency" {
 		t.Fatalf("unexpected artifact key: %+v", result.StepResults[0])
 	}
 }
 
-func TestBuildV1CanonicalizesEvidenceAliasPrimarySkill(t *testing.T) {
+func TestBuildV1UsesIssueEvidenceSummaryPrimarySkill(t *testing.T) {
 	execution := domain.ExecutionSummary{
-		ExecutionID: "exec-evidence-alias",
+		ExecutionID: "exec-evidence",
 		Status:      "completed",
 		Plan: domain.SkillPlan{
-			PlanID: "plan-evidence-alias",
+			PlanID: "plan-evidence",
 			Steps: []domain.SkillPlanStep{
-				{StepID: "step-1", SkillName: "evidence_pack"},
+				{StepID: "step-1", SkillName: "issue_evidence_summary"},
 			},
 			CreatedAt: time.Now().UTC(),
 		},
 		Artifacts: map[string]string{
-			"step:step-1:evidence_pack": `{"skill_name":"evidence_pack","summary":"근거 요약","evidence":[{"snippet":"근거"}]}`,
+			"step:step-1:issue_evidence_summary": `{"skill_name":"issue_evidence_summary","summary":"근거 요약","evidence":[{"snippet":"근거"}]}`,
 		},
 	}
 

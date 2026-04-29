@@ -2,12 +2,8 @@ package skills
 
 import "strings"
 
-// DeprecatedAliases mirrors ADR-009 F1 alias handling so Go control-plane can
-// treat deprecated skill names the same way as the Python runtime.
-var DeprecatedAliases = map[string]string{
-	"keyword_frequency": "term_frequency",
-	"evidence_pack":     "issue_evidence_summary",
-}
+// DeprecatedAliases maps deprecated skill names to canonical replacements.
+var DeprecatedAliases = map[string]string{}
 
 // CanonicalSkillName resolves a deprecated skill name to its canonical name.
 func CanonicalSkillName(name string) string {
