@@ -243,6 +243,7 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
         sample_n=normalized["sample_n"],
         fallback_chunk_ref=chunk_ref,
         fallback_chunk_format=chunk_format,
+        prior_artifacts=payload.get("prior_artifacts"),
     )
     if matches is not None:
         retrieval_backend = "pgvector"
@@ -413,6 +414,7 @@ def _semantic_matches_from_pgvector(
     sample_n: int,
     fallback_chunk_ref: str,
     fallback_chunk_format: str,
+    prior_artifacts: Any = None,
 ) -> list[dict[str, Any]] | None:
     if not dataset_version_id:
         dataset_version_id = _dataset_version_id_from_index_ref(embedding_index_ref)
@@ -436,6 +438,9 @@ def _semantic_matches_from_pgvector(
         return None
     if not rows:
         return []
+    selected_indices = rt._selected_source_indices(prior_artifacts)
+    if selected_indices is not None:
+        rows = [r for r in rows if int(r.get("source_row_index") or 0) in selected_indices]
     chunk_lookup = _chunk_rows_by_id(rows, fallback_chunk_ref)
     matches: list[dict[str, Any]] = []
     for row in rows:
