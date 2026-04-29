@@ -16,4 +16,4 @@ data/
 docs/chat-notes/*
 docs/devlog/*
 workers/python-ai/docs
-.claude/
+.claude/*.egg-info/
