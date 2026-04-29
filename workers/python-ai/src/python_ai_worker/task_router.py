@@ -18,9 +18,9 @@ from .runtime.rule_config import (
 from .skill_bundle import bundle_version, capability_skills
 from .skills.aggregate import (
     run_dictionary_tagging,
-    run_keyword_frequency,
     run_meta_group_count,
     run_noun_frequency,
+    run_term_frequency,
     run_time_bucket_count,
 )
 from .skills.dataset_build import run_dataset_clean, run_dataset_cluster_build, run_dataset_prepare, run_embedding, run_sentiment_label
@@ -116,10 +116,7 @@ def task_handlers() -> dict[str, Any]:
         "garbage_filter": run_garbage_filter,
         "document_filter": run_document_filter,
         "deduplicate_documents": run_deduplicate_documents,
-        "keyword_frequency": run_keyword_frequency,
-        # ADR-009 F1: term_frequency is the canonical replacement; keyword_frequency
-        # is retained as a deprecated alias during the T4 deprecation period.
-        "term_frequency": run_keyword_frequency,
+        "term_frequency": run_term_frequency,
         "noun_frequency": run_noun_frequency,
         "sentence_split": run_sentence_split,
         "time_bucket_count": run_time_bucket_count,
@@ -136,9 +133,6 @@ def task_handlers() -> dict[str, Any]:
         "issue_taxonomy_summary": run_issue_taxonomy_summary,
         "semantic_search": run_semantic_search,
         "issue_evidence_summary": run_issue_evidence_summary,
-        # ADR-009 F2: evidence_pack is a deprecated alias of
-        # issue_evidence_summary during the transition period.
-        "evidence_pack": run_issue_evidence_summary,
         "unstructured_issue_summary": run_unstructured_issue_summary,
     }
 

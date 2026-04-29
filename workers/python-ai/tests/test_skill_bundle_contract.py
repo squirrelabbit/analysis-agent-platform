@@ -172,7 +172,7 @@ class SkillBundleContractTests(unittest.TestCase):
         """ADR-009 F4: the canonical migration scope is exactly 17 names
         (the audit's actual inventory, not the prompt's 14)."""
 
-        self.assertEqual(len(LEGACY_SKILL_NAMES), 17)
+        self.assertEqual(len(LEGACY_SKILL_NAMES), 15)
 
     def test_legacy_skill_names_exist_in_bundle(self) -> None:
         """Every name in LEGACY_SKILL_NAMES must currently exist as a
@@ -208,13 +208,7 @@ class SkillBundleContractTests(unittest.TestCase):
                 self.assertIs(handlers[deprecated], handlers[canonical])
 
     def test_deprecated_alias_inventory_matches_current_phases(self) -> None:
-        self.assertEqual(
-            DEPRECATED_ALIASES,
-            {
-                "keyword_frequency": "term_frequency",
-                "evidence_pack": "issue_evidence_summary",
-            },
-        )
+        self.assertEqual(DEPRECATED_ALIASES, {})
 
     def test_canonical_skill_name_resolves_alias(self) -> None:
         for deprecated, canonical in DEPRECATED_ALIASES.items():
@@ -228,8 +222,6 @@ class SkillBundleContractTests(unittest.TestCase):
 
         self.assertIn("term_frequency", visible)
         self.assertIn("issue_evidence_summary", visible)
-        self.assertNotIn("keyword_frequency", visible)
-        self.assertNotIn("evidence_pack", visible)
 
 
 if __name__ == "__main__":

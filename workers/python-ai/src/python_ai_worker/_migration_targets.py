@@ -1,13 +1,7 @@
 """Migration target registry for ADR-009 Skill Surface Consolidation.
 
-Single source of truth for the 17 legacy skill names being consolidated
-and the deprecated→canonical alias mapping during the T4 deprecation
-period.
-
-Phase 1 (this commit) establishes only the
-``keyword_frequency → term_frequency`` alias per ADR-009 F1.
-Later phases extend ``DEPRECATED_ALIASES`` as additional renames or
-primitive consolidations are decided.
+Single source of truth for legacy skill names being consolidated and the
+deprecated-to-canonical alias mapping.
 
 References
 ----------
@@ -19,7 +13,7 @@ from __future__ import annotations
 
 from typing import Mapping
 
-# 17 legacy skill names enumerated by the 2026-04-24 audit (§0).
+# Legacy skill names enumerated by the 2026-04-24 audit (§0).
 # This set is the canonical migration scope for T4 — all consolidation
 # phases reference this constant rather than re-listing names inline.
 LEGACY_SKILL_NAMES: frozenset[str] = frozenset(
@@ -36,22 +30,14 @@ LEGACY_SKILL_NAMES: frozenset[str] = frozenset(
         "sentence_split",
         "deduplicate_documents",
         "dictionary_tagging",
-        "evidence_pack",
         "dataset_prepare",
         "sentiment_label",
         "embedding",
-        "keyword_frequency",
     }
 )
 
 # Maps deprecated skill name → canonical replacement.
-# Phase 1 introduces the first entry per ADR-009 F1 (alias period for
-# the keyword_frequency rename). Subsequent phases extend this mapping
-# as more renames land.
-DEPRECATED_ALIASES: Mapping[str, str] = {
-    "keyword_frequency": "term_frequency",
-    "evidence_pack": "issue_evidence_summary",
-}
+DEPRECATED_ALIASES: Mapping[str, str] = {}
 
 
 def canonical_skill_name(name: str) -> str:

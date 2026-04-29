@@ -94,11 +94,6 @@ def validate_task_result(name: str, payload: dict[str, Any], result: dict[str, A
     artifact_skill_name = str(artifact.get("skill_name") or "").strip()
     if not artifact_skill_name:
         raise SkillOutputError(f"{name} artifact must contain skill_name")
-    # ADR-009 F1: during the deprecation period, treat deprecated and canonical
-    # skill names as equivalent for artifact identity comparison. The handler
-    # itself is not yet renamed (Phase 4/5 territory), so an artifact produced
-    # via the term_frequency route may still report skill_name=keyword_frequency
-    # and vice versa — both resolve to the same canonical identity.
     if canonical_skill_name(artifact_skill_name) != canonical_skill_name(name):
         raise SkillOutputError(
             f"{name} artifact skill_name mismatch: {artifact_skill_name}"

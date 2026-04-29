@@ -101,7 +101,7 @@ class SkillPolicyBehaviorTests(unittest.TestCase):
                 "python_ai_worker.skills._summarize_impl.rt._anthropic_client",
                 return_value=self._DummyClient(),
             ), patch(
-                "python_ai_worker.skills._summarize_impl.rt._run_evidence_pack_with_llm",
+                "python_ai_worker.skills._summarize_impl.rt._run_issue_evidence_summary_with_llm",
                 return_value={
                     "notes": ["llm presenter stubbed in test"],
                     "artifact": {

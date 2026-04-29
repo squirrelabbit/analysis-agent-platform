@@ -18,8 +18,6 @@ class LLMPlannerPromptTests(unittest.TestCase):
 
         self.assertIn("term_frequency", prompt)
         self.assertIn("issue_evidence_summary", prompt)
-        self.assertNotIn("keyword_frequency", prompt)
-        self.assertNotIn("evidence_pack", prompt)
         self.assertIn(
             "For general unstructured text analysis. Prefer document_filter, term_frequency, document_sample, unstructured_issue_summary, issue_evidence_summary.",
             prompt,
@@ -79,13 +77,13 @@ class LLMPlannerPromptTests(unittest.TestCase):
             prompt,
         )
 
-    def test_normalize_planner_response_canonicalizes_deprecated_aliases(self) -> None:
+    def test_normalize_planner_response_keeps_registered_canonical_skills(self) -> None:
         result = _normalize_planner_response(
             {
                 "plan": {
                     "steps": [
-                        {"skill_name": "keyword_frequency", "dataset_name": "issues.csv", "inputs": {}},
-                        {"skill_name": "evidence_pack", "dataset_name": "issues.csv", "inputs": {}},
+                        {"skill_name": "term_frequency", "dataset_name": "issues.csv", "inputs": {}},
+                        {"skill_name": "issue_evidence_summary", "dataset_name": "issues.csv", "inputs": {}},
                         {"skill_name": "not_registered", "dataset_name": "issues.csv", "inputs": {}},
                     ]
                 }

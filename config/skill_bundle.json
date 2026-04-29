@@ -312,28 +312,6 @@
       "result_scope_policy": "inherits_from_input"
     },
     {
-      "name": "keyword_frequency",
-      "description": "Count top keywords from filtered unstructured rows. Deprecated alias of term_frequency (ADR-009 F1, alias period).",
-      "engine": "python-ai",
-      "kind": "plan",
-      "category": "unstructured_support",
-      "layer": "aggregate",
-      "plan_enabled": true,
-      "task_path": "/tasks/keyword_frequency",
-      "dataset_source": "prepared",
-      "requires_prepare": true,
-      "default_inputs": {
-        "text_column": "text",
-        "top_n": 10
-      },
-      "result_kind": "summary_ranked",
-      "result_scope": "document_subset",
-      "fallback_policy": "graceful_empty",
-      "quality_tier": "deterministic",
-      "result_scope_policy": "inherits_from_input",
-      "deprecated_alias_of": "term_frequency"
-    },
-    {
       "name": "term_frequency",
       "description": "Count top terms from filtered unstructured rows.",
       "engine": "python-ai",
@@ -802,29 +780,6 @@
         "sample_n": 3
       },
       "result_kind": "summary_narrative",
-      "result_scope": "document_subset",
-      "fallback_policy": "strict_fail",
-      "quality_tier": "llm_dependent",
-      "result_scope_policy": "inherits_from_input"
-    },
-    {
-      "name": "evidence_pack",
-      "deprecated_alias_of": "issue_evidence_summary",
-      "description": "Build evidence bundles for final outputs.",
-      "engine": "python-ai",
-      "kind": "plan",
-      "category": "unstructured_support",
-      "layer": "summarize",
-      "plan_enabled": true,
-      "task_path": "/tasks/evidence_pack",
-      "dataset_source": "prepared",
-      "requires_prepare": true,
-      "goal_input": "query",
-      "default_inputs": {
-        "text_column": "text",
-        "sample_n": 3
-      },
-      "result_kind": "evidence",
       "result_scope": "document_subset",
       "fallback_policy": "strict_fail",
       "quality_tier": "llm_dependent",

@@ -22,7 +22,6 @@ from python_ai_worker.tasks import (
     run_dataset_prepare,
     run_embedding,
     run_embedding_cluster,
-    run_evidence_pack,
     run_execution_final_answer,
     run_garbage_filter,
     run_issue_breakdown_summary,
@@ -32,13 +31,13 @@ from python_ai_worker.tasks import (
     run_issue_sentiment_summary,
     run_issue_taxonomy_summary,
     run_issue_trend_summary,
-    run_keyword_frequency,
     run_meta_group_count,
     run_noun_frequency,
     run_planner,
     run_semantic_search,
     run_sentiment_label,
     run_sentence_split,
+    run_term_frequency,
     run_task,
     run_time_bucket_count,
 )
@@ -678,7 +677,7 @@ class TaskTests(unittest.TestCase):
         prior_artifacts = {
             "step:filter:document_filter": json.dumps(filter_result["artifact"], ensure_ascii=False),
         }
-        keyword_result = run_keyword_frequency(
+        term_result = run_term_frequency(
             {
                 "dataset_name": str(csv_path),
                 "text_column": "text",
@@ -697,71 +696,22 @@ class TaskTests(unittest.TestCase):
         )
 
         self.assertEqual(filter_result["artifact"]["summary"]["filtered_row_count"], 2)
-        self.assertEqual(keyword_result["artifact"]["summary"]["document_count"], 2)
-        self.assertEqual(keyword_result["artifact"]["top_terms"][0]["term"], "결제")
+        self.assertEqual(term_result["artifact"]["summary"]["document_count"], 2)
+        self.assertEqual(term_result["artifact"]["top_terms"][0]["term"], "결제")
         self.assertEqual(sample_result["artifact"]["summary"]["sample_count"], 2)
         self.assertEqual(sample_result["artifact"]["samples"][0]["source_index"], 0)
 
-    def test_term_frequency_alias_dispatches_to_keyword_frequency(self) -> None:
-        """ADR-009 F1: routing /tasks/term_frequency must produce the same
-        artifact as /tasks/keyword_frequency, modulo the skill_name field
-        which is allowed to lag the rename during the deprecation period."""
-
+    def test_term_frequency_dispatches_without_deprecation_warning(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
-        csv_path = temp_dir / "alias_issues.csv"
-        with csv_path.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=["text"])
-            writer.writeheader()
-            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
-            writer.writerow({"text": "결제 승인 오류가 늘었습니다"})
-            writer.writerow({"text": "배송 문의가 계속 들어옵니다"})
-
-        filter_result = run_document_filter(
-            {
-                "dataset_name": str(csv_path),
-                "text_column": "text",
-                "query": "결제 오류",
-                "sample_n": 2,
-            }
-        )
-        prior_artifacts = {
-            "step:filter:document_filter": json.dumps(filter_result["artifact"], ensure_ascii=False),
-        }
-
-        canonical_payload = {
-            "dataset_name": str(csv_path),
-            "text_column": "text",
-            "top_n": 3,
-            "prior_artifacts": prior_artifacts,
-        }
-        alias_payload = dict(canonical_payload)
-
-        canonical_result = run_task("keyword_frequency", canonical_payload)
-        alias_result = run_task("term_frequency", alias_payload)
-
-        # The skill_name field is allowed to lag the rename in Phase 1
-        # (handler still produces "keyword_frequency"). Strip it before
-        # comparing the rest of the artifact.
-        canonical_artifact = dict(canonical_result["artifact"])
-        alias_artifact = dict(alias_result["artifact"])
-        canonical_artifact.pop("skill_name", None)
-        alias_artifact.pop("skill_name", None)
-
-        self.assertEqual(canonical_artifact, alias_artifact)
-        self.assertEqual(canonical_result["artifact"]["summary"]["document_count"], 2)
-        self.assertEqual(alias_result["artifact"]["summary"]["document_count"], 2)
-
-    def test_keyword_frequency_alias_logs_deprecation_warning(self) -> None:
-        temp_dir = Path(tempfile.mkdtemp())
-        csv_path = temp_dir / "keyword_alias.csv"
+        csv_path = temp_dir / "term_frequency.csv"
         with csv_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=["text"])
             writer.writeheader()
             writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
 
         with patch("python_ai_worker.task_router._LOG.warning") as warning:
-            run_task(
-                "keyword_frequency",
+            result = run_task(
+                "term_frequency",
                 {
                     "dataset_name": str(csv_path),
                     "text_column": "text",
@@ -769,11 +719,8 @@ class TaskTests(unittest.TestCase):
                 },
             )
 
-        warning.assert_called_once_with(
-            "deprecated_skill_alias_called",
-            skill_name="keyword_frequency",
-            canonical="term_frequency",
-        )
+        warning.assert_not_called()
+        self.assertEqual(result["artifact"]["skill_name"], "term_frequency")
 
     def test_unstructured_issue_summary_exposes_ranked_issues_and_coverage(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
@@ -1050,7 +997,7 @@ class TaskTests(unittest.TestCase):
                 "duplicate_threshold": 0.8,
             }
         )
-        keyword_result = run_keyword_frequency(
+        term_result = run_term_frequency(
             {
                 "dataset_name": str(csv_path),
                 "text_column": "text",
@@ -1063,7 +1010,7 @@ class TaskTests(unittest.TestCase):
 
         self.assertEqual(dedup_result["artifact"]["summary"]["canonical_row_count"], 2)
         self.assertEqual(dedup_result["artifact"]["summary"]["duplicate_row_count"], 1)
-        self.assertEqual(keyword_result["artifact"]["summary"]["document_count"], 2)
+        self.assertEqual(term_result["artifact"]["summary"]["document_count"], 2)
 
     def test_support_skills_group_and_bucket(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
@@ -2701,31 +2648,6 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["quality_tier"], "llm_dependent")
         self.assertTrue(result["artifact"]["llm_output_parsed_strictly"])
 
-    def test_evidence_pack_alias_dispatches_to_issue_evidence_summary(self) -> None:
-        temp_dir = Path(tempfile.mkdtemp())
-        csv_path = temp_dir / "issues.csv"
-        with csv_path.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=["text"])
-            writer.writeheader()
-            writer.writerow({"text": "결제 오류가 반복 발생했습니다"})
-            writer.writerow({"text": "로그인이 자주 실패하고 오류가 보입니다"})
-
-        payload = {
-            "dataset_name": str(csv_path),
-            "query": "결제 오류 관련 근거를 보여줘",
-            "sample_n": 2,
-        }
-
-        with patch(
-            "python_ai_worker.skills._summarize_impl.rt._anthropic_client",
-            return_value=self._DummyEvidenceClient(),
-        ):
-            canonical_result = run_task("issue_evidence_summary", dict(payload))
-            alias_result = run_task("evidence_pack", dict(payload))
-
-        self.assertEqual(canonical_result["artifact"], alias_result["artifact"])
-        self.assertEqual(canonical_result["artifact"]["skill_name"], "issue_evidence_summary")
-
     def test_issue_evidence_summary_requires_llm_presenter(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues_requires_llm.csv"
@@ -2945,7 +2867,7 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result["artifact"]["prompt_compaction"]["analysis_context"]["output_entry_count"], 2)
         self.assertTrue(any("analysis_context compacted" in note for note in result["notes"]))
 
-    def test_evidence_pack_uses_llm_presenter(self) -> None:
+    def test_issue_evidence_summary_uses_llm_presenter(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues.csv"
         with csv_path.open("w", encoding="utf-8", newline="") as handle:
@@ -2959,7 +2881,7 @@ class TaskTests(unittest.TestCase):
             "python_ai_worker.skills._summarize_impl.rt._anthropic_client",
             return_value=self._DummyEvidenceClient("오류 관련 이슈 근거를 정리했습니다."),
         ):
-            result = run_evidence_pack(
+            result = run_issue_evidence_summary(
                 {
                     "dataset_name": str(csv_path),
                     "text_column": "text",
@@ -2969,12 +2891,12 @@ class TaskTests(unittest.TestCase):
             )
 
         self.assertIn("artifact", result)
-        self.assertEqual(result["artifact"]["skill_name"], "evidence_pack")
+        self.assertEqual(result["artifact"]["skill_name"], "issue_evidence_summary")
         self.assertEqual(len(result["artifact"]["evidence"]), 2)
         self.assertTrue(result["artifact"]["summary"])
         self.assertTrue(result["artifact"]["llm_output_parsed_strictly"])
 
-    def test_evidence_pack_uses_semantic_search_candidates(self) -> None:
+    def test_issue_evidence_summary_uses_semantic_search_candidates(self) -> None:
         temp_dir = Path(tempfile.mkdtemp())
         csv_path = temp_dir / "issues.csv"
         chunk_path = temp_dir / "issues.chunks.parquet"
@@ -3004,7 +2926,7 @@ class TaskTests(unittest.TestCase):
                 ],
             ),
         ):
-            result = run_evidence_pack(
+            result = run_issue_evidence_summary(
                 {
                     "dataset_name": str(csv_path),
                     "query": "결제 오류 관련 근거를 보여줘",

@@ -8,12 +8,12 @@ from python_ai_worker.skill_contracts import SkillOutputError, validate_task_res
 class SkillContractValidationTests(unittest.TestCase):
     def test_validate_task_result_requires_artifact_for_non_planner_tasks(self) -> None:
         with self.assertRaisesRegex(SkillOutputError, "artifact object"):
-            validate_task_result("keyword_frequency", {}, {"notes": []})
+            validate_task_result("term_frequency", {}, {"notes": []})
 
     def test_validate_task_result_requires_matching_skill_name(self) -> None:
         with self.assertRaisesRegex(SkillOutputError, "skill_name mismatch"):
             validate_task_result(
-                "keyword_frequency",
+                "term_frequency",
                 {},
                 {
                     "artifact": {

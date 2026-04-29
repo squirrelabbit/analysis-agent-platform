@@ -246,7 +246,7 @@ def _analysis_context_entries(prior_artifacts: Any) -> list[dict[str, Any]]:
         _first_prior_artifact(prior_artifacts, "issue_taxonomy_summary", "dictionary_tagging"),
         _first_prior_artifact(prior_artifacts, "issue_sentiment_summary"),
         _first_prior_artifact(prior_artifacts, "unstructured_issue_summary"),
-        _first_prior_artifact(prior_artifacts, "keyword_frequency"),
+        _first_prior_artifact(prior_artifacts, "term_frequency"),
     ):
         if artifact is None:
             continue

@@ -512,10 +512,6 @@ def run_issue_evidence_summary(payload: dict[str, Any]) -> dict[str, Any]:
     return _run_evidence_summary(payload, "issue_evidence_summary")
 
 
-def run_evidence_pack(payload: dict[str, Any]) -> dict[str, Any]:
-    return _run_evidence_summary(payload, "evidence_pack")
-
-
 def _run_evidence_summary(payload: dict[str, Any], artifact_skill_name: str) -> dict[str, Any]:
     normalized = rt._normalize_text_task_payload(payload)
     selected, selection_source = rt._select_evidence_candidates(payload, normalized)
@@ -524,7 +520,7 @@ def _run_evidence_summary(payload: dict[str, Any], artifact_skill_name: str) -> 
     if not client or not client.is_enabled():
         raise ValueError(f"{artifact_skill_name} requires llm presenter")
     try:
-        llm_result = rt._run_evidence_pack_with_llm(
+        llm_result = rt._run_issue_evidence_summary_with_llm(
             client,
             normalized,
             selected,
@@ -568,7 +564,7 @@ def run_unstructured_issue_summary(payload: dict[str, Any]) -> dict[str, Any]:
     total_dataset_documents = _total_dataset_documents(normalized["dataset_name"])
     documents_considered = len(documents)
     runtime_result_scope = "full_dataset" if documents_considered == total_dataset_documents else "document_subset"
-    keyword_artifact = rt._find_prior_artifact(payload.get("prior_artifacts"), "keyword_frequency")
+    keyword_artifact = rt._find_prior_artifact(payload.get("prior_artifacts"), "term_frequency")
     sample_artifact = rt._find_prior_artifact(payload.get("prior_artifacts"), "document_sample")
     if keyword_artifact or sample_artifact:
         summary = {

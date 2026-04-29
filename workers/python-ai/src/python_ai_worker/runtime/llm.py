@@ -261,7 +261,7 @@ def _run_planner_with_llm(
     )
 
 
-def _run_evidence_pack_with_llm(
+def _run_issue_evidence_summary_with_llm(
     client: AnthropicClient,
     normalized: dict[str, Any],
     selected_documents: list[dict[str, Any]],
@@ -335,7 +335,7 @@ def _run_evidence_pack_with_llm(
     }
 
 
-def _run_evidence_pack_fallback(
+def _run_issue_evidence_summary_fallback(
     normalized: dict[str, Any],
     selected_documents: list[dict[str, Any]],
     selection_source: str,
@@ -1555,10 +1555,10 @@ __all__ = [
     "_prepare_row_with_llm",
     "_prepare_batch_schema",
     "_prepare_schema",
-    "_run_evidence_pack_fallback",
-    "_run_evidence_pack_with_llm",
     "_run_execution_final_answer_fallback",
     "_run_execution_final_answer_with_llm",
+    "_run_issue_evidence_summary_fallback",
+    "_run_issue_evidence_summary_with_llm",
     "_run_planner_with_llm",
     "_sentiment_schema",
     "_sentiment_batch_schema",

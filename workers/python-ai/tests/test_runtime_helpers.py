@@ -224,13 +224,7 @@ class RuntimeHelperTests(unittest.TestCase):
         self.assertEqual(entries[2]["source_skill"], "issue_period_compare")
         self.assertIn("증가", entries[2]["summary"])
 
-    def test_find_prior_artifact_matches_term_frequency_alias_bidirectionally(self) -> None:
-        legacy_prior = {
-            "step:step-1:keyword_frequency": {
-                "skill_name": "keyword_frequency",
-                "top_terms": [{"term": "결제"}],
-            }
-        }
+    def test_find_prior_artifact_matches_term_frequency(self) -> None:
         canonical_prior = {
             "step:step-1:term_frequency": {
                 "skill_name": "term_frequency",
@@ -239,29 +233,11 @@ class RuntimeHelperTests(unittest.TestCase):
         }
 
         self.assertIs(
-            _find_prior_artifact(legacy_prior, "keyword_frequency"),
-            legacy_prior["step:step-1:keyword_frequency"],
-        )
-        self.assertIs(
-            _find_prior_artifact(legacy_prior, "term_frequency"),
-            legacy_prior["step:step-1:keyword_frequency"],
-        )
-        self.assertIs(
-            _find_prior_artifact(canonical_prior, "keyword_frequency"),
-            canonical_prior["step:step-1:term_frequency"],
-        )
-        self.assertIs(
             _find_prior_artifact(canonical_prior, "term_frequency"),
             canonical_prior["step:step-1:term_frequency"],
         )
 
-    def test_find_prior_artifact_matches_issue_evidence_summary_alias_bidirectionally(self) -> None:
-        legacy_prior = {
-            "step:step-2:evidence_pack": {
-                "skill_name": "evidence_pack",
-                "summary": "legacy evidence",
-            }
-        }
+    def test_find_prior_artifact_matches_issue_evidence_summary(self) -> None:
         canonical_prior = {
             "step:step-2:issue_evidence_summary": {
                 "skill_name": "issue_evidence_summary",
@@ -269,18 +245,6 @@ class RuntimeHelperTests(unittest.TestCase):
             }
         }
 
-        self.assertIs(
-            _find_prior_artifact(legacy_prior, "issue_evidence_summary"),
-            legacy_prior["step:step-2:evidence_pack"],
-        )
-        self.assertIs(
-            _find_prior_artifact(legacy_prior, "evidence_pack"),
-            legacy_prior["step:step-2:evidence_pack"],
-        )
-        self.assertIs(
-            _find_prior_artifact(canonical_prior, "evidence_pack"),
-            canonical_prior["step:step-2:issue_evidence_summary"],
-        )
         self.assertIs(
             _find_prior_artifact(canonical_prior, "issue_evidence_summary"),
             canonical_prior["step:step-2:issue_evidence_summary"],
@@ -297,7 +261,7 @@ class RuntimeHelperTests(unittest.TestCase):
         self.assertIsNone(_find_prior_artifact(prior_artifacts, "term_frequency"))
         self.assertIsNone(_find_prior_artifact(prior_artifacts, "issue_evidence_summary"))
 
-    def test_first_prior_artifact_supports_mixed_legacy_and_canonical_names(self) -> None:
+    def test_first_prior_artifact_supports_canonical_names(self) -> None:
         prior_artifacts = {
             "step:step-1:term_frequency": {
                 "skill_name": "term_frequency",
@@ -305,7 +269,7 @@ class RuntimeHelperTests(unittest.TestCase):
             }
         }
 
-        found = _first_prior_artifact(prior_artifacts, "keyword_frequency", "noun_frequency")
+        found = _first_prior_artifact(prior_artifacts, "term_frequency", "noun_frequency")
 
         self.assertIs(found, prior_artifacts["step:step-1:term_frequency"])
 

@@ -6,7 +6,7 @@ from collections import Counter
 
 from .. import runtime as rt
 
-def run_keyword_frequency(payload: dict[str, Any]) -> dict[str, Any]:
+def run_term_frequency(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_text_task_payload(payload)
     selected_rows = rt._selected_text_rows(normalized["dataset_name"], normalized["text_column"], payload.get("prior_artifacts"))
     tokens = Counter()
@@ -22,12 +22,12 @@ def run_keyword_frequency(payload: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "notes": [
-            f"keyword_frequency counted tokens across {document_count} rows",
+            f"term_frequency counted tokens across {document_count} rows",
             f"dataset source: {normalized['dataset_name']}",
         ],
         "artifact": rt._inherit_scope_fields(
             {
-                "skill_name": "keyword_frequency",
+                "skill_name": "term_frequency",
                 "step_id": normalized["step"].get("step_id"),
                 "dataset_name": normalized["dataset_name"],
                 "summary": {

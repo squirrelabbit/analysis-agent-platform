@@ -322,7 +322,7 @@ def _deduplicate_documents_case(ctx: SkillCaseContext) -> dict[str, Any]:
     )
 
 
-def _keyword_frequency_case(ctx: SkillCaseContext) -> dict[str, Any]:
+def _term_frequency_case(ctx: SkillCaseContext) -> dict[str, Any]:
     csv_path = ctx.write_csv("issues.csv", ["occurred_at", "channel", "text"], _issue_rows())
     filtered = ctx.run(
         "document_filter",
@@ -334,7 +334,7 @@ def _keyword_frequency_case(ctx: SkillCaseContext) -> dict[str, Any]:
         },
     )
     return ctx.run(
-        "keyword_frequency",
+        "term_frequency",
         {
             "dataset_name": str(csv_path),
             "text_column": "text",
@@ -584,7 +584,7 @@ def _unstructured_issue_summary_case(ctx: SkillCaseContext) -> dict[str, Any]:
         },
     )
     keywords = ctx.run(
-        "keyword_frequency",
+        "term_frequency",
         {
             "dataset_name": str(csv_path),
             "text_column": "text",
@@ -914,10 +914,6 @@ def _issue_evidence_summary_case(ctx: SkillCaseContext) -> dict[str, Any]:
     )
 
 
-def _evidence_pack_case(ctx: SkillCaseContext) -> dict[str, Any]:
-    return _issue_evidence_summary_case(ctx)
-
-
 def _execution_final_answer_case(ctx: SkillCaseContext) -> dict[str, Any]:
     return ctx.run(
         "execution_final_answer",
@@ -963,10 +959,7 @@ SKILL_CASES: dict[str, SkillCase] = {
     "garbage_filter": SkillCase("garbage_filter", "remove ad, promotion, and placeholder rows", _garbage_filter_case),
     "document_filter": SkillCase("document_filter", "lexical narrowing over issue rows", _document_filter_case),
     "deduplicate_documents": SkillCase("deduplicate_documents", "collapse duplicate or near-duplicate rows", _deduplicate_documents_case),
-    "keyword_frequency": SkillCase("keyword_frequency", "count top terms from filtered rows", _keyword_frequency_case),
-    # ADR-009 F1: term_frequency reuses the keyword_frequency case during the
-    # alias deprecation period. The handler is unchanged in Phase 1.
-    "term_frequency": SkillCase("term_frequency", "count top terms from filtered rows (alias of keyword_frequency)", _keyword_frequency_case),
+    "term_frequency": SkillCase("term_frequency", "count top terms from filtered rows", _term_frequency_case),
     "noun_frequency": SkillCase("noun_frequency", "count noun-focused top terms from filtered rows", _noun_frequency_case),
     "sentence_split": SkillCase("sentence_split", "split filtered rows into sentence-level spans", _sentence_split_case),
     "time_bucket_count": SkillCase("time_bucket_count", "bucket filtered rows by time", _time_bucket_count_case),
@@ -984,7 +977,6 @@ SKILL_CASES: dict[str, SkillCase] = {
     "issue_sentiment_summary": SkillCase("issue_sentiment_summary", "summarize sentiment label distribution", _issue_sentiment_summary_case),
     "issue_taxonomy_summary": SkillCase("issue_taxonomy_summary", "summarize taxonomy-tagged issues", _issue_taxonomy_summary_case),
     "issue_evidence_summary": SkillCase("issue_evidence_summary", "build final evidence summary from sampled rows", _issue_evidence_summary_case),
-    "evidence_pack": SkillCase("evidence_pack", "deprecated alias of issue_evidence_summary during ADR-009 F2", _evidence_pack_case),
     "execution_final_answer": SkillCase("execution_final_answer", "rewrite result_v1 into grounded final answer", _execution_final_answer_case),
 }
 

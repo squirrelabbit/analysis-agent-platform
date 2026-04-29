@@ -152,31 +152,7 @@ def run_issue_evidence_summary(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-@skill_handler("python-ai")
-def run_evidence_pack(payload: dict[str, Any]) -> dict[str, Any]:
-    config = load_config()
-    policy = load_issue_evidence_summary_policy(
-        requested_policy_version(payload, "evidence_policy_version", "policy_version")
-        or config.issue_evidence_summary_policy_version
-    )
-    with _bind_issue_evidence_policy(policy):
-        result = _impl.run_evidence_pack(payload)
-    artifact = result.get("artifact") or {}
-    if isinstance(artifact, dict):
-        artifact["policy_scope"] = "issue_evidence_summary"
-    return annotate_result_policy(
-        result,
-        policy,
-        policy_snapshot={
-            "selection_source_priority": list((policy.get("policy") or {}).get("selection_source_priority") or []),
-            "max_selected_documents": int((policy.get("policy") or {}).get("max_selected_documents") or 3),
-        },
-        note_prefix="issue_evidence_policy",
-    )
-
-
 __all__ = [
-    "run_evidence_pack",
     "run_issue_breakdown_summary",
     "run_issue_cluster_summary",
     "run_issue_evidence_summary",
