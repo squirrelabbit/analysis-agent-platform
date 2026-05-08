@@ -37,3 +37,63 @@ export const useUploadVersionMutation = () => {
     },
   });
 };
+
+export const useDownloadVersion = () => {
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      datasetId,
+      versionId,
+      type
+    }: {
+      projectId: string;
+      datasetId: string,
+      versionId: string,
+      type: "source" | "clean" | "prepare" | "sentiment"
+    }) => datasetVersionsApi.downloadVersionFile(projectId, datasetId, versionId, type),
+    onSuccess: (res) => {
+      const blob = res.data
+
+      // 파일명 추출
+      const disposition = res.headers["content-disposition"]
+
+      let fileName = "download"
+
+      if (disposition) {
+        const match = disposition.match(/filename="?(.+)"?/)
+        if (match) fileName = match[1]
+      }
+
+      const url = window.URL.createObjectURL(blob)
+
+      const a = document.createElement("a")
+      a.href = url
+      a.download = fileName
+
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+
+      window.URL.revokeObjectURL(url)
+    },
+  });
+}
+      
+
+export const useRemoveVersion = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      datasetId,
+      versionId,
+    }: {
+      projectId: string;
+      datasetId: string,
+      versionId: string,
+    }) => datasetVersionsApi.deleteDatasetVersion(projectId, datasetId, versionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["versions"] });
+    },
+  });
+};
