@@ -1,49 +1,107 @@
-
-export type LLMMode = 'default' | 'enabled' | 'disabled'
-
-export interface DatasetVersion {
-  id: string,
-  datasetId: string,
-  projectId: string,
-  storageUri: string,
-  dataType: string,
-  recordCount: number,
-  metadata: Record<string, any>,
-  profile: Record<string, any>,
-  prepareStatus: string,
-  prepareLLMMode: string, // default
-  prepareModel: string,
-  preparePromptVersion: string,
-  prepareUri: string,
-  preparedAt: string,
-  prepareSummary: PrepareSummary,
-  sentimentStatus: string,
-  sentimentLLMMode: string, // default
-  sentimentModel: string,
-  sentimentUri: string,
-  sentimentLabeledAt: string,
-  sentimentPromptVersion: string,
-  embeddingStatus: string,
-  embeddingModel: string,
-  embeddingUri: string,
-  isActive: boolean,
-  createdAt: string,
-  readyAt: string
+export interface SourceSummary {
+  available: boolean;
+  status: string; // "ready";
+  format: string;
+  rowCount: number;
+  columnCount: number;
+  columns: Record<string, any>[];
+  sampleLimit: number;
+  sampleRows: Record<string, any>[];
+  errorMessage?: string;
 }
 
 
-export interface PrepareSummary {
+export interface CleanSummary {
+  inputRowCount: number;
+  outputRowCount: number;
+  keptCount: number;
+  droppedCount: number;
+  textColumns: string[];
+  textJoiner: string;
+  sourceInputCharCount: number;
+  cleanedInputCharCount: number;
+  cleanReducedCharCount: number;
+}
+
+export interface PrerpareSummary {
   inputRowCount: number;
   outputRowCount: number;
   keptCount: number;
   reviewCount: number;
   droppedCount: number;
+  textColumn: string;
+  textColumns: string[];
+  textJoiner: string;
 }
 
-export interface SentimentSummary {
-  inputRowCount: number;
-  labeledRowCount: number;
-  textColumn: string;
-  sentimenBatchSize: number
-  label_counts: any
+export interface Artifact {
+  artifactId: string,
+  projectId: string,
+  datasetId: string,
+  datasetVersionId: string,
+  artifactType: string,
+  stage: string,
+  status: string,
+  uri: string,
+  format: string,
+  metadata: any
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Progress {
+  percent: number;
+  processedRows: number;
+  totalRows: number;
+  elapsedSeconds: number;
+  message: string;
+  updatedAt: string
+}
+
+export interface Diagnostics {
+  retryCount: number,
+  workflowId: string,
+  workflowRunId: string,
+  resumedExecutionCount: number,
+  progress?: Progress
+}
+
+export interface BuildStage {
+  stage: string;
+  status: string;
+  applicable: boolean;
+  required: boolean;
+  ready: boolean;
+  dependsOn: string[]
+  canRun: boolean;
+  runGroup: string;
+  autoRuEligible: boolean;
+  blockedReason?:string;
+  latestJob?: Record<string, any>,
+  primaryArtifact?: Record<string, any>,
+  artifacts?: Artifact[];
+  summary?: Record<string, any>
+  model?: string,
+  promptVersion?:string,
+  diagnostics?: Diagnostics
+}
+
+
+export interface DatasetVersion {
+  id: string,
+  datasetId: string;
+  projectId: string,
+  metadata: any,
+  storageUri: string,
+  dataType: string,
+  recordCount: number,
+  sourceSummary: SourceSummary
+  buildStages: BuildStage[],
+  isActive: boolean,
+  cleanStatus: string,
+  cleanSummary?: CleanSummary,
+  prepareStatus: string,
+  prepareSummary?: PrerpareSummary,
+  sentimentStatus: string,
+  embeddingStatus: string,
 }

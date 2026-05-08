@@ -24,7 +24,7 @@ export default function CreateDialog({
   const close = () => setOpen(false)
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={setOpen} >
       <DialogTrigger asChild>
         <Button className="text-xs">
           <Plus className="w-3.5 h-3.5" />
@@ -32,11 +32,14 @@ export default function CreateDialog({
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-md flex flex-col max-h-[80vh]">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{title} 등록</DialogTitle>
         </DialogHeader>
-        {children(close)}
+        <div className="flex-1 overflow-y-auto">
+
+          {children(close)}
+        </div>
         <DialogFooter className="flex gap-2">
           <Button variant="outline" onClick={() => setOpen(false)}>
             취소

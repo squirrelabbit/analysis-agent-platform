@@ -1,10 +1,8 @@
 import { apiClient } from "@/api/client";
 import {
-  type PreparePreviewResponse,
   type DatasetVersionListResponse,
   type DatasetVersionResponse,
   type UploadDatasetVersionRequest,
-  type SentimentPreviewResponse,
 } from "../types/datasetVersion.dto";
 
 export const datasetVersionsApi = {
@@ -38,6 +36,17 @@ export const datasetVersionsApi = {
       )
       .then((r) => r.data),
 
+  deleteDatasetVersion: (
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+  ) =>
+    apiClient
+      .delete<void>(
+        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}`,
+      )
+      .then((r) => r.data),
+
   uploadDatasetVersion: (
     projectId: string,
     datasetId: string,
@@ -50,38 +59,16 @@ export const datasetVersionsApi = {
       )
       .then((r) => r.data),
 
-  deleteDatasetVersion: (
+  downloadVersionFile: (
     projectId: string,
     datasetId: string,
     versionId: string,
+    type: "source" | "clean" | "prepare" | "sentiment",
   ) =>
-    apiClient
-      .delete<void>(
-        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}`,
-      )
-      .then((r) => r.data),
-
-  downloadSourceFile: (
-    projectId: string,
-    datasetId: string,
-    versionId: string,
-  ) =>
-    apiClient
-      .get<void>(
-        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/source_download`,
-      )
-      .then((r) => r.data),
-
-  downloadCleanFile: (
-    projectId: string,
-    datasetId: string,
-    versionId: string,
-  ) =>
-    apiClient
-      .get<void>(
-        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/clean_download`,
-      )
-      .then((r) => r.data),
+    apiClient.get(
+      `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/${type}_download`,
+      { responseType: "blob" },
+    ),
 
   runDatasetVersion: (
     projectId: string,
@@ -107,26 +94,26 @@ export const datasetVersionsApi = {
       )
       .then((r) => r.data),
 
+  getVersionPreview:  (
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+    type: "prepare" | "sentiment",
+    // limit?: number,
+  ) =>
+    apiClient.get(
+      `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/${type}_preview`,
+    ),
+
   getPreparePreview: (
     projectId: string,
     datasetId: string,
     versionId: string,
     // limit?: number,
   ) =>
-    apiClient.get<PreparePreviewResponse>(
+    apiClient.get(
       `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/prepare_preview`,
     ),
-
-  downloadPreparePreview: (
-    projectId: string,
-    datasetId: string,
-    versionId: string,
-  ) =>
-    apiClient
-      .get<void>(
-        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/prepare_download`,
-      )
-      .then((r) => r.data),
 
   getSentimentPreview: (
     projectId: string,
@@ -134,18 +121,7 @@ export const datasetVersionsApi = {
     versionId: string,
     // limit?: number,
   ) =>
-    apiClient.get<SentimentPreviewResponse>(
+    apiClient.get(
       `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/prepare_preview`,
     ),
-
-  downloadSentimentPreview: (
-    projectId: string,
-    datasetId: string,
-    versionId: string,
-  ) =>
-    apiClient
-      .get<void>(
-        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/sentiment_download`,
-      )
-      .then((r) => r.data),
 };
