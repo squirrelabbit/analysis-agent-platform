@@ -1,13 +1,29 @@
-import { NavLink } from "react-router-dom"
-import { Database, FileText } from "lucide-react"
+import { NavLink, useParams } from "react-router-dom"
+import { Braces, Database, FileText, TextSearch } from "lucide-react"
 import type { Project } from "@/features/project/types/project"
+import { cn } from "@/lib/utils"
 
 
 export default function Sidebar({ project }: { project: Project}) {
+  const basePath = `/projects/${project.id}`
+  const { datasetId } = useParams()
+  
+  const subMenus = [
+    {
+      name: "데이터셋 버전",
+      path: `${basePath}/datasets/${datasetId}/versions`,
+      icon: TextSearch,
+    },
+    {
+      name: "프롬프트",
+      path: `${basePath}/datasets/${datasetId}/prompts`,
+      icon: Braces,
+    },
+  ]
   const menus = [
     {
       name: "데이터셋",
-      path: `/projects/${project.id}/datasets`,
+      path: `/${basePath}/datasets`,
       icon: Database,
     },
     {
@@ -18,7 +34,7 @@ export default function Sidebar({ project }: { project: Project}) {
   ]
 
   return (
-    <aside className="w-52 border-r bg-white flex flex-col p-4 gap-4">
+    <aside className="w-64 border-r bg-white flex flex-col p-4 gap-4">
       <div className="text-sm font-semibold text-zinc-800 truncate">
         {project?.name || "로딩중..."}
       </div>
@@ -26,27 +42,49 @@ export default function Sidebar({ project }: { project: Project}) {
       <nav className="flex flex-col gap-1">
         {menus.map((menu) => {
           const Icon = menu.icon
-
           return (
-            <NavLink
-              key={menu.name}
-              to={menu.path}
-              // end={menu.name === "데이터셋"} // 기본 경로 active 처리
-              className={({ isActive }) =>
-                `
-                flex items-center gap-2 px-3 py-2 rounded-md text-sm
-                transition-colors
-                ${
-                  isActive
-                    ? "bg-indigo-50 text-indigo-500 font-medium"
-                    : "text-zinc-600 hover:bg-zinc-100"
+            <div key={menu.name}>
+              <NavLink
+                to={menu.path}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
+                    isActive || (menu.name === "데이터셋")
+                      ? "bg-indigo-50 text-indigo-500 font-medium"
+                      : "text-zinc-600 hover:bg-zinc-100"
+                  )
                 }
-              `
-              }
-            >
-              <Icon className="w-4 h-4" />
-              {menu.name}
-            </NavLink>
+              >
+                <Icon className="w-4 h-4" />
+                {menu.name}
+              </NavLink>
+
+              {/* datasetId 있을 때만 서브메뉴 노출 */}
+              {menu.name === "데이터셋" && datasetId && (
+                <div className="ml-3 mt-0.5 flex flex-col gap-0.5 border-l border-zinc-100 pl-3">
+                  {subMenus.map((sub) => {
+                    const SubIcon = sub.icon
+                    return (
+                      <NavLink
+                        key={sub.name}
+                        to={sub.path}
+                        className={({ isActive }) =>
+                          cn(
+                            "flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors",
+                            isActive
+                              ? "text-indigo-500 font-medium bg-indigo-50"
+                              : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700"
+                          )
+                        }
+                      >
+                        <SubIcon className="w-3.5 h-3.5" />
+                        {sub.name}
+                      </NavLink>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           )
         })}
       </nav>
