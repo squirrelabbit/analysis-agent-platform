@@ -73,7 +73,7 @@ def run_garbage_filter(payload: dict[str, Any]) -> dict[str, Any]:
             f"dataset source: {normalized['dataset_name']}",
             f"garbage rules: {', '.join(normalized['garbage_rule_names'])}",
         ],
-        "artifact": {
+        "artifact": rt._inherit_scope_fields({
             "skill_name": "garbage_filter",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -94,7 +94,7 @@ def run_garbage_filter(payload: dict[str, Any]) -> dict[str, Any]:
             "matched_rules_column": "matched_rules",
             "artifact_ref": artifact_ref,
             "artifact_format": artifact_format,
-        },
+        }, payload),
     }
 
 def run_document_filter(payload: dict[str, Any]) -> dict[str, Any]:
@@ -135,20 +135,21 @@ def run_document_filter(payload: dict[str, Any]) -> dict[str, Any]:
         selection_mode = "all_rows"
 
     if not matches:
-        for item in selected_rows:
-            text = item["text"]
-            if not text:
-                continue
-            matches.append(
-                {
-                    "rank": 0,
-                    "source_index": int(item["source_index"]),
-                    "score": 0,
-                    "text": text[:240],
-                }
-            )
         if query_tokens:
-            selection_mode = "fallback_all_rows"
+            selection_mode = "no_match"
+        else:
+            for item in selected_rows:
+                text = item["text"]
+                if not text:
+                    continue
+                matches.append(
+                    {
+                        "rank": 0,
+                        "source_index": int(item["source_index"]),
+                        "score": 0,
+                        "text": text[:240],
+                    }
+                )
 
     for rank, item in enumerate(matches, start=1):
         item["rank"] = rank
@@ -184,10 +185,12 @@ def run_document_filter(payload: dict[str, Any]) -> dict[str, Any]:
     ]
     if query_tokens:
         notes.append(f"match_mode: {normalized['match_mode']}")
+        if not filtered_indices:
+            notes.append("warning: query produced no lexical matches")
 
     return {
         "notes": notes,
-        "artifact": {
+        "artifact": rt._inherit_scope_fields({
             "skill_name": "document_filter",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -208,7 +211,7 @@ def run_document_filter(payload: dict[str, Any]) -> dict[str, Any]:
             "source_index_column": "source_index",
             "rank_column": "rank",
             "score_column": "score",
-        },
+        }, payload),
     }
 
 def run_deduplicate_documents(payload: dict[str, Any]) -> dict[str, Any]:
@@ -336,7 +339,7 @@ def run_deduplicate_documents(payload: dict[str, Any]) -> dict[str, Any]:
             f"dataset source: {normalized['dataset_name']}",
             f"duplicate_threshold: {normalized['duplicate_threshold']}",
         ],
-        "artifact": {
+        "artifact": rt._inherit_scope_fields({
             "skill_name": "deduplicate_documents",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -361,7 +364,7 @@ def run_deduplicate_documents(payload: dict[str, Any]) -> dict[str, Any]:
             "status_column": "dedup_status",
             "similarity_column": "similarity",
             "member_count_column": "member_count",
-        },
+        }, payload),
     }
 
 def run_sentence_split(payload: dict[str, Any]) -> dict[str, Any]:
@@ -426,7 +429,7 @@ def run_sentence_split(payload: dict[str, Any]) -> dict[str, Any]:
             f"dataset source: {normalized['dataset_name']}",
             f"splitter_backend: {splitter_backend}",
         ],
-        "artifact": {
+        "artifact": rt._inherit_scope_fields({
             "skill_name": "sentence_split",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -448,7 +451,7 @@ def run_sentence_split(payload: dict[str, Any]) -> dict[str, Any]:
                 "splitter_backend": splitter_backend,
             },
             "sample_documents": sample_documents,
-        },
+        }, payload),
     }
 
 def run_document_sample(payload: dict[str, Any]) -> dict[str, Any]:
@@ -464,7 +467,7 @@ def run_document_sample(payload: dict[str, Any]) -> dict[str, Any]:
             f"document_sample selected {len(samples)} representative rows",
             f"dataset source: {normalized['dataset_name']}",
         ],
-        "artifact": {
+        "artifact": rt._inherit_scope_fields({
             "skill_name": "document_sample",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -475,6 +478,5 @@ def run_document_sample(payload: dict[str, Any]) -> dict[str, Any]:
                 "sample_count": len(samples),
             },
             "samples": samples,
-        },
+        }, payload),
     }
-

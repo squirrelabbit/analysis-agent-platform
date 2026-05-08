@@ -13,6 +13,8 @@ import pyarrow.parquet as pq
 from python_ai_worker.runtime.artifacts import (
     _analysis_context_entries,
     _cluster_embedding_records,
+    _find_prior_artifact,
+    _first_prior_artifact,
     _select_evidence_candidates,
     _selected_source_indices,
 )
@@ -221,6 +223,55 @@ class RuntimeHelperTests(unittest.TestCase):
         self.assertIn("최다 그룹", entries[1]["summary"])
         self.assertEqual(entries[2]["source_skill"], "issue_period_compare")
         self.assertIn("증가", entries[2]["summary"])
+
+    def test_find_prior_artifact_matches_term_frequency(self) -> None:
+        canonical_prior = {
+            "step:step-1:term_frequency": {
+                "skill_name": "term_frequency",
+                "top_terms": [{"term": "결제"}],
+            }
+        }
+
+        self.assertIs(
+            _find_prior_artifact(canonical_prior, "term_frequency"),
+            canonical_prior["step:step-1:term_frequency"],
+        )
+
+    def test_find_prior_artifact_matches_issue_evidence_summary(self) -> None:
+        canonical_prior = {
+            "step:step-2:issue_evidence_summary": {
+                "skill_name": "issue_evidence_summary",
+                "summary": "canonical evidence",
+            }
+        }
+
+        self.assertIs(
+            _find_prior_artifact(canonical_prior, "issue_evidence_summary"),
+            canonical_prior["step:step-2:issue_evidence_summary"],
+        )
+
+    def test_find_prior_artifact_does_not_create_false_positive_matches(self) -> None:
+        prior_artifacts = {
+            "step:step-1:noun_frequency": {
+                "skill_name": "noun_frequency",
+                "top_terms": [{"term": "로그인"}],
+            }
+        }
+
+        self.assertIsNone(_find_prior_artifact(prior_artifacts, "term_frequency"))
+        self.assertIsNone(_find_prior_artifact(prior_artifacts, "issue_evidence_summary"))
+
+    def test_first_prior_artifact_supports_canonical_names(self) -> None:
+        prior_artifacts = {
+            "step:step-1:term_frequency": {
+                "skill_name": "term_frequency",
+                "top_terms": [{"term": "결제"}],
+            }
+        }
+
+        found = _first_prior_artifact(prior_artifacts, "term_frequency", "noun_frequency")
+
+        self.assertIs(found, prior_artifacts["step:step-1:term_frequency"])
 
     def test_compact_analysis_context_truncates_and_omits_when_limits_are_small(self) -> None:
         with patch.dict(

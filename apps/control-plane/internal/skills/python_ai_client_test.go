@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/obs"
 )
 
 func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
@@ -108,33 +109,6 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 					"chunk_ref":"/tmp/issues.chunks.parquet",
 					"summary":{"match_count":2,"citation_mode":"chunk"},
 					"matches":[{"rank":1,"score":0.9,"text":"결제 오류","chunk_id":"row-1:chunk-0","char_start":0,"char_end":5}]
-				}
-			}`))
-		case "/tasks/evidence_pack":
-			if !strings.Contains(string(body), `"query":"VOC 이슈를 요약해줘"`) {
-				t.Fatalf("unexpected evidence request body: %s", string(body))
-			}
-			if !strings.Contains(string(body), `"step:step-0:issue_trend_summary":{`) {
-				t.Fatalf("expected issue_trend_summary artifact in evidence request body: %s", string(body))
-			}
-			if !strings.Contains(string(body), `"step:step-1:unstructured_issue_summary":{`) {
-				t.Fatalf("expected prior artifacts in evidence request body: %s", string(body))
-			}
-			if !strings.Contains(string(body), `"step:step-2:semantic_search":{`) {
-				t.Fatalf("expected semantic_search artifact in evidence request body: %s", string(body))
-			}
-			if !strings.Contains(string(body), `"skill_name":"semantic_search"`) {
-				t.Fatalf("expected semantic_search artifact in evidence request body: %s", string(body))
-			}
-			_, _ = w.Write([]byte(`{
-				"notes":["evidence path completed"],
-				"artifact":{
-					"skill_name":"evidence_pack",
-					"selection_source":"semantic_search",
-					"citation_mode":"chunk",
-					"chunk_ref":"/tmp/issues.chunks.parquet",
-					"summary":"대표 이슈 근거를 모았습니다",
-					"evidence":[{"rank":1,"source_index":0,"snippet":"결제 오류","rationale":"selected","chunk_id":"row-1:chunk-0","char_start":0,"char_end":5}]
 				}
 			}`))
 		case "/tasks/issue_evidence_summary":
@@ -315,6 +289,48 @@ func TestPythonAIClientRunsUnstructuredTasks(t *testing.T) {
 	}
 }
 
+func TestPythonAIClientPropagatesRequestIDHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Request-ID"); got != "request-123" {
+			t.Fatalf("unexpected request id header: %q", got)
+		}
+		_, _ = w.Write([]byte(`{
+			"artifact":{
+				"skill_name":"unstructured_issue_summary",
+				"summary":{"document_count":1},
+				"top_terms":[{"term":"error","count":1}]
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client := PythonAIClient{
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	}
+	ctx := obs.WithRequestID(context.Background(), "request-123")
+
+	_, err := client.Run(ctx, domain.ExecutionSummary{
+		ExecutionID: "exec-1",
+		ProjectID:   "project-1",
+		Plan: domain.SkillPlan{
+			Steps: []domain.SkillPlanStep{
+				{
+					StepID:      "step-1",
+					SkillName:   "unstructured_issue_summary",
+					DatasetName: "/tmp/issues.csv",
+					Inputs: map[string]any{
+						"text_column": "text",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -328,12 +344,12 @@ func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 					"summary":{"filtered_row_count":2}
 				}
 			}`))
-		case "/tasks/keyword_frequency":
+		case "/tasks/term_frequency":
 			_, _ = w.Write([]byte(`{
 				"notes":["keyword path completed"],
 				"artifact":{
-					"skill_name":"keyword_frequency",
-					"usage":{"provider":"anthropic","model":"claude-haiku","operation":"keyword_frequency","request_count":1,"input_tokens":60,"output_tokens":30,"total_tokens":90,"cost_estimation_status":"not_configured"},
+					"skill_name":"term_frequency",
+					"usage":{"provider":"anthropic","model":"claude-haiku","operation":"term_frequency","request_count":1,"input_tokens":60,"output_tokens":30,"total_tokens":90,"cost_estimation_status":"not_configured"},
 					"summary":{"document_count":2},
 					"top_terms":[{"term":"결제","count":2}]
 				}
@@ -380,7 +396,7 @@ func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 		Plan: domain.SkillPlan{
 			Steps: []domain.SkillPlanStep{
 				{StepID: "step-1", SkillName: "document_filter", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "query": "결제 오류"}},
-				{StepID: "step-2", SkillName: "keyword_frequency", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "top_n": 3}},
+				{StepID: "step-2", SkillName: "term_frequency", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "top_n": 3}},
 				{StepID: "step-3", SkillName: "noun_frequency", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "top_n": 3}},
 				{StepID: "step-4", SkillName: "time_bucket_count", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "time_column": "occurred_at", "bucket": "day"}},
 				{StepID: "step-5", SkillName: "meta_group_count", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "dimension_column": "channel"}},
@@ -394,8 +410,8 @@ func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 	if result.ProcessedSteps != 6 {
 		t.Fatalf("unexpected processed steps: %d", result.ProcessedSteps)
 	}
-	if !strings.Contains(result.Artifacts["step:step-2:keyword_frequency"], `"결제"`) {
-		t.Fatalf("unexpected keyword artifact: %s", result.Artifacts["step:step-2:keyword_frequency"])
+	if !strings.Contains(result.Artifacts["step:step-2:term_frequency"], `"결제"`) {
+		t.Fatalf("unexpected keyword artifact: %s", result.Artifacts["step:step-2:term_frequency"])
 	}
 	if !strings.Contains(result.Artifacts["step:step-3:noun_frequency"], `"analyzer_backend":"kiwi"`) {
 		t.Fatalf("unexpected noun artifact: %s", result.Artifacts["step:step-3:noun_frequency"])
@@ -411,6 +427,53 @@ func TestPythonAIClientRunsSupportTasks(t *testing.T) {
 	}
 	if len(result.StepHooks) != 12 {
 		t.Fatalf("unexpected step hook count: %+v", result.StepHooks)
+	}
+}
+
+func TestPythonAIClientDispatchesTermFrequency(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/tasks/term_frequency":
+			_, _ = w.Write([]byte(`{
+				"notes":["term frequency completed"],
+				"artifact":{
+					"skill_name":"term_frequency",
+					"summary":{"document_count":2},
+					"top_terms":[{"term":"결제","count":2}]
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := PythonAIClient{
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	}
+
+	result, err := client.Run(context.Background(), domain.ExecutionSummary{
+		ExecutionID: "exec-term-frequency",
+		ProjectID:   "project-1",
+		Plan: domain.SkillPlan{
+			Steps: []domain.SkillPlanStep{
+				{StepID: "step-1", SkillName: "term_frequency", DatasetName: "/tmp/issues.csv", Inputs: map[string]any{"text_column": "text", "top_n": 3}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	artifact, ok := result.Artifacts["step:step-1:term_frequency"]
+	if !ok {
+		t.Fatalf("expected term_frequency artifact key, got %+v", result.Artifacts)
+	}
+	if !strings.Contains(artifact, `"skill_name":"term_frequency"`) {
+		t.Fatalf("unexpected term_frequency artifact skill_name: %s", artifact)
+	}
+	if !strings.Contains(artifact, `"결제"`) {
+		t.Fatalf("unexpected term_frequency artifact: %s", artifact)
 	}
 }
 
@@ -553,7 +616,7 @@ func TestPythonAIClientStoresDocumentFilterAsSidecarRefButKeepsRuntimeArtifactFo
 					"score_column":"score"
 				}
 			}`))
-		case "/tasks/keyword_frequency":
+		case "/tasks/term_frequency":
 			if !strings.Contains(string(body), `"artifact_ref":"`) {
 				t.Fatalf("expected compacted document_filter artifact_ref in prior artifacts, got: %s", string(body))
 			}
@@ -563,7 +626,7 @@ func TestPythonAIClientStoresDocumentFilterAsSidecarRefButKeepsRuntimeArtifactFo
 			_, _ = w.Write([]byte(`{
 				"notes":["keyword completed"],
 				"artifact":{
-					"skill_name":"keyword_frequency",
+					"skill_name":"term_frequency",
 					"summary":{"document_count":2},
 					"top_terms":[{"term":"결제","count":2}]
 				}
@@ -586,7 +649,7 @@ func TestPythonAIClientStoresDocumentFilterAsSidecarRefButKeepsRuntimeArtifactFo
 		Plan: domain.SkillPlan{
 			Steps: []domain.SkillPlanStep{
 				{StepID: "step-1", SkillName: "document_filter", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text", "query": "결제 오류"}},
-				{StepID: "step-2", SkillName: "keyword_frequency", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text", "top_n": 3}},
+				{StepID: "step-2", SkillName: "term_frequency", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text", "top_n": 3}},
 			},
 		},
 	})
@@ -601,8 +664,8 @@ func TestPythonAIClientStoresDocumentFilterAsSidecarRefButKeepsRuntimeArtifactFo
 	if strings.Contains(filterArtifact, `"matched_indices"`) {
 		t.Fatalf("stored document_filter artifact should be compacted: %s", filterArtifact)
 	}
-	if !strings.Contains(result.Artifacts["step:step-2:keyword_frequency"], `"document_count":2`) {
-		t.Fatalf("unexpected keyword_frequency artifact: %s", result.Artifacts["step:step-2:keyword_frequency"])
+	if !strings.Contains(result.Artifacts["step:step-2:term_frequency"], `"document_count":2`) {
+		t.Fatalf("unexpected term_frequency artifact: %s", result.Artifacts["step:step-2:term_frequency"])
 	}
 }
 
@@ -653,7 +716,7 @@ func TestPythonAIClientStoresDeduplicateDocumentsAsSidecarRefButKeepsRuntimeArti
 					"member_count_column":"member_count"
 				}
 			}`))
-		case "/tasks/keyword_frequency":
+		case "/tasks/term_frequency":
 			if !strings.Contains(string(body), `"artifact_ref":"`) {
 				t.Fatalf("expected compacted deduplicate_documents artifact_ref in prior artifacts, got: %s", string(body))
 			}
@@ -663,7 +726,7 @@ func TestPythonAIClientStoresDeduplicateDocumentsAsSidecarRefButKeepsRuntimeArti
 			_, _ = w.Write([]byte(`{
 				"notes":["keyword completed"],
 				"artifact":{
-					"skill_name":"keyword_frequency",
+					"skill_name":"term_frequency",
 					"summary":{"document_count":2},
 					"top_terms":[{"term":"결제","count":1},{"term":"로그인","count":1}]
 				}
@@ -686,7 +749,7 @@ func TestPythonAIClientStoresDeduplicateDocumentsAsSidecarRefButKeepsRuntimeArti
 		Plan: domain.SkillPlan{
 			Steps: []domain.SkillPlanStep{
 				{StepID: "step-1", SkillName: "deduplicate_documents", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text", "duplicate_threshold": 0.8}},
-				{StepID: "step-2", SkillName: "keyword_frequency", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text", "top_n": 3}},
+				{StepID: "step-2", SkillName: "term_frequency", DatasetName: "/tmp/issues.prepared.parquet", Inputs: map[string]any{"text_column": "normalized_text", "top_n": 3}},
 			},
 		},
 	})
@@ -701,8 +764,8 @@ func TestPythonAIClientStoresDeduplicateDocumentsAsSidecarRefButKeepsRuntimeArti
 	if strings.Contains(dedupArtifact, `"canonical_indices"`) {
 		t.Fatalf("stored deduplicate artifact should be compacted: %s", dedupArtifact)
 	}
-	if !strings.Contains(result.Artifacts["step:step-2:keyword_frequency"], `"document_count":2`) {
-		t.Fatalf("unexpected keyword_frequency artifact: %s", result.Artifacts["step:step-2:keyword_frequency"])
+	if !strings.Contains(result.Artifacts["step:step-2:term_frequency"], `"document_count":2`) {
+		t.Fatalf("unexpected term_frequency artifact: %s", result.Artifacts["step:step-2:term_frequency"])
 	}
 }
 

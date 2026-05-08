@@ -21,7 +21,7 @@ const (
 	datasetBuildTypeCluster   = "cluster"
 )
 
-func (s *DatasetService) CreateCleanJob(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest, triggeredBy string) (domain.DatasetBuildJob, error) {
+func (s *DatasetService) CreateCleanJob(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
 		return domain.DatasetBuildJob{}, err
@@ -60,7 +60,7 @@ func (s *DatasetService) CreateCleanJob(projectID, datasetID, datasetVersionID s
 	if err := s.store.SaveDatasetBuildJob(job); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
-	if err := s.dispatchDatasetBuildJob(job, func() error {
+	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
 		_, err := s.BuildClean(projectID, datasetID, datasetVersionID, input)
 		return err
 	}); err != nil {
@@ -69,7 +69,7 @@ func (s *DatasetService) CreateCleanJob(projectID, datasetID, datasetVersionID s
 	return job, nil
 }
 
-func (s *DatasetService) CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy string) (domain.DatasetBuildJob, error) {
+func (s *DatasetService) CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
 		return domain.DatasetBuildJob{}, err
@@ -101,7 +101,7 @@ func (s *DatasetService) CreatePrepareJob(projectID, datasetID, datasetVersionID
 	if err := s.store.SaveDatasetBuildJob(job); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
-	if err := s.dispatchDatasetBuildJob(job, func() error {
+	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
 		_, err := s.BuildPrepare(projectID, datasetID, datasetVersionID, input)
 		return err
 	}); err != nil {
@@ -110,7 +110,7 @@ func (s *DatasetService) CreatePrepareJob(projectID, datasetID, datasetVersionID
 	return job, nil
 }
 
-func (s *DatasetService) CreateSentimentJob(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error) {
+func (s *DatasetService) CreateSentimentJob(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
 		return domain.DatasetBuildJob{}, err
@@ -139,7 +139,7 @@ func (s *DatasetService) CreateSentimentJob(projectID, datasetID, datasetVersion
 	if err := s.store.SaveDatasetBuildJob(job); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
-	if err := s.dispatchDatasetBuildJob(job, func() error {
+	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
 		_, err := s.BuildSentiment(projectID, datasetID, datasetVersionID, input)
 		return err
 	}); err != nil {
@@ -148,7 +148,7 @@ func (s *DatasetService) CreateSentimentJob(projectID, datasetID, datasetVersion
 	return job, nil
 }
 
-func (s *DatasetService) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error) {
+func (s *DatasetService) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
 		return domain.DatasetBuildJob{}, err
@@ -177,7 +177,7 @@ func (s *DatasetService) CreateEmbeddingJob(projectID, datasetID, datasetVersion
 	if err := s.store.SaveDatasetBuildJob(job); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
-	if err := s.dispatchDatasetBuildJob(job, func() error {
+	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
 		_, err := s.BuildEmbeddings(projectID, datasetID, datasetVersionID, input)
 		return err
 	}); err != nil {
@@ -186,7 +186,7 @@ func (s *DatasetService) CreateEmbeddingJob(projectID, datasetID, datasetVersion
 	return job, nil
 }
 
-func (s *DatasetService) CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error) {
+func (s *DatasetService) CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
 		return domain.DatasetBuildJob{}, err
@@ -224,7 +224,7 @@ func (s *DatasetService) CreateClusterJob(projectID, datasetID, datasetVersionID
 	if err := s.store.SaveDatasetBuildJob(job); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
-	if err := s.dispatchDatasetBuildJob(job, func() error {
+	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
 		_, err := s.BuildClusters(projectID, datasetID, datasetVersionID, input)
 		return err
 	}); err != nil {
@@ -349,7 +349,7 @@ func (s *DatasetService) runDatasetBuildJob(job domain.DatasetBuildJob, runner f
 	runErr = runner()
 }
 
-func (s *DatasetService) dispatchDatasetBuildJob(job domain.DatasetBuildJob, fallbackRunner func() error) error {
+func (s *DatasetService) dispatchDatasetBuildJob(job domain.DatasetBuildJob, requestID string, fallbackRunner func() error) error {
 	if s.buildJobStarter != nil && s.buildJobStarter.EngineName() == "temporal" {
 		workflowID, err := s.buildJobStarter.StartDatasetBuildWorkflow(workflows.StartDatasetBuildInput{
 			JobID:            job.JobID,
@@ -357,6 +357,7 @@ func (s *DatasetService) dispatchDatasetBuildJob(job domain.DatasetBuildJob, fal
 			DatasetID:        job.DatasetID,
 			DatasetVersionID: job.DatasetVersionID,
 			BuildType:        job.BuildType,
+			RequestID:        normalizeDatasetBuildRequestID(requestID, job.JobID),
 		})
 		if err == nil {
 			if strings.TrimSpace(workflowID) != "" {
@@ -408,6 +409,17 @@ func normalizeTriggeredBy(value string) string {
 		return "system"
 	}
 	return trimmed
+}
+
+func normalizeDatasetBuildRequestID(requestID, jobID string) string {
+	if trimmed := strings.TrimSpace(requestID); trimmed != "" {
+		return trimmed
+	}
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return ""
+	}
+	return "dataset-build-request-" + jobID
 }
 
 func withBuildJobDiagnostics(job domain.DatasetBuildJob) domain.DatasetBuildJob {

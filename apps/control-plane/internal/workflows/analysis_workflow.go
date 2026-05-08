@@ -39,6 +39,7 @@ type StartDatasetBuildInput struct {
 	DatasetID        string
 	DatasetVersionID string
 	BuildType        string
+	RequestID        string
 }
 
 func NewStarter(cfg config.Config) (Starter, error) {
@@ -116,6 +117,7 @@ func (s TemporalStarter) StartDatasetBuildWorkflow(input StartDatasetBuildInput)
 			DatasetID:        input.DatasetID,
 			DatasetVersionID: input.DatasetVersionID,
 			BuildType:        input.BuildType,
+			RequestID:        input.RequestID,
 			RequestedAt:      time.Now().UTC(),
 		},
 	)

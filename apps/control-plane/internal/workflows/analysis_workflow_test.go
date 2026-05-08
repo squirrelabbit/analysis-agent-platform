@@ -96,6 +96,7 @@ func TestTemporalStarterStartsDatasetBuildWorkflowWithExpectedOptions(t *testing
 		DatasetID:        "dataset-1",
 		DatasetVersionID: "version-1",
 		BuildType:        "prepare",
+		RequestID:        "request-build-1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -119,7 +120,7 @@ func TestTemporalStarterStartsDatasetBuildWorkflowWithExpectedOptions(t *testing
 	if !ok {
 		t.Fatalf("unexpected workflow input type: %T", fakeClient.args[0])
 	}
-	if input.JobID != "job-123" || input.DatasetVersionID != "version-1" || input.BuildType != "prepare" {
+	if input.JobID != "job-123" || input.DatasetVersionID != "version-1" || input.BuildType != "prepare" || input.RequestID != "request-build-1" {
 		t.Fatalf("unexpected workflow input: %+v", input)
 	}
 }

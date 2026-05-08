@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from .._migration_targets import canonical_skill_name
 from ..anthropic_client import AnthropicClient, AnthropicConfig
 from ..config import load_config
+from ..obs import get
 from ..prompt_registry import (
     render_execution_final_answer_prompt,
     render_prepare_batch_prompt,
@@ -14,7 +17,7 @@ from ..prompt_registry import (
     render_sentiment_batch_prompt,
     render_sentiment_prompt,
 )
-from ..skill_bundle import plan_skill_names
+from ..skill_bundle import planner_recommendations, planner_sequence, planner_visible_skills, skill_definition
 from .common import (
     _coerce_string_list,
     _evidence_rationale,
@@ -26,6 +29,8 @@ from .common import (
 )
 from .constants import NEGATIVE_SENTIMENT_TERMS, POSITIVE_SENTIMENT_TERMS, SENTIMENT_LABELS
 from .payloads import _normalize_inputs
+
+_LOG = get("runtime.llm")
 
 
 def _normalize_runtime_llm_mode(mode: str) -> str:
@@ -39,6 +44,88 @@ def _normalize_runtime_llm_mode(mode: str) -> str:
 
 def _llm_mode_disables_remote(mode: str) -> bool:
     return _normalize_runtime_llm_mode(mode) == "disabled"
+
+
+def _create_json_logged(
+    client: AnthropicClient,
+    *,
+    operation: str,
+    prompt: str,
+    schema: dict[str, Any],
+    max_tokens: int,
+    batch_size: int = 1,
+) -> dict[str, Any]:
+    started_at = time.monotonic()
+    _LOG.info(
+        "llm.call.started",
+        operation=operation,
+        model=client._config.model,
+        max_tokens=max_tokens,
+        batch_size=batch_size,
+    )
+    try:
+        response = client.create_json(prompt=prompt, schema=schema, max_tokens=max_tokens)
+    except Exception as exc:
+        _LOG.error(
+            "llm.call.failed",
+            operation=operation,
+            model=client._config.model,
+            batch_size=batch_size,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            error_category=type(exc).__name__,
+        )
+        raise
+    _LOG.info(
+        "llm.call.completed",
+        operation=operation,
+        model=client._config.model,
+        batch_size=batch_size,
+        duration_ms=int((time.monotonic() - started_at) * 1000),
+    )
+    return response
+
+
+def _create_json_response_logged(
+    client: AnthropicClient,
+    *,
+    operation: str,
+    prompt: str,
+    schema: dict[str, Any],
+    max_tokens: int,
+    batch_size: int = 1,
+) -> Any:
+    started_at = time.monotonic()
+    _LOG.info(
+        "llm.call.started",
+        operation=operation,
+        model=client._config.model,
+        max_tokens=max_tokens,
+        batch_size=batch_size,
+    )
+    try:
+        response = client.create_json_response(prompt=prompt, schema=schema, max_tokens=max_tokens)
+    except Exception as exc:
+        _LOG.error(
+            "llm.call.failed",
+            operation=operation,
+            model=client._config.model,
+            batch_size=batch_size,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            error_category=type(exc).__name__,
+        )
+        raise
+    usage = dict(getattr(response, "usage", {}) or {})
+    _LOG.info(
+        "llm.call.completed",
+        operation=operation,
+        model=client._config.model,
+        batch_size=batch_size,
+        duration_ms=int((time.monotonic() - started_at) * 1000),
+        input_tokens=int(usage.get("input_tokens") or 0),
+        output_tokens=int(usage.get("output_tokens") or 0),
+        total_tokens=int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0),
+    )
+    return response
 
 
 def _anthropic_client() -> AnthropicClient | None:
@@ -95,64 +182,77 @@ def _anthropic_sentiment_client(model_override: str = "", *, llm_mode: str = "de
     )
 
 
+def _planner_skill_description_lines(active_layers: set[str] | None = None) -> list[str]:
+    lines: list[str] = []
+    for skill in _planner_visible_skills_for_layers(active_layers):
+        name = str(skill.get("name") or "").strip()
+        description = str(skill.get("description") or "").strip()
+        if not name or not description:
+            continue
+        result_kind = str(skill.get("result_kind") or "").strip()
+        prior_signal = _planner_prior_signal(skill)
+        lines.append(f"- {name}: {description} (result_kind={result_kind or 'unknown'}, prior_artifacts={prior_signal})")
+        goal_input = str(skill.get("goal_input") or "").strip()
+        if goal_input:
+            lines.append(f"  When {name} is used, set inputs.{goal_input} to the user goal.")
+    return lines
+
+
+def _planner_recommendation_lines(active_layers: set[str] | None = None) -> list[str]:
+    lines: list[str] = []
+    for recommendation in planner_recommendations():
+        sequence_name = str(recommendation.get("sequence_name") or "").strip()
+        when = str(recommendation.get("when") or "").strip()
+        if not sequence_name or not when:
+            continue
+        sequence = planner_sequence(sequence_name)
+        if not sequence:
+            continue
+        if active_layers and not _sequence_is_visible_for_layers(sequence, active_layers):
+            continue
+        lines.append(f"{when} Prefer {', '.join(sequence)}.")
+    return lines
+
+
+def _build_planner_system_prompt(payload: dict[str, Any]) -> str:
+    active_layers = _active_layer_set(payload.get("active_layers"))
+    visible_skills = _planner_visible_skills_for_layers(active_layers)
+    allowed_skills = ", ".join(str(skill.get("name") or "").strip() for skill in visible_skills if str(skill.get("name") or "").strip())
+    sections = [
+        "You are an analysis planner for a deterministic execution platform.",
+        "Choose the smallest valid skill plan for the request.",
+        f"Allowed skills: {allowed_skills}.",
+        f"Active runtime layers: {', '.join(sorted(active_layers)) if active_layers else 'all planner-visible layers'}.",
+        "Skill descriptions:",
+        *_planner_skill_description_lines(active_layers),
+        "Recommended sequences:",
+        *_planner_recommendation_lines(active_layers),
+        "Return only a plan that can be replayed without extra reasoning.",
+        "",
+        f"dataset_name: {payload.get('dataset_name') or 'dataset_from_version'}",
+        f"dataset_version_id: {payload.get('dataset_version_id') or ''}",
+        f"data_type: {payload.get('data_type') or ''}",
+        f"goal: {payload.get('goal') or ''}",
+        f"constraints: {json.dumps(payload.get('constraints') or [], ensure_ascii=False)}",
+        f"context: {json.dumps(payload.get('context') or {}, ensure_ascii=False)}",
+    ]
+    return "\n".join(sections)
+
+
 def _run_planner_with_llm(
     client: AnthropicClient,
     payload: dict[str, Any],
     *,
     fallback_planner: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    allowed_skills = ", ".join(plan_skill_names())
-    prompt = "\n".join(
-        [
-            "You are an analysis planner for a deterministic execution platform.",
-            "Choose the smallest valid skill plan for the request.",
-            f"Allowed skills: {allowed_skills}.",
-            "Use structured_kpi_summary for numeric KPI/tabular analysis.",
-            "Use garbage_filter to remove ad, promotion, placeholder, or noise-only rows before downstream text analysis when the dataset likely contains garbage SNS content.",
-            "Use document_filter first for replayable lexical narrowing before downstream text analysis.",
-            "Use deduplicate_documents to collapse repeated or near-identical documents.",
-            "Use keyword_frequency to count top terms after document filtering.",
-            "Use noun_frequency when the user asks for noun-focused keyword extraction, Korean noun counts, or morphology-based top terms.",
-            "Use sentence_split when the user explicitly asks for sentence-level splitting, sentence-unit evidence preparation, or sentence-by-sentence review.",
-            "Use time_bucket_count to aggregate filtered rows by time bucket.",
-            "Use meta_group_count to aggregate filtered rows by metadata dimension.",
-            "Use document_sample to select representative documents for downstream summaries.",
-            "Use dictionary_tagging when the user asks for category or taxonomy-based classification.",
-            "Use embedding_cluster to group similar issues with precomputed embeddings.",
-            "Use cluster_label_candidates after embedding_cluster to propose deterministic cluster labels.",
-            "Use unstructured_issue_summary for VOC/document/text analysis.",
-            "Use issue_breakdown_summary when the user asks which channel, product, region, or metadata group has more issues.",
-            "Use issue_cluster_summary when the user asks for major themes, clusters, or grouped issues.",
-            "Use issue_trend_summary when the user asks about changes, increases, decreases, or time-based trends in text issues.",
-            "Use issue_period_compare when the user asks to compare current vs previous periods in text issues.",
-            "Use issue_sentiment_summary when the user asks about positive, negative, neutral, or sentiment distribution.",
-            "Use issue_taxonomy_summary when the user asks for tagged categories or taxonomy distribution.",
-            "Use semantic_search when the user asks to find relevant evidence or related documents.",
-            "Use issue_evidence_summary to return representative snippets and follow-up questions for text analysis.",
-            "For general unstructured text analysis, prefer unstructured_issue_summary followed by issue_evidence_summary.",
-            "For general unstructured text analysis, prefer document_filter, keyword_frequency, document_sample, unstructured_issue_summary, then issue_evidence_summary.",
-            "For noun extraction requests, prefer document_filter followed by noun_frequency.",
-            "For sentence splitting requests, prefer document_filter followed by sentence_split.",
-            "For cluster analysis, prefer document_filter, deduplicate_documents, embedding_cluster, cluster_label_candidates, issue_cluster_summary, then issue_evidence_summary.",
-            "For taxonomy analysis, prefer document_filter, dictionary_tagging, issue_taxonomy_summary, then issue_evidence_summary.",
-            "For breakdown analysis, prefer document_filter, meta_group_count, document_sample, issue_breakdown_summary, then issue_evidence_summary.",
-            "For trend analysis, prefer document_filter, time_bucket_count, document_sample, issue_trend_summary, then issue_evidence_summary.",
-            "For period comparison, prefer document_filter, document_sample, issue_period_compare, then issue_evidence_summary.",
-            "For sentiment analysis, prefer document_filter, document_sample, issue_sentiment_summary, then issue_evidence_summary.",
-            "For evidence lookup, prefer semantic_search followed by issue_evidence_summary.",
-            "When issue_evidence_summary is used, set inputs.query to the user goal.",
-            "When semantic_search is used, set inputs.query to the user goal.",
-            "Return only a plan that can be replayed without extra reasoning.",
-            "",
-            f"dataset_name: {payload.get('dataset_name') or 'dataset_from_version'}",
-            f"dataset_version_id: {payload.get('dataset_version_id') or ''}",
-            f"data_type: {payload.get('data_type') or ''}",
-            f"goal: {payload.get('goal') or ''}",
-            f"constraints: {json.dumps(payload.get('constraints') or [], ensure_ascii=False)}",
-            f"context: {json.dumps(payload.get('context') or {}, ensure_ascii=False)}",
-        ]
+    prompt = _build_planner_system_prompt(payload)
+    response = _create_json_logged(
+        client,
+        operation="planner",
+        prompt=prompt,
+        schema=_planner_schema(),
+        max_tokens=1200,
     )
-    response = client.create_json(prompt=prompt, schema=_planner_schema(), max_tokens=1200)
     return _normalize_planner_response(
         response,
         payload,
@@ -161,7 +261,7 @@ def _run_planner_with_llm(
     )
 
 
-def _run_evidence_pack_with_llm(
+def _run_issue_evidence_summary_with_llm(
     client: AnthropicClient,
     normalized: dict[str, Any],
     selected_documents: list[dict[str, Any]],
@@ -188,7 +288,14 @@ def _run_evidence_pack_with_llm(
             json.dumps(prompt_documents, ensure_ascii=False),
         ]
     )
-    response = client.create_json_response(prompt=prompt, schema=_evidence_schema(), max_tokens=1400)
+    response = _create_json_response_logged(
+        client,
+        operation=artifact_skill_name,
+        prompt=prompt,
+        schema=_evidence_schema(),
+        max_tokens=1400,
+        batch_size=len(prompt_documents),
+    )
     evidence = _merge_evidence_citations(response.body.get("evidence") or [], selected_documents)
     artifact = {
         "skill_name": artifact_skill_name,
@@ -228,7 +335,7 @@ def _run_evidence_pack_with_llm(
     }
 
 
-def _run_evidence_pack_fallback(
+def _run_issue_evidence_summary_fallback(
     normalized: dict[str, Any],
     selected_documents: list[dict[str, Any]],
     selection_source: str,
@@ -417,7 +524,14 @@ def _run_execution_final_answer_with_llm(
         evidence_json=json.dumps(evidence_candidates, ensure_ascii=False),
         version=normalized["prompt_version"],
     )
-    response = client.create_json_response(prompt=prompt, schema=_execution_final_answer_schema(), max_tokens=1200)
+    response = _create_json_response_logged(
+        client,
+        operation="execution_final_answer",
+        prompt=prompt,
+        schema=_execution_final_answer_schema(),
+        max_tokens=1200,
+        batch_size=len(evidence_candidates),
+    )
     selected_ids = _unique_strings(_coerce_string_list(response.body.get("evidence_ref_ids")))
     evidence = [dict(evidence_lookup[item_id]) for item_id in selected_ids if item_id in evidence_lookup]
     answer = {
@@ -803,7 +917,13 @@ def _prepare_row_with_llm(
         version=prompt_version_override or config.anthropic_prepare_prompt_version,
         template_override=prompt_template_override,
     )
-    response = client.create_json_response(prompt=prompt, schema=_prepare_schema(), max_tokens=600)
+    response = _create_json_response_logged(
+        client,
+        operation="dataset_prepare",
+        prompt=prompt,
+        schema=_prepare_schema(),
+        max_tokens=600,
+    )
     return (
         _normalize_prepare_response(response.body, raw_text, prompt_version=prompt_version),
         _anthropic_usage_metadata(
@@ -827,7 +947,14 @@ def _prepare_rows_with_llm(
         version=prompt_version_override or config.anthropic_prepare_batch_prompt_version,
         template_override=prompt_template_override,
     )
-    response = client.create_json_response(prompt=prompt, schema=_prepare_batch_schema(), max_tokens=max(800, 280 * len(raw_texts)))
+    response = _create_json_response_logged(
+        client,
+        operation="dataset_prepare",
+        prompt=prompt,
+        schema=_prepare_batch_schema(),
+        max_tokens=max(800, 280 * len(raw_texts)),
+        batch_size=len(raw_texts),
+    )
     prepared_rows = response.body.get("rows")
     if not isinstance(prepared_rows, list) or len(prepared_rows) != len(raw_texts):
         raise ValueError("prepare batch response row count mismatch")
@@ -966,7 +1093,13 @@ def _label_sentiment_with_llm(
         version=prompt_version_override or config.anthropic_sentiment_prompt_version,
         template_override=prompt_template_override,
     )
-    response = client.create_json_response(prompt=prompt, schema=_sentiment_schema(), max_tokens=400)
+    response = _create_json_response_logged(
+        client,
+        operation="sentiment_label",
+        prompt=prompt,
+        schema=_sentiment_schema(),
+        max_tokens=400,
+    )
     label = str(response.body.get("label") or "unknown").strip().lower()
     if label not in SENTIMENT_LABELS:
         label = "unknown"
@@ -1027,7 +1160,14 @@ def _label_sentiments_with_llm(
             version=prompt_version_override or config.anthropic_sentiment_batch_prompt_version,
             template_override=batch_prompt_template_override,
         )
-        response = client.create_json_response(prompt=prompt, schema=_sentiment_batch_schema(), max_tokens=800)
+        response = _create_json_response_logged(
+            client,
+            operation="sentiment_label",
+            prompt=prompt,
+            schema=_sentiment_batch_schema(),
+            max_tokens=800,
+            batch_size=len(batch),
+        )
         rows = list(response.body.get("rows") or [])
         if len(rows) != len(batch):
             raise ValueError(f"sentiment batch rows mismatch: expected {len(batch)}, got {len(rows)}")
@@ -1305,10 +1445,14 @@ def _normalize_planner_response(
     dataset_name = str(payload.get("dataset_name") or "dataset_from_version").strip()
     raw_plan = response.get("plan") or {}
     raw_steps = raw_plan.get("steps") or []
-    allowed_skills = set(plan_skill_names())
+    allowed_skills = {
+        str(skill.get("name") or "").strip()
+        for skill in _planner_visible_skills_for_layers(_active_layer_set(payload.get("active_layers")))
+        if str(skill.get("name") or "").strip()
+    }
     steps = []
     for raw_step in raw_steps:
-        skill_name = str(raw_step.get("skill_name") or "").strip()
+        skill_name = canonical_skill_name(str(raw_step.get("skill_name") or "").strip())
         if skill_name not in allowed_skills:
             continue
         inputs = raw_step.get("inputs") or {}
@@ -1336,8 +1480,53 @@ def _normalize_planner_response(
         },
         "planner_type": "anthropic",
         "planner_model": planner_model,
-        "planner_prompt_version": "planner-anthropic-v1",
+        "planner_prompt_version": "planner-anthropic-v2",
     }
+
+
+def _active_layer_set(raw_layers: Any) -> set[str]:
+    return {
+        str(layer or "").strip()
+        for layer in list(raw_layers or [])
+        if str(layer or "").strip()
+    }
+
+
+def _planner_visible_skills_for_layers(active_layers: set[str] | None = None) -> list[dict[str, Any]]:
+    skills: list[dict[str, Any]] = []
+    for skill in planner_visible_skills():
+        layer = str(skill.get("layer") or "").strip()
+        if active_layers and layer and layer not in active_layers:
+            continue
+        skills.append(skill)
+    return skills
+
+
+def _planner_prior_signal(skill: dict[str, Any]) -> str:
+    required_prior_skills = [
+        str(name or "").strip()
+        for name in list(skill.get("requires_prior_skills") or [])
+        if str(name or "").strip()
+    ]
+    if required_prior_skills:
+        return f"all({', '.join(required_prior_skills)})"
+    required_any_prior_skills = [
+        str(name or "").strip()
+        for name in list(skill.get("requires_any_prior_skills") or [])
+        if str(name or "").strip()
+    ]
+    if required_any_prior_skills:
+        return f"any({', '.join(required_any_prior_skills)})"
+    return "none"
+
+
+def _sequence_is_visible_for_layers(sequence: list[str], active_layers: set[str]) -> bool:
+    for skill_name in sequence:
+        skill = skill_definition(skill_name) or {}
+        layer = str(skill.get("layer") or "").strip()
+        if layer and layer not in active_layers:
+            return False
+    return True
 
 
 __all__ = [
@@ -1357,6 +1546,7 @@ __all__ = [
     "_label_sentiment_with_llm",
     "_matches_sentiment_term",
     "_merge_usage_records",
+    "_build_planner_system_prompt",
     "_normalize_planner_response",
     "_planner_schema",
     "_prepare_row",
@@ -1365,10 +1555,10 @@ __all__ = [
     "_prepare_row_with_llm",
     "_prepare_batch_schema",
     "_prepare_schema",
-    "_run_evidence_pack_fallback",
-    "_run_evidence_pack_with_llm",
     "_run_execution_final_answer_fallback",
     "_run_execution_final_answer_with_llm",
+    "_run_issue_evidence_summary_fallback",
+    "_run_issue_evidence_summary_with_llm",
     "_run_planner_with_llm",
     "_sentiment_schema",
     "_sentiment_batch_schema",

@@ -15,6 +15,7 @@ import (
 	"analysis-support-platform/control-plane/internal/id"
 	"analysis-support-platform/control-plane/internal/planner"
 	"analysis-support-platform/control-plane/internal/registry"
+	skillruntime "analysis-support-platform/control-plane/internal/skills"
 	"analysis-support-platform/control-plane/internal/store"
 	"analysis-support-platform/control-plane/internal/workflows"
 )
@@ -27,11 +28,11 @@ type AnalysisService struct {
 }
 
 type executionDependencyBuilder interface {
-	CreateCleanJob(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest, triggeredBy string) (domain.DatasetBuildJob, error)
-	CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy string) (domain.DatasetBuildJob, error)
-	CreateSentimentJob(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
-	CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
-	CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, triggeredBy string) (domain.DatasetBuildJob, error)
+	CreateCleanJob(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error)
+	CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error)
+	CreateSentimentJob(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error)
+	CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error)
+	CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error)
 }
 
 func NewAnalysisService(repository store.Repository, starter workflows.Starter, planGenerator planner.Planner) *AnalysisService {
@@ -109,12 +110,12 @@ func (s *AnalysisService) SubmitAnalysis(projectID string, input domain.Analysis
 			plannerModel = generated.PlannerModel
 			plannerPromptVersion = generated.PlannerPromptVersion
 		} else {
-			generated := buildDefaultPlan(input)
+			generated := planner.BuildDefaultPlan(input)
 			plan = &generated
 		}
 	}
 
-	datasetName := "dataset_from_version"
+	datasetName := planner.DatasetFromVersion
 	if input.DatasetName != nil && strings.TrimSpace(*input.DatasetName) != "" {
 		datasetName = strings.TrimSpace(*input.DatasetName)
 	}
@@ -306,11 +307,11 @@ func (s *AnalysisService) ensureExecutionDependencies(projectID string, plan dom
 		return err
 	}
 
-	_, err = s.ensureExecutionDependenciesForVersion(projectID, version, plan.Plan, "analysis_execute")
+	_, err = s.ensureExecutionDependenciesForVersion(projectID, version, plan.Plan, plan.RequestID, "analysis_execute")
 	return err
 }
 
-func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string, version domain.DatasetVersion, plan domain.SkillPlan, triggeredBy string) (domain.DatasetVersion, error) {
+func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string, version domain.DatasetVersion, plan domain.SkillPlan, requestID, triggeredBy string) (domain.DatasetVersion, error) {
 	if s.dependencyBuilder == nil {
 		return version, nil
 	}
@@ -323,7 +324,7 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 	clusterRequest, hasMaterializedClusterRequest := domain.ClusterMaterializationRequestForPlan(plan)
 
 	if planNeedsTextBuildDependency(plan) && shouldBuildCleanDependency(version) {
-		if _, err := s.dependencyBuilder.CreateCleanJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetCleanRequest{}, triggeredBy); err != nil {
+		if _, err := s.dependencyBuilder.CreateCleanJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetCleanRequest{}, triggeredBy, requestID); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
@@ -333,7 +334,7 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 		return latest, nil
 	}
 	if needsPrepare && requiresPrepare(version) && !datasetPrepareReady(version) {
-		if _, err := s.dependencyBuilder.CreatePrepareJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, triggeredBy); err != nil {
+		if _, err := s.dependencyBuilder.CreatePrepareJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetPrepareRequest{}, triggeredBy, requestID); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
@@ -343,7 +344,7 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 		return latest, nil
 	}
 	if needsSentiment && !datasetSentimentReady(version) {
-		if _, err := s.dependencyBuilder.CreateSentimentJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}, triggeredBy); err != nil {
+		if _, err := s.dependencyBuilder.CreateSentimentJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}, triggeredBy, requestID); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
@@ -353,7 +354,7 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 		return latest, nil
 	}
 	if needsEmbedding && !datasetEmbeddingReady(version) {
-		if _, err := s.dependencyBuilder.CreateEmbeddingJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}, triggeredBy); err != nil {
+		if _, err := s.dependencyBuilder.CreateEmbeddingJob(projectID, version.DatasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}, triggeredBy, requestID); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
@@ -363,7 +364,7 @@ func (s *AnalysisService) ensureExecutionDependenciesForVersion(projectID string
 		return latest, nil
 	}
 	if needsCluster && hasMaterializedClusterRequest && clusterRequest != nil && !domain.ClusterRequestMatchesMetadata(*clusterRequest, version.Metadata) {
-		if _, err := s.dependencyBuilder.CreateClusterJob(projectID, version.DatasetID, version.DatasetVersionID, *clusterRequest, triggeredBy); err != nil {
+		if _, err := s.dependencyBuilder.CreateClusterJob(projectID, version.DatasetID, version.DatasetVersionID, *clusterRequest, triggeredBy, requestID); err != nil {
 			return domain.DatasetVersion{}, err
 		}
 		latest, err := s.store.GetDatasetVersion(projectID, versionID)
@@ -460,7 +461,6 @@ func (s *AnalysisService) BuildExecutionResult(projectID, executionID string) (d
 		"evidence_artifact_keys": filterArtifactKeysBySkills(
 			sortedArtifactKeys(execution.Artifacts),
 			"issue_evidence_summary",
-			"evidence_pack",
 		),
 		"reproducibility": map[string]any{
 			"params_hash":          execution.ParamsHash,
@@ -923,7 +923,7 @@ func buildStepArtifactPreview(artifact map[string]any) map[string]any {
 		return nil
 	}
 	preview := map[string]any{
-		"skill_name": strings.TrimSpace(artifactStringValue(artifact["skill_name"])),
+		"skill_name": skillruntime.CanonicalSkillName(artifactStringValue(artifact["skill_name"])),
 	}
 	if summary := strings.TrimSpace(executionArtifactSummary(artifact)); summary != "" {
 		preview["summary"] = summary
@@ -1251,7 +1251,6 @@ func decodeExecutionArtifacts(artifacts map[string]string) map[string]map[string
 func selectPrimaryExecutionArtifact(decoded map[string]map[string]any, plan domain.SkillPlan) (string, map[string]any) {
 	priority := []string{
 		"issue_evidence_summary",
-		"evidence_pack",
 		"issue_cluster_summary",
 		"issue_taxonomy_summary",
 		"issue_sentiment_summary",
@@ -1265,7 +1264,7 @@ func selectPrimaryExecutionArtifact(decoded map[string]map[string]any, plan doma
 	keys := sortedArtifactKeysFromDecoded(decoded)
 	for _, skillName := range priority {
 		for _, step := range plan.Steps {
-			if step.SkillName != skillName {
+			if !skillruntime.IsAliasFor(step.SkillName, skillName) {
 				continue
 			}
 			key := artifactKeyForStep(keys, step.StepID, skillName)
@@ -1275,7 +1274,7 @@ func selectPrimaryExecutionArtifact(decoded map[string]map[string]any, plan doma
 			return key, decoded[key]
 		}
 		for _, key := range keys {
-			if strings.HasSuffix(key, ":"+skillName) {
+			if artifactKeyMatchesSkillName(key, skillName) {
 				return key, decoded[key]
 			}
 		}
@@ -1302,7 +1301,7 @@ func buildExecutionAnswerV1(primaryArtifact map[string]any, decoded map[string]m
 		answer.Summary = "실행은 완료됐지만 대표 요약을 생성하지 못했습니다."
 	}
 	if len(answer.Evidence) == 0 {
-		if evidenceKey, evidenceArtifact := selectPrimaryBySkills(decoded, "issue_evidence_summary", "evidence_pack"); evidenceKey != "" {
+		if evidenceKey, evidenceArtifact := selectPrimaryBySkills(decoded, "issue_evidence_summary"); evidenceKey != "" {
 			answer.Evidence = executionArtifactEvidence(evidenceArtifact)
 			if answer.SelectionSource == "" {
 				answer.SelectionSource = strings.TrimSpace(artifactStringValue(evidenceArtifact["selection_source"]))
@@ -1421,7 +1420,7 @@ func executionArtifactSummary(artifact map[string]any) string {
 			return summaryText
 		}
 	}
-	skillName := strings.TrimSpace(artifactStringValue(artifact["skill_name"]))
+	skillName := skillruntime.CanonicalSkillName(artifactStringValue(artifact["skill_name"]))
 	summary, _ := artifact["summary"].(map[string]any)
 	switch skillName {
 	case "issue_cluster_summary":
@@ -1505,7 +1504,7 @@ func executionArtifactKeyFindings(artifact map[string]any) []string {
 }
 
 func deriveExecutionFindings(artifact map[string]any) []string {
-	skillName := strings.TrimSpace(artifactStringValue(artifact["skill_name"]))
+	skillName := skillruntime.CanonicalSkillName(artifactStringValue(artifact["skill_name"]))
 	summary, _ := artifact["summary"].(map[string]any)
 	findings := make([]string, 0)
 	switch skillName {
@@ -1565,7 +1564,7 @@ func executionArtifactEvidence(artifact map[string]any) []map[string]any {
 	if len(items) > 0 {
 		return items
 	}
-	skillName := strings.TrimSpace(artifactStringValue(artifact["skill_name"]))
+	skillName := skillruntime.CanonicalSkillName(artifactStringValue(artifact["skill_name"]))
 	switch skillName {
 	case "issue_cluster_summary":
 		clusters := executionArtifactMapSlice(artifact["clusters"], 1)
@@ -1673,9 +1672,13 @@ func sortedArtifactKeysFromDecoded(decoded map[string]map[string]any) []string {
 }
 
 func artifactKeyForStep(keys []string, stepID, skillName string) string {
-	prefix := "step:" + strings.TrimSpace(stepID) + ":" + strings.TrimSpace(skillName)
+	prefix := "step:" + strings.TrimSpace(stepID) + ":"
 	for _, key := range keys {
-		if key == prefix {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		candidate := strings.TrimPrefix(key, prefix)
+		if skillruntime.IsAliasFor(candidate, skillName) {
 			return key
 		}
 	}
@@ -1686,7 +1689,7 @@ func selectPrimaryBySkills(decoded map[string]map[string]any, skillNames ...stri
 	keys := sortedArtifactKeysFromDecoded(decoded)
 	for _, skillName := range skillNames {
 		for _, key := range keys {
-			if strings.HasSuffix(key, ":"+skillName) {
+			if artifactKeyMatchesSkillName(key, skillName) {
 				return key, decoded[key]
 			}
 		}
@@ -1772,7 +1775,7 @@ func (s *AnalysisService) ResumeWaitingExecutionsForDatasetVersion(projectID, da
 			}
 			return resumedCount, err
 		}
-		version, err = s.ensureExecutionDependenciesForVersion(projectID, version, execution.Plan, triggeredBy)
+		version, err = s.ensureExecutionDependenciesForVersion(projectID, version, execution.Plan, execution.RequestID, triggeredBy)
 		if err != nil {
 			return resumedCount, err
 		}
@@ -1926,38 +1929,6 @@ func (s *AnalysisService) DiffExecutions(projectID, fromExecutionID, toExecution
 	}, nil
 }
 
-func buildDefaultPlan(input domain.AnalysisSubmitRequest) domain.SkillPlan {
-	now := time.Now().UTC()
-	dataType := "structured"
-	if input.DataType != nil && strings.TrimSpace(*input.DataType) != "" {
-		dataType = strings.TrimSpace(*input.DataType)
-	}
-	skills := registry.DefaultPlanSkills(dataType)
-
-	datasetName := "dataset_from_version"
-	if input.DatasetName != nil && strings.TrimSpace(*input.DatasetName) != "" {
-		datasetName = strings.TrimSpace(*input.DatasetName)
-	}
-
-	notes := "generated by control-plane scaffold"
-	steps := make([]domain.SkillPlanStep, 0, len(skills))
-	for _, skillName := range skills {
-		steps = append(steps, domain.SkillPlanStep{
-			StepID:      id.New(),
-			SkillName:   skillName,
-			DatasetName: datasetName,
-			Inputs:      defaultInputsForSkill(skillName, input.Goal),
-		})
-	}
-
-	return domain.SkillPlan{
-		PlanID:    id.New(),
-		Steps:     steps,
-		Notes:     &notes,
-		CreatedAt: now,
-	}
-}
-
 func normalizePlan(plan domain.SkillPlan, datasetName string, version domain.DatasetVersion, goal string) domain.SkillPlan {
 	if strings.TrimSpace(plan.PlanID) == "" {
 		plan.PlanID = id.New()
@@ -1969,7 +1940,7 @@ func normalizePlan(plan domain.SkillPlan, datasetName string, version domain.Dat
 		if strings.TrimSpace(plan.Steps[index].StepID) == "" {
 			plan.Steps[index].StepID = id.New()
 		}
-		if strings.TrimSpace(plan.Steps[index].DatasetName) == "" || strings.TrimSpace(plan.Steps[index].DatasetName) == "dataset_from_version" || strings.TrimSpace(plan.Steps[index].DatasetName) == datasetName {
+		if strings.TrimSpace(plan.Steps[index].DatasetName) == "" || strings.TrimSpace(plan.Steps[index].DatasetName) == planner.DatasetFromVersion || strings.TrimSpace(plan.Steps[index].DatasetName) == datasetName {
 			plan.Steps[index].DatasetName = resolvedDatasetNameForSkill(plan.Steps[index].SkillName, datasetName, version)
 		}
 		if plan.Steps[index].Inputs == nil {
@@ -2346,23 +2317,23 @@ func filterArtifactKeysBySkill(keys []string, skillName string) []string {
 
 func filterArtifactKeysBySkills(keys []string, skillNames ...string) []string {
 	filtered := make([]string, 0, len(keys))
-	suffixes := make([]string, 0, len(skillNames))
-	for _, skillName := range skillNames {
-		skillName = strings.TrimSpace(skillName)
-		if skillName == "" {
-			continue
-		}
-		suffixes = append(suffixes, ":"+skillName)
-	}
 	for _, key := range keys {
-		for _, suffix := range suffixes {
-			if strings.HasSuffix(key, suffix) {
+		for _, skillName := range skillNames {
+			if artifactKeyMatchesSkillName(key, skillName) {
 				filtered = append(filtered, key)
 				break
 			}
 		}
 	}
 	return filtered
+}
+
+func artifactKeyMatchesSkillName(key, skillName string) bool {
+	index := strings.LastIndex(strings.TrimSpace(key), ":")
+	if index < 0 || index == len(strings.TrimSpace(key))-1 {
+		return false
+	}
+	return skillruntime.IsAliasFor(key[index+1:], skillName)
 }
 
 func derefString(value *string) string {
