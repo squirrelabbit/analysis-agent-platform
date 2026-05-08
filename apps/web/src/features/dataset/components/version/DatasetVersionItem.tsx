@@ -15,7 +15,7 @@ import {
 import DeleteDialog from "@/components/common/dialogs/DeleteDialog";
 import { Switch } from "@/components/ui/switch";
 import { Calendar, Database, FileText } from "lucide-react";
-import FileDownload from "@/components/common/FileDownload";
+import FileDownload from "@/components/common/files/FileDownload";
 
 export default function DatasetVersionItem({
   version,
