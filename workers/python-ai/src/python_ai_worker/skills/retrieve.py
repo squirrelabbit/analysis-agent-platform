@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from ..config import load_config
+from ..obs import skill_handler
 from ..skill_policy_registry import load_cluster_label_policy, load_embedding_cluster_policy
 from . import _retrieve_impl as _impl
 from ._policy_utils import annotate_result_policy, requested_policy_version, with_payload_defaults
@@ -129,6 +130,7 @@ def _bind_cluster_label_policy(policy: dict[str, Any]) -> Iterator[None]:
         _impl.rt._cluster_label_rationale = original_rationale_fn
 
 
+@skill_handler("python-ai")
 def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
     config = load_config()
     policy = load_embedding_cluster_policy(
@@ -161,6 +163,7 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+@skill_handler("python-ai")
 def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
     config = load_config()
     policy = load_cluster_label_policy(
@@ -191,6 +194,7 @@ def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+@skill_handler("python-ai")
 def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
     with _bind_retrieve_helpers():
         return _impl.run_semantic_search(payload)

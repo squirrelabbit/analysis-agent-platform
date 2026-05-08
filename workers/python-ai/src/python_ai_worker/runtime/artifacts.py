@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from .._migration_targets import canonical_skill_name
 from .common import (
     _bucket_label,
     _duplicate_similarity,
@@ -22,6 +23,13 @@ from .common import (
     _tokenize,
     _vector_norm,
 )
+
+_RESULT_SCOPE_ALIASES = {
+    "subset_filtered": "document_subset",
+    "sample_n": "document_subset",
+    "single_record": "document_subset",
+    "subset_selection": "cluster_subset",
+}
 
 
 def _copy_citation_fields(source: dict[str, Any], target: dict[str, Any]) -> None:
@@ -198,6 +206,12 @@ def _cluster_candidates_from_artifact(artifact: dict[str, Any], normalized: dict
 
 
 def _iter_prior_artifacts(prior_artifacts: Any) -> list[dict[str, Any]]:
+    if isinstance(prior_artifacts, list):
+        artifacts: list[dict[str, Any]] = []
+        for artifact in prior_artifacts:
+            if isinstance(artifact, dict):
+                artifacts.append(artifact)
+        return artifacts
     if not isinstance(prior_artifacts, dict):
         return []
     artifacts: list[dict[str, Any]] = []
@@ -214,8 +228,10 @@ def _iter_prior_artifacts(prior_artifacts: Any) -> list[dict[str, Any]]:
 
 
 def _find_prior_artifact(prior_artifacts: Any, skill_name: str) -> dict[str, Any] | None:
+    requested_name = canonical_skill_name(str(skill_name or "").strip())
     for artifact in reversed(_iter_prior_artifacts(prior_artifacts)):
-        if str(artifact.get("skill_name") or "").strip() == skill_name:
+        artifact_name = canonical_skill_name(str(artifact.get("skill_name") or "").strip())
+        if artifact_name == requested_name:
             return artifact
     return None
 
@@ -230,7 +246,7 @@ def _analysis_context_entries(prior_artifacts: Any) -> list[dict[str, Any]]:
         _first_prior_artifact(prior_artifacts, "issue_taxonomy_summary", "dictionary_tagging"),
         _first_prior_artifact(prior_artifacts, "issue_sentiment_summary"),
         _first_prior_artifact(prior_artifacts, "unstructured_issue_summary"),
-        _first_prior_artifact(prior_artifacts, "keyword_frequency"),
+        _first_prior_artifact(prior_artifacts, "term_frequency"),
     ):
         if artifact is None:
             continue
@@ -263,11 +279,12 @@ def _analysis_context_entry(artifact: dict[str, Any]) -> dict[str, Any] | None:
 
 def _analysis_context_summary(artifact: dict[str, Any]) -> str:
     skill_name = str(artifact.get("skill_name") or "").strip()
+    canonical_name = canonical_skill_name(skill_name)
     summary = artifact.get("summary") or {}
     if not isinstance(summary, dict):
         summary = {}
 
-    if skill_name in {"issue_trend_summary", "time_bucket_count"}:
+    if canonical_name in {"issue_trend_summary", "time_bucket_count"}:
         peak_bucket = str(summary.get("peak_bucket") or "").strip()
         peak_count = int(summary.get("peak_count") or 0)
         bucket = str(artifact.get("bucket") or summary.get("bucket_type") or "").strip()
@@ -276,7 +293,7 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
             return f"{prefix}피크 구간은 {peak_bucket}({peak_count}건)이다."
         return ""
 
-    if skill_name in {"issue_breakdown_summary", "meta_group_count"}:
+    if canonical_name in {"issue_breakdown_summary", "meta_group_count"}:
         top_group = str(summary.get("top_group") or "").strip()
         top_group_count = int(summary.get("top_group_count") or 0)
         dimension = str(summary.get("dimension_column") or artifact.get("dimension_column") or "").strip()
@@ -285,7 +302,7 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
             return f"{prefix}최다 그룹은 {top_group}({top_group_count}건)이다."
         return ""
 
-    if skill_name == "issue_period_compare":
+    if canonical_name == "issue_period_compare":
         current_count = int(summary.get("current_count") or 0)
         previous_count = int(summary.get("previous_count") or 0)
         count_delta = int(summary.get("count_delta") or 0)
@@ -297,14 +314,14 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
             return f"현재 기간과 이전 기간이 모두 {current_count}건으로 동일하다."
         return ""
 
-    if skill_name == "issue_cluster_summary":
+    if canonical_name == "issue_cluster_summary":
         label = str(summary.get("dominant_cluster_label") or "").strip()
         count = int(summary.get("dominant_cluster_count") or 0)
         if label and count > 0:
             return f"가장 큰 군집은 {label}이며 {count}건이다."
         return ""
 
-    if skill_name == "cluster_label_candidates":
+    if canonical_name == "cluster_label_candidates":
         clusters = artifact.get("clusters") or []
         if isinstance(clusters, list):
             for cluster in clusters:
@@ -316,7 +333,7 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
                     return f"가장 큰 군집 후보 라벨은 {label}이며 {count}건이다."
         return ""
 
-    if skill_name == "embedding_cluster":
+    if canonical_name == "embedding_cluster":
         clusters = artifact.get("clusters") or []
         if isinstance(clusters, list):
             for cluster in clusters:
@@ -329,7 +346,7 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
                     return f"대표 군집 top term은 {', '.join(terms[:2])}이고 {count}건이다."
         return ""
 
-    if skill_name in {"issue_taxonomy_summary", "dictionary_tagging"}:
+    if canonical_name in {"issue_taxonomy_summary", "dictionary_tagging"}:
         label = str(summary.get("dominant_taxonomy_label") or "").strip()
         count = int(summary.get("dominant_taxonomy_count") or 0)
         if not label:
@@ -343,14 +360,14 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
             return f"가장 큰 taxonomy는 {label}이며 {count}건이다."
         return ""
 
-    if skill_name == "issue_sentiment_summary":
+    if canonical_name == "issue_sentiment_summary":
         label = str(summary.get("dominant_label") or "").strip()
         count = int(summary.get("dominant_label_count") or 0)
         if label and count > 0:
             return f"지배적인 감성은 {label}이며 {count}건이다."
         return ""
 
-    if skill_name == "unstructured_issue_summary":
+    if canonical_name == "unstructured_issue_summary":
         top_terms = [str(item.get("term") or "").strip() for item in list(artifact.get("top_terms") or []) if isinstance(item, dict)]
         top_terms = [term for term in top_terms if term]
         document_count = int(summary.get("document_count") or 0)
@@ -358,7 +375,7 @@ def _analysis_context_summary(artifact: dict[str, Any]) -> str:
             return f"주요 키워드는 {', '.join(top_terms[:3])}이며 문서 수는 {document_count}건이다."
         return ""
 
-    if skill_name == "keyword_frequency":
+    if canonical_name == "term_frequency":
         top_terms = [str(item.get("term") or "").strip() for item in list(artifact.get("top_terms") or []) if isinstance(item, dict)]
         top_terms = [term for term in top_terms if term]
         if top_terms:
@@ -373,6 +390,69 @@ def _copy_artifact_fields(artifact: dict[str, Any], skill_name: str, step_id: An
     copied["skill_name"] = skill_name
     copied["step_id"] = step_id
     return copied
+
+
+def _normalize_result_scope(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return ""
+    return _RESULT_SCOPE_ALIASES.get(normalized, normalized)
+
+
+def infer_runtime_scope_from_prior(
+    payload: dict[str, Any],
+    *,
+    declared_result_scope: str | None = None,
+) -> str:
+    for artifact in reversed(_iter_prior_artifacts(payload.get("prior_artifacts"))):
+        runtime_result_scope = _normalize_result_scope(artifact.get("runtime_result_scope"))
+        if runtime_result_scope:
+            return runtime_result_scope
+        result_scope = _normalize_result_scope(artifact.get("result_scope"))
+        if result_scope:
+            return result_scope
+    normalized_declared_result_scope = _normalize_result_scope(
+        declared_result_scope or payload.get("_declared_result_scope")
+    )
+    if normalized_declared_result_scope:
+        return normalized_declared_result_scope
+    raise ValueError("runtime_result_scope could not be inferred from prior artifacts")
+
+
+def _set_scope_fields(
+    artifact: dict[str, Any],
+    *,
+    declared_result_scope: str,
+    runtime_result_scope: str | None = None,
+) -> dict[str, Any]:
+    normalized_declared_result_scope = _normalize_result_scope(declared_result_scope)
+    if not normalized_declared_result_scope:
+        raise ValueError("declared_result_scope is required")
+    normalized_runtime_result_scope = _normalize_result_scope(
+        runtime_result_scope or normalized_declared_result_scope
+    )
+    if not normalized_runtime_result_scope:
+        raise ValueError("runtime_result_scope is required")
+    artifact["result_scope"] = normalized_declared_result_scope
+    artifact["runtime_result_scope"] = normalized_runtime_result_scope
+    return artifact
+
+
+def _inherit_scope_fields(
+    artifact: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    declared_result_scope: str = "document_subset",
+) -> dict[str, Any]:
+    runtime_result_scope = infer_runtime_scope_from_prior(
+        payload,
+        declared_result_scope=declared_result_scope,
+    )
+    return _set_scope_fields(
+        artifact,
+        declared_result_scope=declared_result_scope,
+        runtime_result_scope=runtime_result_scope,
+    )
 
 
 def _indexed_rows(dataset_name: str) -> list[dict[str, Any]]:
@@ -1012,12 +1092,16 @@ __all__ = [
     "_build_time_bucket_artifact",
     "_cluster_embedding_records",
     "_copy_artifact_fields",
+    "_inherit_scope_fields",
+    "_normalize_result_scope",
+    "_set_scope_fields",
     "_extract_deduplicated_indices",
     "_extract_document_filter_indices",
     "_extract_garbage_filter_indices",
     "_extract_document_samples",
     "_extract_semantic_candidates",
     "_find_prior_artifact",
+    "infer_runtime_scope_from_prior",
     "_indexed_rows",
     "_iter_prior_artifacts",
     "_rank_sample_rows",

@@ -43,6 +43,15 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
             summary["top_n"] = normalized["top_n"]
             summary["sample_n"] = normalized["sample_n"]
             artifact["summary"] = summary
+            rt._set_scope_fields(
+                artifact,
+                declared_result_scope="cluster_subset",
+                runtime_result_scope=(
+                    "full_dataset"
+                    if artifact["cluster_materialization_scope"] == "full_dataset"
+                    else "cluster_subset"
+                ),
+            )
             return {
                 "notes": [
                     f"embedding_cluster loaded precomputed cluster artifact",
@@ -88,7 +97,8 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
         notes.append(f"cluster_fallback_reason: {cluster_fallback_reason}")
     return {
         "notes": notes,
-        "artifact": {
+        "artifact": rt._set_scope_fields(
+            {
             "skill_name": "embedding_cluster",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -118,7 +128,14 @@ def run_embedding_cluster(payload: dict[str, Any]) -> dict[str, Any]:
                 "embedding_source_backend": source_backend,
             },
             "clusters": clusters,
-        },
+            },
+            declared_result_scope="cluster_subset",
+            runtime_result_scope=(
+                "full_dataset"
+                if cluster_materialization_scope == "full_dataset"
+                else "cluster_subset"
+            ),
+        ),
     }
 
 def _load_precomputed_cluster_artifact(cluster_ref: str) -> dict[str, Any] | None:
@@ -147,6 +164,8 @@ def _precomputed_cluster_matches_request(artifact: dict[str, Any], normalized: d
 def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = rt._normalize_cluster_label_payload(payload)
     prior = rt._find_prior_artifact(payload.get("prior_artifacts"), "embedding_cluster")
+    if prior is None:
+        raise ValueError("cluster_label_candidates requires embedding_cluster prior artifact")
     clusters = []
     for cluster in list((prior or {}).get("clusters") or []):
         if not isinstance(cluster, dict):
@@ -170,7 +189,8 @@ def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
             f"cluster_label_candidates generated labels for {len(clusters)} clusters",
             f"dataset source: {normalized['dataset_name']}",
         ],
-        "artifact": {
+        "artifact": rt._inherit_scope_fields(
+            {
             "skill_name": "cluster_label_candidates",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -189,7 +209,9 @@ def run_cluster_label_candidates(payload: dict[str, Any]) -> dict[str, Any]:
                 "label_rule": "top_terms",
             },
             "clusters": clusters,
-        },
+            },
+            payload,
+        ),
     }
 
 
@@ -221,6 +243,7 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
         sample_n=normalized["sample_n"],
         fallback_chunk_ref=chunk_ref,
         fallback_chunk_format=chunk_format,
+        prior_artifacts=payload.get("prior_artifacts"),
     )
     if matches is not None:
         retrieval_backend = "pgvector"
@@ -250,7 +273,8 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
             f"retrieval_backend: {retrieval_backend}",
             f"citation_mode: {citation_mode}",
         ],
-        "artifact": {
+        "artifact": rt._inherit_scope_fields(
+            {
             "skill_name": "semantic_search",
             "step_id": normalized["step"].get("step_id"),
             "dataset_name": normalized["dataset_name"],
@@ -269,7 +293,9 @@ def run_semantic_search(payload: dict[str, Any]) -> dict[str, Any]:
                 "citation_mode": citation_mode,
             },
             "matches": limited,
-        },
+            },
+            payload,
+        ),
     }
 
 
@@ -388,6 +414,7 @@ def _semantic_matches_from_pgvector(
     sample_n: int,
     fallback_chunk_ref: str,
     fallback_chunk_format: str,
+    prior_artifacts: Any = None,
 ) -> list[dict[str, Any]] | None:
     if not dataset_version_id:
         dataset_version_id = _dataset_version_id_from_index_ref(embedding_index_ref)
@@ -411,6 +438,9 @@ def _semantic_matches_from_pgvector(
         return None
     if not rows:
         return []
+    selected_indices = rt._selected_source_indices(prior_artifacts)
+    if selected_indices is not None:
+        rows = [r for r in rows if int(r.get("source_row_index") or 0) in selected_indices]
     chunk_lookup = _chunk_rows_by_id(rows, fallback_chunk_ref)
     matches: list[dict[str, Any]] = []
     for row in rows:
@@ -664,4 +694,3 @@ def _fnv1a_64(value: str) -> int:
 
 def _pgvector_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{value:.8f}" for value in vector) + "]"
-

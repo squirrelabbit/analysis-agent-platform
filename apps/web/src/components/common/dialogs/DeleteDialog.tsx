@@ -33,7 +33,7 @@ export default function DeleteDialog({
           <TooltipTrigger asChild>
             <DialogTrigger asChild>
               <Button
-                size="sm"
+                size="icon-xs"
                 variant="ghost"
                 className="rounded-lg hover:bg-red-50 hover:text-red-500 text-zinc-400"
               >

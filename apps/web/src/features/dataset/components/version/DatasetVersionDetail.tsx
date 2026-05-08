@@ -1,18 +1,14 @@
-import { Item, ItemContent, ItemHeader, ItemTitle } from "@/components/ui/item";
-import type { DatasetVersion } from "../../types/datasetVersion";
-import { Badge } from "@/components/ui/badge";
-import { Activity, CheckCircle2, FileText, RotateCcw } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { DatasetVersion } from "../../types/datasetVersion";
+import DataInfoTab from "./tabs/DataInfoTab";
+import PiplineTab from "./tabs/PiplineTab";
+import { AnalysisResultTab } from "./tabs/AnalysisResultTab";
+import { Item, ItemContent, ItemHeader, ItemTitle } from "@/components/ui/item";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import FileInfoTab from "./FileInfoTab";
-import AnalysisSummaryTab from "./AnalysisSummaryTab";
-import { Button } from "@/components/ui/button";
+import { CheckCircle2 } from "lucide-react";
 
-export default function DatasetVersionDetail({
-  version,
-}: {
-  version: DatasetVersion;
-}) {
+export function DatasetVersionDetail({ version }: { version: DatasetVersion }) {
   return (
     <Item>
       <ItemHeader>
@@ -47,52 +43,27 @@ export default function DatasetVersionDetail({
                 variant="outline"
                 className="border-blue-200 bg-blue-50 text-blue-600 text-[10px] font-semibold"
               >
-                정형
+                {version.dataType === "structured" ? '정형' : '비정형'}
               </Badge>
             </div>
           </div>
         </ItemTitle>
-        <div className="ml-auto shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[11px] gap-1.5"
-          >
-            <RotateCcw className="w-3 h-3" />
-            재실행
-          </Button>
-        </div>
       </ItemHeader>
       <ItemContent>
-        <Tabs defaultValue="data">
-          <TabsList>
-            <TabsTrigger value="data">
-              {" "}
-              <FileText className="w-3 h-3" />
-              데이터 정보
-            </TabsTrigger>
-            <TabsTrigger value="summary">
-              {" "}
-              <Activity className="w-3 h-3" />
-              분석 요약
-            </TabsTrigger>
+        <Tabs defaultValue="info" >
+          <TabsList variant="line">
+            <TabsTrigger value="info">데이터 정보</TabsTrigger>
+            <TabsTrigger value="pipeline">파이프라인</TabsTrigger>
+            <TabsTrigger value="result">분석 결과</TabsTrigger>
           </TabsList>
-          <TabsContent value="data">
-            <FileInfoTab {...version} />
+          <TabsContent value="info">
+            <DataInfoTab {...version} />
           </TabsContent>
-          <TabsContent value="summary">
-            <AnalysisSummaryTab {...version} />
-            <div className="mt-4 pt-4 border-t border-border">
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider mb-1.5">
-                적용 프롬프트
-              </p>
-              <Badge
-                variant="outline"
-                className="text-[11px] border-purple-200 bg-purple-50 text-purple-700"
-              >
-                {version.preparePromptVersion}
-              </Badge>
-            </div>
+          <TabsContent value="pipeline">
+            <PiplineTab version={version} />
+          </TabsContent>
+          <TabsContent value="result">
+            <AnalysisResultTab buildStages={version.buildStages} onDownload={async () => {}} />
           </TabsContent>
         </Tabs>
       </ItemContent>

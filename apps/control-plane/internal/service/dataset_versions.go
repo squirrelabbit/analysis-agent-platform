@@ -189,7 +189,7 @@ func (s *DatasetService) maybeRunEagerClean(projectID, datasetID string, version
 	if len(resolveDatasetBuildTextSelection(version.Metadata, nil).Columns) == 0 {
 		return version
 	}
-	if _, err := s.CreateCleanJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetCleanRequest{}, "dataset_version_create"); err == nil {
+	if _, err := s.CreateCleanJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetCleanRequest{}, "dataset_version_create", ""); err == nil {
 		latest, getErr := s.GetDatasetVersion(projectID, datasetID, version.DatasetVersionID)
 		if getErr == nil {
 			return latest
@@ -205,7 +205,7 @@ func (s *DatasetService) maybeRunEagerSentiment(projectID, datasetID string, ver
 	if !requiresSentiment(version) || !isPrepareReady(version) {
 		return version
 	}
-	if _, err := s.CreateSentimentJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}, "dataset_prepare_complete"); err == nil {
+	if _, err := s.CreateSentimentJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}, "dataset_prepare_complete", ""); err == nil {
 		latest, getErr := s.GetDatasetVersion(projectID, datasetID, version.DatasetVersionID)
 		if getErr == nil {
 			return latest
@@ -224,7 +224,7 @@ func (s *DatasetService) maybeRunEagerEmbedding(projectID, datasetID string, ver
 	if requiresPrepare(version) && !isPrepareReady(version) {
 		return version
 	}
-	if _, err := s.CreateEmbeddingJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}, "dataset_prepare_complete"); err == nil {
+	if _, err := s.CreateEmbeddingJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}, "dataset_prepare_complete", ""); err == nil {
 		latest, getErr := s.GetDatasetVersion(projectID, datasetID, version.DatasetVersionID)
 		if getErr == nil {
 			return latest

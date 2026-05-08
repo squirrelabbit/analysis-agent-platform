@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/obs"
 	"analysis-support-platform/control-plane/internal/registry"
 )
 
@@ -16,7 +18,34 @@ type CompositeRunner struct {
 }
 
 func (r CompositeRunner) Run(ctx context.Context, execution domain.ExecutionSummary) (ExecutionRunResult, error) {
+	l := obs.FromContext(ctx)
 	structuredExecution, structuredCount, unstructuredExecution, unstructuredCount, unsupported := splitExecution(execution)
+
+	// Log per-skill routing decisions.
+	for _, step := range structuredExecution.Plan.Steps {
+		l.Info("skill routing decision",
+			"event", "skill.routing.decision",
+			"skill_name", step.SkillName,
+			"target", "duckdb",
+			"reason", "registry_engine",
+		)
+	}
+	for _, step := range unstructuredExecution.Plan.Steps {
+		l.Info("skill routing decision",
+			"event", "skill.routing.decision",
+			"skill_name", step.SkillName,
+			"target", "python_ai",
+			"reason", "registry_engine",
+		)
+	}
+	for _, name := range unsupported {
+		l.Warn("skill routing decision",
+			"event", "skill.routing.decision",
+			"skill_name", name,
+			"target", "none",
+			"reason", "not_registered",
+		)
+	}
 
 	result := ExecutionRunResult{
 		Artifacts: map[string]string{},
@@ -28,10 +57,32 @@ func (r CompositeRunner) Run(ctx context.Context, execution domain.ExecutionSumm
 		if r.Structured == nil {
 			return ExecutionRunResult{}, errors.New("structured runner is required")
 		}
+		inputShape := skillGroupShape(structuredExecution.Plan.Steps)
+		l.Info("skill execution started",
+			"event", "skill.executed.started",
+			"skill_name", "duckdb",
+			"runtime_layer", "duckdb",
+			"input_shape", inputShape,
+		)
+		groupStart := time.Now()
 		runResult, err := r.Structured.Run(ctx, structuredExecution)
 		if err != nil {
+			l.Error("skill execution failed",
+				"event", "skill.executed.failed",
+				"skill_name", "duckdb",
+				"duration_ms", time.Since(groupStart).Milliseconds(),
+				"error_category", classifySkillError(err),
+			)
 			return ExecutionRunResult{}, err
 		}
+		outputShape := fmt.Sprintf("processed_steps=%d, artifact_count=%d", runResult.ProcessedSteps, len(runResult.Artifacts))
+		l.Info("skill execution completed",
+			"event", "skill.executed.completed",
+			"skill_name", "duckdb",
+			"runtime_layer", "duckdb",
+			"duration_ms", time.Since(groupStart).Milliseconds(),
+			"output_shape", outputShape,
+		)
 		mergeRunResult(&result, runResult)
 		engines = appendEngine(engines, runResult.Engine)
 	}
@@ -40,10 +91,32 @@ func (r CompositeRunner) Run(ctx context.Context, execution domain.ExecutionSumm
 		if r.Unstructured == nil {
 			return ExecutionRunResult{}, errors.New("unstructured runner is required")
 		}
+		inputShape := skillGroupShape(unstructuredExecution.Plan.Steps)
+		l.Info("skill execution started",
+			"event", "skill.executed.started",
+			"skill_name", "python_ai",
+			"runtime_layer", "python-ai",
+			"input_shape", inputShape,
+		)
+		groupStart := time.Now()
 		runResult, err := r.Unstructured.Run(ctx, unstructuredExecution)
 		if err != nil {
+			l.Error("skill execution failed",
+				"event", "skill.executed.failed",
+				"skill_name", "python_ai",
+				"duration_ms", time.Since(groupStart).Milliseconds(),
+				"error_category", classifySkillError(err),
+			)
 			return ExecutionRunResult{}, err
 		}
+		outputShape := fmt.Sprintf("processed_steps=%d, artifact_count=%d", runResult.ProcessedSteps, len(runResult.Artifacts))
+		l.Info("skill execution completed",
+			"event", "skill.executed.completed",
+			"skill_name", "python_ai",
+			"runtime_layer", "python-ai",
+			"duration_ms", time.Since(groupStart).Milliseconds(),
+			"output_shape", outputShape,
+		)
 		mergeRunResult(&result, runResult)
 		engines = appendEngine(engines, runResult.Engine)
 	}
@@ -59,6 +132,35 @@ func (r CompositeRunner) Run(ctx context.Context, execution domain.ExecutionSumm
 	}
 
 	return result, nil
+}
+
+// skillGroupShape builds a concise input_shape summary for a step group.
+func skillGroupShape(steps []domain.SkillPlanStep) string {
+	names := make([]string, len(steps))
+	for i, s := range steps {
+		names[i] = s.SkillName
+	}
+	return fmt.Sprintf("step_count=%d, skills=[%s]", len(steps), strings.Join(names, ","))
+}
+
+// classifySkillError returns a short error category string.
+func classifySkillError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "context canceled"):
+		return "timeout"
+	case strings.Contains(msg, "not found") || strings.Contains(msg, "404"):
+		return "not_found"
+	case strings.Contains(msg, "invalid") || strings.Contains(msg, "bad request") || strings.Contains(msg, "400"):
+		return "invalid_input"
+	case strings.Contains(msg, "python ai worker returned"):
+		return "worker_error"
+	default:
+		return "internal_error"
+	}
 }
 
 func splitExecution(execution domain.ExecutionSummary) (domain.ExecutionSummary, int, domain.ExecutionSummary, int, []string) {

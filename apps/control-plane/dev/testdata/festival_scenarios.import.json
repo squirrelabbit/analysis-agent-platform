@@ -50,7 +50,7 @@
       "analysis_scope": "축제 기간",
       "step": 4,
       "function_name": "빈도 기반 키워드 추출",
-      "runtime_skill_name": "keyword_frequency",
+      "runtime_skill_name": "term_frequency",
       "parameter_text": "top_n=10",
       "parameters": {
         "top_n": 10
@@ -184,7 +184,7 @@
       "analysis_scope": "전/중/후",
       "step": 3,
       "function_name": "기간 구간 키워드 비교",
-      "runtime_skill_name": "keyword_frequency",
+      "runtime_skill_name": "term_frequency",
       "parameter_text": "top_n=10",
       "parameters": {
         "top_n": 10
