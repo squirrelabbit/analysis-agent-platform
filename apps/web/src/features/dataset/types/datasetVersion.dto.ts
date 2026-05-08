@@ -109,3 +109,7 @@ export interface DatasetVersionResponse {
   sentiment_status: string,
   embedding_status: string,
 }
+
+export interface DatasetVersionListResponse {
+  items: Omit<DatasetVersionResponse, "source_summary">[]
+}
