@@ -42,7 +42,7 @@ export default function DatasetVersionHeader({
       </Breadcrumb>
       <div className="flex justify-between my-3">
         <h2 className="mb-1 text-xl font-bold text-[#16192b]">데이터셋 버전</h2>
-        <CreateDialog title="데이터" formId="project-form">
+        <CreateDialog title="데이터" formId="upload-dataset-version-form">
           {(close) => (
             <UploadVersionForm
               formId="upload-dataset-version-form"
