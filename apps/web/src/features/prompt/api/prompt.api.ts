@@ -1,19 +1,11 @@
 import { apiClient } from "@/api/client";
-import type { PromptCatalogResponse, PromptPayload, PromptResponse } from "../types/prompt.dto";
+import type { PromptListResponse, PromptPayload, PromptResponse } from "../types/prompt.dto";
+import type { Operation } from "../types/prompt";
 
 export const promptsApi = {
-  getPromptCatalog: () =>
-    apiClient.get<PromptCatalogResponse>(`/prompt_catalog`).then((r) => r.data),
+  getPrompts: (operation?: Operation) =>
+    apiClient.get<PromptListResponse>(`/prompts`, {params: {operation: operation}}).then((r) => r.data.items),
 
-  getPromptById: (id: string) =>
-    apiClient.get<PromptResponse>(`/prompts/${id}`).then((r) => r.data),
-
-  createPrompt: (req: PromptPayload) =>
-    apiClient.post<PromptResponse>(`/projects`, req).then((r) => r.data),
-
-  updatePrompt: (id: string, req: PromptPayload) =>
-    apiClient.patch<PromptResponse>(`/projects/${id}`, req).then((r) => r.data),
-
-  deletePrompt: (id: string) =>
-    apiClient.delete<void>(`/prompts/${id}`).then((r) => r.data),
-};
+  createPrompt: (project_id: string, req: PromptPayload) =>
+    apiClient.post<PromptResponse>(`/projects/${project_id}/prompts`, req).then((r) => r.data),
+}

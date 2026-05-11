@@ -1,7 +1,7 @@
 import type { Operation } from "./prompt";
 
 export interface PromptResponse {
-  project_id: string;
+  prompt_id: string;
   version: string;
   operation: string;
   title: string;
@@ -11,6 +11,10 @@ export interface PromptResponse {
   content_hash: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface PromptListResponse {
+  items: PromptResponse[]
 }
 
 export interface PromptCatalogResponse {

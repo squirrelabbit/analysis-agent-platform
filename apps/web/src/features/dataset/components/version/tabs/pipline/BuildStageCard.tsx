@@ -11,8 +11,9 @@ import {
 } from "@/components/ui/item";
 import type { BuildStage } from "@/features/dataset/types/datasetVersion";
 import { cn } from "@/lib/utils";
-import { CheckCircle2, Clock, FileText, Lock } from "lucide-react";
+import { CheckCircle2, Clock, Lock } from "lucide-react";
 import { PrepareAccordion, SentimentAccordion } from "./AccordionWrapper";
+import { StageProgressBar } from "./StageProgressBar";
 
 // ── 스테이지 메타 (라벨, 설명, 그룹) ─────────────────────────────────────────
 const STAGE_META: Record<
@@ -102,7 +103,7 @@ export function StageIcon({
 }
 
 export function BuildStageCard({ buildStage }: { buildStage: BuildStage }) {
-  const { stage, status } = buildStage;
+  const { stage, status, diagnostics } = buildStage;
 
   const meta = STAGE_META[stage];
   const config = STATUS_CONFIG[status as "ready" | "stale" | "not_requested"];
@@ -124,18 +125,11 @@ export function BuildStageCard({ buildStage }: { buildStage: BuildStage }) {
           </Button>
         )}
       </ItemActions>
-      {status == "ready" && (
-        <ItemFooter>
-          <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-          <span className="text-xs text-zinc-500 font-mono flex-1 truncate">
-            result.csv
-          </span>
-          <div className="flex items-center gap-3 shrink-0 text-[11px] text-zinc-400">
-            <span>10건</span>
-            <span>16.5MB</span>
-          </div>
-        </ItemFooter>
-      )}
+      <ItemFooter>
+        {diagnostics?.progress && (
+          <StageProgressBar progress={diagnostics?.progress} />
+        )}
+      </ItemFooter>
       {stage === "prepare" && <PrepareAccordion />}
       {stage === "sentiment" && <SentimentAccordion />}
     </Item>

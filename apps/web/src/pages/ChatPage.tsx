@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Send, ChevronRight, Sparkles, Database } from 'lucide-react'
-
-// shadcn components (npx shadcn@latest add ...)
+import { Send, Sparkles, Database } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -33,8 +31,8 @@ import {
   type ChatMessage,
   type ChatScenario,
 } from '@/mock/chatMockData'
-import ScenarioCard from '@/components/chats/ScenarioCard'
-import MessageBubble from '@/components/chats/MessageBubble'
+import MessageBubble from '@/features/chats/MessageBubble'
+import ScenarioCard from '@/features/chats/ScenarioCard'
 
 export function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>(MOCK_INITIAL_MESSAGES)

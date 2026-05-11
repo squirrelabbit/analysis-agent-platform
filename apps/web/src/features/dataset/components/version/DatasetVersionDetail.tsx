@@ -63,7 +63,7 @@ export function DatasetVersionDetail({ version }: { version: DatasetVersion }) {
             <PiplineTab version={version} />
           </TabsContent>
           <TabsContent value="result">
-            <AnalysisResultTab buildStages={version.buildStages} onDownload={async () => {}} />
+            <AnalysisResultTab version={version} />
           </TabsContent>
         </Tabs>
       </ItemContent>

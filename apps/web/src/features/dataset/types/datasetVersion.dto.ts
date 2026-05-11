@@ -49,6 +49,8 @@ export interface ArtifactDto {
   status: string,
   uri: string,
   format: string,
+  model?: string,
+  prompt_version?: string
   metadata: any
   created_at: string
   updated_at: string
