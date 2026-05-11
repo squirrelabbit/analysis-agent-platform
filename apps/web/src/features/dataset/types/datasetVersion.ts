@@ -44,12 +44,14 @@ export interface Artifact {
   status: string,
   uri: string,
   format: string,
+  model?: string,
+  promptVersion?: string
   metadata: any
   createdAt: string
   updatedAt: string
 }
 
-export interface Progress {
+export interface ProgressType {
   percent: number;
   processedRows: number;
   totalRows: number;
@@ -63,7 +65,7 @@ export interface Diagnostics {
   workflowId: string,
   workflowRunId: string,
   resumedExecutionCount: number,
-  progress?: Progress
+  progress?: ProgressType
 }
 
 export interface BuildStage {

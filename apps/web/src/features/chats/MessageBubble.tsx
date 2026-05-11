@@ -1,5 +1,5 @@
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import type { ChatMessage } from "@/mock/chatMockData"
-import { Avatar, AvatarFallback } from "../ui/avatar"
 
 // ── 메시지 말풍선 ────────────────────────────────────────────────────────────
 export default function MessageBubble({ message }: { message: ChatMessage }) {

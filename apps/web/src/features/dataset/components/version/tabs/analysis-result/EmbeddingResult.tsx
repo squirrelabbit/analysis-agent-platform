@@ -10,8 +10,9 @@ export function EmbeddingResult({
 }: {
   stage: BuildStage
   artifact?: Artifact
-  onDownload: (a: Artifact) => Promise<void>
+  onDownload: () => Promise<void>
 }) {
+  const { model } = stage
   if (stage.status === "not_requested") return <EmptyResult message="파이프라인 탭에서 embedding을 실행하세요" />
   if (!artifact) return <EmptyResult />
 
@@ -30,7 +31,9 @@ export function EmbeddingResult({
         title="임베딩 결과"
         action={!isStale ? <DownloadButton artifact={artifact} onDownload={onDownload} /> : undefined}
       >
-        <div className="grid grid-cols-2 gap-2">
+        
+          <StatCard label="모델" value={(model ?? "-")} />
+        <div className="grid grid-cols-2 gap-2 mt-2">
           <StatCard label="총 벡터 수" value={(meta.vector_count ?? 2048).toLocaleString()} unit="개" />
           <StatCard label="벡터 차원" value={meta.vector_dim ?? 1536} />
           <StatCard label="포맷" value={<span className="font-mono text-xs">{artifact.format}</span>} />

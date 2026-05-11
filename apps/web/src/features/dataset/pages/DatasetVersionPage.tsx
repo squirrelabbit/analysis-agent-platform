@@ -30,39 +30,34 @@ export default function DatasetVersionPage() {
   );
 
   useEffect(() => {
-  if (isLoading) return
+    if (isLoading) return;
 
-  setSelected(
-    versions.find((v) => v.isActive)?.id ??
-      versions[0]?.id,
-  )
-}, [versions])
+    setSelected(versions.find((v) => v.isActive)?.id ?? versions[0]?.id);
+  }, [versions]);
 
   if (!project || !dataset) return null;
   return (
-    <>
-      <div className="flex h-[calc(100vh-56px)]">
-        <aside className="w-80  border-r bg-white flex flex-col p-4">
-          <DatasetVersionHeader project={project} dataset={dataset} />
-          {isLoading ? (
-            <VersionSkeleton />
-          ) : (
-            <div className="flex flex-col gap-2">
-              {versions.map((v) => (
-                <DatasetVersionItem
-                  key={v.id}
-                  version={v}
-                  isSelected={selected === v.id}
-                  onSelect={() => setSelected(v.id)}
-                />
-              ))}
-            </div>
-          )}
-        </aside>
-        <div className="flex-1 overflow-x-auto">
-          {version && <DatasetVersionDetail version={version} />}
-        </div>
+    <div className="flex h-[calc(100vh-56px)]">
+      <aside className="w-80 border-r bg-white flex flex-col p-4">
+        <DatasetVersionHeader project={project} dataset={dataset} />
+        {isLoading ? (
+          <VersionSkeleton />
+        ) : (
+          <div className="flex flex-col gap-2">
+            {versions.map((v) => (
+              <DatasetVersionItem
+                key={v.id}
+                version={v}
+                isSelected={selected === v.id}
+                onSelect={() => setSelected(v.id)}
+              />
+            ))}
+          </div>
+        )}
+      </aside>
+      <div className="flex-1 overflow-x-auto">
+        {version && <DatasetVersionDetail version={version} />}
       </div>
-    </>
+    </div>
   );
 }

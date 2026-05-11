@@ -83,19 +83,21 @@ export function DownloadButton({
   onDownload,
 }: {
   artifact: Artifact
-  onDownload: (a: Artifact) => Promise<void>
+  onDownload: () => Promise<void>
 }) {
-  const filename = artifact.uri.split("/").pop() ?? artifact.artifactType
 
+  if (!artifact?.uri) return null
+  // const filename = artifact.uri.split("/").pop() ?? artifact.artifactType
   return (
     <Button
       variant="outline"
       size="sm"
       className="gap-1.5 text-xs h-7 text-zinc-500 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50"
-      onClick={() => onDownload(artifact)}
+      onClick={() => onDownload()}
     >
       <Download className="w-3 h-3" />
-      {filename}
+      다운로드
+      {/* {filename} */}
     </Button>
   )
 }
