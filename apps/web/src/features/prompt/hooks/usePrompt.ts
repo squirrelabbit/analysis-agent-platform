@@ -12,12 +12,3 @@ export const usePrompts = (operation?: Operation) =>
       return data.map(mapPrompt);
     },
   });
-
-export const usePromptDetail = (id: string) =>
-  useQuery({
-    queryKey: promptKeys.detail(id),
-    queryFn: async () => {
-      const data = await promptsApi.getPromptById(id);
-      return mapPrompt(data);
-    },
-  });
