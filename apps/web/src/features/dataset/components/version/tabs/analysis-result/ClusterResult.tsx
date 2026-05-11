@@ -9,7 +9,7 @@ export function ClusterResult({
 }: {
   stage: BuildStage
   artifact?: Artifact
-  onDownload: (a: Artifact) => Promise<void>
+  onDownload: () => Promise<void>
 }) {
   if (stage.status === "not_requested") return <EmptyResult message="파이프라인 탭에서 cluster를 실행하세요" />
   if (stage.status === "stale") return <EmptyResult message="embedding 재실행 후 cluster를 실행하세요" />

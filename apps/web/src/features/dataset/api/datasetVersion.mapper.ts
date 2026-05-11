@@ -6,7 +6,7 @@ import type {
   DatasetVersion,
   Diagnostics,
   PrerpareSummary,
-  Progress,
+  ProgressType,
   SourceSummary,
 } from "../types/datasetVersion";
 import type {
@@ -81,12 +81,14 @@ export const mapArtifact = (dto: ArtifactDto): Artifact => ({
   status: dto.status,
   uri: dto.uri,
   format: dto.format,
+  model: dto.model,
+  promptVersion: dto.prompt_version,
   metadata: dto.metadata,
   createdAt: dto.created_at,
   updatedAt: dto.updated_at,
 });
 
-export const mapProgress = (dto: ProgressDto): Progress => ({
+export const mapProgress = (dto: ProgressDto): ProgressType => ({
   percent: dto.percent,
   processedRows: dto.processed_rows,
   totalRows: dto.total_rows,

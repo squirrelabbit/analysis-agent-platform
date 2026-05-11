@@ -6,21 +6,22 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import type { Project } from "@/features/project/types/project";
-import type { Dataset } from "../../types/dataset";
 import CreateDialog from "@/components/common/dialogs/CreateDialog";
-import UploadVersionForm from "./forms/UploadVersionForm";
-import { useUploadVersionMutation } from "../../hooks/useVersionMutation";
-import { mapUploadFormToRequest } from "../../api/datasetVersion.mapper";
+import CreatePromptForm from "./CreatePromptForm";
+import { useCreatePromptMutation } from "../hooks/usePromptsMutation";
+import type { Project } from "@/features/project/types/project";
+import type { Dataset } from "@/features/dataset/types/dataset";
+import { mapPromptFormToRequest } from "../api/prompt.mapper";
 
-export default function DatasetVersionHeader({
+export default function PromptHeader({
   project,
   dataset,
 }: {
   project: Project;
   dataset: Dataset;
 }) {
-  const { mutateAsync } = useUploadVersionMutation();
+  const { mutateAsync } = useCreatePromptMutation();
+
   return (
     <div>
       <Breadcrumb>
@@ -41,18 +42,13 @@ export default function DatasetVersionHeader({
         </BreadcrumbList>
       </Breadcrumb>
       <div className="flex justify-between my-3">
-        <h2 className="mb-1 text-xl font-bold text-[#16192b]">데이터셋 버전</h2>
-        <CreateDialog title="데이터" formId="upload-dataset-version-form">
+        <h2 className="mb-1 text-xl font-bold text-[#16192b]">프롬프트</h2>
+        <CreateDialog title="프롬프트" formId="prompt-form">
           {(close) => (
-            <UploadVersionForm
-              formId="upload-dataset-version-form"
-              type={dataset.dataType}
+            <CreatePromptForm
+              formId="prompt-form"
               onSubmit={async (data) => {
-                await mutateAsync({
-                  projectId: project.id,
-                  datasetId: dataset.id,
-                  req: mapUploadFormToRequest(data),
-                });
+                await mutateAsync({ projectId: project.id, req: mapPromptFormToRequest(data) })
               }}
               onSuccess={close}
             />

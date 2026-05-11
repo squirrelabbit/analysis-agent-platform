@@ -9,10 +9,14 @@ export function SentimentResult({
 }: {
   stage: BuildStage
   artifact?: Artifact
-  onDownload: (a: Artifact) => Promise<void>
+  onDownload: () => Promise<void>
 }) {
-  if (stage.status === "not_requested") return <EmptyResult message="파이프라인 탭에서 sentiment를 실행하세요" />
+  const { summary, model, promptVersion } = stage
+  if (stage.status === "not_requested" || !summary) return <EmptyResult message="파이프라인 탭에서 sentiment를 실행하세요" />
   if (!artifact) return <EmptyResult />
+
+  const { input_row_count, label_counts, sentiment_batch_size, labeled_row_count, source_row_count, text_column } = summary || {}
+
 
   const meta = artifact.metadata as {
     sentiment_usage?: {
@@ -29,13 +33,11 @@ export function SentimentResult({
   const usage = meta.sentiment_usage
   const total = usage?.request_count ?? 0
 
-  // mock 분포 — 실제는 API에서 제공
-  const dist = { positive: 1065, negative: 573, neutral: 410 }
-
   const DONUT_SEGMENTS = [
-    { label: "긍정", count: dist.positive, color: "#22C55E", pct: total > 0 ? dist.positive / total : 0 },
-    { label: "부정", count: dist.negative, color: "#F87171", pct: total > 0 ? dist.negative / total : 0 },
-    { label: "중립", count: dist.neutral,  color: "#A1A1AA", pct: total > 0 ? dist.neutral / total  : 0 },
+    { label: "긍정", count: label_counts.positive ?? 0, color: "#22C55E", pct: input_row_count > 0 ? label_counts.positive ?? 0 / input_row_count : 0 },
+    { label: "부정", count: label_counts.negative ?? 0, color: "#F87171", pct: input_row_count > 0 ? label_counts.negative ?? 0 / input_row_count : 0 },
+    { label: "중립", count: label_counts.neutral ?? 0,  color: "#A1A1AA", pct: input_row_count > 0 ? label_counts.neutral ?? 0 / input_row_count  : 0 },
+    { label: "긍부정 혼합", count: label_counts.mixed ?? 0,  color: "#FBBF24", pct: input_row_count > 0 ? label_counts.mixed ?? 0 / input_row_count  : 0 },
   ]
 
   // SVG 도넛 계산
@@ -86,13 +88,15 @@ export function SentimentResult({
             ))}
           </div>
         </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <StatCard label="모델" value={<span className="font-mono text-xs">{usage?.model ?? "-"}</span>} />
-          <StatCard
-            label="비용"
-            value={usage?.cost_estimation_status === "free_fallback" ? "무료" : `$${usage?.estimated_cost_usd ?? 0}`}
-          />
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <StatCard label="모델" value={<span className="font-mono text-xs">{model ?? "-"}</span>} />
+          <StatCard label="프롬프트 버전" value={<span className="font-mono text-xs">{promptVersion ?? "-"}</span>} />
+          <StatCard label="배치 크기" value={sentiment_batch_size ?? "-"} />
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <StatCard label="감성 분석 대상 컬럼" value={<span className="font-mono text-xs">{text_column ?? "-"}</span>} />
+          <StatCard label="원본 row 수" value={<span className="font-mono text-xs">{source_row_count ?? "-"}</span>} />
+          <StatCard label="감성 라벨링 성공 row 수" value={<span className="font-mono text-xs">{labeled_row_count ?? "-"}</span>} />
         </div>
       </ResultSection>
 
@@ -105,7 +109,7 @@ export function SentimentResult({
               value={seg.count}
               total={total}
               displayValue={`${seg.count.toLocaleString()}건 (${(seg.pct * 100).toFixed(0)}%)`}
-              color={seg.label === "긍정" ? "bg-emerald-400" : seg.label === "부정" ? "bg-red-300" : "bg-zinc-300"}
+              color={seg.label === "긍정" ? "bg-emerald-400" : seg.label === "부정" ? "bg-red-300" : seg.label === "중립" ? "bg-zinc-300" : "bg-amber-400"}
             />
           ))}
         </div>
