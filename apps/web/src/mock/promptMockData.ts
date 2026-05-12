@@ -33,7 +33,7 @@ export const MOCK_PROMPTS: Prompt[] = [
     operation: "prepare_batch",
     status: "active",
     summary: "이슈 세부정보 보존과 과도한 요약 방지를 강화한 prepare batch 프롬프트",
-    title: "Dataset prepare batch v2",
+    title: "Dataset prepare batch v1",
     updatedAt: "",
     content: `
     ## Task
