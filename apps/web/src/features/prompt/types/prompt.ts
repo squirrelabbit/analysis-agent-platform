@@ -1,13 +1,15 @@
-export type Operation =
+export type PromptOperation =
   | "prepare"
   | "prepare_batch"
   | "sentiment"
   | "sentiment_batch";
 
+export type PromptStatus = "active" | "ready" | "deprecated";
+
 export interface Prompt {
   id: string;
   version: string;
-  operation: string;
+  operation: PromptOperation;
   title: string;
   status: string;
   summary: string;
