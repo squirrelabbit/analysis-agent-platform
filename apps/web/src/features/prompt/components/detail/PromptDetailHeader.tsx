@@ -51,7 +51,7 @@ export function PromptDetailHeader({
             </TabsList>
           </Tabs>
 
-          <Button
+          {/* <Button
             size="sm"
             variant="outline"
             className="h-8 text-[11px] gap-1.5 text-destructive
@@ -60,7 +60,7 @@ export function PromptDetailHeader({
           >
             <Trash2 className="w-3 h-3" />
             삭제
-          </Button>
+          </Button> */}
         </div>
       </div>
 
