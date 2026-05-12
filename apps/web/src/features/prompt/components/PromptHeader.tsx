@@ -23,7 +23,7 @@ export default function PromptHeader({
   const { mutateAsync } = useCreatePromptMutation();
 
   return (
-    <div>
+    <div className="p-3">
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
@@ -41,7 +41,7 @@ export default function PromptHeader({
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-      <div className="flex justify-between my-3">
+      <div className="flex justify-between pt-3">
         <h2 className="mb-1 text-xl font-bold text-[#16192b]">프롬프트</h2>
         <CreateDialog title="프롬프트" formId="prompt-form">
           {(close) => (
