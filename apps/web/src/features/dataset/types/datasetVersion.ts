@@ -1,3 +1,9 @@
+export type VersionRouteParams = {
+  projectId: string
+  datasetId: string
+  versionId: string
+}
+
 export interface SourceSummary {
   available: boolean;
   status: string; // "ready";

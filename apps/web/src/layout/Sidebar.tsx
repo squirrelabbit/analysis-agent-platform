@@ -1,10 +1,11 @@
-import { NavLink, useParams } from "react-router-dom"
+import { NavLink, useLocation, useParams } from "react-router-dom"
 import { Braces, Database, FileText, TextSearch } from "lucide-react"
 import type { Project } from "@/features/project/types/project"
 import { cn } from "@/lib/utils"
 
 
 export default function Sidebar({ project }: { project: Project}) {
+  const { pathname } = useLocation()
   const basePath = `/projects/${project.id}`
   const { datasetId } = useParams()
   
@@ -20,15 +21,16 @@ export default function Sidebar({ project }: { project: Project}) {
       icon: Braces,
     },
   ]
+
   const menus = [
     {
       name: "데이터셋",
-      path: `/${basePath}/datasets`,
+      path: `${basePath}/datasets`,
       icon: Database,
     },
     {
       name: "시나리오",
-      path: `/projects/${project.id}/scenarios`,
+      path: `${basePath}/scenarios`,
       icon: FileText,
     },
   ]
@@ -49,7 +51,7 @@ export default function Sidebar({ project }: { project: Project}) {
                 className={({ isActive }) =>
                   cn(
                     "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
-                    isActive || (menu.name === "데이터셋")
+                    isActive || (menu.path === pathname)
                       ? "bg-indigo-50 text-indigo-500 font-medium"
                       : "text-zinc-600 hover:bg-zinc-100"
                   )
