@@ -1,9 +1,9 @@
-import type { Operation } from "./prompt";
+import type { PromptOperation } from "./prompt";
 
 export interface PromptResponse {
   prompt_id: string;
   version: string;
-  operation: string;
+  operation: PromptOperation;
   title: string;
   status: string;
   summary: string;
@@ -31,6 +31,6 @@ export interface PromptCatalogResponse {
 
 export interface PromptPayload {
   version: string;
-  operation: Operation;
+  operation: PromptOperation;
   content: string;
 }
