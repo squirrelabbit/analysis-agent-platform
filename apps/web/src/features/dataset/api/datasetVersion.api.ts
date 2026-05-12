@@ -70,16 +70,12 @@ export const datasetVersionsApi = {
       { responseType: "blob" },
     ),
 
-  runDatasetVersion: (
+  runBuildJob: (
     projectId: string,
     datasetId: string,
     versionId: string,
-    type: "prepare" | "sentiment",
-  ) =>
-    apiClient
-      .post<void>(
-        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/${type}`,
-      )
+    type: "segment" | "clause_label" | "embedding_cluster" | "keyword_index",
+  ) => apiClient.post(`/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/${type}`)
       .then((r) => r.data),
 
   runDatasetVersionSample: (
@@ -103,25 +99,5 @@ export const datasetVersionsApi = {
   ) =>
     apiClient.get(
       `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/${type}_preview`,
-    ),
-
-  getPreparePreview: (
-    projectId: string,
-    datasetId: string,
-    versionId: string,
-    // limit?: number,
-  ) =>
-    apiClient.get(
-      `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/prepare_preview`,
-    ),
-
-  getSentimentPreview: (
-    projectId: string,
-    datasetId: string,
-    versionId: string,
-    // limit?: number,
-  ) =>
-    apiClient.get(
-      `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/prepare_preview`,
     ),
 };

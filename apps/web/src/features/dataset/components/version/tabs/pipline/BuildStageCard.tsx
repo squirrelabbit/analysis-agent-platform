@@ -1,5 +1,4 @@
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Item,
   ItemActions,
@@ -9,11 +8,16 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import type { BuildStage } from "@/features/dataset/types/datasetVersion";
+import type {
+  BuildStage,
+  VersionRouteParams,
+} from "@/features/dataset/types/datasetVersion";
 import { cn } from "@/lib/utils";
 import { CheckCircle2, Clock, Lock } from "lucide-react";
 import { PrepareAccordion, SentimentAccordion } from "./AccordionWrapper";
 import { StageProgressBar } from "./StageProgressBar";
+import AnalysisDialog from "./forms/AnalysisDialog";
+import { useRunBuildJob } from "@/features/dataset/hooks/useVersionMutation";
 
 // ── 스테이지 메타 (라벨, 설명, 그룹) ─────────────────────────────────────────
 const STAGE_META: Record<
@@ -23,6 +27,7 @@ const STAGE_META: Record<
     desc: string;
     group: string;
     isLLM?: boolean;
+    type?: "segment" | "clause_label" | "embedding_cluster" | "keyword_index";
     isParallel?: boolean;
   }
 > = {
@@ -40,23 +45,27 @@ const STAGE_META: Record<
     label: "전처리 (Prepare)",
     desc: "전체 데이터 LLM 전처리. 비용이 발생합니다.",
     group: "LLM 전처리",
+    type: "segment",
     isLLM: true,
   },
   sentiment: {
     label: "감성 분석",
     desc: "문서별 긍/부정/중립 레이블링. 비용이 발생합니다.",
     group: "분석 — 병렬 실행 가능",
+    type: "clause_label",
     isParallel: true,
   },
   embedding: {
     label: "임베딩",
     desc: "벡터 임베딩 생성. 클러스터링의 선행 단계.",
     group: "분석 — 병렬 실행 가능",
+    type: "embedding_cluster",
     isParallel: true,
   },
   cluster: {
     label: "클러스터링",
     desc: "임베딩 기반 토픽 클러스터 생성.",
+    type: "keyword_index",
     group: "후처리",
   },
 };
@@ -102,8 +111,15 @@ export function StageIcon({
   }
 }
 
-export function BuildStageCard({ buildStage }: { buildStage: BuildStage }) {
+export function BuildStageCard({
+  buildStage,
+  routeParams,
+}: {
+  buildStage: BuildStage;
+  routeParams: VersionRouteParams;
+}) {
   const { stage, status, diagnostics } = buildStage;
+  const { mutateAsync } = useRunBuildJob();
 
   const meta = STAGE_META[stage];
   const config = STATUS_CONFIG[status as "ready" | "stale" | "not_requested"];
@@ -120,9 +136,28 @@ export function BuildStageCard({ buildStage }: { buildStage: BuildStage }) {
       <ItemActions className="flex-col">
         <Badge className={cn(config.badgeClass)}>{config.label}</Badge>
         {status == "not_requested" && (
-          <Button variant="outline" size="sm">
-            실행
-          </Button>
+          <AnalysisDialog
+            title="분석을 실행하시겠습니까?"
+            formId={`${stage}-form`}
+          >
+            {(close) => (
+              <form
+                id={`${stage}-form`}
+                onSubmit={async () => {
+                  try {
+                    meta.type &&
+                      (await mutateAsync({
+                        ...routeParams,
+                        type: meta.type,
+                      }));
+                  } catch (error) {
+                  } finally {
+                    close();
+                  }
+                }}
+              />
+            )}
+          </AnalysisDialog>
         )}
       </ItemActions>
       <ItemFooter>
