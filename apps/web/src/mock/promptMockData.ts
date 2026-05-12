@@ -4,49 +4,108 @@ import type { Prompt } from "@/features/prompt/types/prompt";
 export const MOCK_PROMPTS: Prompt[] = [
   {
     id: "1",
-    version: "0.1",
+    version: "v1",
     contentHash: "",
     createdAt: "",
-    operation: "prepare",
-    status: "ready",
-    summary: "",
-    title: "텍스트 전처리",
+    operation: "prepare_batch",
+    status: "active",
+    summary: " prepare batch 최초 버전. row 순서 유지와 독립 처리를 강조한다.",
+    title: "Dataset prepare batch v1",
     updatedAt: "",
-    content: `당신은 한국어 텍스트 전처리 전문가입니다.
+    content: `
+    ## Task
 
-다음 텍스트를 분석하고 전처리하세요:
+    You are preparing raw VOC or issue text for deterministic downstream analysis.
 
-1. 불필요한 특수문자, HTML 태그, URL을 제거하세요
-2. 이모지와 특수기호를 정리하세요  
-3. 반복되는 공백과 줄바꿈을 정규화하세요
-4. 원문의 의미를 최대한 보존하면서 정제하세요
-
-출력 형식:
-- normalized_text: 정제된 텍스트
-- skip: 처리 불가능한 경우 true`,
+    - Process each row independently and preserve ordering.
+    - Keep the original meaning.
+    - Remove only obvious noise, duplicated punctuation, and boilerplate.
+    - Do not summarize beyond a short normalization.
+    - Do not invent facts.
+    - Choose disposition 'keep', 'review', or 'drop' for each row.
+    `,
   },
   {
     id: "2",
-    version: "0.3",
+    version: "v2",
     contentHash: "",
     createdAt: "",
-    operation: "prepare",
-    status: "ready",
-    summary: "",
-    title: "",
+    operation: "prepare_batch",
+    status: "active",
+    summary: "이슈 세부정보 보존과 과도한 요약 방지를 강화한 prepare batch 프롬프트",
+    title: "Dataset prepare batch v1",
     updatedAt: "",
-    content: "",
+    content: `
+    ## Task
+
+    You are preparing raw VOC or issue text for deterministic downstream analysis.
+
+    - Process each row independently, preserve ordering, and preserve issue-specific details.
+    - Normalize only obvious noise, duplicated punctuation, spacing, and boilerplate.
+    - Do not summarize, merge rows, or infer missing context.
+    - Choose exactly one disposition: 'keep', 'review', or 'drop' for each row.
+
+    ## Rows
+
+    {{rows_json}}
+    `,
   },
   {
     id: "3",
-    version: "0.4",
+    version: "v1",
     contentHash: "",
     createdAt: "",
     operation: "prepare",
-    status: "ready",
-    summary: "",
-    title: "",
+    status: "active",
+    summary: "초기 row 단위 prepare 프롬프트. 기본 정제와 keep/review/drop 판정을 수행한다.",
+    title: "Dataset prepare row v1",
     updatedAt: "",
-    content: "",
+    content: `
+    ## Task
+
+    You are preparing raw VOC or issue text for deterministic downstream analysis.
+
+    - Keep the original meaning.
+    - Remove only obvious noise, duplicated punctuation, and boilerplate.
+    - Do not summarize beyond a short normalization.
+    - Do not invent facts.
+    - Choose disposition 'keep', 'review', or 'drop'.
+    - Use 'drop' only for empty, unreadable noise, or clear non-content rows.
+    - Use 'review' when the text is partially readable but low quality or mixed.
+
+    ## Raw Text
+
+    {{raw_text}}
+    `,
+  },
+  {
+    id: "4",
+    version: "v1",
+    contentHash: "",
+    createdAt: "",
+    operation: "sentiment_batch",
+    status: "active",
+    summary: "감성 라벨링 batch 최초 버전. row 순서 유지와 JSON 배열 응답을 요구한다.",
+    title: "Sentiment batch v1",
+    updatedAt: "",
+    content: `
+    ## Task
+
+    You are labeling sentiment for customer feedback or issue text.
+
+    - Process each row independently and preserve ordering.
+    - Return exactly one label per row: positive, 'negative', neutral, mixed, or 'unknown'.
+    - 'negative': complaint, failure, error, dissatisfaction, delay, refund, blocked experience, or explicit frustration.
+    - positive: satisfaction, appreciation, successful resolution, gratitude, or clearly favorable experience.
+    - neutral: factual status reporting without clear positive or negative sentiment.
+    - mixed: explicit positive and negative signals coexist in the same text.
+    - 'unknown': the text is too ambiguous, too short, or too fragmentary to classify reliably.
+    - Prefer neutral over negative when the text only reports status or handling progress without explicit dissatisfaction.
+    - Do not invent context beyond each row.
+
+    ## Rows
+
+    {{rows_json}}
+    `,
   },
 ];
