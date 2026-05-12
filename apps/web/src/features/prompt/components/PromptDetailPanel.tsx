@@ -9,10 +9,9 @@ import { PromptDetailHeader, type ViewMode } from "./detail/PromptDetailHeader";
 interface Props {
   group: PromptGroup | null;
   onSaveNewVersion?: (groupKey: string, content: string) => void;
-  onDelete?: (promptId: string) => void;
 }
 
-export function PromptDetailPanel({ group, onSaveNewVersion, onDelete }: Props) {
+export function PromptDetailPanel({ group, onSaveNewVersion }: Props) {
   const [activeVersion, setActiveVersion] = useState<string>(
     group?.latestVersion ?? ""
   );
@@ -57,7 +56,6 @@ export function PromptDetailPanel({ group, onSaveNewVersion, onDelete }: Props) 
         }}
         onViewModeChange={setViewMode}
         onAddVersion={() => setViewMode("edit")}
-        onDelete={() => onDelete?.(activePrompt.id)}
       />
 
 

@@ -1,8 +1,7 @@
 import { OperationBadge, StatusBadge } from "../OperationBadge";
 import { VersionPicker } from "./VersionPicker";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Trash2, Calendar, RefreshCw } from "lucide-react";
+import { Calendar, RefreshCw } from "lucide-react";
 import type { Prompt, PromptGroup } from "../../types/prompt";
 import { fmtDate } from "../../utils/prompt";
 
@@ -15,7 +14,6 @@ interface Props {
   onVersionChange: (version: string) => void;
   onViewModeChange: (mode: ViewMode) => void;
   onAddVersion: () => void;
-  onDelete: () => void;
 }
 
 export function PromptDetailHeader({
@@ -25,7 +23,6 @@ export function PromptDetailHeader({
   onVersionChange,
   onViewModeChange,
   onAddVersion,
-  onDelete,
 }: Props) {
   return (
     <div className="px-6 py-4 border-b border-border shrink-0">

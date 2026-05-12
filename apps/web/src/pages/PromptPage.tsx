@@ -30,11 +30,6 @@ export default function PromptPage() {
     console.log("새 버전 저장:", groupKey, content);
   };
 
-  const handleDelete = (promptId: string) => {
-    // API 호출: DELETE /prompts/:id
-    console.log("삭제:", promptId);
-  };
-
   if (!project || !dataset) return null;
   return (
     <div className="flex h-[calc(100vh-56px)]">
@@ -57,7 +52,6 @@ export default function PromptPage() {
           <PromptDetailPanel
            group={selectedGroup}
            onSaveNewVersion={handleSaveNewVersion}
-           onDelete={handleDelete}
          />
         )}
       </div>
