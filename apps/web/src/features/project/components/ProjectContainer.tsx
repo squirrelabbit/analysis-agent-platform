@@ -38,7 +38,7 @@ export default function ProjectContainer({
         name.toLowerCase().includes(query) ||
         description.toLowerCase().includes(search),
     );
-  }, [search]);
+  }, [projects, search]);
 
   // 페이징 계산
   const totalPages = Math.ceil(filteredProjects.length / itemsPerPage);
