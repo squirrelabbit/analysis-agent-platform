@@ -148,7 +148,7 @@ function ProjectListItem({ project, counts, onDelete }: ProjectItemViewProps) {
               </Badge>
             ))}
           </div>
-          <DeleteDialog title="프로젝트 삭제" onDelete={onDelete} Icon={<X />}>
+          <DeleteDialog title="프로젝트 삭제" onDelete={onDelete} Icon={X}>
             <div>프로젝트명: {name}</div>
           </DeleteDialog>
         </ItemActions>

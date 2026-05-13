@@ -15,7 +15,7 @@ interface DeleteDialgProps {
   title: string;
   onDelete: () => void;
   children?: React.ReactNode;
-  Icon?: React.ReactNode;
+  Icon?: React.ComponentType;
 }
 
 export default function DeleteDialog({
@@ -26,12 +26,12 @@ export default function DeleteDialog({
 }: DeleteDialgProps) {
   return (
     <Dialog>
-      <DialogTrigger>
+      <DialogTrigger asChild>
         <Button
           variant="ghost"
           className="hover:bg-red-50 hover:text-red-500 text-zinc-400"
         >
-          {Icon ? Icon : <Trash2 />}
+          {Icon ? <Icon /> : <Trash2 />}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-sm">
