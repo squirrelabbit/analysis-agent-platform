@@ -5,5 +5,6 @@ export interface Project {
   datasetCount: number,
   scenarioCount: number,
   promptCount: number,
+  createdAt: string,
 }
 
