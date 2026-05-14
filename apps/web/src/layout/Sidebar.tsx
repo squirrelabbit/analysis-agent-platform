@@ -1,13 +1,35 @@
 import { NavLink, useLocation, useParams } from "react-router-dom"
-import { Braces, Database, FileText, TextSearch } from "lucide-react"
+import { Braces, Database, FileText, MessageCircle, TextSearch } from "lucide-react"
 import type { Project } from "@/features/project/types/project"
 import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
 
 
 export default function Sidebar({ project }: { project: Project}) {
   const { pathname } = useLocation()
   const basePath = `/projects/${project.id}`
   const { datasetId } = useParams()
+  
+  const menus = [
+    {
+      name: "데이터셋",
+      path: `${basePath}/datasets`,
+      icon: Database,
+      badge: project.datasetCount
+    },
+    {
+      name: "시나리오",
+      path: `${basePath}/scenarios`,
+      icon: FileText,
+      badge: project.scenarioCount
+    },
+    {
+      name: "채팅",
+      path: `${basePath}/chats`,
+      icon: MessageCircle,
+      badge: 0
+    },
+  ]
   
   const subMenus = [
     {
@@ -19,19 +41,6 @@ export default function Sidebar({ project }: { project: Project}) {
       name: "프롬프트",
       path: `${basePath}/datasets/${datasetId}/prompts`,
       icon: Braces,
-    },
-  ]
-
-  const menus = [
-    {
-      name: "데이터셋",
-      path: `${basePath}/datasets`,
-      icon: Database,
-    },
-    {
-      name: "시나리오",
-      path: `${basePath}/scenarios`,
-      icon: FileText,
     },
   ]
 
@@ -50,15 +59,19 @@ export default function Sidebar({ project }: { project: Project}) {
                 to={menu.path}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
+                    "flex items-center gap-2 justify-between px-3 py-2 rounded-md text-sm transition-colors ",
                     isActive || (menu.path === pathname)
-                      ? "bg-indigo-50 text-indigo-500 font-medium"
+                      ? "bg-violet-100 text-violet-600 font-medium"
                       : "text-zinc-600 hover:bg-zinc-100"
                   )
                 }
               >
-                <Icon className="w-4 h-4" />
-                {menu.name}
+                <div className="flex items-center gap-2">
+
+                  <Icon className="w-4 h-4" />
+                  {menu.name}
+                </div>
+                <Badge className={cn(menu.path === pathname ? "bg-violet-200 text-violet-600 ": "bg-zinc-200 text-zinc-600")}>{menu.badge}</Badge>
               </NavLink>
 
               {/* datasetId 있을 때만 서브메뉴 노출 */}
