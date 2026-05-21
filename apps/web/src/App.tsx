@@ -28,6 +28,7 @@ function App() {
                 <Route path="prompts" element={<PromptPage />} />
               </Route>
               <Route path="scenarios" element={<ScenarioPage />} />
+              <Route path="chats" element={<ChatPage />} />
             </Route>
           </Routes>
         </AppLayout>
