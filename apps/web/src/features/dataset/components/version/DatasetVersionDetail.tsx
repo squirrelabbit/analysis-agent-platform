@@ -9,11 +9,10 @@ import { cn } from "@/lib/utils";
 import { CheckCircle2 } from "lucide-react";
 import { fmtDate } from "@/utils/format";
 
-export function DatasetVersionDetail({ version, detail }: { version?: DatasetVersion, detail: DatasetVersionDetail }) {
+export function DatasetVersionDetail({ version, detail }: { version: DatasetVersion, detail: DatasetVersionDetail }) {
   const { createdAt, isActive } = detail
-  const { originalFilename } = version ||{}
+  const { originalFilename } = version
   
-  console.log(version, isActive)
   return (
     <Item>
       <ItemHeader>

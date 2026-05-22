@@ -22,12 +22,9 @@ export default function DatasetVersionPage() {
   );
 
   const [selected, setSelected] = useState<string>();
-
-  const { data: version } = useDatasetVersionDetail(
-    project.id,
-    datasetId,
-    selected,
-  );
+  const { data: detail } = useDatasetVersionDetail(project.id, datasetId, selected)
+  
+  const version = versions.find((v) => v.id == selected)
 
   useEffect(() => {
     if (isLoading) return;
@@ -35,7 +32,7 @@ export default function DatasetVersionPage() {
     setSelected(versions.find((v) => v.isActive)?.id ?? versions[0]?.id);
   }, [versions]);
 
-  if (!project || !dataset) return null;
+  if (!project || !dataset || isLoading) return null;
   return (
     <div className="flex h-[calc(100vh-56px)]">
       <aside className="w-80 border-r bg-white flex flex-col p-4">
@@ -56,7 +53,7 @@ export default function DatasetVersionPage() {
         )}
       </aside>
       <div className="flex-1 overflow-x-auto">
-        {version && <DatasetVersionDetail version={version} />}
+        {version && detail && <DatasetVersionDetail version={version} detail={detail} />}
       </div>
     </div>
   );
