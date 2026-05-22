@@ -1,7 +1,19 @@
+export interface CleanJobPayload {
+  text_columns?: string[];
+  output_path?: string;
+  preprocess_options?: {
+    remove_english: boolean;
+    remove_numbers: boolean;
+    remove_special: boolean;
+    remove_monosyllables: boolean;
+  };
+  force?: boolean;
+}
+
 export interface UploadDatasetVersionRequest {
   file: File,
-  metadata: Record<string, any>,
   data_type: "structured" |"unstructured",
+  activate_on_create: boolean;
 }
 
 export interface SourceSummaryDto {
@@ -23,95 +35,102 @@ export interface CleanSummaryDto {
   dropped_count: number;
   text_columns: string[];
   text_joiner: string;
+  preprocess_options: {
+    remove_english: false;
+    remove_monosyllables: false;
+    remove_numbers: false;
+    remove_special: false;
+  };
   source_input_char_count: number;
   cleaned_input_char_count: number;
   clean_reduced_char_count: number;
+  clean_regex_rule_hits: {
+    html_artifact: number;
+    media_placeholder: number;
+    url_cleanup: number;
+  };
 }
 
-export interface PrerpareSummaryDto {
+export interface DocGenuinenessSummaryDto {
+  input_artifact_ref: string;
   input_row_count: number;
-  output_row_count: number;
-  kept_count: number;
-  review_count: number;
-  dropped_count: number;
-  text_column: string;
-  text_columns: string[];
-  text_joiner: string;
+  model: string;
+  parse_failures: number;
+  processed_row_count: number;
+  prompt_version: string;
+  tier_counts: {
+    genuine_review: number;
+    mixed: number;
+    non_review: number;
+  };
+  total_completion_tokens: number;
+  total_prompt_tokens: number;
 }
 
-export interface ArtifactDto {
-  artifact_id: string,
-  project_id: string,
-  dataset_id: string,
-  dataset_version_id: string,
-  artifact_type: string,
-  stage: string,
-  status: string,
-  uri: string,
-  format: string,
-  model?: string,
-  prompt_version?: string
-  metadata: any
-  created_at: string
-  updated_at: string
+export interface ClauseLabelSummaryDto {
+  // aspect_counts {
+  //     "atmosphere": 0,
+  //     "contents": 0,
+  //     "convenience": 0,
+  //     "etc": 0,
+  //     "food": 0,
+  //     "overall": 0,
+  //     "value": 0
+  // },
+  clause_count: number;
+  include_genuineness: string[];
+  input_artifact_ref: string;
+  input_row_count: number;
+  model: string;
+  parse_failures: number;
+  processed_doc_count: number;
+  prompt_version: string
+  sentiment_counts: {
+    negative: number;
+    neutral: number;
+    positive: number;
+    mixed: number
+  };
+  // reasoning_effort
+  skipped_by_filter: number;
+  skipped_empty: number;
+  total_completion_tokens: number;
+  total_prompt_tokens: number;
 }
 
-export interface ProgressDto {
-  percent: number;
-  processed_rows: number;
-  total_rows: number;
-  elapsed_seconds: number;
-  message: string;
-  updated_at: string
-}
-
-export interface DiagnosticsDto {
-  retry_count: number,
-  workflow_id: string,
-  workflow_run_id: string,
-  resumed_execution_count: number,
-  progress?: ProgressDto
-}
-
-export interface BuildStageDto {
-  stage: string;
-  status: string;
-  applicable: boolean;
-  required: boolean;
-  ready: boolean;
-  depends_on: string[]
-  can_run: boolean;
-  run_group: string;
-  auto_run_eligible: boolean;
-  blocked_reason?:string;
-  latest_job?: Record<string, any>,
-  primary_artifact?: Record<string, any>,
-  artifacts?: ArtifactDto[];
-  summary?: Record<string, any>
-  model?: string,
-  prompt_version?:string,
-  diagnostics?: DiagnosticsDto
+export interface BuildStageResultDto<T = unknown> {
+  status: string
+  completed_at?: string
+  summary?: T
 }
 
 export interface DatasetVersionResponse {
-  dataset_version_id: string,
-  dataset_id: string;
-  project_id: string,
-  metadata: any,
-  storage_uri: string,
-  data_type: string,
-  record_count: number,
-  source_summary: SourceSummaryDto
-  build_stages: BuildStageDto[],
-  is_active: boolean,
-  clean_status: string,
-  clean_summary?: CleanSummaryDto,
-  prepare_status: string,
-  prepare_summary?: PrerpareSummaryDto,
-  sentiment_status: string,
-  embedding_status: string,
+  dataset_version_id: string;
+  created_at: string;
+  is_active: boolean;
+  row_count: number;
+  column_count: number;
+  columns: string[];
+  byte_size: number;
+  clean_status: string;
+  doc_genuineness_status: string;
+  clause_label_status: string;
+  original_filename: string
 }
 
 export interface DatasetVersionListResponse {
-  items: Omit<DatasetVersionResponse, "source_summary">[]
+  items: DatasetVersionResponse[]
+}
+
+export interface DatasetVersionDetailResponse {
+  dataset_version_id: string;
+  created_at: string;
+  is_active: boolean;
+  row_count: number;
+  column_count: number;
+  columns: string[];
+  byte_size: number;
+  clean: BuildStageResultDto;
+  doc_genuineness: BuildStageResultDto;
+  clause_label: BuildStageResultDto;
 }

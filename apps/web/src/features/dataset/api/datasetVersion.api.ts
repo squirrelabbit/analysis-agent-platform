@@ -1,9 +1,11 @@
 import { apiClient } from "@/api/client";
 import {
+  type DatasetVersionDetailResponse,
   type DatasetVersionListResponse,
   type DatasetVersionResponse,
   type UploadDatasetVersionRequest,
 } from "../types/datasetVersion.dto";
+import type { Stage } from "../types/datasetVersion";
 
 export const datasetVersionsApi = {
   getDatasetVersions: (projectId: string, datasetId: string) =>
@@ -19,7 +21,7 @@ export const datasetVersionsApi = {
     versionId: string,
   ) =>
     apiClient
-      .get<DatasetVersionResponse>(
+      .get<DatasetVersionDetailResponse>(
         `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}`,
       )
       .then((r) => r.data),
@@ -70,11 +72,21 @@ export const datasetVersionsApi = {
       { responseType: "blob" },
     ),
 
+  buildJob: <T>(
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+    type: Stage,
+    req?: T
+  ) => apiClient.post(`/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/${type}`, req)
+      .then((r) => r.data),
+
   runBuildJob: (
     projectId: string,
     datasetId: string,
     versionId: string,
-    type: "segment" | "clause_label" | "embedding_cluster" | "keyword_index",
+    type: Stage
+    // type: "segment" | "clause_label" | "embedding_cluster" | "keyword_index",
   ) => apiClient.post(`/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/${type}`)
       .then((r) => r.data),
 

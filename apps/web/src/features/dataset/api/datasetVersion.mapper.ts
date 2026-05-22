@@ -1,175 +1,148 @@
+import { compactObject } from "@/utils/clean";
 import type { UploadVersionFormValues } from "../schcema/dataset.schcema";
+import type { CleanJobFormValues } from "../schcema/version.schema";
 import type {
-  Artifact,
-  BuildStage,
+  ClauseLabelSummary,
   CleanSummary,
   DatasetVersion,
-  Diagnostics,
-  PrerpareSummary,
-  ProgressType,
-  SourceSummary,
+  DatasetVersionDetail,
+  DocGenuinenessSummary,
 } from "../types/datasetVersion";
 import type {
-  ArtifactDto,
-  BuildStageDto,
+  ClauseLabelSummaryDto,
+  CleanJobPayload,
   CleanSummaryDto,
+  DatasetVersionDetailResponse,
   DatasetVersionResponse,
-  DiagnosticsDto,
-  PrerpareSummaryDto,
-  ProgressDto,
-  SourceSummaryDto,
+  DocGenuinenessSummaryDto,
   UploadDatasetVersionRequest,
 } from "../types/datasetVersion.dto";
+
+export const mapDatasetVersion = (
+  dto: DatasetVersionResponse,
+): DatasetVersion => ({
+  id: dto.dataset_version_id,
+  createdAt: dto.created_at,
+  isActive: dto.is_active,
+  rowCount: dto.row_count,
+  columnCount: dto.column_count,
+  columns: dto.columns,
+  byteSize: dto.byte_size,
+  cleanStatus: dto.clean_status,
+  docGenuinenessStatus: dto.doc_genuineness_status,
+  clauseLabelStatus: dto.clause_label_status,
+  originalFilename: dto.original_filename
+});
+
+export const mapDatasetVersionDetail = (
+  dto: DatasetVersionDetailResponse,
+): DatasetVersionDetail => ({
+  id: dto.dataset_version_id,
+  createdAt: dto.created_at,
+  isActive: dto.is_active,
+  rowCount: dto.row_count,
+  columnCount: dto.column_count,
+  columns: dto.columns,
+  byteSize: dto.byte_size,
+  clean: {
+    status: dto.clean.status,
+    completedAt: dto.clean.completed_at,
+    summary: dto.clean.summary ? mapCleanSummary(dto.clean.summary as CleanSummaryDto) : undefined
+  },
+  docGenuineness: {
+    status: dto.doc_genuineness.status,
+    completedAt: dto.doc_genuineness.completed_at,
+    summary: dto.doc_genuineness.summary ? mapDocGenuinenessSummary(dto.doc_genuineness.summary as DocGenuinenessSummaryDto) : undefined
+  },
+  clauseLabel: {
+    status: dto.clause_label.status,
+    completedAt: dto.clause_label.completed_at,
+    summary: dto.clause_label.summary ? mapClauseLabelSummary(dto.clause_label.summary as ClauseLabelSummaryDto) : undefined
+  },
+});
 
 export const mapUploadFormToRequest = (
   form: UploadVersionFormValues,
 ): UploadDatasetVersionRequest => ({
   file: form.file,
   data_type: form.dataType,
-  // prepare_required: form.analysisType === "prepare" ? true : undefined,
-  // sentiment_required: form.analysisType === "sentiment" ? true : undefined,
-  metadata: {
-    text_columns: form.text_columns.map((col) => col.value),
-    clean_preprocess_options: form.cleanOptions
-  }
-});
-
-export const mapSourceSummary = (dto: SourceSummaryDto): SourceSummary => ({
-  available: dto.available,
-  status: dto.status,
-  format: dto.format,
-  rowCount: dto.row_count,
-  columnCount: dto.column_count,
-  columns: dto.columns,
-  errorMessage: dto.error_message,
-  sampleLimit: dto.sample_limit,
-  sampleRows: dto.sample_rows,
+  activate_on_create: form.activateOnCreate,
 });
 
 export const mapCleanSummary = (dto: CleanSummaryDto): CleanSummary => ({
-  inputRowCount: dto.input_row_count,
-  outputRowCount: dto.output_row_count,
-  keptCount: dto.kept_count,
-  droppedCount: dto.dropped_count,
+  inputRowCount: dto.input_row_count ?? 0,
+  outputRowCount: dto.output_row_count ?? 0,
+  keptCount: dto.kept_count ?? 0,
+  droppedCount: dto.dropped_count ?? 0,
   textColumns: dto.text_columns,
   textJoiner: dto.text_joiner,
-  sourceInputCharCount: dto.source_input_char_count,
-  cleanedInputCharCount: dto.cleaned_input_char_count,
-  cleanReducedCharCount: dto.clean_reduced_char_count,
+  preprocessOptions:  {
+    removeEnglish: dto.preprocess_options?.remove_english,
+    removeMonosyllables: dto.preprocess_options?.remove_monosyllables,
+    removeNumbers: dto.preprocess_options?.remove_numbers,
+    removeSpecial: dto.preprocess_options?.remove_special,
+  },
+  sourceInputCharCount: dto.source_input_char_count ?? 0,
+  cleanedInputCharCount: dto.cleaned_input_char_count ?? 0,
+  cleanReducedCharCount: dto.clean_reduced_char_count ?? 0,
+  cleanRegexRuleHits: {
+    htmlArtifact: dto.clean_regex_rule_hits?.html_artifact ?? 0,
+    mediaPlaceholder: dto.clean_regex_rule_hits?.media_placeholder ?? 0,
+    urlCleanup: dto.clean_regex_rule_hits?.url_cleanup ?? 0,
+  }
 });
 
-export const mapPrepareSummary = (
-  dto: PrerpareSummaryDto,
-): PrerpareSummary => ({
+export const mapDocGenuinenessSummary  = (dto: DocGenuinenessSummaryDto): DocGenuinenessSummary => ({
+  inputArtifactRef: dto.input_artifact_ref,
+  inputRowCount: dto.input_row_count ?? 0,
+  model: dto.model,
+  parseFailures: dto.parse_failures ?? 0,
+  processedRowCount: dto.processed_row_count ?? 0,
+  promptVersion: dto.prompt_version,
+  tierCounts: {
+    genuineReview: dto.tier_counts?.genuine_review ?? 0,
+    mixed: dto.tier_counts?.mixed ?? 0,
+    nonReview: dto.tier_counts?.non_review ?? 0
+  },
+  totalCompletionTokens: dto.total_completion_tokens ?? 0,
+  totalPromptTokens: dto.total_prompt_tokens ?? 0,
+});
+
+export const mapClauseLabelSummary  = (dto: ClauseLabelSummaryDto): ClauseLabelSummary => ({
+  clauseCount: dto.clause_count ?? 0,
+  includeGenuineness: dto.include_genuineness,
+  inputArtifactRef: dto.input_artifact_ref,
   inputRowCount: dto.input_row_count,
-  outputRowCount: dto.output_row_count,
-  keptCount: dto.kept_count,
-  reviewCount: dto.review_count,
-  droppedCount: dto.dropped_count,
-  textColumn: dto.text_column,
-  textColumns: dto.text_columns,
-  textJoiner: dto.text_joiner,
-});
-
-export const mapArtifact = (dto: ArtifactDto): Artifact => ({
-  artifactId: dto.artifact_id,
-  projectId: dto.project_id,
-  datasetId: dto.dataset_id,
-  datasetVersionId: dto.dataset_version_id,
-  artifactType: dto.artifact_type,
-  stage: dto.stage,
-  status: dto.status,
-  uri: dto.uri,
-  format: dto.format,
   model: dto.model,
+  parseFailures: dto.parse_failures ?? 0,
+  processedDocCount: dto.processed_doc_count ?? 0,
   promptVersion: dto.prompt_version,
-  metadata: dto.metadata,
-  createdAt: dto.created_at,
-  updatedAt: dto.updated_at,
+  sentimentCounts: {
+    negative: dto.sentiment_counts.negative ?? 0,
+    neutral: dto.sentiment_counts.neutral ?? 0,
+    positive: dto.sentiment_counts.positive ?? 0,
+    mixed: dto.sentiment_counts.mixed ?? 0,
+  },
+  skippedByFilter: dto.skipped_by_filter ?? 0,
+  skippedEmpty: dto.skipped_empty ?? 0,
+  totalCompletionTokens: dto.total_completion_tokens ?? 0,
+  totalPromptTokens: dto.total_prompt_tokens ?? 0,
 });
 
-export const mapProgress = (dto: ProgressDto): ProgressType => ({
-  percent: dto.percent,
-  processedRows: dto.processed_rows,
-  totalRows: dto.total_rows,
-  elapsedSeconds: dto.elapsed_seconds,
-  message: dto.message,
-  updatedAt: dto.updated_at,
-});
-
-export const mapDiagnostics = (dto: DiagnosticsDto): Diagnostics => ({
-  retryCount: dto.retry_count,
-  workflowId: dto.workflow_id,
-  workflowRunId: dto.workflow_run_id,
-  resumedExecutionCount: dto.resumed_execution_count,
-  progress: dto.progress ? mapProgress(dto.progress) : undefined,
-});
-
-export const mapBuildStage = (dto: BuildStageDto): BuildStage => ({
-  stage: dto.stage,
-  status: dto.status,
-  applicable: dto.applicable,
-  required: dto.required,
-  ready: dto.ready,
-  dependsOn: dto.depends_on,
-  canRun: dto.can_run,
-  runGroup: dto.run_group,
-  autoRuEligible: dto.auto_run_eligible,
-  blockedReason: dto.blocked_reason,
-  latestJob: dto.latest_job,
-  primaryArtifact: dto.primary_artifact,
-  artifacts: dto.artifacts?.map(mapArtifact),
-  summary: dto.summary,
-  model: dto.model,
-  promptVersion: dto.prompt_version,
-  diagnostics: dto.diagnostics ? mapDiagnostics(dto.diagnostics) : undefined,
-});
-
-export const mapDatasetVersion = (
-  dto: DatasetVersionResponse,
-): DatasetVersion => ({
-  id: dto.dataset_version_id,
-  datasetId: dto.dataset_id,
-  projectId: dto.project_id,
-  metadata: dto.metadata,
-  storageUri: dto.storage_uri,
-  dataType: dto.data_type,
-  recordCount: dto.record_count,
-  sourceSummary: mapSourceSummary(dto.source_summary),
-  buildStages: dto.build_stages.map(mapBuildStage),
-  isActive: dto.is_active,
-  cleanStatus: dto.clean_status,
-  cleanSummary: dto.clean_summary
-    ? mapCleanSummary(dto.clean_summary)
-    : undefined,
-  prepareStatus: dto.prepare_status,
-  prepareSummary: dto.prepare_summary
-    ? mapPrepareSummary(dto.prepare_summary)
-    : undefined,
-  sentimentStatus: dto.sentiment_status,
-  embeddingStatus: dto.embedding_status,
-});
-
-export const mapVersionList = (
-  dto: Omit<DatasetVersionResponse, "source_summary">,
-): Omit<DatasetVersion, "sourceSummary"> => ({
-  id: dto.dataset_version_id,
-  datasetId: dto.dataset_id,
-  projectId: dto.project_id,
-  metadata: dto.metadata,
-  storageUri: dto.storage_uri,
-  dataType: dto.data_type,
-  recordCount: dto.record_count,
-  buildStages: dto.build_stages.map(mapBuildStage),
-  isActive: dto.is_active,
-  cleanStatus: dto.clean_status,
-  cleanSummary: dto.clean_summary
-    ? mapCleanSummary(dto.clean_summary)
-    : undefined,
-  prepareStatus: dto.prepare_status,
-  prepareSummary: dto.prepare_summary
-    ? mapPrepareSummary(dto.prepare_summary)
-    : undefined,
-  sentimentStatus: dto.sentiment_status,
-  embeddingStatus: dto.embedding_status,
-});
+export const mapCleanJobFormToRequest = (
+  values: CleanJobFormValues,
+): CleanJobPayload => {
+  return compactObject({
+    text_columns: values.textColumns
+      ?.map((v) => v.value.trim())
+      .filter(Boolean),
+    output_path: values.outputPath?.trim(),
+    clean_options: {
+      remove_english: values.cleanOptions.removeEnglish,
+      remove_numbers: values.cleanOptions.removeNumbers,
+      remove_special: values.cleanOptions.removeSpecial,
+      remove_monosyllables: values.cleanOptions.removeMonosyllables,
+    },
+    force: values.force,
+  });
+};
