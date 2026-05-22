@@ -1,72 +1,64 @@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import type {
-  BuildStage,
-  DatasetVersion,
+  BuildStageResult,
+  ClauseLabelSummary,
+  CleanSummary,
+  DatasetVersionDetail,
+  DocGenuinenessSummary,
+  Stage,
 } from "@/features/dataset/types/datasetVersion";
-import { SourceResult } from "./analysis-result/SourceResult";
-import { CleanResult } from "./analysis-result/CleanResult";
-import { PrepareResult } from "./analysis-result/PrepareResult";
-import { SentimentResult } from "./analysis-result/SentimentResult";
-import { EmbeddingResult } from "./analysis-result/EmbeddingResult";
-import { ClusterResult } from "./analysis-result/ClusterResult";
-import { useDownloadVersion } from "@/features/dataset/hooks/useVersionMutation";
+import { useParams } from "react-router-dom";
+import { CleanSummaryTab } from "./analysis-result/CleanSummaryTab";
+import { DocGenuinenessTab } from "./analysis-result/DocGenuinenessTab";
+import { ClauseLabelTab } from "./analysis-result/ClauseLabelTab";
 
-// ── 타입 ──────────────────────────────────────────────────────────────────────
-export type StageStatus =
-  | "ready"
-  | "stale"
-  | "not_requested"
-  | "running"
-  | "error";
 
 // ── 상태 뱃지 ─────────────────────────────────────────────────────────────────
 const STATUS_DOT: Record<string, string> = {
   ready: "bg-emerald-500",
+  enqueue: "bg-amber-400",
   stale: "bg-amber-400",
   not_requested: "bg-zinc-300",
+  failed: "bg-red-400",
+  "": "bg-zinc-300",
 };
 
 const STAGE_LABEL: Record<string, string> = {
-  source: "source",
   clean: "clean",
-  prepare: "prepare",
-  sentiment: "sentiment",
-  embedding: "embedding",
-  cluster: "cluster",
+  docGenuineness: "docGenuineness",
+  clauseLabel: "clauseLabel",
 };
 
-const STAGE_ORDER = [
-  "source",
-  "clean",
-  "prepare",
-  "sentiment",
-  "embedding",
-  "cluster",
-];
+const STAGE_ORDER = ["clean", "docGenuineness", "clauseLabel"];
 
 // ── AnalysisResultTab ─────────────────────────────────────────────────────────
-export function AnalysisResultTab({ version }: { version: DatasetVersion }) {
-  const download = useDownloadVersion();
+export function AnalysisResultTab({
+  detail,
+}: {
+  detail: DatasetVersionDetail;
+}) {
+  const { projectId, datasetId } = useParams();
+  const { clean, docGenuineness, clauseLabel } = detail;
 
-  const stageMap = Object.fromEntries(
-    version.buildStages.map((s) => [s.stage, s]),
-  );
+  const stages: {
+    stage: Stage;
+    buildStage: BuildStageResult;
+    summary?: any;
+  }[] = [
+    { stage: "clean", buildStage: clean },
+    { stage: "docGenuineness", buildStage: docGenuineness },
+    { stage: "clauseLabel", buildStage: clauseLabel },
+  ];
+
+  const stageMap = Object.fromEntries(stages.map((s) => [s.stage, s]));
 
   const orderedStages = STAGE_ORDER.map((key) => stageMap[key]).filter(Boolean);
 
   const defaultTab =
-    orderedStages.find((s) => s.status === "ready")?.stage ??
-    orderedStages[0]?.stage;
+    stages.find(({ buildStage }) => buildStage.status === "ready")?.stage ??
+    stages[0]?.stage;
 
-  const downloadFile = async (stage: string) => {
-    const { id, projectId, datasetId } = version;
-    download.mutateAsync({
-      projectId: projectId,
-      datasetId: datasetId,
-      versionId: id,
-      type: stage as "source" | "clean" | "prepare" | "sentiment",
-    });
-  };
+  if (!projectId || !datasetId) return null;
 
   return (
     <Tabs defaultValue={defaultTab} className="flex flex-col gap-4">
@@ -81,7 +73,7 @@ export function AnalysisResultTab({ version }: { version: DatasetVersion }) {
               data-[state=inactive]:bg-white hover:border-indigo-200 hover:text-indigo-500 transition-colors"
           >
             <span
-              className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[stage.status]}`}
+              className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[stage.buildStage.status]}`}
             />
             {STAGE_LABEL[stage.stage] ?? stage.stage}
           </TabsTrigger>
@@ -89,12 +81,11 @@ export function AnalysisResultTab({ version }: { version: DatasetVersion }) {
       </TabsList>
 
       {/* 각 스테이지 결과 */}
-      {orderedStages.map((stage) => (
-        <TabsContent key={stage.stage} value={stage.stage} className="mt-0">
+      {orderedStages.map(({ stage, buildStage }) => (
+        <TabsContent key={stage} value={stage} className="mt-0">
           <StageResultContent
-            version={version}
             stage={stage}
-            onDownload={async () => await downloadFile(stage.stage)}
+            buildStage={buildStage}
           />
         </TabsContent>
       ))}
@@ -104,67 +95,29 @@ export function AnalysisResultTab({ version }: { version: DatasetVersion }) {
 
 // ── StageResultContent — 스테이지별 라우팅 ────────────────────────────────────
 function StageResultContent({
-  version,
   stage,
-  onDownload,
+  buildStage,
 }: {
-  version: DatasetVersion;
-  stage: BuildStage;
-  onDownload: () => Promise<void>;
+  stage: Stage;
+  buildStage: BuildStageResult;
 }) {
-  const artifact = stage.artifacts?.[0];
-
-  switch (stage.stage) {
-    case "source":
-      return (
-        <SourceResult
-          summary={version.sourceSummary}
-          artifact={artifact}
-          onDownload={onDownload}
-        />
-      );
+  if (!buildStage.summary)
+    return <EmptyResult message={`${stage} 결과가 없습니다`} />;
+  switch (stage) {
     case "clean":
+      return <CleanSummaryTab summary={buildStage.summary as CleanSummary} />;
+    case "docGenuineness":
       return (
-        <CleanResult
-          stage={stage}
-          artifact={artifact}
-          onDownload={onDownload}
+        <DocGenuinenessTab
+          summary={buildStage.summary as DocGenuinenessSummary}
         />
       );
-    case "prepare":
+    case "clauseLabel":
       return (
-        <PrepareResult
-          stage={stage}
-          artifact={artifact}
-          onDownload={onDownload}
-        />
-      );
-    case "sentiment":
-      return (
-        <SentimentResult
-          stage={stage}
-          artifact={artifact}
-          onDownload={onDownload}
-        />
-      );
-    case "embedding":
-      return (
-        <EmbeddingResult
-          stage={stage}
-          artifact={artifact}
-          onDownload={onDownload}
-        />
-      );
-    case "cluster":
-      return (
-        <ClusterResult
-          stage={stage}
-          artifact={artifact}
-          onDownload={onDownload}
-        />
+        <ClauseLabelTab summary={buildStage.summary as ClauseLabelSummary} />
       );
     default:
-      return <EmptyResult message={`${stage.stage} 결과가 없습니다`} />;
+      return <EmptyResult message={`${stage} 결과가 없습니다`} />;
   }
 }
 

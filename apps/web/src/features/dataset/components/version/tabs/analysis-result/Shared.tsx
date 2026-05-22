@@ -1,7 +1,3 @@
-import { Download } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import type { Artifact } from "@/features/dataset/types/datasetVersion"
-
 // 섹션 카드
 export function ResultSection({
   title,
@@ -74,30 +70,5 @@ export function BarRow({
         <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
-  )
-}
-
-// 다운로드 버튼
-export function DownloadButton({
-  artifact,
-  onDownload,
-}: {
-  artifact: Artifact
-  onDownload: () => Promise<void>
-}) {
-
-  if (!artifact?.uri) return null
-  // const filename = artifact.uri.split("/").pop() ?? artifact.artifactType
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      className="gap-1.5 text-xs h-7 text-zinc-500 hover:text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50"
-      onClick={() => onDownload()}
-    >
-      <Download className="w-3 h-3" />
-      다운로드
-      {/* {filename} */}
-    </Button>
   )
 }

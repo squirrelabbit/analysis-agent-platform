@@ -4,69 +4,55 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemFooter,
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
 import type {
-  BuildStage,
-  VersionRouteParams,
+  BuildStageResult,
+  Stage,
 } from "@/features/dataset/types/datasetVersion";
 import { cn } from "@/lib/utils";
 import { CheckCircle2, Clock, Lock } from "lucide-react";
-import { PrepareAccordion, SentimentAccordion } from "./AccordionWrapper";
-import { StageProgressBar } from "./StageProgressBar";
 import AnalysisDialog from "./forms/AnalysisDialog";
-import { useRunBuildJob } from "@/features/dataset/hooks/useVersionMutation";
+import { useParams } from "react-router-dom";
+
+export interface FormProps<T> {
+  formId: string;
+  onSubmit: (data: T) => Promise<void>;
+  onSuccess: () => void;
+}
 
 // ── 스테이지 메타 (라벨, 설명, 그룹) ─────────────────────────────────────────
 const STAGE_META: Record<
-  string,
+  Stage,
   {
     label: string;
     desc: string;
     group: string;
     isLLM?: boolean;
-    type?: "segment" | "clause_label" | "embedding_cluster" | "keyword_index";
+    type: Stage,
     isParallel?: boolean;
   }
 > = {
-  source: {
-    label: "소스 데이터",
-    desc: "업로드된 원본 파일. 분석의 시작점입니다.",
-    group: "기본 빌드",
-  },
   clean: {
-    label: "정제 (Clean)",
+    label: "데이터 정제 (Clean)",
     desc: "노이즈·중복 제거, 텍스트 컬럼 병합.",
     group: "기본 빌드",
+    type: 'clean'
   },
-  prepare: {
-    label: "전처리 (Prepare)",
+  docGenuineness: {
+    label: "문서 품질 검증 전처리 (Prepare)",
     desc: "전체 데이터 LLM 전처리. 비용이 발생합니다.",
     group: "LLM 전처리",
-    type: "segment",
+    type: "docGenuineness",
     isLLM: true,
   },
-  sentiment: {
+  clauseLabel: {
     label: "감성 분석",
     desc: "문서별 긍/부정/중립 레이블링. 비용이 발생합니다.",
     group: "분석 — 병렬 실행 가능",
-    type: "clause_label",
+    type: "clauseLabel",
     isParallel: true,
-  },
-  embedding: {
-    label: "임베딩",
-    desc: "벡터 임베딩 생성. 클러스터링의 선행 단계.",
-    group: "분석 — 병렬 실행 가능",
-    type: "embedding_cluster",
-    isParallel: true,
-  },
-  cluster: {
-    label: "클러스터링",
-    desc: "임베딩 기반 토픽 클러스터 생성.",
-    type: "keyword_index",
-    group: "후처리",
   },
 };
 
@@ -76,6 +62,12 @@ const STATUS_CONFIG = {
     badgeClass: "bg-green-50 text-green-700 border-green-200",
     borderClass: "border-l-green-500",
     iconBg: "bg-green-50",
+  },
+  queued: {
+    label: "대기중",
+    badgeClass: "bg-amber-50 text-amber-700 border-amber-200",
+    borderClass: "border-l-amber-400",
+    iconBg: "bg-amber-50",
   },
   stale: {
     label: "갱신 필요",
@@ -89,6 +81,19 @@ const STATUS_CONFIG = {
     borderClass: "border-l-zinc-300",
     iconBg: "bg-zinc-100",
   },
+  "": {
+    label: "미요청",
+    badgeClass: "bg-zinc-100 text-zinc-500 border-zinc-200",
+    borderClass: "border-l-zinc-300",
+    iconBg: "bg-zinc-100",
+  },
+  failed: {
+    label: "실패",
+    badgeClass: "bg-red-50 text-red-700 border-red-200",
+    borderClass: "border-l-red-400",
+    iconBg: "bg-red-50"
+
+  }
 };
 
 export function StageIcon({
@@ -112,18 +117,21 @@ export function StageIcon({
 }
 
 export function BuildStageCard({
+  id,
+  stage,
   buildStage,
-  routeParams,
 }: {
-  buildStage: BuildStage;
-  routeParams: VersionRouteParams;
+  id: string,
+  stage: Stage,
+  buildStage: BuildStageResult;
 }) {
-  const { stage, status, diagnostics } = buildStage;
-  const { mutateAsync } = useRunBuildJob();
+  const { projectId, datasetId } = useParams()
+  const { status } = buildStage;
 
   const meta = STAGE_META[stage];
-  const config = STATUS_CONFIG[status as "ready" | "stale" | "not_requested"];
+  const config = STATUS_CONFIG[status as "ready" | "stale" | "not_requested" | "queued" | "" | "failed"];
 
+  if (!projectId || !datasetId ) return null
   return (
     <Item className={cn("border-l-2 bg-white", config.borderClass)}>
       <ItemMedia className={cn("p-2 rounded-lg", config.iconBg)}>
@@ -135,38 +143,14 @@ export function BuildStageCard({
       </ItemContent>
       <ItemActions className="flex-col">
         <Badge className={cn(config.badgeClass)}>{config.label}</Badge>
-        {status == "not_requested" && (
           <AnalysisDialog
-            title="분석을 실행하시겠습니까?"
+            versionId={id}
             formId={`${stage}-form`}
-          >
-            {(close) => (
-              <form
-                id={`${stage}-form`}
-                onSubmit={async () => {
-                  try {
-                    meta.type &&
-                      (await mutateAsync({
-                        ...routeParams,
-                        type: meta.type,
-                      }));
-                  } catch (error) {
-                  } finally {
-                    close();
-                  }
-                }}
-              />
-            )}
+            stage={stage}
+            status={status}
+            >
           </AnalysisDialog>
-        )}
       </ItemActions>
-      <ItemFooter>
-        {diagnostics?.progress && (
-          <StageProgressBar progress={diagnostics?.progress} />
-        )}
-      </ItemFooter>
-      {stage === "prepare" && <PrepareAccordion />}
-      {stage === "sentiment" && <SentimentAccordion />}
     </Item>
   );
 }

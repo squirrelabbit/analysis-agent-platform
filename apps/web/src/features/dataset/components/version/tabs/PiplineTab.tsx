@@ -1,19 +1,21 @@
-import type { DatasetVersion } from "@/features/dataset/types/datasetVersion";
+import type { BuildStageResult, DatasetVersionDetail, Stage } from "@/features/dataset/types/datasetVersion";
 import { BuildStageCard } from "./pipline/BuildStageCard";
 
-export default function PiplineTab({ version }: { version: DatasetVersion }) {
-  const { buildStages, projectId, datasetId, id } = version;
-  const routeParams = {
-    projectId: projectId,
-    datasetId: datasetId,
-    versionId: id,
-  };
+export default function PiplineTab({ detail }: { detail: DatasetVersionDetail }) {
+  const { id, clean, docGenuineness, clauseLabel } = detail;
+
+  const stages: {stage: Stage, buildStage: BuildStageResult, summary?: any}[] = [
+    {stage: 'clean', buildStage: clean, },
+    {stage: 'docGenuineness', buildStage: docGenuineness },
+    {stage: 'clauseLabel', buildStage: clauseLabel },
+  ]
 
   return (
     <div className="flex flex-col gap-2">
-      {buildStages.map((bs, idx) => (
-        <BuildStageCard key={idx} buildStage={bs} routeParams={routeParams} />
-      ))}
+      {stages.map((s, idx) => 
+        
+        <BuildStageCard key={idx} id={id} stage={s.stage} buildStage={s.buildStage}  />
+      )}
     </div>
   );
 }

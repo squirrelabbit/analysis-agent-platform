@@ -16,6 +16,8 @@ import DeleteDialog from "@/components/common/dialogs/DeleteDialog";
 import { Switch } from "@/components/ui/switch";
 import { Calendar, Database, FileText } from "lucide-react";
 import FileDownload from "@/components/common/files/FileDownload";
+import { useParams } from "react-router-dom";
+import { fmtDate } from "@/utils/format";
 
 export default function DatasetVersionItem({
   version,
@@ -26,23 +28,58 @@ export default function DatasetVersionItem({
   isSelected: boolean;
   onSelect: () => void;
 }) {
-  const { metadata, recordCount, isActive } = version;
+  const { projectId, datasetId } = useParams();
+  const {
+    // id,
+    originalFilename,
+    createdAt,
+    isActive,
+    rowCount,
+    // columnCount,
+    byteSize,
+  } = version;
 
   const active = useActiveVersion();
   const remove = useRemoveVersion();
   const download = useDownloadVersion();
 
+  if (!projectId || !datasetId) return null;
   return (
     <Item
-      onClick={onSelect}
+      role="button"
       className={cn(
-        "hover:bg-blue-50",
-        isSelected && "bg-blue-50 hover:bg-blue-50",
+        "group cursor-pointer",
+
+        // animation
+        "transition-all duration-200 ease-out",
+
+        // hover
+        "hover:bg-violet-50 hover:border-violet-200",
+        "hover:-translate-y-px",
+        "hover:shadow-sm",
+
+        // focus
+        "focus-visible:outline-none",
+        "focus-visible:ring-2 focus-visible:ring-violet-400/40",
+
+        // selected
+        isSelected && ["bg-violet-50", "border-violet-200", "shadow-sm"],
       )}
+      // className={cn(
+      //   "hover:bg-blue-50 hover:cursor-pointer",
+      //   isSelected && "bg-blue-50 hover:bg-blue-50",
+      // )}
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          onSelect();
+        }
+      }}
     >
       <ItemHeader>
         <div className="flex items-center gap-2">
-          <p>{metadata.upload.original_filename}</p>
+          <p>{originalFilename}</p>
           <Badge
             variant="outline"
             className={cn(
@@ -61,8 +98,8 @@ export default function DatasetVersionItem({
             onCheckedChange={() => {
               if (!isActive) {
                 active.mutateAsync({
-                  projectId: version.projectId,
-                  datasetId: version.datasetId,
+                  projectId: projectId,
+                  datasetId: datasetId,
                   versionId: version.id,
                 });
               }
@@ -75,8 +112,8 @@ export default function DatasetVersionItem({
           <DeleteDialog
             onDelete={() =>
               remove.mutateAsync({
-                projectId: version.projectId,
-                datasetId: version.datasetId,
+                projectId: projectId,
+                datasetId: datasetId,
                 versionId: version.id,
               })
             }
@@ -89,25 +126,25 @@ export default function DatasetVersionItem({
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="text-[10px] flex items-center gap-1">
             <Calendar className="w-2.5 h-2.5" />
-            {metadata.upload.uploaded_at.slice(0, 10)}
+            {fmtDate(createdAt)}
           </span>{" "}
           ·
           <span className="text-[10px] flex items-center gap-1">
             <Database className="w-2.5 h-2.5" />
-            {recordCount?.toLocaleString()}건
+            {rowCount}건
           </span>{" "}
           ·
           <span className="text-[10px] flex items-center gap-1">
             <FileText className="w-2.5 h-2.5" />
-            {formatFileSize(metadata.upload.byte_size)}
+            {formatFileSize(byteSize)}
           </span>
           ·
           <span>
             <FileDownload
               onClick={() =>
                 download.mutateAsync({
-                  projectId: version.projectId,
-                  datasetId: version.datasetId,
+                  projectId: projectId,
+                  datasetId: datasetId,
                   versionId: version.id,
                   type: "source",
                 })

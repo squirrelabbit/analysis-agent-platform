@@ -1,4 +1,4 @@
-import type { DatasetVersion } from "@/features/dataset/types/datasetVersion";
+import type { DatasetVersionDetail } from "@/features/dataset/types/datasetVersion";
 import { formatFileSize } from "@/lib/utils";
 import {
   Item,
@@ -6,25 +6,24 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
-import { PiplineSummary } from "./PiplineSummary";
 
-export default function DataInfoTab(props: DatasetVersion) {
-  const { buildStages, sourceSummary, metadata } = props || {};
+export default function DataInfoTab(props: DatasetVersionDetail) {
+  const { rowCount, columnCount, columns, byteSize } = props || {};
 
   const infos = [
     {
       label: "총 레코드",
-      value: sourceSummary.rowCount?.toLocaleString(),
+      value: rowCount.toLocaleString(),
       sub: "건",
     },
     {
       label: "컬럼 수",
-      value: sourceSummary.columnCount?.toLocaleString(),
+      value: columnCount.toLocaleString(),
       sub: "개",
     },
     {
       label: "파일 크기",
-      value: formatFileSize(metadata.upload.byte_size),
+      value: formatFileSize(byteSize),
       sub: "",
     },
   ];
@@ -45,10 +44,10 @@ export default function DataInfoTab(props: DatasetVersion) {
       <Item className="bg-white shadow-sm my-3" variant="outline">
         <ItemContent>
           <ItemTitle>컬럼 목록</ItemTitle>
-          <div className=" flex gap-2 pt-2">
-            {!metadata?.text_columns
+          <div className="flex flex-wrap gap-2 pt-2">
+            {!columns.length
               ? "-"
-              : metadata.text_columns.map((col: any) => (
+              : columns.map((col: any) => (
                   <span
                     key={col}
                     className="px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-muted border border-border text-foreground"
@@ -59,12 +58,11 @@ export default function DataInfoTab(props: DatasetVersion) {
           </div>
         </ItemContent>
       </Item>
-      <Item className="bg-white shadow-sm" variant="outline">
+      {/* <Item className="bg-white shadow-sm" variant="outline">
         <ItemContent>
-          <ItemTitle>파이프라인</ItemTitle>
-          <PiplineSummary buildStages={buildStages} />
+          <ItemTitle>파이프라인 / 처리 상태</ItemTitle>
         </ItemContent>
-      </Item>
+      </Item> */}
     </div>
   );
 }

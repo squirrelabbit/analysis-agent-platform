@@ -4,10 +4,10 @@ import { cn } from "@/lib/utils"
 
 // ── 타입 ──────────────────────────────────────────────────────────────────────
 export interface CleanPreprocessOptions {
-  remove_english:       boolean
-  remove_numbers:       boolean
-  remove_special:       boolean
-  remove_monosyllables: boolean
+  removeEnglish:       boolean
+  removeNumbers:       boolean
+  removeSpecial:       boolean
+  removeMonosyllables: boolean
 }
 
 interface CleanOptionsAccordionProps {
@@ -21,10 +21,10 @@ const CLEAN_OPTIONS: {
   label: string
   desc: string
 }[] = [
-  { key: "remove_english",       label: "영문 제거",    desc: "영어 단어 및 알파벳 제거" },
-  { key: "remove_numbers",       label: "숫자 제거",    desc: "숫자 및 수식 제거" },
-  { key: "remove_special",       label: "특수문자 제거", desc: "특수기호, 이모지 제거" },
-  { key: "remove_monosyllables", label: "단음절 제거",  desc: "1글자 단어 제거" },
+  { key: "removeEnglish",       label: "영문 제거",    desc: "영어 단어 및 알파벳 제거" },
+  { key: "removeNumbers",       label: "숫자 제거",    desc: "숫자 및 수식 제거" },
+  { key: "removeSpecial",       label: "특수문자 제거", desc: "특수기호, 이모지 제거" },
+  { key: "removeMonosyllables", label: "단음절 제거",  desc: "1글자 단어 제거" },
 ]
 
 // ── Toggle Switch ─────────────────────────────────────────────────────────────

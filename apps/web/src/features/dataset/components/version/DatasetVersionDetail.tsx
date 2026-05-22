@@ -1,5 +1,5 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { DatasetVersion } from "../../types/datasetVersion";
+import type { DatasetVersion, DatasetVersionDetail } from "../../types/datasetVersion";
 import DataInfoTab from "./tabs/DataInfoTab";
 import PiplineTab from "./tabs/PiplineTab";
 import { AnalysisResultTab } from "./tabs/AnalysisResultTab";
@@ -7,8 +7,13 @@ import { Item, ItemContent, ItemHeader, ItemTitle } from "@/components/ui/item";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { CheckCircle2 } from "lucide-react";
+import { fmtDate } from "@/utils/format";
 
-export function DatasetVersionDetail({ version }: { version: DatasetVersion }) {
+export function DatasetVersionDetail({ version, detail }: { version?: DatasetVersion, detail: DatasetVersionDetail }) {
+  const { createdAt, isActive } = detail
+  const { originalFilename } = version ||{}
+  
+  console.log(version, isActive)
   return (
     <Item>
       <ItemHeader>
@@ -16,10 +21,10 @@ export function DatasetVersionDetail({ version }: { version: DatasetVersion }) {
           <div className="flex-1 flex items-center gap-4 py-3 flex-wrap">
             <div>
               <p className="text-[12px] font-mono font-medium text-foreground">
-                {version.metadata.upload.original_filename}
+                {originalFilename}
               </p>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                업로드 {version.metadata.upload.uploaded_at.slice(0, 10)}
+                업로드 {fmtDate(createdAt)}
               </p>
             </div>
 
@@ -28,27 +33,24 @@ export function DatasetVersionDetail({ version }: { version: DatasetVersion }) {
                 variant="outline"
                 className={cn(
                   "h-5 px-2 text-[10px] font-semibold",
-                  version.isActive
+                  isActive
                     ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                     : "bg-muted/50 text-muted-foreground",
                 )}
               >
                 {" "}
-                {version.isActive && (
+                {isActive && (
                   <CheckCircle2 className="w-2.5 h-2.5 mr-1" />
                 )}
-                {version.isActive ? "활성" : "비활성"}
-              </Badge>
-              <Badge
-                variant="outline"
-                className="border-blue-200 bg-blue-50 text-blue-600 text-[10px] font-semibold"
-              >
-                {version.dataType === "structured" ? '정형' : '비정형'}
+                {isActive ? "활성" : "비활성"}
               </Badge>
             </div>
           </div>
         </ItemTitle>
       </ItemHeader>
+          {/* clean            → 데이터 정제
+doc_genuineness  → 문서 품질 검증
+clause_label     → 문장 분류 */}
       <ItemContent>
         <Tabs defaultValue="info" >
           <TabsList variant="line">
@@ -57,13 +59,13 @@ export function DatasetVersionDetail({ version }: { version: DatasetVersion }) {
             <TabsTrigger value="result">분석 결과</TabsTrigger>
           </TabsList>
           <TabsContent value="info">
-            <DataInfoTab {...version} />
+            <DataInfoTab {...detail} />
           </TabsContent>
-          <TabsContent value="pipeline">
-            <PiplineTab version={version} />
+           <TabsContent value="pipeline">
+            <PiplineTab detail={detail} />
           </TabsContent>
           <TabsContent value="result">
-            <AnalysisResultTab version={version} />
+            <AnalysisResultTab detail={detail} />
           </TabsContent>
         </Tabs>
       </ItemContent>
