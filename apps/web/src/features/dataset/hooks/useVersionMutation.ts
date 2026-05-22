@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { datasetVersionsApi } from "../api/datasetVersion.api";
 import type { UploadDatasetVersionRequest } from "../types/datasetVersion.dto";
+import type { Stage } from "../types/datasetVersion";
 
 export const useActiveVersion = () => {
   const queryClient = useQueryClient();
@@ -117,7 +118,8 @@ export const useRunBuildJob = () => {
       projectId: string;
       datasetId: string;
       versionId: string;
-      type: "segment" | "clause_label" | "embedding_cluster" | "keyword_index";
+      type: Stage
+      // type: "segment" | "clause_label" | "embedding_cluster" | "keyword_index";
     }) => datasetVersionsApi.runBuildJob(projectId, datasetId, versionId, type),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["versions"] });
