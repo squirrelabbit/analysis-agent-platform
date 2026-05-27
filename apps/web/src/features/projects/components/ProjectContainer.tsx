@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Project } from "../types/project";
+import type { Project } from "../models/model";
 import ProjectToolbar from "./ProjectToolbar";
 import { ProjectItem } from "./ProjectItem";
 import { ItemGroup } from "@/components/ui/item";

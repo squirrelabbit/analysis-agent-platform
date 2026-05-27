@@ -3,7 +3,7 @@ import type {
   CreateProjectRequest,
   ProjectListResponse,
   ProjectResponse,
-} from "../types/project.dto";
+} from "../models/dto";
 
 export const projectsApi = {
   getProjects: () =>

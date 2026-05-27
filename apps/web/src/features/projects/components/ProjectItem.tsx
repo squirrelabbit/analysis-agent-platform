@@ -7,13 +7,13 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import type { Project } from "../types/project";
+import type { Project } from "../models/model";
 import { useNavigate } from "react-router-dom";
 import { useDeleteProjectMutation } from "../hooks/project.mutation";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Calendar, ChevronRight, X } from "lucide-react";
-import { fmtDate } from "@/utils/format";
+import { fmtDate } from "@/shared/utils/format";
 import DeleteDialog from "@/components/common/dialogs/DeleteDialog";
 
 interface ProjectItemViewProps {

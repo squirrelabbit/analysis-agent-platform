@@ -1,5 +1,5 @@
-import type { Project } from "../types/project";
-import type { ProjectResponse } from "../types/project.dto";
+import type { Project } from "./model";
+import type { ProjectResponse } from "./dto";
 
 export const mapProject = (dto: ProjectResponse): Project => ({
   id: dto.project_id,
