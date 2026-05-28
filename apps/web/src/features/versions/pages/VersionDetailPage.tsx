@@ -2,7 +2,7 @@ import { useVersion } from "../hooks/version.query";
 import type { BuildJobType } from "@/shared/types/common";
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import PipelineCard from "../components/PiplineCard";
+import PipelineCard from "../components/PipelineCard";
 import CleanTab from "../components/tabs/CleanTab";
 import GenuinenessTab from "../components/tabs/GenuinenessTab";
 import { ClauseTab } from "../components/tabs/ClauseTab";

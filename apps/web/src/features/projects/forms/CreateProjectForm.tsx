@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import {
   projectSchema,
   type ProjectFormValues,
-} from "../schcemas/project.schcema";
+} from "../schemas/project.schema";
 
 export default function CreateProjectForm({
   formId,
