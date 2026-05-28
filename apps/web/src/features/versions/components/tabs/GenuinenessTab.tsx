@@ -210,6 +210,9 @@ export default function GenuinenessTab() {
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide w-48">
                   문서 ID
                 </th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide">
+                  정제 텍스트
+                </th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide w-36">
                   판별 결과
                 </th>
@@ -222,7 +225,7 @@ export default function GenuinenessTab() {
               {filtered?.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={3}
+                    colSpan={4}
                     className="text-center py-8 text-sm text-zinc-400"
                   >
                     해당 항목이 없습니다
@@ -236,6 +239,9 @@ export default function GenuinenessTab() {
                   >
                     <td className="px-4 py-3 font-mono text-xs text-zinc-400 max-w-45 truncate">
                       {item.docId}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-zinc-500 leading-relaxed max-w-sm">
+                      {item.cleanedText}
                     </td>
                     <td className="px-4 py-3">
                       {/* <p>{item.genuineness}</p> */}

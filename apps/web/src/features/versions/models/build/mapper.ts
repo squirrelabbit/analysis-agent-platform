@@ -54,6 +54,7 @@ const mapGenuinenessItem = (dto: GenuinenessItemDto): GenuinenessItem => ({
   genuineness: dto.genuineness,
   reason: dto.reason,
   source: dto.source,
+  cleanedText: dto.cleaned_text,
 });
 
 export const mapGenuinenessSummary = (
