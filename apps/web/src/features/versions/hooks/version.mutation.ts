@@ -27,6 +27,9 @@ export const useDeleteVersion = () => {
       queryClient.removeQueries({
         queryKey: versionKeys.detail(projectId, datasetId, id),
       });
+      queryClient.invalidateQueries({
+        queryKey: versionKeys.list(projectId, datasetId),
+      });
     },
   });
 };
