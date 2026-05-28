@@ -14,6 +14,13 @@ import { MetricCard } from "@/components/common/cards/MetricCard";
 import type { ClauseBuild } from "../../models/build";
 import { Badge } from "@/components/ui/badge";
 import { useBuildVersion } from "../../hooks/build.query";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const SENTIMENT_COLORS: Record<string, string> = {
   positive: "#10b981",
@@ -46,6 +53,7 @@ export function ClauseTab() {
   const { data } = useBuildVersion("clause_label") as { data: ClauseBuild | undefined };
   const { summary, items, applied, durationSeconds } = data || {};
   const [filter, setFilter] = useState<string | "">("");
+  const [aspectFilter, setAspectFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -68,7 +76,13 @@ export function ClauseTab() {
     { name: "negative", value: negative, fill: SENTIMENT_COLORS.negative },
   ];
 
-  const filtered = filter ? items?.filter((i) => i.sentiment === filter) : items;
+  const aspectOptions = [...new Set(items?.map((i) => i.aspect) ?? [])];
+
+  const filtered = items?.filter(
+    (i) =>
+      (!filter || i.sentiment === filter) &&
+      (aspectFilter === "all" || i.aspect === aspectFilter),
+  );
   const paginatedItems = filtered?.slice((page - 1) * pageSize, page * pageSize);
   const totalPages = Math.ceil((filtered?.length ?? 0) / pageSize);
 
@@ -226,11 +240,33 @@ export function ClauseTab() {
           <span className="text-xs font-medium text-zinc-500">
             조항 결과 상세 ({items?.length ?? 0}건)
           </span>
-          <div className="flex gap-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Select
+              value={aspectFilter}
+              onValueChange={(v) => {
+                setAspectFilter(v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-7 w-40 text-xs">
+                <SelectValue placeholder="Aspect" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">전체 Aspect</SelectItem>
+                {aspectOptions.map((a) => (
+                  <SelectItem key={a} value={a}>
+                    {a}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {SENTIMENT_FILTER_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
-                onClick={() => setFilter(opt.value)}
+                onClick={() => {
+                  setFilter(opt.value);
+                  setPage(1);
+                }}
                 className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                   filter === opt.value
                     ? "bg-zinc-800 text-white border-zinc-800"
