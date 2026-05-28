@@ -121,6 +121,7 @@ export function ClauseTab() {
               <YAxis
                 type="category"
                 dataKey="name"
+                interval={0}
                 tick={{ fontSize: 11, fill: "#71717a" }}
                 axisLine={false}
                 tickLine={false}
