@@ -14,12 +14,12 @@ export interface BuildBaseDto<TType extends BuildJobType, TSummary> {
   build_type: TType;
   status: string;
   job_id: string;
-  started_at: string;
-  completed_at: string;
-  duration_seconds: number;
-  error_message: string;
-  progress: ProgressDto;
-  summary: TSummary;
+  started_at?: string;
+  completed_at?: string;
+  duration_seconds?: number;
+  error_message: string | null;
+  progress?: ProgressDto;
+  summary?: TSummary;
 }
 
 export interface PaginatedSummaryDto<T> {

@@ -11,14 +11,13 @@ import { Download } from "lucide-react";
 import BuildDialog from "./BuildDialog";
 import { useDownloadFile } from "@/shared/apis/common.mutation";
 import type { BuildJobType } from "@/shared/types/common";
-import type { ProgressType } from "../models/build";
 
 interface PipelineCardProps {
   versionId: string;
   type: BuildJobType;
 }
 
-function ProgressBar({ percent }: ProgressType) {
+function ProgressBar({ percent }: { percent: number }) {
   return (
     <div className="mb-4">
       <div className="flex items-center justify-between mb-2">
@@ -44,9 +43,11 @@ function ProgressBar({ percent }: ProgressType) {
 export default function PipelineCard({ versionId, type }: PipelineCardProps) {
   const { mutateAsync: onDownload } = useDownloadFile();
 
-  const { data } = useBuildVersion(type);
-  if (!data) return null;
-  const { status, buildType, progress } = data || {};
+  const { data, isLoading } = useBuildVersion(type);
+  const status = isLoading ? "running" : (data?.status ?? "not_requested");
+  const buildType = data?.buildType ?? type;
+  const percent = data?.progress?.percent ?? 0;
+
   return (
     <Card className="flex-1 border-slate-200 hover:shadow-md transition-shadow">
       <CardContent>
@@ -62,8 +63,7 @@ export default function PipelineCard({ versionId, type }: PipelineCardProps) {
           </Badge>
         </div>
 
-        <ProgressBar {...progress} />
-        {/* Action Buttons */}
+        <ProgressBar percent={percent} />
         <div className="flex gap-2">
           {status === "completed" && (
             <Button

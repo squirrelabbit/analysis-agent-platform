@@ -18,8 +18,8 @@ export interface BuildBase<TType extends BuildJobType, TSummary> {
   completedAt: string;
   durationSeconds: number;
   errorMessage: string;
-  progress: ProgressType;
-  summary: TSummary;
+  progress?: ProgressType;
+  summary?: TSummary;
 }
 
 export interface PaginatedSummary<T> {

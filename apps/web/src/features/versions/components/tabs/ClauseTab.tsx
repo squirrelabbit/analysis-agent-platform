@@ -13,6 +13,7 @@ import {
 import { MetricCard } from "@/components/common/cards/MetricCard";
 import type { ClauseBuild } from "../../models/build";
 import { Badge } from "@/components/ui/badge";
+import { useBuildVersion } from "../../hooks/build.query";
 
 const SENTIMENT_COLORS: Record<string, string> = {
   positive: "#10b981",
@@ -41,8 +42,13 @@ function SentimentBadge({ value }: { value: string }) {
   return <Badge className={map[value]}>{labels[value]}</Badge>;
 }
 
-export function ClauseTab({ clauseLabel }: { clauseLabel: ClauseBuild }) {
-  const { summary, items, applied, durationSeconds } = clauseLabel;
+export function ClauseTab() {
+  const { data } = useBuildVersion("clause_label") as { data: ClauseBuild | undefined };
+  const { summary, items, applied, durationSeconds } = data || {};
+  if (!summary) {
+    return <p className="text-sm text-zinc-500">표시할 분류 요약이 없습니다.</p>;
+  }
+
   const {
     sentiment: { positive, neutral, negative },
   } = summary;
@@ -61,9 +67,9 @@ export function ClauseTab({ clauseLabel }: { clauseLabel: ClauseBuild }) {
     { name: "negative", value: negative, fill: SENTIMENT_COLORS.negative },
   ];
 
-  const filtered = filter ? items.filter((i) => i.sentiment === filter) : items;
-  const paginatedItems = filtered.slice((page - 1) * pageSize, page * pageSize);
-  const totalPages = Math.ceil(filtered.length / pageSize);
+  const filtered = filter ? items?.filter((i) => i.sentiment === filter) : items;
+  const paginatedItems = filtered?.slice((page - 1) * pageSize, page * pageSize);
+  const totalPages = Math.ceil(filtered?.length ?? 0 / pageSize);
 
   return (
     <div className="space-y-5">
@@ -188,16 +194,16 @@ export function ClauseTab({ clauseLabel }: { clauseLabel: ClauseBuild }) {
                 label: "프롬프트 버전",
                 value: (
                   <span className="font-mono text-xs">
-                    {applied.promptVersion}
+                    {applied?.promptVersion}
                   </span>
                 ),
               },
               {
                 label: "소요 시간",
                 value:
-                  durationSeconds > 0
-                    ? `${Math.floor(durationSeconds / 60)}분 ${durationSeconds % 60}초`
-                    : `${durationSeconds}초`,
+                  durationSeconds ?? 0 > 0
+                    ? `${Math.floor(durationSeconds ?? 0 / 60)}분 ${durationSeconds ?? 0 % 60}초`
+                    : `${durationSeconds ?? 0}초`,
               },
             ].map(({ label, value }) => (
               <div
@@ -216,7 +222,7 @@ export function ClauseTab({ clauseLabel }: { clauseLabel: ClauseBuild }) {
       <div className="rounded-xl border border-zinc-100 bg-white overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-50 flex items-center justify-between flex-wrap gap-2">
           <span className="text-xs font-medium text-zinc-500">
-            조항 결과 상세 ({items.length}건)
+            조항 결과 상세 ({items?.length ?? 0}건)
           </span>
           <div className="flex gap-1.5 flex-wrap">
             {SENTIMENT_FILTER_OPTIONS.map((opt) => (
@@ -253,7 +259,7 @@ export function ClauseTab({ clauseLabel }: { clauseLabel: ClauseBuild }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-50">
-              {filtered.length === 0 ? (
+              {filtered?.length === 0 ? (
                 <tr>
                   <td
                     colSpan={4}
@@ -263,7 +269,7 @@ export function ClauseTab({ clauseLabel }: { clauseLabel: ClauseBuild }) {
                   </td>
                 </tr>
               ) : (
-                paginatedItems.map((item) => (
+                paginatedItems?.map((item) => (
                   <tr
                     key={item.docId}
                     className="hover:bg-zinc-50/60 transition-colors"
@@ -288,7 +294,7 @@ export function ClauseTab({ clauseLabel }: { clauseLabel: ClauseBuild }) {
             </tbody>
           </table>
           <div className="flex items-center justify-between px-4 py-3 border-t border-zinc-100">
-            <p className="text-xs text-zinc-400">총 {filtered.length}개</p>
+            <p className="text-xs text-zinc-400">총 {filtered?.length ?? 0}개</p>
 
             <div className="flex items-center gap-2">
               <Button

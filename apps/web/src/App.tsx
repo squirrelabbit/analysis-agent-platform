@@ -5,8 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ProjectLayout from "./layout/ProjectLayout";
 import ProjectPage from "./pages/ProjectPage";
 import DatasetDetail from "./features/datasets/pages/DatasetDetail";
-import VersionDetail from "./features/versions/pages/VersionDetail";
 import DatasetContainer from "./features/datasets/pages/DatasetContainer";
+import VersionDetailPage from "./features/versions/pages/VersionDetailPage";
 
 function App() {
   const queryClient = new QueryClient();
@@ -21,7 +21,7 @@ function App() {
               <Route index element={<Navigate to="datasets" replace />} />
               <Route path="datasets" element={<DatasetContainer />} />
               <Route path="datasets/:datasetId">
-                <Route path="versions/:versionId" element={<VersionDetail /> }/> 
+                <Route path="versions/:versionId" element={<VersionDetailPage /> }/> 
                 <Route index element={<Navigate to="versions" replace />} />
                 <Route path="versions" element={<DatasetDetail />} />
                 {/* <Route path="prompts" element={<PromptPage />} /> */}

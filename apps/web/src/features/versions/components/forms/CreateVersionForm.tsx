@@ -1,4 +1,4 @@
-import type { DataType } from "@/features/datasets/models/dataset.type";
+import type { DataType } from "@/shared/types/common";
 import {
   versionSchema,
   type VersionFormValues,

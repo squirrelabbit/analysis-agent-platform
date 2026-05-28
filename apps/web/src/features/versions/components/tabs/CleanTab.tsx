@@ -1,8 +1,14 @@
 import { MetricCard } from "@/components/common/cards/MetricCard";
 import type { CleanBuild } from "../../models/build";
+import { useBuildVersion } from "../../hooks/build.query";
 
-export default function CleanTab({ clean }: { clean: CleanBuild }) {
-  const { summary } = clean;
+export default function CleanTab() {
+  const { data } = useBuildVersion("clean") as { data: CleanBuild | undefined };
+  const { summary } = data || {};
+  if (!summary) {
+    return <p className="text-sm text-zinc-500">표시할 정제 요약이 없습니다.</p>;
+  }
+
   const {
     inputRowCount,
     outputRowCount,

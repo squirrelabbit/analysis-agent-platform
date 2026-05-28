@@ -14,6 +14,7 @@ export const versionKeys = {
   build: (
     versionId: string,
     type: BuildJobType,
+    jobId?: string,
   ) =>
-    [...versionKeys.builds(), versionId, type] as const,
+    [...versionKeys.builds(), versionId, type, jobId ?? "latest"] as const,
 }
