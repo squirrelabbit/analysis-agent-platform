@@ -30,7 +30,6 @@ const chartConfig = {
 const FILTER_OPTIONS: { label: string; value: string }[] = [
   { label: "전체", value: "" },
   { label: "진성", value: "genuine_review" },
-  { label: "혼합", value: "mixed" },
   { label: "비진성", value: "non_review" },
   { label: "불확실", value: "uncertain" },
 ];
@@ -133,11 +132,6 @@ export default function GenuinenessTab() {
                 label="진성"
                 value={genuineReview}
                 valueColor="text-emerald-600"
-              />
-              <MetricCard
-                label="혼합"
-                value={mixed}
-                valueColor="text-amber-600"
               />
               <MetricCard
                 label="비진성"
