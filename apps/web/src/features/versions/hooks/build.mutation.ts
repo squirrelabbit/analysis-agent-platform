@@ -10,7 +10,7 @@ export const useBuildJob = <T>() => {
     mutationFn: ({type, req}: { type: BuildJobType, req?: T }) =>
       buildApi.runBuildVersion(projectId, datasetId, versionId, type, req),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["versions"] });
+      queryClient.invalidateQueries({ queryKey: ["builds"] });
     },
   });
 };
