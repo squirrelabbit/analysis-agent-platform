@@ -9,6 +9,7 @@ import {
   PieChart,
   Pie,
   Cell,
+  LabelList,
 } from "recharts";
 import { MetricCard } from "@/components/common/cards/MetricCard";
 import type { ClauseBuild } from "../../models/build";
@@ -51,7 +52,7 @@ function SentimentBadge({ value }: { value: string }) {
 
 export function ClauseTab() {
   const { data } = useBuildVersion("clause_label") as { data: ClauseBuild | undefined };
-  const { summary, items, applied, durationSeconds } = data || {};
+  const { summary, items, applied, durationSeconds, pagination } = data || {};
   const [filter, setFilter] = useState<string | "">("");
   const [aspectFilter, setAspectFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
@@ -86,6 +87,19 @@ export function ClauseTab() {
   const paginatedItems = filtered?.slice((page - 1) * pageSize, page * pageSize);
   const totalPages = Math.ceil((filtered?.length ?? 0) / pageSize);
 
+  const ratio = (n: number) =>
+    summary.total ? `${Math.round((n / summary.total) * 100)}%` : "0%";
+
+  const loadedStart = (pagination?.offset ?? 0) + 1;
+  const loadedEnd = (pagination?.offset ?? 0) + (items?.length ?? 0);
+  const totalCount = pagination?.total ?? items?.length ?? 0;
+
+  const totalSec = Math.round(durationSeconds ?? 0);
+  const durationLabel =
+    totalSec >= 60
+      ? `${Math.floor(totalSec / 60)}분 ${totalSec % 60}초`
+      : `${totalSec}초`;
+
   return (
     <div className="space-y-5">
       {/* Metrics */}
@@ -98,16 +112,19 @@ export function ClauseTab() {
           <MetricCard
             label="긍정 (positive)"
             value={positive}
+            sub={ratio(positive)}
             valueColor="text-emerald-600"
           />
           <MetricCard
             label="중립 (neutral)"
             value={neutral}
+            sub={ratio(neutral)}
             valueColor="text-zinc-500"
           />
           <MetricCard
             label="부정 (negative)"
             value={negative}
+            sub={ratio(negative)}
             valueColor="text-red-500"
           />
         </div>
@@ -124,7 +141,7 @@ export function ClauseTab() {
             <BarChart
               data={aspectData}
               layout="vertical"
-              margin={{ top: 0, right: 16, bottom: 0, left: 10 }}
+              margin={{ top: 0, right: 40, bottom: 0, left: 10 }}
             >
               <XAxis
                 type="number"
@@ -150,7 +167,14 @@ export function ClauseTab() {
                 fill="#3b82f6"
                 radius={[0, 3, 3, 0]}
                 barSize={10}
-              />
+              >
+                <LabelList
+                  dataKey="value"
+                  position="right"
+                  fontSize={11}
+                  fill="#71717a"
+                />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -216,10 +240,7 @@ export function ClauseTab() {
               },
               {
                 label: "소요 시간",
-                value:
-                  (durationSeconds ?? 0) > 0
-                    ? `${Math.floor((durationSeconds ?? 0) / 60)}분 ${(durationSeconds ?? 0) % 60}초`
-                    : `${durationSeconds ?? 0}초`,
+                value: durationLabel,
               },
             ].map(({ label, value }) => (
               <div
@@ -238,7 +259,7 @@ export function ClauseTab() {
       <div className="rounded-xl border border-zinc-100 bg-white overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-50 flex items-center justify-between flex-wrap gap-2">
           <span className="text-xs font-medium text-zinc-500">
-            조항 결과 상세 ({items?.length ?? 0}건)
+            총 {totalCount}건 중 {loadedStart}–{loadedEnd}건 표시
           </span>
           <div className="flex items-center gap-1.5 flex-wrap">
             <Select
