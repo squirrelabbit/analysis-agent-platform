@@ -1,39 +1,46 @@
-import { NavLink, useLocation, useParams } from "react-router-dom"
-import { Braces, Database, FileText, TextSearch } from "lucide-react"
-import type { Project } from "@/features/project/types/project"
-import { cn } from "@/lib/utils"
+import { NavLink, useLocation } from "react-router-dom";
+import { Database, MessageCircle } from "lucide-react";
+import type { Project } from "@/features/projects/models/model";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 
-
-export default function Sidebar({ project }: { project: Project}) {
-  const { pathname } = useLocation()
-  const basePath = `/projects/${project.id}`
-  const { datasetId } = useParams()
-  
-  const subMenus = [
-    {
-      name: "데이터셋 버전",
-      path: `${basePath}/datasets/${datasetId}/versions`,
-      icon: TextSearch,
-    },
-    {
-      name: "프롬프트",
-      path: `${basePath}/datasets/${datasetId}/prompts`,
-      icon: Braces,
-    },
-  ]
+export default function Sidebar({ project }: { project: Project }) {
+  const { pathname } = useLocation();
+  const basePath = `/projects/${project.id}`;
 
   const menus = [
     {
       name: "데이터셋",
       path: `${basePath}/datasets`,
       icon: Database,
+      badge: project.datasetCount,
     },
+    // {
+    //   name: "시나리오",
+    //   path: `${basePath}/scenarios`,
+    //   icon: FileText,
+    //   badge: project.scenarioCount,
+    // },
     {
-      name: "시나리오",
-      path: `${basePath}/scenarios`,
-      icon: FileText,
+      name: "채팅",
+      path: `${basePath}/chats`,
+      icon: MessageCircle,
+      badge: 0,
     },
-  ]
+  ];
+
+  // const subMenus = [
+  //   {
+  //     name: "데이터셋 버전",
+  //     path: `${basePath}/datasets/${datasetId}/versions`,
+  //     icon: TextSearch,
+  //   },
+  //   {
+  //     name: "프롬프트",
+  //     path: `${basePath}/datasets/${datasetId}/prompts`,
+  //     icon: Braces,
+  //   },
+  // ]
 
   return (
     <aside className="w-64 border-r bg-white flex flex-col p-4 gap-4">
@@ -43,26 +50,39 @@ export default function Sidebar({ project }: { project: Project}) {
 
       <nav className="flex flex-col gap-1">
         {menus.map((menu) => {
-          const Icon = menu.icon
+          const Icon = menu.icon;
           return (
             <div key={menu.name}>
               <NavLink
                 to={menu.path}
-                className={({ isActive }) =>
+                className={() =>
                   cn(
-                    "flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors",
-                    isActive || (menu.path === pathname)
-                      ? "bg-indigo-50 text-indigo-500 font-medium"
-                      : "text-zinc-600 hover:bg-zinc-100"
+                    "flex items-center gap-2 justify-between px-3 py-2 rounded-md text-sm transition-colors ",
+                    pathname === menu.path ||
+                      pathname.startsWith(`${menu.path}/`)
+                      ? "bg-violet-100 text-violet-600 font-medium"
+                      : "text-zinc-600 hover:bg-zinc-100",
                   )
                 }
               >
-                <Icon className="w-4 h-4" />
-                {menu.name}
+                <div className="flex items-center gap-2">
+                  <Icon className="w-4 h-4" />
+                  {menu.name}
+                </div>
+                <Badge
+                  className={cn(
+                    pathname === menu.path ||
+                      pathname.startsWith(`${menu.path}/`)
+                      ? "bg-violet-200 text-violet-600 "
+                      : "bg-zinc-200 text-zinc-600",
+                  )}
+                >
+                  {menu.badge}
+                </Badge>
               </NavLink>
 
               {/* datasetId 있을 때만 서브메뉴 노출 */}
-              {menu.name === "데이터셋" && datasetId && (
+              {/* {menu.name === "데이터셋" && datasetId && (
                 <div className="ml-3 mt-0.5 flex flex-col gap-0.5 border-l border-zinc-100 pl-3">
                   {subMenus.map((sub) => {
                     const SubIcon = sub.icon
@@ -85,11 +105,11 @@ export default function Sidebar({ project }: { project: Project}) {
                     )
                   })}
                 </div>
-              )}
+              )} */}
             </div>
-          )
+          );
         })}
       </nav>
     </aside>
-  )
+  );
 }

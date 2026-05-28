@@ -1,7 +1,5 @@
-import { useDatasetId } from "@/hooks/useDatasetId";
-import type { Project } from "@/features/project/types/project";
+import type { Project } from "@/features/projects/models/model";
 import { useOutletContext } from "react-router-dom";
-import { useDatasetDetail } from "@/features/dataset/hooks/useDataset";
 import PromptHeader from "@/features/prompt/components/PromptHeader";
 import { usePrompts } from "@/features/prompt/hooks/usePrompt";
 import { MOCK_PROMPTS } from "@/mock/promptMockData";
@@ -13,11 +11,11 @@ import {
 import { groupPrompts } from "@/features/prompt/utils/prompt";
 import { PromptListPanel } from "@/features/prompt/components/PromptListPanel";
 import { PromptDetailPanel } from "@/features/prompt/components/PromptDetailPanel";
+import { useDataset } from "@/features/datasets/hooks/dataset.query";
 
 export default function PromptPage() {
   const { project } = useOutletContext<{ project: Project }>();
-  const { datasetId } = useDatasetId();
-  const { data: dataset } = useDatasetDetail(project.id, datasetId);
+  const { data: dataset } = useDataset();
   const { data: prompts = MOCK_PROMPTS, isLoading } = usePrompts();
 
   const groups = useMemo(() => groupPrompts(prompts), []);

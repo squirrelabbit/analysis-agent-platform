@@ -31,9 +31,7 @@ export function PromptFilterBar({
       <div className="px-3 pb-2.5 border-b border-border">
         <div className="relative">
           <Search
-            className="absolute left-2.5 top-1/2 -translate-y-1/2
-                             w-3.5 h-3.5 "
-          />
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" />
           <Input
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
