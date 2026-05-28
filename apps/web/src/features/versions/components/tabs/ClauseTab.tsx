@@ -272,7 +272,7 @@ export function ClauseTab() {
               ) : (
                 paginatedItems?.map((item) => (
                   <tr
-                    key={item.docId}
+                    key={item.clauseId}
                     className="hover:bg-zinc-50/60 transition-colors"
                   >
                     <td className="px-4 py-3 font-mono text-xs text-zinc-400 max-w-40 truncate">
