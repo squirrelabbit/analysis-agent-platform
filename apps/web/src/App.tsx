@@ -8,8 +8,9 @@ import DatasetDetail from "./features/datasets/pages/DatasetDetail";
 import DatasetContainer from "./features/datasets/pages/DatasetContainer";
 import VersionDetailPage from "./features/versions/pages/VersionDetailPage";
 
+const queryClient = new QueryClient();
+
 function App() {
-  const queryClient = new QueryClient();
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
