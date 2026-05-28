@@ -3,11 +3,10 @@ import AppLayout from "./layout/AppLayout";
 import { ChatPage } from "./pages/ChatPage";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ProjectLayout from "./layout/ProjectLayout";
-import DatasetPage from "./pages/DatasetPage";
-import ScenarioPage from "./pages/ScenarioPage";
-import DatasetVersionPage from "./features/dataset/pages/DatasetVersionPage";
 import ProjectPage from "./pages/ProjectPage";
-import PromptPage from "./pages/PromptPage";
+import DatasetDetail from "./features/datasets/pages/DatasetDetail";
+import VersionDetail from "./features/versions/pages/VersionDetail";
+import DatasetContainer from "./features/datasets/pages/DatasetContainer";
 
 function App() {
   const queryClient = new QueryClient();
@@ -20,13 +19,14 @@ function App() {
             <Route path="/projects" element={<ProjectPage />} />
             <Route path="/projects/:projectId" element={<ProjectLayout />}>
               <Route index element={<Navigate to="datasets" replace />} />
-              <Route path="datasets" element={<DatasetPage />} />
+              <Route path="datasets" element={<DatasetContainer />} />
               <Route path="datasets/:datasetId">
+                <Route path="versions/:versionId" element={<VersionDetail /> }/> 
                 <Route index element={<Navigate to="versions" replace />} />
-                <Route path="versions" element={<DatasetVersionPage />} />
-                <Route path="prompts" element={<PromptPage />} />
+                <Route path="versions" element={<DatasetDetail />} />
+                {/* <Route path="prompts" element={<PromptPage />} /> */}
               </Route>
-              <Route path="scenarios" element={<ScenarioPage />} />
+              {/* <Route path="scenarios" element={<ScenarioPage />} /> */}
               <Route path="chats" element={<ChatPage />} />
             </Route>
           </Routes>

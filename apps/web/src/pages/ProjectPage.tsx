@@ -1,5 +1,5 @@
-import ProjectContainer from "@/features/project/components/ProjectContainer";
-import { useProjects } from "@/features/project/hooks/project.query";
+import ProjectContainer from "@/features/projects/components/ProjectContainer";
+import { useProjects } from "@/features/projects/hooks/project.query";
 
 export default function ProjectPage() {
   const { data: projects = [], isLoading } = useProjects();
