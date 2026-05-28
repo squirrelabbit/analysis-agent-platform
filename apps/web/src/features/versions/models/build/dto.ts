@@ -1,4 +1,4 @@
-import type { Pagination } from "@/shared/model/common";
+import type { Pagination } from "@/shared/models/common";
 import type { BuildJobType } from "@/shared/types/common";
 
 

@@ -13,7 +13,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import FileUploader from "@/components/common/files/FileUploader";
-import type { FormProps } from "@/shared/model/common";
+import type { FormProps } from "@/shared/models/common";
 import { Checkbox } from "@/components/ui/checkbox";
 
 

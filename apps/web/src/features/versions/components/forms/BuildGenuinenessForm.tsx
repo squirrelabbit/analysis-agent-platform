@@ -1,4 +1,4 @@
-import type { FormProps } from "@/shared/model/common";
+import type { FormProps } from "@/shared/models/common";
 import { BuildGenuinenessSchema, type BuildGenuinenessFormValues } from "../../schemas/build.schema";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
