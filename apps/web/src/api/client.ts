@@ -3,7 +3,7 @@ import axios from 'axios'
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
   timeout: 10_000,
-  headers: { 'Content-Type': 'application/json' },
+  // headers: { 'Content-Type': 'application/json' },
 })
 
 // 요청 인터셉터 — 토큰 주입 (추후 회원 관리 시)
