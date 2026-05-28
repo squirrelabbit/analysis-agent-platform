@@ -1,7 +1,8 @@
 import axios from 'axios'
 
 export const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL,
+  // dev: vite proxy(/api) 경유로 CORS 회피, prod: 빌드 시 주입된 절대주소
+  baseURL: import.meta.env.DEV ? '/api' : import.meta.env.VITE_API_BASE_URL,
   timeout: 10_000,
   // headers: { 'Content-Type': 'application/json' },
 })
