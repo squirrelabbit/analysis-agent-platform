@@ -1,7 +1,7 @@
 import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import { useProjectId } from "@/hooks/useProjectId";
-import { useProjectDetail } from "@/features/project/hooks/project.query";
+import { useProjectDetail } from "@/features/projects/hooks/project.query";
 
 export default function ProjectLayout() {
   const { projectId } = useProjectId();
