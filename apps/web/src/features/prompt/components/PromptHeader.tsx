@@ -9,8 +9,8 @@ import {
 import CreateDialog from "@/components/common/dialogs/CreateDialog";
 import CreatePromptForm from "./CreatePromptForm";
 import { useCreatePromptMutation } from "../hooks/usePromptsMutation";
-import type { Project } from "@/features/project/types/project";
-import type { Dataset } from "@/features/dataset/types/dataset";
+import type { Project } from "@/features/projects/models/model";
+import type { Dataset } from "@/features/datasets/models";
 import { mapPromptFormToRequest } from "../api/prompt.mapper";
 
 export default function PromptHeader({
