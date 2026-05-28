@@ -45,6 +45,10 @@ function SentimentBadge({ value }: { value: string }) {
 export function ClauseTab() {
   const { data } = useBuildVersion("clause_label") as { data: ClauseBuild | undefined };
   const { summary, items, applied, durationSeconds } = data || {};
+  const [filter, setFilter] = useState<string | "">("");
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+
   if (!summary) {
     return <p className="text-sm text-zinc-500">표시할 분류 요약이 없습니다.</p>;
   }
@@ -52,9 +56,6 @@ export function ClauseTab() {
   const {
     sentiment: { positive, neutral, negative },
   } = summary;
-  const [filter, setFilter] = useState<string | "">("");
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
 
   const aspectData = Object.entries(summary.aspect)
     .sort(([, a], [, b]) => b - a)
@@ -69,7 +70,7 @@ export function ClauseTab() {
 
   const filtered = filter ? items?.filter((i) => i.sentiment === filter) : items;
   const paginatedItems = filtered?.slice((page - 1) * pageSize, page * pageSize);
-  const totalPages = Math.ceil(filtered?.length ?? 0 / pageSize);
+  const totalPages = Math.ceil((filtered?.length ?? 0) / pageSize);
 
   return (
     <div className="space-y-5">
@@ -201,8 +202,8 @@ export function ClauseTab() {
               {
                 label: "소요 시간",
                 value:
-                  durationSeconds ?? 0 > 0
-                    ? `${Math.floor(durationSeconds ?? 0 / 60)}분 ${durationSeconds ?? 0 % 60}초`
+                  (durationSeconds ?? 0) > 0
+                    ? `${Math.floor((durationSeconds ?? 0) / 60)}분 ${(durationSeconds ?? 0) % 60}초`
                     : `${durationSeconds ?? 0}초`,
               },
             ].map(({ label, value }) => (

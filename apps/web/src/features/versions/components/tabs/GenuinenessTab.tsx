@@ -56,6 +56,10 @@ export default function GenuinenessTab() {
     data: GenuinenessBuild | undefined;
   };
   const { summary, applied, items } = data || {};
+  const [filter, setFilter] = useState<string>("");
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+
   if (!summary) {
     return (
       <p className="text-sm text-zinc-500">
@@ -66,10 +70,6 @@ export default function GenuinenessTab() {
 
   const { genuineness, total } = summary;
   const { genuineReview, mixed, nonReview, uncertain } = genuineness;
-
-  const [filter, setFilter] = useState<string>("");
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
 
   const pieData = [
     {
@@ -105,7 +105,7 @@ export default function GenuinenessTab() {
     (page - 1) * pageSize,
     page * pageSize,
   );
-  const totalPages = Math.ceil(filtered?.length ?? 0 / pageSize);
+  const totalPages = Math.ceil((filtered?.length ?? 0) / pageSize);
   return (
     <div className="space-y-5">
       {/* Metrics */}
