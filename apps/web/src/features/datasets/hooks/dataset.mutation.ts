@@ -16,7 +16,7 @@ export const useCreateDataset = () => {
     mutationFn: (req: DatasetFormValues) =>
       datasetApi.createDataset(projectId, mapDatasetFormToRequest(req)),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      queryClient.invalidateQueries({ queryKey: datasetKeys.all });
     },
   });
 };
@@ -31,7 +31,7 @@ export const useEditMetadata = () => {
         metadata: { doc_genuineness: mapMetadataRequest(req) },
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      queryClient.invalidateQueries({ queryKey: datasetKeys.all });
     },
   });
 };

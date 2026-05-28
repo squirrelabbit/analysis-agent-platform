@@ -11,7 +11,7 @@ export const useActiveVersion = () => {
     mutationFn: (versionId: string) =>
       versionApi.activeVersion(projectId, datasetId, versionId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["versions"] });
+      queryClient.invalidateQueries({ queryKey: versionKeys.all });
     },
   });
 };
@@ -25,7 +25,7 @@ export const useDeleteVersion = () => {
       versionApi.deleteVersion(projectId, datasetId, versionId),
     onSuccess: (_, id) => {
       queryClient.removeQueries({
-        queryKey: versionKeys.detail(id),
+        queryKey: versionKeys.detail(projectId, datasetId, id),
       });
     },
   });
@@ -46,7 +46,7 @@ export const useCreateVersion = () => {
       return versionApi.createVersion(projectId, datasetId, formData);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["versions"] });
+      queryClient.invalidateQueries({ queryKey: versionKeys.all });
     },
   });
 };

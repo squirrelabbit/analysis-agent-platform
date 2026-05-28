@@ -7,7 +7,7 @@ import { mapDataset } from "../models/mapper";
 export const useDatasets = () => {
   const { projectId } = useProjectParams();
   return useQuery({
-    queryKey: datasetKeys.lists(),
+    queryKey: datasetKeys.list(projectId),
     queryFn: () => datasetApi.getDatasets(projectId),
     select: (data) => data.map(mapDataset),
   });
@@ -16,7 +16,7 @@ export const useDatasets = () => {
 export const useDataset = () => {
   const { projectId, datasetId } = useDatasetParams();
   return useQuery({
-    queryKey: datasetKeys.lists(),
+    queryKey: datasetKeys.detail(projectId, datasetId),
     queryFn: () => datasetApi.getDataset(projectId, datasetId),
     select: mapDataset,
   });

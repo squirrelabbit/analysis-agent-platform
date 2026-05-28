@@ -10,7 +10,7 @@ import { mapVersion, mapVersionDetail } from "../models/version";
 export const useVersions = () => {
   const { projectId, datasetId } = useDatasetParams();
   return useQuery({
-    queryKey: versionKeys.lists(),
+    queryKey: versionKeys.list(projectId, datasetId),
     queryFn: () => versionApi.getVersions(projectId, datasetId),
     select: (data) => data.map(mapVersion),
   });
@@ -19,7 +19,7 @@ export const useVersions = () => {
 export const useVersion = () => {
   const { projectId, datasetId, versionId } = useVersionParams();
   return useQuery({
-    queryKey: versionKeys.detail(versionId),
+    queryKey: versionKeys.detail(projectId, datasetId, versionId),
     queryFn: () => versionApi.getVersion(projectId, datasetId, versionId),
     enabled: !!versionId,
     select: mapVersionDetail,

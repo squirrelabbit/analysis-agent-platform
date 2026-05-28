@@ -17,7 +17,6 @@ export default function VersionDetailPage() {
 
   return (
     <div className="p-8">
-      <div>{version.id}</div>
       <div className="grid md:grid-cols-3 gap-4">
         {builds.map((build) => (
           <PipelineCard key={build} versionId={version.id} type={build} />

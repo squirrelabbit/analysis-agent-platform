@@ -5,10 +5,13 @@ export const versionKeys = {
 
   lists: () => [...versionKeys.all, "list"] as const,
 
+  list: (projectId: string, datasetId: string) =>
+    [...versionKeys.lists(), projectId, datasetId] as const,
+
   details: () => [...versionKeys.all, "detail"] as const,
 
-  detail: (versionId: string) =>
-    [...versionKeys.details(), versionId] as const,
+  detail: (projectId: string, datasetId: string, versionId: string) =>
+    [...versionKeys.details(), projectId, datasetId, versionId] as const,
 };
 
 export const buildKeys = {
