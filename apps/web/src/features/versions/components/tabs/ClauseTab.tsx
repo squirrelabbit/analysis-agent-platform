@@ -87,9 +87,6 @@ export function ClauseTab() {
   const paginatedItems = filtered?.slice((page - 1) * pageSize, page * pageSize);
   const totalPages = Math.ceil((filtered?.length ?? 0) / pageSize);
 
-  const ratio = (n: number) =>
-    summary.total ? `${Math.round((n / summary.total) * 100)}%` : "0%";
-
   const loadedStart = (pagination?.offset ?? 0) + 1;
   const loadedEnd = (pagination?.offset ?? 0) + (items?.length ?? 0);
   const totalCount = pagination?.total ?? items?.length ?? 0;
@@ -112,19 +109,16 @@ export function ClauseTab() {
           <MetricCard
             label="긍정 (positive)"
             value={positive}
-            sub={ratio(positive)}
             valueColor="text-emerald-600"
           />
           <MetricCard
             label="중립 (neutral)"
             value={neutral}
-            sub={ratio(neutral)}
             valueColor="text-zinc-500"
           />
           <MetricCard
             label="부정 (negative)"
             value={negative}
-            sub={ratio(negative)}
             valueColor="text-red-500"
           />
         </div>
