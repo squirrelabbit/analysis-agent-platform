@@ -14,11 +14,11 @@ export default function DatasetDetail() {
   const { data: dataset } = useDataset();
   const { mutateAsync} = useCreateVersion()
 
-  if (!dataset)return null
+  if (!project || !dataset) return null;
   return (
     <div className="p-8">
       {/* 데이터셋 정보 */}
-      <HeadBreadcrumb project={project!} dataset={dataset} />
+      <HeadBreadcrumb project={project} dataset={dataset} />
       <div className="flex items-center justify-between mt-4 mb-6">
         <div>
           <h2 className="text-xl font-bold">{dataset?.name}</h2>
