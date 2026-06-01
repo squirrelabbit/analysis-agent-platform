@@ -6,6 +6,7 @@ import CollapsibleTable from "./CollapsibleTable";
 import DisplayTable from "./DisplayTable";
 import MessageWarnings from "./MessageWarnings";
 import PlanPanel from "./PlanPanel";
+import RunStatus from "./RunStatus";
 
 // 메시지 하나에 chart/table을 동시에 펼치지 않는다 — recommended_view 기준
 // 단일 메인 결과 + 필요 시 상세 데이터 접이식.
@@ -55,6 +56,10 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
         )}
       >
         <div className="whitespace-pre-wrap break-words">{message.content}</div>
+
+        {!isUser && (
+          <RunStatus status={message.runStatus} error={message.runError} />
+        )}
 
         {showFallbackNotice && (
           <p className="mt-2 text-[11px] text-zinc-500">
