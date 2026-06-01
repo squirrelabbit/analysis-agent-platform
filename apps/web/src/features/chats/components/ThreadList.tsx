@@ -1,5 +1,15 @@
-import { MessageSquare, Plus } from "lucide-react";
+import { MessageSquare, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { fmtDate } from "@/shared/utils/format";
 import type { ChatThread } from "../models";
@@ -9,8 +19,10 @@ interface ThreadListProps {
   activeThreadId: string | null;
   isLoading: boolean;
   isComposing: boolean;
+  deletingThreadId: string | null;
   onSelect: (threadId: string) => void;
   onNewThread: () => void;
+  onDelete: (threadId: string) => void;
 }
 
 export default function ThreadList({
@@ -18,8 +30,10 @@ export default function ThreadList({
   activeThreadId,
   isLoading,
   isComposing,
+  deletingThreadId,
   onSelect,
   onNewThread,
+  onDelete,
 }: ThreadListProps) {
   return (
     <aside className="w-60 shrink-0 border-r border-zinc-100 bg-white flex flex-col min-h-0 overflow-hidden">
@@ -49,14 +63,15 @@ export default function ThreadList({
           <ul className="p-2 flex flex-col gap-1">
             {threads.map((t) => {
               const active = t.id === activeThreadId;
+              const deleting = t.id === deletingThreadId;
               return (
-                <li key={t.id}>
+                <li key={t.id} className="group relative">
                   <button
                     type="button"
                     onClick={() => onSelect(t.id)}
-                    disabled={isComposing}
+                    disabled={isComposing || deleting}
                     className={cn(
-                      "w-full text-left rounded-md px-2.5 py-2 transition-colors disabled:opacity-50",
+                      "w-full text-left rounded-md pl-2.5 pr-8 py-2 transition-colors disabled:opacity-50",
                       active
                         ? "bg-violet-50 border border-violet-200"
                         : "hover:bg-zinc-50 border border-transparent",
@@ -75,6 +90,47 @@ export default function ThreadList({
                       <span>{t.messageCount}건</span>
                     </div>
                   </button>
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        disabled={isComposing || deleting}
+                        aria-label="대화 삭제"
+                        className={cn(
+                          "absolute top-1.5 right-1.5 h-6 w-6 rounded text-zinc-400",
+                          "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+                          "hover:bg-red-50 hover:text-red-500",
+                          "disabled:opacity-30 disabled:pointer-events-none",
+                        )}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-sm">
+                      <DialogHeader>
+                        <DialogTitle>대화 삭제</DialogTitle>
+                        <DialogDescription className="text-xs">
+                          “{t.title}” 대화와 모든 메시지·실행 기록이 함께
+                          삭제됩니다. 이 작업은 되돌릴 수 없습니다.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <DialogFooter className="flex gap-2">
+                        <DialogClose asChild>
+                          <Button variant="outline">취소</Button>
+                        </DialogClose>
+                        <DialogClose asChild>
+                          <Button
+                            variant="destructive"
+                            onClick={() => onDelete(t.id)}
+                          >
+                            삭제
+                          </Button>
+                        </DialogClose>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                 </li>
               );
             })}

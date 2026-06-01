@@ -52,4 +52,11 @@ export const chatApi = {
         { timeout: ANALYSIS_TIMEOUT_MS },
       )
       .then((r) => r.data),
+
+  deleteThread: (projectId: string, datasetId: string, threadId: string) =>
+    apiClient
+      .delete(
+        `/projects/${projectId}/datasets/${datasetId}/analysis_threads/${threadId}`,
+      )
+      .then(() => undefined),
 };
