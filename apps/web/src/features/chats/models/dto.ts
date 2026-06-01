@@ -53,3 +53,33 @@ export interface AnalyzeUserQuestionRequest {
 export interface AnalysisThreadMessageRequest {
   content: string;
 }
+
+export interface AnalysisThreadDto {
+  thread_id: string;
+  project_id: string;
+  dataset_id: string;
+  dataset_version_id: string;
+  title?: string;
+  created_at: string;
+  updated_at: string;
+  message_count?: number;
+  last_message?: string;
+}
+
+export interface AnalysisThreadListResponseDto {
+  items: AnalysisThreadDto[];
+}
+
+// AnalysisMessage(상세)는 frontend-safe view가 아니라 raw schema이므로 추가 필드를
+// 가질 수 있다. 우리가 화면에 쓰는 키만 좁혀 둔다.
+export interface AnalysisMessageDto {
+  message_id: string;
+  role: ChatRole;
+  content: string;
+  run_id?: string | null;
+  created_at: string;
+}
+
+export interface AnalysisThreadDetailDto extends AnalysisThreadDto {
+  messages: AnalysisMessageDto[];
+}

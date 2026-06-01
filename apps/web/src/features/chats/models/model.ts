@@ -17,8 +17,22 @@ export interface ChatMessage {
   display?: ChatDisplay;
 }
 
+export interface ChatThread {
+  id: string;
+  title: string;
+  lastMessage: string;
+  messageCount: number;
+  updatedAt: string;
+}
+
+export interface ChatThreadDetail {
+  id: string;
+  messages: ChatMessage[];
+}
+
 export interface AnalyzeResult {
   threadId: string;
+  userMessage?: ChatMessage;
   assistantMessage?: ChatMessage;
   errorMessage?: string | null;
 }

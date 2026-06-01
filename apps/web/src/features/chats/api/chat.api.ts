@@ -1,5 +1,7 @@
 import { apiClient } from "@/api/client";
 import type {
+  AnalysisThreadDetailDto,
+  AnalysisThreadListResponseDto,
   AnalysisThreadMessageRequest,
   AnalysisThreadMessageResponseDto,
   AnalyzeUserQuestionRequest,
@@ -9,6 +11,21 @@ import type {
 const ANALYSIS_TIMEOUT_MS = 120_000;
 
 export const chatApi = {
+  listThreads: (projectId: string, datasetId: string) =>
+    apiClient
+      .get<AnalysisThreadListResponseDto>(
+        `/projects/${projectId}/datasets/${datasetId}/analysis_threads`,
+      )
+      .then((r) => r.data.items),
+
+  getThread: (projectId: string, datasetId: string, threadId: string) =>
+    apiClient
+      .get<AnalysisThreadDetailDto>(
+        `/projects/${projectId}/datasets/${datasetId}/analysis_threads/${threadId}`,
+      )
+      .then((r) => r.data),
+
+
   analyze: (
     projectId: string,
     datasetId: string,
