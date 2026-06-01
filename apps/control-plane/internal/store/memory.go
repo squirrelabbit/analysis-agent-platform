@@ -617,6 +617,33 @@ func (s *MemoryStore) GetAnalysisThread(projectID, datasetID, threadID string) (
 	return s.withAnalysisThreadStatsLocked(thread), nil
 }
 
+func (s *MemoryStore) DeleteAnalysisThread(projectID, datasetID, threadID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	thread, ok := s.analysisThreads[threadID]
+	if !ok || thread.ProjectID != projectID || thread.DatasetID != datasetID {
+		return ErrNotFound
+	}
+	delete(s.analysisThreads, threadID)
+	// postgres는 FK ON DELETE CASCADE로 처리 — 메모리는 수동으로 동일하게 정리.
+	for key, m := range s.analysisMessages {
+		if m.ThreadID == threadID {
+			delete(s.analysisMessages, key)
+		}
+	}
+	for key, run := range s.analysisRuns {
+		if run.ThreadID == threadID {
+			delete(s.analysisRuns, key)
+		}
+	}
+	for key, event := range s.rejectionEvents {
+		if event.ThreadID == threadID {
+			delete(s.rejectionEvents, key)
+		}
+	}
+	return nil
+}
+
 func (s *MemoryStore) ListAnalysisThreads(projectID, datasetID string) ([]domain.AnalysisThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

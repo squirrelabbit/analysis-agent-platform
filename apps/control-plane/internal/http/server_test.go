@@ -807,3 +807,37 @@ func writeCleanedParquetForHTTP(t *testing.T, path string, rows []map[string]any
 func escapeDuckDBLiteralForHTTP(value string) string {
 	return strings.ReplaceAll(value, `'`, `''`)
 }
+
+// silverone 2026-06-01 — DELETE analysis thread endpoint. 없는 thread는 404.
+// 정상 삭제(204) + cascade는 store 레벨 테스트(delete_analysis_thread_test)와
+// dev 라이브로 검증 — thread 생성은 active version이 필요해 HTTP 테스트는 404
+// 경로(route+handler+서비스 ErrNotFound 매핑)에 집중한다.
+func TestDeleteAnalysisThreadEndpoint_NotFound(t *testing.T) {
+	server := NewServer(config.Config{
+		BindAddr:       ":0",
+		StoreBackend:   "memory",
+		WorkflowEngine: "noop",
+		UploadRoot:     t.TempDir(),
+		ArtifactRoot:   t.TempDir(),
+	})
+	handler := server.Handler()
+
+	project := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects", `{"name":"thread-del-project"}`, http.StatusCreated, &project)
+	projectID := project["project_id"].(string)
+
+	dataset := map[string]any{}
+	readJSONResponse(t, handler, http.MethodPost, "/projects/"+projectID+"/datasets", `{"name":"thread-del-dataset","data_type":"unstructured"}`, http.StatusCreated, &dataset)
+	datasetID := dataset["dataset_id"].(string)
+
+	// 존재하지 않는 thread 삭제 → 404.
+	readJSONResponse(
+		t,
+		handler,
+		http.MethodDelete,
+		"/projects/"+projectID+"/datasets/"+datasetID+"/analysis_threads/does-not-exist",
+		"",
+		http.StatusNotFound,
+		nil,
+	)
+}

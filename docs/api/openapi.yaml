@@ -1030,6 +1030,24 @@ paths:
                 $ref: "#/components/schemas/AnalysisThreadDetail"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Analysis]
+      summary: analysis thread 단건 삭제
+      description: |
+        thread를 삭제한다 (silverone 2026-06-01). 해당 project_id + dataset_id에
+        속한 thread만 삭제 가능 — dataset이 다르거나 thread가 없으면 404.
+        analysis_messages / analysis_runs / planner_rejection_events는 FK
+        ON DELETE CASCADE로 함께 삭제된다. bulk/soft delete/restore는 미지원.
+      operationId: deleteAnalysisThread
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/ThreadId"
+      responses:
+        "204":
+          description: 삭제 완료 (본문 없음)
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/analysis_threads/{thread_id}/messages:
     post:
       tags: [Analysis]

@@ -147,6 +147,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/analysis_threads", s.handleCreateAnalysisThread)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/analysis_threads", s.handleListAnalysisThreads)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/analysis_threads/{thread_id}", s.handleGetAnalysisThread)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/analysis_threads/{thread_id}", s.handleDeleteAnalysisThread)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/analysis_threads/{thread_id}/messages", s.handlePostAnalysisThreadMessage)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/analysis_runs/{run_id}", s.handleGetAnalysisRun)
 	s.mux.HandleFunc("GET /projects/{project_id}/dataset_build_jobs/{job_id}", s.handleGetDatasetBuildJob)
@@ -874,6 +875,18 @@ func (s *Server) handleGetAnalysisThread(w stdhttp.ResponseWriter, r *stdhttp.Re
 		return
 	}
 	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDeleteAnalysisThread(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.datasetService.DeleteAnalysisThread(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("thread_id"),
+	); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
 }
 
 func (s *Server) handlePostAnalysisThreadMessage(w stdhttp.ResponseWriter, r *stdhttp.Request) {
