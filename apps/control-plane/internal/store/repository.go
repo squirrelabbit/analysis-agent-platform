@@ -55,6 +55,10 @@ type Repository interface {
 	// reuse classifier가 이전 plan을 patch할 때 사용.
 	GetLastSuccessfulAnalysisRun(projectID, threadID string) (domain.AnalysisRun, error)
 
+	// silverone 2026-06-01 (PR2) — planner가 answerable=false로 거절한 이벤트 적재.
+	// message_id UNIQUE로 중복 무시(idempotent). skill upgrade backlog 축적용.
+	SaveRejectionEvent(event domain.PlannerRejectionEvent) error
+
 	// silverone 2026-05-27 (Codex adversarial review fix-2) — control-plane
 	// 재기동 시 reconciliation에서 사용. status가 queued/running으로 남아 있는
 	// in-flight row를 모두 가져온다. project_id 무관 — 전체 system 단위.

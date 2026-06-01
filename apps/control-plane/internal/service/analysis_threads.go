@@ -292,6 +292,16 @@ func (s *DatasetService) PostAnalysisThreadMessage(
 		return domain.AnalysisThreadMessageResponse{}, err
 	}
 
+	// silverone 2026-06-01 (PR2) — planner가 answerable=false로 거절했고 reason이
+	// unsupported_skill / missing_data_or_artifact면 rejection event 적재 (skill
+	// upgrade backlog). out_of_dataset_scope는 제외. best-effort — 적재 실패가
+	// 사용자 응답을 깨지 않는다 (assistant message는 이미 저장됨).
+	if event, ok := rejectionEventFromResult(
+		projectID, datasetID, thread.ThreadID, assistantMessage.MessageID, question, analysisResp.Result,
+	); ok {
+		_ = s.store.SaveRejectionEvent(event)
+	}
+
 	// silverone 2026-05-28 — frontend-safe projection.
 	// DB에는 full result_json / assistant_message.context_summary / run.request_json이
 	// 그대로 보존된다. 응답에서만 운영자/debug 필드를 stripping.
@@ -463,6 +473,49 @@ func composerContextSummary(raw json.RawMessage) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// rejectionEventFromResult — analyze 결과(composer.metadata.reason)에서 적재 대상
+// 거절 이벤트를 만든다 (silverone 2026-06-01, PR2). 적재 대상은 unsupported_skill /
+// missing_data_or_artifact 두 reason뿐 — out_of_dataset_scope는 (false 반환으로)
+// 저장하지 않는다. message는 composer.assistant_content(사용자 노출 거절 문구),
+// capability_gap은 composer.metadata.capability_gap에서 가져온다.
+func rejectionEventFromResult(
+	projectID, datasetID, threadID, messageID, userQuestion string, raw json.RawMessage,
+) (domain.PlannerRejectionEvent, bool) {
+	if len(raw) == 0 {
+		return domain.PlannerRejectionEvent{}, false
+	}
+	root := map[string]any{}
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return domain.PlannerRejectionEvent{}, false
+	}
+	composer, _ := root["composer"].(map[string]any)
+	meta, _ := composer["metadata"].(map[string]any)
+	if len(meta) == 0 {
+		return domain.PlannerRejectionEvent{}, false
+	}
+	reason := strings.TrimSpace(fmt.Sprintf("%v", meta["reason"]))
+	if reason != "unsupported_skill" && reason != "missing_data_or_artifact" {
+		return domain.PlannerRejectionEvent{}, false
+	}
+	message, _ := composer["assistant_content"].(string)
+	var capabilityGap map[string]any
+	if gap, ok := meta["capability_gap"].(map[string]any); ok && len(gap) > 0 {
+		capabilityGap = gap
+	}
+	return domain.PlannerRejectionEvent{
+		EventID:       id.New(),
+		ProjectID:     projectID,
+		DatasetID:     datasetID,
+		ThreadID:      threadID,
+		MessageID:     messageID,
+		UserQuestion:  userQuestion,
+		Reason:        reason,
+		Message:       strings.TrimSpace(message),
+		CapabilityGap: capabilityGap,
+		CreatedAt:     time.Now().UTC(),
+	}, true
 }
 
 func presentColumns(present map[string]any) []string {

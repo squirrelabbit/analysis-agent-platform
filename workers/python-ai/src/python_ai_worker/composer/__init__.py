@@ -70,6 +70,11 @@ def _compose_safely(
     if error_metadata:
         return _error_payload(user_question=user_question, error_metadata=error_metadata)
 
+    # 1.5 answerable=false 거절 plan (silverone 2026-06-01, PR1) — reason별 메시지를
+    # 그대로 렌더하고 display=null. raw row 테이블/truncation warning을 만들지 않는다.
+    if isinstance(plan, dict) and plan.get("answerable") is False:
+        return _reject_payload(user_question=user_question, plan=plan)
+
     # 2. present 없음 — fallback.
     if not isinstance(present, dict):
         return _fallback_payload(user_question=user_question, reason="present_missing")
@@ -564,6 +569,42 @@ def _fallback_payload(*, user_question: str | None, reason: str) -> dict[str, An
             "template": "fallback",
             "fallback_reason": reason,
         },
+    }
+
+
+# silverone 2026-06-01 (PR1) — answerable=false 거절 plan 렌더.
+_DEFAULT_REJECT_MESSAGE = "이 질문은 현재 선택한 데이터셋으로는 답변할 수 없습니다."
+_REJECT_REASONS = frozenset(
+    {"out_of_dataset_scope", "unsupported_skill", "missing_data_or_artifact"}
+)
+
+
+def _reject_payload(*, user_question: str | None, plan: dict[str, Any]) -> dict[str, Any]:
+    """answerable=false plan → 사용자 노출 거절 메시지. display=null (테이블/경고 없음).
+
+    metadata.mode=rejected, metadata.reason=<taxonomy>. reason=unsupported_skill의
+    capability_gap은 metadata로 전달 — PR2(rejection event 저장)에서 사용한다.
+    """
+    reason = str(plan.get("reason") or "").strip()
+    if reason not in _REJECT_REASONS:
+        reason = "out_of_dataset_scope"
+    message = str(plan.get("message") or "").strip() or _DEFAULT_REJECT_MESSAGE
+
+    metadata: dict[str, Any] = {
+        "mode": "rejected",
+        "template": "rejected",
+        "reason": reason,
+        "fallback_reason": None,
+    }
+    capability_gap = plan.get("capability_gap")
+    if isinstance(capability_gap, dict) and capability_gap:
+        metadata["capability_gap"] = capability_gap
+
+    return {
+        "assistant_content": message,
+        "display": None,
+        "context_summary": {"question": (user_question or "").strip()} if user_question else {},
+        "metadata": metadata,
     }
 
 

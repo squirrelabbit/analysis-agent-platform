@@ -29,6 +29,7 @@ type MemoryStore struct {
 	analysisThreads      map[string]domain.AnalysisThread
 	analysisMessages     map[string]domain.AnalysisMessage
 	analysisRuns         map[string]domain.AnalysisRun
+	rejectionEvents      map[string]domain.PlannerRejectionEvent // key: message_id (PR2 dedup)
 	// document_cluster_profile build / confirmation 관련 필드는 β2 (5/19) 결정으로 제거.
 	// scenarios / requests / plans / executions / reports 필드는 δ-3 (5/21) plan_v2 도입에 따라 제거.
 }
@@ -46,6 +47,7 @@ func NewMemoryStore() *MemoryStore {
 		analysisThreads:      make(map[string]domain.AnalysisThread),
 		analysisMessages:     make(map[string]domain.AnalysisMessage),
 		analysisRuns:         make(map[string]domain.AnalysisRun),
+		rejectionEvents:      make(map[string]domain.PlannerRejectionEvent),
 	}
 }
 
@@ -701,6 +703,21 @@ func (s *MemoryStore) SaveAnalysisRun(run domain.AnalysisRun) error {
 	run.RequestJSON = cloneAnyMap(run.RequestJSON)
 	run.ResultJSON = append([]byte(nil), run.ResultJSON...)
 	s.analysisRuns[run.RunID] = run
+	return nil
+}
+
+func (s *MemoryStore) SaveRejectionEvent(event domain.PlannerRejectionEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// message_id 기준 idempotent — 이미 있으면 무시 (PR2 중복 적재 방지).
+	if _, ok := s.rejectionEvents[event.MessageID]; ok {
+		return nil
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	}
+	event.CapabilityGap = cloneAnyMap(event.CapabilityGap)
+	s.rejectionEvents[event.MessageID] = event
 	return nil
 }
 

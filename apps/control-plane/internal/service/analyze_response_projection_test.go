@@ -251,3 +251,80 @@ func mapKeys(m map[string]any) []string {
 	}
 	return keys
 }
+
+// silverone 2026-06-01 (PR1, reject reason) — answerable=false 거절 plan의
+// reason/message/capability_gap + composer.metadata.reason이 프론트 응답에
+// 노출되는지 잠근다. (PR2 rejection event 저장이 이 필드들에 의존)
+const rejectAnalyzeWorkerResponse = `{
+  "plan_version": "v2",
+  "plan": {
+    "plan_version": "v2",
+    "answerable": false,
+    "reason": "unsupported_skill",
+    "message": "현재 분석 기능으로는 처리할 수 없습니다.",
+    "steps": [],
+    "capability_gap": {
+      "requested_capability": "text_clustering",
+      "suggested_skill": "cluster_texts",
+      "evidence": "비슷한 주제끼리 묶어달라고 요청함"
+    }
+  },
+  "steps": [],
+  "present": null,
+  "artifact_paths": null,
+  "composer": {
+    "assistant_content": "현재 분석 기능으로는 처리할 수 없습니다.",
+    "display": null,
+    "context_summary": {"question": "비슷한 후기끼리 묶어줘"},
+    "metadata": {
+      "mode": "rejected",
+      "template": "rejected",
+      "fallback_reason": null,
+      "reason": "unsupported_skill",
+      "capability_gap": {"suggested_skill": "cluster_texts"}
+    }
+  }
+}`
+
+func TestProjectFrontendAnalyzeResult_RejectPlanFields(t *testing.T) {
+	projected := projectFrontendAnalyzeResult(json.RawMessage(rejectAnalyzeWorkerResponse))
+	var root map[string]any
+	if err := json.Unmarshal(projected, &root); err != nil {
+		t.Fatalf("unmarshal projected: %v", err)
+	}
+
+	plan, ok := root["plan"].(map[string]any)
+	if !ok {
+		t.Fatalf("plan missing")
+	}
+	if plan["answerable"] != false {
+		t.Errorf("plan.answerable = %v, want false", plan["answerable"])
+	}
+	if plan["reason"] != "unsupported_skill" {
+		t.Errorf("plan.reason = %v", plan["reason"])
+	}
+	if _, ok := plan["message"].(string); !ok {
+		t.Errorf("plan.message missing")
+	}
+	if gap, ok := plan["capability_gap"].(map[string]any); !ok || gap["suggested_skill"] != "cluster_texts" {
+		t.Errorf("plan.capability_gap missing/invalid: %v", plan["capability_gap"])
+	}
+
+	composer, ok := root["composer"].(map[string]any)
+	if !ok {
+		t.Fatalf("composer missing")
+	}
+	meta, ok := composer["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("composer.metadata missing")
+	}
+	if meta["mode"] != "rejected" || meta["reason"] != "unsupported_skill" {
+		t.Errorf("composer.metadata mode/reason = %v / %v", meta["mode"], meta["reason"])
+	}
+	if gap, ok := meta["capability_gap"].(map[string]any); !ok || gap["suggested_skill"] != "cluster_texts" {
+		t.Errorf("composer.metadata.capability_gap missing: %v", meta["capability_gap"])
+	}
+	if composer["display"] != nil {
+		t.Errorf("reject display must be null, got %v", composer["display"])
+	}
+}

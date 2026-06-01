@@ -1579,6 +1579,42 @@ func (s *PostgresStore) SaveAnalysisRun(run domain.AnalysisRun) error {
 	return err
 }
 
+func (s *PostgresStore) SaveRejectionEvent(event domain.PlannerRejectionEvent) error {
+	var capabilityGap any
+	if len(event.CapabilityGap) > 0 {
+		encoded, err := marshalJSON(event.CapabilityGap)
+		if err != nil {
+			return err
+		}
+		capabilityGap = encoded
+	}
+	createdAt := event.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	// message_id UNIQUE — 같은 거절 응답을 재처리해도 중복 적재하지 않는다 (idempotent).
+	_, err := s.db.Exec(
+		`INSERT INTO planner_rejection_events (
+			event_id, project_id, dataset_id, thread_id, message_id,
+			user_question, reason, message, capability_gap, created_at
+		) VALUES (
+			$1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9::jsonb, $10
+		)
+		ON CONFLICT (message_id) DO NOTHING`,
+		event.EventID,
+		event.ProjectID,
+		event.DatasetID,
+		nullIfEmpty(event.ThreadID),
+		event.MessageID,
+		event.UserQuestion,
+		event.Reason,
+		nullableEmptyString(event.Message),
+		capabilityGap,
+		createdAt,
+	)
+	return err
+}
+
 func (s *PostgresStore) GetAnalysisRun(projectID, runID string) (domain.AnalysisRun, error) {
 	row := s.db.QueryRow(
 		`SELECT run_id, thread_id, project_id::text, dataset_id::text, dataset_version_id,
@@ -2053,6 +2089,23 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS analysis_messages_thread_idx
 		  ON analysis_messages(project_id, thread_id, created_at ASC)`,
+		// silverone 2026-06-01 (PR2) — planner answerable=false 거절 이벤트 적재.
+		// message_id UNIQUE로 중복 무시. out_of_dataset_scope는 service가 저장 안 함
+		// (unsupported_skill / missing_data_or_artifact만). skill upgrade backlog 축적.
+		`CREATE TABLE IF NOT EXISTS planner_rejection_events (
+			event_id TEXT PRIMARY KEY,
+			project_id UUID NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+			dataset_id UUID NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+			thread_id TEXT REFERENCES analysis_threads(thread_id) ON DELETE CASCADE,
+			message_id TEXT NOT NULL UNIQUE,
+			user_question TEXT NOT NULL,
+			reason TEXT NOT NULL,
+			message TEXT,
+			capability_gap JSONB,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS planner_rejection_events_reason_idx
+		  ON planner_rejection_events(reason, created_at DESC)`,
 		// silverone 2026-05-27 (Codex adversarial review fix-1) — 옛 schema
 		// (report_drafts / executions / skill_plans / analysis_requests) DROP을
 		// boot-time ensureSchema에서 제거. 운영/감사 이력이 들어있을 수 있는
