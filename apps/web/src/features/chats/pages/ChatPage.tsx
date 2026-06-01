@@ -80,9 +80,44 @@ export function ChatPage() {
     return extras.length ? [...merged, ...extras] : merged;
   }, [serverMessages, pendingTurn]);
 
-  const bottomRef = useRef<HTMLDivElement>(null);
+  // 사용자 액션(send / thread select / new thread / dataset change)은 force로
+  // 강제 하단 이동, messages 자체 변경은 near-bottom일 때만 따라간다 →
+  // refetch/polling이 사용자를 위로 끌어내려 진행 중인 읽기를 방해하지 않음.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const scrollPolicyRef = useRef<"force" | "auto">("force");
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = containerRef.current;
+    const content = contentRef.current;
+    if (!el || !content) return;
+    // 메시지가 아직 안 들어왔으면 force 플래그를 소비하지 않고 보존 →
+    // thread fetch 완료 후 첫 messages 변경 때 비로소 끝으로 이동.
+    if (messages.length === 0) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const force = scrollPolicyRef.current === "force";
+    if (!force && distance > 80) return;
+    // 직접 assignment가 가장 robust — behavior 옵션 없는 대신 layout 시점에
+    // 정확하다.
+    const scrollEnd = () => {
+      el.scrollTop = el.scrollHeight;
+    };
+    scrollEnd();
+    // force일 때 차트/표 등 비동기 layout으로 scrollHeight가 늦게 늘어나도
+    // 끝에 붙어있도록 짧은 윈도우 동안 자식 크기 변화에 반응한다.
+    // 윈도우가 끝나면 그제서야 force를 auto로 reset → 그 사이에 일어나는
+    // 후속 effect도 force로 다시 끝으로 보낸다 (첫 scrollTo가 실패해도 복구).
+    if (!force) return;
+    const observer = new ResizeObserver(scrollEnd);
+    observer.observe(content);
+    const timer = setTimeout(() => {
+      observer.disconnect();
+      scrollPolicyRef.current = "auto";
+    }, 600);
+    return () => {
+      observer.disconnect();
+      clearTimeout(timer);
+    };
   }, [messages, isLoading]);
 
   function resetThreadState() {
@@ -90,6 +125,7 @@ export function ChatPage() {
     setPendingTurn(null);
     setErrorMsg(null);
     setInput("");
+    scrollPolicyRef.current = "force";
   }
 
   function handleDatasetChange(next: string) {
@@ -102,6 +138,7 @@ export function ChatPage() {
     setThreadId(next);
     setPendingTurn(null);
     setErrorMsg(null);
+    scrollPolicyRef.current = "force";
   }
 
   function handleNewThread() {
@@ -122,6 +159,7 @@ export function ChatPage() {
     };
     setPendingTurn({ user: localUser });
     setInput("");
+    scrollPolicyRef.current = "force";
 
     try {
       const res = await chat.mutateAsync({
@@ -184,8 +222,14 @@ export function ChatPage() {
         </div>
 
         {/* 메시지 목록 */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
-          <div className="flex flex-col gap-4 max-w-3xl mx-auto">
+        <div
+          ref={containerRef}
+          className="flex-1 min-h-0 overflow-y-auto px-5 py-4"
+        >
+          <div
+            ref={contentRef}
+            className="flex flex-col gap-4 max-w-3xl mx-auto"
+          >
             {isDetailLoading && !hasContent && (
               <p className="text-center text-xs text-zinc-400 py-8">
                 대화를 불러오는 중…
@@ -230,8 +274,6 @@ export function ChatPage() {
                 {errorMsg}
               </div>
             )}
-
-            <div ref={bottomRef} />
           </div>
         </div>
 
