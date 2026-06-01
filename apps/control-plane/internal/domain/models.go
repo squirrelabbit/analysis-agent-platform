@@ -228,6 +228,23 @@ type AnalysisRun struct {
 	CompletedAt      *time.Time      `json:"completed_at,omitempty"`
 }
 
+// PlannerRejectionEvent — planner가 answerable=false로 거절한 질문의 적재 이벤트
+// (silverone 2026-06-01, PR2). skill upgrade backlog 축적용. out_of_dataset_scope는
+// 저장하지 않고, unsupported_skill / missing_data_or_artifact만 저장한다.
+// MessageID(거절 응답 assistant message id)에 UNIQUE를 걸어 중복 적재를 막는다.
+type PlannerRejectionEvent struct {
+	EventID       string         `json:"event_id"`
+	ProjectID     string         `json:"project_id"`
+	DatasetID     string         `json:"dataset_id"`
+	ThreadID      string         `json:"thread_id"`
+	MessageID     string         `json:"message_id"`
+	UserQuestion  string         `json:"user_question"`
+	Reason        string         `json:"reason"`
+	Message       string         `json:"message,omitempty"`
+	CapabilityGap map[string]any `json:"capability_gap,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+}
+
 type AnalysisThreadCreateRequest struct {
 	Title string `json:"title,omitempty"`
 }
