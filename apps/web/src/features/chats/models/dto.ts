@@ -36,10 +36,16 @@ export interface AnalysisThreadMessageResponseDto {
   };
 }
 
+export interface AnalysisPlanStepDisplayDto {
+  label?: string;
+  expression?: string;
+}
+
 export interface AnalysisPlanStepDto {
   id: string;
   skill: string;
   params: Record<string, unknown>;
+  display?: AnalysisPlanStepDisplayDto;
 }
 
 export interface AnalysisPlanDto {
@@ -111,6 +117,7 @@ export interface AnalysisMessageDto {
   run_id?: string | null;
   created_at: string;
   display?: ComposerDisplayDto;
+  plan?: AnalysisPlanDto;
 }
 
 export interface AnalysisThreadDetailDto extends AnalysisThreadDto {

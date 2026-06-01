@@ -1,6 +1,9 @@
+import { cn } from "@/lib/utils";
 import type { ChatTableDisplay } from "../models";
 
 const MAX_VISIBLE_ROWS = 100;
+// 20행 이하면 max-height 없이 자연 펼침, 그 이상은 360px 박스 + 내부 스크롤.
+const COMPACT_ROWS_THRESHOLD = 20;
 
 function formatCell(value: unknown): string {
   if (value === null || value === undefined) return "—";
@@ -15,6 +18,7 @@ export default function DisplayTable({ display }: { display: ChatTableDisplay })
   const visibleRows = rows.slice(0, MAX_VISIBLE_ROWS);
   const truncated = totalRows > MAX_VISIBLE_ROWS;
   const hasRows = totalRows > 0;
+  const compact = totalRows <= COMPACT_ROWS_THRESHOLD;
   return (
     <div className="mt-2 rounded-lg border border-zinc-200 bg-white overflow-hidden">
       {(title || truncated) && (
@@ -27,7 +31,7 @@ export default function DisplayTable({ display }: { display: ChatTableDisplay })
           )}
         </div>
       )}
-      <div className="overflow-auto max-h-[360px]">
+      <div className={cn("overflow-auto", !compact && "max-h-[360px]")}>
         <table className="w-full text-xs">
           <thead className="sticky top-0 z-10 bg-zinc-50">
             <tr className="border-b border-zinc-100">
