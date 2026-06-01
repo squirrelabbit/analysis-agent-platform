@@ -34,6 +34,16 @@ export interface AnalysisThreadMessageResponseDto {
   };
 }
 
+// silverone 2026-06-01 chart-ready metadata v1.
+// 신규 turn 응답에는 채워지지만 과거 thread detail 메시지에는 누락될 수
+// 있으므로 항상 optional로 다룬다.
+export interface ChartSpecDto {
+  kind: "bar" | "line";
+  x: string;
+  y: string | string[];
+  series: string | null;
+}
+
 export interface ComposerDisplayDto {
   type: "table" | "chart" | "json";
   title?: string | null;
@@ -44,6 +54,8 @@ export interface ComposerDisplayDto {
   max_rows?: number;
   truncated?: boolean;
   warnings?: string[];
+  recommended_view?: "table" | "bar" | "line" | null;
+  chart_spec?: ChartSpecDto | null;
 }
 
 export interface AnalyzeUserQuestionRequest {
