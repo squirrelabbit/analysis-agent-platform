@@ -1,5 +1,6 @@
 import type {
   AnalysisMessageDto,
+  AnalysisPlanDto,
   AnalysisThreadDetailDto,
   AnalysisThreadDto,
   AnalysisThreadMessageResponseDto,
@@ -9,9 +10,22 @@ import type {
   AnalyzeResult,
   ChatDisplay,
   ChatMessage,
+  ChatPlan,
   ChatThread,
   ChatThreadDetail,
 } from "./model";
+
+const mapPlan = (dto: AnalysisPlanDto | undefined): ChatPlan | undefined => {
+  if (!dto || !dto.steps?.length) return undefined;
+  return {
+    version: dto.plan_version,
+    steps: dto.steps.map((s) => ({
+      id: s.id,
+      skill: s.skill,
+      params: s.params ?? {},
+    })),
+  };
+};
 
 const mapDisplay = (dto: ComposerDisplayDto | undefined): ChatDisplay | undefined => {
   if (!dto || dto.type !== "table") return undefined;
@@ -42,6 +56,7 @@ export const mapAnalyzeResponse = (
           content,
           createdAt: dto.assistant_message.created_at,
           display: mapDisplay(dto.result?.composer?.display),
+          plan: mapPlan(dto.result?.plan),
         }
       : undefined;
 
