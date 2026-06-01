@@ -35,6 +35,10 @@ export type TaxonomyStatus =
   | "hash_mismatch"
   | "id_mismatch";
 
+// 메인 렌더 view. 백엔드가 새 타입(metric, stacked_bar 등)을 추가할 수 있어
+// 알려진 값만 좁히고 그 외는 "unknown"으로 떨어뜨려 table fallback한다.
+export type RecommendedView = "table" | "bar" | "line" | "unknown";
+
 export interface ChatMessage {
   id: string;
   role: ChatRole;
@@ -45,6 +49,10 @@ export interface ChatMessage {
   chart?: ChatChart;
   warnings?: string[];
   taxonomyStatus?: TaxonomyStatus;
+  // 백엔드가 chart를 추천했지만 유효 데이터 부족 등으로 매퍼가 chart를
+  // 생성하지 못한 경우에 fallback 안내를 띄우기 위한 플래그.
+  chartFallbackReason?: "insufficient_data";
+  recommendedView?: RecommendedView;
 }
 
 export interface ChatThread {
