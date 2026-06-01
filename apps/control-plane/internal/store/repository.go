@@ -43,6 +43,10 @@ type Repository interface {
 	SaveAnalysisThread(thread domain.AnalysisThread) error
 	GetAnalysisThread(projectID, datasetID, threadID string) (domain.AnalysisThread, error)
 	ListAnalysisThreads(projectID, datasetID string) ([]domain.AnalysisThread, error)
+	// silverone 2026-06-01 — 단건 thread 삭제 (테스트 정리). project_id+dataset_id+
+	// thread_id가 모두 일치하는 row만 삭제. 일치 row 없으면 ErrNotFound.
+	// messages/runs/rejection_events는 FK ON DELETE CASCADE에 위임.
+	DeleteAnalysisThread(projectID, datasetID, threadID string) error
 	// silverone 2026-06-01 — project sidebar 채팅 count용 단일 COUNT 쿼리.
 	// dataset 단위 thread list보다 가볍고 N+1 회피.
 	CountAnalysisThreadsByProject(projectID string) (int, error)

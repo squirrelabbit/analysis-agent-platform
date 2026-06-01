@@ -1395,6 +1395,30 @@ func (s *PostgresStore) GetAnalysisThread(projectID, datasetID, threadID string)
 	return thread, nil
 }
 
+func (s *PostgresStore) DeleteAnalysisThread(projectID, datasetID, threadID string) error {
+	// project_id + dataset_id + thread_id가 모두 일치하는 row만 삭제 → dataset 불일치
+	// 시 0 rows → ErrNotFound(404). analysis_messages / analysis_runs /
+	// planner_rejection_events는 FK ON DELETE CASCADE로 함께 삭제된다.
+	res, err := s.db.Exec(
+		`DELETE FROM analysis_threads
+		 WHERE thread_id = $1 AND project_id = $2::uuid AND dataset_id = $3::uuid`,
+		threadID,
+		projectID,
+		datasetID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgresStore) ListAnalysisThreads(projectID, datasetID string) ([]domain.AnalysisThread, error) {
 	rows, err := s.db.Query(
 		`SELECT t.thread_id, t.project_id::text, t.dataset_id::text, t.dataset_version_id,

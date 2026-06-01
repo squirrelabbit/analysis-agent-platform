@@ -110,6 +110,20 @@ func (s *DatasetService) GetAnalysisThread(projectID, datasetID, threadID string
 	return domain.AnalysisThreadDetail{AnalysisThread: thread, Messages: messages}, nil
 }
 
+// DeleteAnalysisThread — thread 단건 삭제 (silverone 2026-06-01, 테스트 정리용).
+// project_id+dataset_id+thread_id가 모두 일치하는 thread만 삭제하며, 일치 row가
+// 없거나 dataset이 다르면 404(ErrNotFound). messages/runs/rejection_events는
+// FK ON DELETE CASCADE로 함께 삭제된다.
+func (s *DatasetService) DeleteAnalysisThread(projectID, datasetID, threadID string) error {
+	if err := s.store.DeleteAnalysisThread(projectID, datasetID, threadID); err != nil {
+		if err == store.ErrNotFound {
+			return ErrNotFound{Resource: "analysis thread"}
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *DatasetService) GetAnalysisRun(projectID, datasetID, runID string) (domain.AnalysisRun, error) {
 	run, err := s.store.GetAnalysisRun(projectID, runID)
 	if err != nil {
