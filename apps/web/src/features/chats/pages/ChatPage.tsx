@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Send } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -147,7 +146,7 @@ export function ChatPage() {
         onNewThread={handleNewThread}
       />
 
-      <div className="flex flex-col flex-1 overflow-hidden">
+      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         {/* 헤더 */}
         <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-zinc-100 shrink-0">
           <div>
@@ -174,7 +173,7 @@ export function ChatPage() {
         </div>
 
         {/* 메시지 목록 */}
-        <ScrollArea className="flex-1 px-5 py-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
           <div className="flex flex-col gap-4 max-w-3xl mx-auto">
             {isDetailLoading && !hasContent && (
               <p className="text-center text-xs text-zinc-400 py-8">
@@ -223,7 +222,7 @@ export function ChatPage() {
 
             <div ref={bottomRef} />
           </div>
-        </ScrollArea>
+        </div>
 
         {/* 입력창 */}
         <div className="border-t border-zinc-100 bg-white px-5 py-3 shrink-0">
