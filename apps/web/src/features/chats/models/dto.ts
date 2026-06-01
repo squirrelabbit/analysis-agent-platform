@@ -31,7 +31,19 @@ export interface AnalysisThreadMessageResponseDto {
       assistant_content: string;
       display?: ComposerDisplayDto;
     };
+    plan?: AnalysisPlanDto;
   };
+}
+
+export interface AnalysisPlanStepDto {
+  id: string;
+  skill: string;
+  params: Record<string, unknown>;
+}
+
+export interface AnalysisPlanDto {
+  plan_version: string;
+  steps: AnalysisPlanStepDto[];
 }
 
 // silverone 2026-06-01 chart-ready metadata v1.

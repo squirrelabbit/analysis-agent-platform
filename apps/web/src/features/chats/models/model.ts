@@ -9,12 +9,24 @@ export interface ChatTableDisplay {
 
 export type ChatDisplay = ChatTableDisplay;
 
+export interface ChatPlanStep {
+  id: string;
+  skill: string;
+  params: Record<string, unknown>;
+}
+
+export interface ChatPlan {
+  version: string;
+  steps: ChatPlanStep[];
+}
+
 export interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
   createdAt: string;
   display?: ChatDisplay;
+  plan?: ChatPlan;
 }
 
 export interface ChatThread {

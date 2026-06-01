@@ -55,9 +55,20 @@ export function ChatPage() {
   // server messages를 source of truth로 두고, 분석 중인 turn만 pending으로 덧붙인다.
   // pending의 user는 처음엔 client uuid → 응답 받으면 server id로 교체되므로
   // refetch가 도착하면 baseIds.has로 자동 dedupe 된다.
+  // 단 thread detail의 assistant message에는 plan이 보존되지 않으므로
+  // (백엔드 작업 전) pendingTurn.assistant.plan은 server message에 머지해
+  // 새 turn 직후엔 plan이 사라지지 않도록 한다.
   const messages = useMemo(() => {
     if (!pendingTurn) return serverMessages;
     const baseIds = new Set(serverMessages.map((m) => m.id));
+    const pendingPlan = pendingTurn.assistant?.plan;
+    const merged = pendingPlan
+      ? serverMessages.map((m) =>
+          m.id === pendingTurn.assistant?.id && !m.plan
+            ? { ...m, plan: pendingPlan }
+            : m,
+        )
+      : serverMessages;
     const extras: ChatMessage[] = [];
     if (!baseIds.has(pendingTurn.user.id)) extras.push(pendingTurn.user);
     if (
@@ -66,7 +77,7 @@ export function ChatPage() {
     ) {
       extras.push(pendingTurn.assistant);
     }
-    return extras.length ? [...serverMessages, ...extras] : serverMessages;
+    return extras.length ? [...merged, ...extras] : merged;
   }, [serverMessages, pendingTurn]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
