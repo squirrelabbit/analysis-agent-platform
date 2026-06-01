@@ -1,6 +1,5 @@
 import { MessageSquare, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { fmtDate } from "@/shared/utils/format";
 import type { ChatThread } from "../models";
@@ -23,7 +22,7 @@ export default function ThreadList({
   onNewThread,
 }: ThreadListProps) {
   return (
-    <aside className="w-60 shrink-0 border-r border-zinc-100 bg-white flex flex-col overflow-hidden">
+    <aside className="w-60 shrink-0 border-r border-zinc-100 bg-white flex flex-col min-h-0 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-100">
         <div className="flex items-center gap-1.5">
           <MessageSquare className="w-3.5 h-3.5 text-violet-500" />
@@ -39,7 +38,7 @@ export default function ThreadList({
         </Button>
       </div>
 
-      <ScrollArea className="flex-1">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {isLoading ? (
           <p className="text-[11px] text-zinc-400 px-3 py-4">불러오는 중…</p>
         ) : threads.length === 0 ? (
@@ -81,7 +80,7 @@ export default function ThreadList({
             })}
           </ul>
         )}
-      </ScrollArea>
+      </div>
     </aside>
   );
 }
