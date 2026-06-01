@@ -235,6 +235,18 @@ CALCULATE_OPERATIONS: frozenset[str] = frozenset(
 SORT_ORDERS: frozenset[str] = frozenset({"asc", "desc"})
 PRESENT_FORMATS: frozenset[str] = frozenset({"table", "chart", "json"})
 
+# reject reason taxonomy (silverone 2026-06-01, PR1) — planner가 answerable=false
+# 로 거절할 때의 사유 분류. v1은 3종:
+#   out_of_dataset_scope    — 선택 데이터셋과 무관한 외부/일반 질문 (날씨/시각/맛집)
+#   unsupported_skill       — 데이터셋 관련은 있으나 현 skill set으로 불가
+#                             (클러스터링/원인 설명 등). capability_gap 동반 → skill
+#                             backlog 저장 후보(PR2).
+#   missing_data_or_artifact — 지원 분석 유형이지만 필요한 컬럼/아티팩트/build 부재
+# 후속 후보: ambiguous_question / unsafe_or_disallowed / planner_failed.
+REJECT_REASONS: frozenset[str] = frozenset(
+    {"out_of_dataset_scope", "unsupported_skill", "missing_data_or_artifact"}
+)
+
 
 # validator R3 (2026-05-27) — column type 분류 단일 source.
 #
@@ -289,4 +301,5 @@ __all__ = [
     "CALCULATE_OPERATIONS",
     "SORT_ORDERS",
     "PRESENT_FORMATS",
+    "REJECT_REASONS",
 ]

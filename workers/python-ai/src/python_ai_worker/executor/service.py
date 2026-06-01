@@ -63,6 +63,17 @@ def execute_analyze_plan(
         ExecutorError: SQL 생성/실행 실패 / 지원하지 않는 skill.
     """
 
+    # silverone 2026-06-01 (PR1) — answerable=false 거절 plan은 artifact/DuckDB
+    # 없이 short-circuit. step이 없으므로 실행하지 않고 composer가 reason별
+    # 메시지를 렌더한다 (display=null). raw row를 절대 만들지 않는다.
+    if isinstance(plan, dict) and plan.get("answerable") is False:
+        return _build_reject_response(
+            dataset_version_id=dataset_version_id,
+            plan=plan,
+            user_question=user_question,
+            reuse_metadata=reuse_metadata,
+        )
+
     if artifact_paths is None:
         artifact_paths = _resolve_artifact_paths(dataset_version_id)
 
@@ -167,6 +178,38 @@ def _build_response(
         },
         "steps": steps_payload,
         "present": present_payload,
+        "composer": composer_output,
+    }
+
+
+def _build_reject_response(
+    *,
+    dataset_version_id: str,
+    plan: dict[str, Any],
+    user_question: str | None = None,
+    reuse_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """answerable=false plan의 응답 (silverone 2026-06-01, PR1).
+
+    step 실행 없음 → present=None, artifact_paths=None. composer가 plan.reason /
+    message를 보고 거절 메시지를 렌더(display=null)한다. capability_gap(있으면)은
+    composer.metadata로 전달되어 PR2(rejection event 저장)에서 사용한다.
+    """
+    composer_output = compose_answer(
+        user_question=user_question,
+        present=None,
+        plan=plan,
+        steps=[],
+        reuse_metadata=reuse_metadata,
+        error_metadata=None,
+    )
+    return {
+        "dataset_version_id": dataset_version_id,
+        "plan_version": str(plan.get("plan_version") or "").strip(),
+        "plan": plan,
+        "artifact_paths": None,
+        "steps": [],
+        "present": None,
         "composer": composer_output,
     }
 

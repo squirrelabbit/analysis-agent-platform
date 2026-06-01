@@ -2494,6 +2494,28 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AnalyzePlanStepView"
+        answerable:
+          type: boolean
+          description: |
+            (silverone 2026-06-01, PR1) plan으로 답할 수 없는 질문이면 `false`.
+            생략 시 `true`. `false`면 `steps`는 빈 배열이고 `reason` / `message`가
+            채워진다.
+        reason:
+          type: string
+          enum: [out_of_dataset_scope, unsupported_skill, missing_data_or_artifact]
+          description: |
+            `answerable=false`일 때 거절 사유. out_of_dataset_scope(데이터셋 무관
+            외부/일반 질문), unsupported_skill(데이터셋 관련이나 현 skill 미지원),
+            missing_data_or_artifact(필요 컬럼/아티팩트 부재).
+        message:
+          type: string
+          description: "`answerable=false`일 때 사용자에게 보여줄 거절 사유 문구."
+        capability_gap:
+          type: object
+          description: |
+            `reason=unsupported_skill`일 때 동반. skill upgrade backlog 저장
+            후보(PR2). requested_capability / suggested_skill / evidence 등.
+          additionalProperties: true
       required: [plan_version, steps]
     AnalyzePlanStepView:
       type: object
@@ -2764,20 +2786,32 @@ components:
       properties:
         mode:
           type: string
-          enum: [deterministic, llm_backed, deterministic_fallback, error, fallback]
+          enum: [deterministic, llm_backed, deterministic_fallback, error, fallback, rejected]
           description: |
             - deterministic: PR-A 정상 흐름 (현재 default).
             - llm_backed / deterministic_fallback: PR-B 도입 후 사용.
             - error: error_metadata 분기로 placeholder 문구 사용.
             - fallback: composer가 present를 못 읽거나 예외 발생.
+            - rejected: (PR1) planner가 answerable=false로 거절. display=null.
         template:
           type: string
-          enum: [table_normal, table_truncated, empty, reuse_applied, failed, fallback]
+          enum: [table_normal, table_truncated, empty, reuse_applied, failed, fallback, rejected]
         fallback_reason:
           type:
             - string
             - "null"
           description: mode != deterministic일 때 진단용 사유. 정상이면 null.
+        reason:
+          type: string
+          enum: [out_of_dataset_scope, unsupported_skill, missing_data_or_artifact]
+          description: |
+            (PR1) mode=rejected일 때 거절 사유 taxonomy. plan.reason과 동일 값.
+            프론트 reason별 처리 / 운영 rejection event(PR2) 집계에 사용.
+        capability_gap:
+          type: object
+          description: |
+            (PR1) reason=unsupported_skill일 때 skill upgrade backlog 후보 정보.
+          additionalProperties: true
       required: [mode, template]
     ArtifactPagination:
       type: object

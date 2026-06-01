@@ -27,6 +27,7 @@ from .schema import (
     JOIN_HOWS,
     NUMERIC_COLUMN_TYPES,
     PLAN_VERSION,
+    REJECT_REASONS,
     RESERVED_COLUMN_TYPES,
     RESERVED_INPUT_NAMES,
     RESERVED_STRING_COLUMNS,
@@ -123,6 +124,12 @@ def collect_plan_issues(plan: dict[str, Any]) -> list[ValidationIssue]:
                 message=f"plan_version must be '{PLAN_VERSION}', got '{version or '<missing>'}'",
             )
         )
+
+    # silverone 2026-06-01 (PR1) — reject plan: answerable=false면 step skill 검증
+    # 대신 reason/message/steps-empty만 검증하고 끝낸다. answerable 미지정/true는
+    # 기존 step 검증 흐름 그대로(하위 호환).
+    if plan.get("answerable") is False:
+        return _collect_reject_plan_issues(plan, issues)
 
     raw_steps = plan.get("steps")
     if not isinstance(raw_steps, list):
@@ -246,6 +253,58 @@ def collect_plan_issues(plan: dict[str, Any]) -> list[ValidationIssue]:
             seen_ids=seen_ids,
             step_lookup=step_lookup,
             issues=issues,
+        )
+
+    return issues
+
+
+def _collect_reject_plan_issues(
+    plan: dict[str, Any], issues: list[ValidationIssue]
+) -> list[ValidationIssue]:
+    """answerable=false plan 검증 (silverone 2026-06-01, PR1).
+
+    - reason은 REJECT_REASONS 중 하나.
+    - message는 비어 있으면 안 됨 (사용자 노출 문구).
+    - steps는 비어 있어야 한다 (거절 plan은 실행 step 없음).
+    - reason=unsupported_skill이면 capability_gap이 있으면 dict여야 한다 (v1은
+      존재 시 shape만 가볍게 확인; 없어도 통과 — composer/PR2가 optional 처리).
+    """
+    reason = str(plan.get("reason") or "").strip()
+    if reason not in REJECT_REASONS:
+        issues.append(
+            ValidationIssue(
+                code="plan.reason_invalid",
+                message=(
+                    f"answerable=false plan.reason must be one of {sorted(REJECT_REASONS)}, "
+                    f"got '{reason or '<missing>'}'"
+                ),
+            )
+        )
+
+    if not str(plan.get("message") or "").strip():
+        issues.append(
+            ValidationIssue(
+                code="plan.reject_message_required",
+                message="answerable=false plan must include a non-empty 'message'",
+            )
+        )
+
+    steps = plan.get("steps")
+    if steps not in (None, []) and not (isinstance(steps, list) and len(steps) == 0):
+        issues.append(
+            ValidationIssue(
+                code="plan.reject_steps_not_empty",
+                message="answerable=false plan.steps must be empty",
+            )
+        )
+
+    capability_gap = plan.get("capability_gap")
+    if capability_gap is not None and not isinstance(capability_gap, dict):
+        issues.append(
+            ValidationIssue(
+                code="plan.capability_gap_not_object",
+                message="plan.capability_gap must be a JSON object when present",
+            )
         )
 
     return issues

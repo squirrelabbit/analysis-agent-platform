@@ -15,8 +15,9 @@ import (
 //
 // Keep set (사용자 결정 2026-05-28):
 //   - result.plan : plan_version + steps[].id / .skill / .params
+//     + (answerable=false 거절 시) answerable / reason / message / capability_gap
 //   - result.composer.assistant_content
-//   - result.composer.metadata.{mode,template,fallback_reason}
+//   - result.composer.metadata.{mode,template,fallback_reason,reason,capability_gap}
 //   - result.composer.display.{type,title,columns,rows,total_rows,
 //     returned_rows,max_rows,truncated,warnings,recommended_view,chart_spec}
 //   - result.taxonomy_check (전체 객체)
@@ -66,6 +67,23 @@ func projectAnalyzePlan(value any) map[string]any {
 	if pv, ok := plan["plan_version"].(string); ok && pv != "" {
 		out["plan_version"] = pv
 	}
+	// silverone 2026-06-01 (PR1, reject reason) — answerable=false 거절 plan의
+	// reason/message/capability_gap을 프론트·rejection event(PR2)용으로 노출.
+	// answerable 미지정/true는 기존 plan과 동일하게 steps만 노출.
+	if answerable, ok := plan["answerable"].(bool); ok {
+		out["answerable"] = answerable
+		if !answerable {
+			if reason, ok := plan["reason"].(string); ok && reason != "" {
+				out["reason"] = reason
+			}
+			if message, ok := plan["message"].(string); ok && message != "" {
+				out["message"] = message
+			}
+			if gap, ok := plan["capability_gap"].(map[string]any); ok && len(gap) > 0 {
+				out["capability_gap"] = gap
+			}
+		}
+	}
 	rawSteps, _ := plan["steps"].([]any)
 	steps := make([]map[string]any, 0, len(rawSteps))
 	for _, item := range rawSteps {
@@ -109,10 +127,15 @@ func projectAnalyzeComposer(value any) map[string]any {
 	}
 	if meta, ok := composer["metadata"].(map[string]any); ok {
 		metaView := map[string]any{}
-		for _, key := range [...]string{"mode", "template", "fallback_reason"} {
+		// silverone 2026-06-01 (PR1, reject reason) — mode=rejected일 때 reason을
+		// 노출해 프론트가 reason별 처리, 운영이 rejection event(PR2) 집계 가능.
+		for _, key := range [...]string{"mode", "template", "fallback_reason", "reason"} {
 			if v, exists := meta[key]; exists {
 				metaView[key] = v
 			}
+		}
+		if gap, ok := meta["capability_gap"].(map[string]any); ok && len(gap) > 0 {
+			metaView["capability_gap"] = gap
 		}
 		out["metadata"] = metaView
 	}
