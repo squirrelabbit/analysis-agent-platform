@@ -36,10 +36,16 @@ export interface AnalysisThreadMessageResponseDto {
   };
 }
 
+export interface AnalysisPlanStepDisplayDto {
+  label?: string;
+  expression?: string;
+}
+
 export interface AnalysisPlanStepDto {
   id: string;
   skill: string;
   params: Record<string, unknown>;
+  display?: AnalysisPlanStepDisplayDto;
 }
 
 export interface AnalysisPlanDto {

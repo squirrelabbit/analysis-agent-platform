@@ -13,6 +13,8 @@ export interface ChatPlanStep {
   id: string;
   skill: string;
   params: Record<string, unknown>;
+  label?: string;
+  expression?: string;
 }
 
 export interface ChatPlan {

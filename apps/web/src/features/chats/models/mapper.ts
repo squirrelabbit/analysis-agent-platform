@@ -31,6 +31,8 @@ const mapPlan = (dto: AnalysisPlanDto | undefined): ChatPlan | undefined => {
       id: s.id,
       skill: s.skill,
       params: s.params ?? {},
+      label: s.display?.label?.trim() || undefined,
+      expression: s.display?.expression?.trim() || undefined,
     })),
   };
 };

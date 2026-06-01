@@ -3,11 +3,9 @@ import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatPlan } from "../models";
 
-function formatParams(params: Record<string, unknown>): string {
-  if (!params || Object.keys(params).length === 0) return "{}";
-  return JSON.stringify(params, null, 2);
-}
-
+// step.display.label/expression이 있으면 그것을 사용해 사람이 읽기 쉬운 형태로
+// 표시. label이 없으면 step.id로 fallback. raw params/skill은 노출하지 않는다
+// (백엔드가 label/expression으로 의도된 표현을 제공).
 export default function PlanPanel({ plan }: { plan: ChatPlan }) {
   const [open, setOpen] = useState(false);
   const stepCount = plan.steps.length;
@@ -35,20 +33,19 @@ export default function PlanPanel({ plan }: { plan: ChatPlan }) {
         <ol className="border-t border-zinc-100 divide-y divide-zinc-50">
           {plan.steps.map((step, idx) => (
             <li key={step.id} className="px-3 py-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-baseline gap-2">
                 <span className="font-mono text-[10px] text-zinc-400 w-5 shrink-0">
                   {idx + 1}.
                 </span>
-                <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700">
-                  {step.skill}
-                </span>
-                <span className="font-mono text-[11px] text-zinc-600 truncate">
-                  {step.id}
+                <span className="text-[12px] font-medium text-zinc-800 truncate">
+                  {step.label || step.id}
                 </span>
               </div>
-              <pre className="mt-1.5 ml-7 px-2 py-1.5 rounded bg-zinc-50 text-[10px] text-zinc-600 overflow-x-auto">
-                {formatParams(step.params)}
-              </pre>
+              {step.expression && (
+                <div className="mt-1 ml-7 font-mono text-[11px] text-zinc-500 break-all">
+                  {step.expression}
+                </div>
+              )}
             </li>
           ))}
         </ol>
