@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/select";
 import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { useDatasets } from "@/features/datasets/hooks/dataset.query";
-import { useAnalysisChat } from "../hooks/chat.mutation";
+import { useAnalysisChat, useDeleteChatThread } from "../hooks/chat.mutation";
 import { useChatThread, useChatThreads } from "../hooks/chat.query";
 import type { ChatMessage } from "../models";
 import MessageBubble from "../components/MessageBubble";
@@ -45,7 +45,11 @@ export function ChatPage() {
   const threadsQuery = useChatThreads(projectId, activeDatasetId);
   const threadDetail = useChatThread(projectId, activeDatasetId, threadId);
   const chat = useAnalysisChat(projectId, activeDatasetId);
+  const deleteThread = useDeleteChatThread(projectId, activeDatasetId);
   const isLoading = chat.isPending;
+  const deletingThreadId = deleteThread.isPending
+    ? (deleteThread.variables ?? null)
+    : null;
 
   const serverMessages = useMemo(
     () => threadDetail.data?.messages ?? [],
@@ -149,6 +153,19 @@ export function ChatPage() {
     resetThreadState();
   }
 
+  async function handleDeleteThread(id: string) {
+    if (isLoading || deleteThread.isPending) return;
+    setErrorMsg(null);
+    try {
+      await deleteThread.mutateAsync(id);
+      if (id === threadId) {
+        resetThreadState();
+      }
+    } catch (err) {
+      setErrorMsg(extractErrorMessage(err));
+    }
+  }
+
   async function handleSend() {
     const text = input.trim();
     if (!text || isLoading || !activeDatasetId) return;
@@ -194,8 +211,10 @@ export function ChatPage() {
         activeThreadId={threadId}
         isLoading={threadsQuery.isLoading}
         isComposing={isLoading}
+        deletingThreadId={deletingThreadId}
         onSelect={handleSelectThread}
         onNewThread={handleNewThread}
+        onDelete={handleDeleteThread}
       />
 
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">

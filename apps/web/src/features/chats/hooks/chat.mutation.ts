@@ -30,3 +30,19 @@ export const useAnalysisChat = (projectId: string, datasetId: string) => {
     },
   });
 };
+
+export const useDeleteChatThread = (projectId: string, datasetId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (threadId: string) =>
+      chatApi.deleteThread(projectId, datasetId, threadId),
+    onSuccess: (_, threadId) => {
+      queryClient.removeQueries({
+        queryKey: chatKeys.threadDetail(projectId, datasetId, threadId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: chatKeys.threadList(projectId, datasetId),
+      });
+    },
+  });
+};
