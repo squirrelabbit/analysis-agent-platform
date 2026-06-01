@@ -20,14 +20,7 @@ type DatasetResolvedSource struct {
 }
 
 func ResolveDatasetSource(version DatasetVersion) DatasetResolvedSource {
-	if ref := preparedDatasetRef(version); ref != "" {
-		return DatasetResolvedSource{
-			DatasetName: ref,
-			TextColumn:  metadataStringValue(version.Metadata, "prepared_text_column", "normalized_text"),
-			TextColumns: []string{metadataStringValue(version.Metadata, "prepared_text_column", "normalized_text")},
-			Stage:       DatasetSourceStagePrepared,
-		}
-	}
+	// silverone 2026-05-28 (β2 cleanup PR2) — prepare stage 분기 제거.
 	if ref := cleanedDatasetRef(version); ref != "" {
 		textColumn := metadataStringValue(version.Metadata, "cleaned_text_column", "cleaned_text")
 		return DatasetResolvedSource{
@@ -81,20 +74,8 @@ func ResolveRawDatasetSource(version DatasetVersion) DatasetResolvedSource {
 	}
 }
 
-func ResolveSentimentDatasetSource(version DatasetVersion) DatasetResolvedSource {
-	if ref := sentimentDatasetRef(version); ref != "" {
-		textColumn := metadataStringValue(version.Metadata, "sentiment_text_column", "sentiment_label")
-		return DatasetResolvedSource{
-			DatasetName: ref,
-			TextColumn:  textColumn,
-			TextColumns: []string{textColumn},
-			Stage:       DatasetSourceStageSentiment,
-		}
-	}
-	source := ResolveDatasetSource(version)
-	source.DatasetName = source.DatasetName + ".sentiment.parquet"
-	return source
-}
+// silverone 2026-05-28 (β2 cleanup PR2) — ResolveSentimentDatasetSource 제거.
+// β2로 sentiment stage 자체가 사라져 호출처 없음.
 
 func DatasetSourceDefaultTextColumn(version DatasetVersion) string {
 	return ResolveDatasetSource(version).TextColumn
@@ -125,12 +106,8 @@ func DatasetSourceIsRawTextColumn(version DatasetVersion, column string) bool {
 	return false
 }
 
-func preparedDatasetRef(version DatasetVersion) string {
-	if version.PrepareStatus != "ready" || version.PrepareURI == nil {
-		return ""
-	}
-	return strings.TrimSpace(*version.PrepareURI)
-}
+// silverone 2026-05-28 (β2 cleanup PR2) — preparedDatasetRef / sentimentDatasetRef
+// 제거. ADR-018 β2로 prepare/sentiment 단계 자체가 없어진 후 호출처 0.
 
 func cleanedDatasetRef(version DatasetVersion) string {
 	status := metadataStringValue(version.Metadata, "clean_status", strings.TrimSpace(version.CleanStatus))
@@ -147,13 +124,6 @@ func cleanedDatasetRef(version DatasetVersion) string {
 		return ref
 	}
 	return metadataStringValue(version.Metadata, "cleaned_ref", "")
-}
-
-func sentimentDatasetRef(version DatasetVersion) string {
-	if version.SentimentStatus != "ready" || version.SentimentURI == nil {
-		return ""
-	}
-	return strings.TrimSpace(*version.SentimentURI)
 }
 
 func metadataStringValue(metadata map[string]any, key, fallback string) string {

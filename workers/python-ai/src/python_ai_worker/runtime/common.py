@@ -27,6 +27,7 @@ except ImportError:  # pragma: no cover - exercised in environments without parq
     pa = None
     pq = None
 
+from ..obs import get as _get_logger
 from .constants import (
     STOPWORDS,
     TOKEN_PATTERN,
@@ -38,6 +39,8 @@ from .rule_config import (
     resolve_prepare_regex_rules,
     resolve_taxonomy_rules,
 )
+
+_LOG = _get_logger(__name__)
 
 _KIWI_INSTANCES: dict[str, Any] = {}
 _ROW_CACHE: "OrderedDict[tuple[str, int, int], list[dict[str, Any]]]" = OrderedDict()
@@ -160,11 +163,21 @@ def _write_parquet_rows(
     *,
     schema: Any | None = None,
 ) -> None:
+    # silverone 2026-05-28 — schema 명시 시 rows 유무와 무관하게 강제 적용.
+    # 이전 동작은 rows가 있으면 schema 인자를 무시하고 from_pylist의 자동
+    # 추론에 의존했다 → caller가 schema를 명시한 의도가 묵살되고, 원본
+    # source dict의 한글/BOM 컬럼이 parquet에 그대로 들어갔다 (clean 정식화
+    # bug). schema 명시 시 row가 schema에 정의된 키만 포함하도록 정제.
     arrow, parquet = _require_pyarrow()
-    if rows:
+    if schema is not None:
+        if rows:
+            allowed = {field.name for field in schema}
+            projected = [{k: row.get(k) for k in allowed} for row in rows]
+            table = arrow.Table.from_pylist(projected, schema=schema)
+        else:
+            table = arrow.Table.from_pylist([], schema=schema)
+    elif rows:
         table = arrow.Table.from_pylist(rows)
-    elif schema is not None:
-        table = arrow.Table.from_pylist([], schema=schema)
     else:
         table = arrow.table({})
     parquet.write_table(table, path)
@@ -219,43 +232,18 @@ def _normalize_prepared_text(text: str) -> str:
     return normalized.strip()
 
 
-def _normalize_prepare_preprocess_options(value: Any) -> dict[str, bool]:
-    if not isinstance(value, dict):
-        return {
-            "remove_english": False,
-            "remove_numbers": False,
-            "remove_special": False,
-            "remove_monosyllables": False,
-        }
-    return {
-        "remove_english": bool(value.get("remove_english")),
-        "remove_numbers": bool(value.get("remove_numbers")),
-        "remove_special": bool(value.get("remove_special")),
-        "remove_monosyllables": bool(value.get("remove_monosyllables")),
-    }
-
-
-def _prepare_preprocess_text(text: Any, options: dict[str, bool]) -> str:
+def _strip_known_noise_phrases(text: Any) -> str:
+    """5/21 — preprocess_options 4 boolean(remove_english/numbers/special/monosyllables)
+    제거 후 남은 책임: ``PREPROCESS_SPECIFIC_PHRASES`` (네이버 placeholder 등)
+    strip + 일반 whitespace 정규화. 거친 character class 제거는 dataset domain
+    별 misuse 위험이 커서 ``regex_rule_names`` (config/regex_rules)로 명시
+    rule을 추가하는 형태로 옮겼다.
+    """
     current = "" if text is None else str(text)
     if not current:
         return ""
-
     phrase_pattern = re.compile("|".join(map(re.escape, PREPROCESS_SPECIFIC_PHRASES)))
     current = phrase_pattern.sub("", current)
-
-    patterns: list[str] = []
-    if options.get("remove_english"):
-        patterns.append(r"[a-zA-Z]")
-    if options.get("remove_numbers"):
-        patterns.append(r"\d")
-    if options.get("remove_special"):
-        patterns.append(r"[\W_]")
-    if options.get("remove_monosyllables"):
-        patterns.append(r"[ㄱ-ㅎㅏ-ㅣ]+")
-
-    if patterns:
-        current = re.sub("|".join(patterns), " ", current)
-
     return _normalize_prepared_text(current)
 
 
@@ -376,8 +364,19 @@ def _extract_noun_tokens(
                     continue
                 noun_tokens.append(surface)
             return noun_tokens, "kiwi"
-        except Exception:
-            pass
+        except Exception as exc:
+            # Codex round 3B silent fallback finding: kiwi tokenize failure
+            # silently fell through to regex_fallback, leaving operators no
+            # signal that Korean noun extraction had degraded to crude
+            # whitespace splitting (regex_fallback returns the raw words, not
+            # nouns). Surface a warning so operators can correlate downstream
+            # noun_frequency quality drops with backend failures.
+            _LOG.warning(
+                "tokenize.kiwi_failed",
+                error_category=type(exc).__name__,
+                error_message=str(exc),
+                user_dictionary_path=str(user_dictionary_path or ""),
+            )
 
     noun_tokens = []
     for token in _tokenize(normalized_text):
@@ -445,8 +444,17 @@ def _split_sentences(text: str, *, language: str = "ko") -> tuple[list[str], str
             sentences = [item for item in sentences if item]
             if sentences:
                 return sentences, "kss"
-        except Exception:
-            pass
+        except Exception as exc:
+            # Codex round 3B silent fallback finding: kss split failure
+            # silently fell through to a regex split, which over-splits Korean
+            # text on every period/newline and produces fragmented sentences.
+            # Surface a warning so the regex fallback is visible to operators.
+            _LOG.warning(
+                "split_sentences.kss_failed",
+                error_category=type(exc).__name__,
+                error_message=str(exc),
+                language=normalized_language,
+            )
 
     sentences = [
         item.strip()
@@ -526,11 +534,6 @@ def _looks_duplicate_goal(goal: str) -> bool:
     return any(keyword in goal for keyword in keywords)
 
 
-def _looks_sentiment_goal(goal: str) -> bool:
-    keywords = ("sentiment", "positive", "negative", "neutral", "긍정", "부정", "중립", "감성", "감정", "호감", "불만", "만족")
-    return any(keyword in goal for keyword in keywords)
-
-
 def _looks_noun_frequency_goal(goal: str) -> bool:
     keywords = ("noun", "nouns", "명사", "명사 추출", "명사 빈도", "명사 키워드")
     return any(keyword in goal for keyword in keywords)
@@ -539,19 +542,6 @@ def _looks_noun_frequency_goal(goal: str) -> bool:
 def _looks_sentence_split_goal(goal: str) -> bool:
     keywords = ("sentence split", "sentence-level", "문장 분리", "문장단위", "문장 단위", "문장별", "문장으로 나눠")
     return any(keyword in goal for keyword in keywords)
-
-
-def _iter_embedding_records(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        raise ValueError(f"embedding_uri does not exist: {path}")
-    records: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            records.append(json.loads(line))
-    return records
 
 
 def _vector_norm(token_counts: Counter[str]) -> float:
@@ -869,12 +859,12 @@ __all__ = [
     "_duplicate_similarity",
     "_evidence_rationale",
     "_extract_noun_tokens",
+    "_split_sentences",
     "_fallback_evidence_summary",
     "_fallback_follow_up_questions",
     "_apply_prepare_regex_rules",
     "_in_bucket_range",
     "_iter_documents",
-    "_iter_embedding_records",
     "_iter_rows",
     "_load_cluster_membership_rows",
     "_looks_breakdown_goal",
@@ -885,7 +875,6 @@ __all__ = [
     "_looks_noun_frequency_goal",
     "_looks_noise_only",
     "_looks_semantic_search_goal",
-    "_looks_sentiment_goal",
     "_looks_sentence_split_goal",
     "_looks_taxonomy_goal",
     "_looks_trend_goal",
@@ -895,7 +884,6 @@ __all__ = [
     "_normalize_garbage_rule_names",
     "_normalize_pos_prefixes",
     "_normalize_prepared_text",
-    "_normalize_prepare_preprocess_options",
     "_normalize_prepare_regex_rule_names",
     "_normalize_stopwords",
     "_normalize_taxonomy_rules",
@@ -903,8 +891,8 @@ __all__ = [
     "_parse_timestamp",
     "_period_end",
     "_period_start",
-    "_prepare_preprocess_text",
     "_rank_documents",
+    "_strip_known_noise_phrases",
     "_read_csv_rows",
     "_read_jsonl_rows",
     "_read_parquet_rows",

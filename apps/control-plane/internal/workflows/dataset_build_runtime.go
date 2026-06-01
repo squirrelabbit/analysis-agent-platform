@@ -46,10 +46,9 @@ type DatasetBuildLifecycleResult struct {
 
 type DatasetBuildRunner interface {
 	BuildClean(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest) (domain.DatasetVersion, error)
-	BuildPrepare(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest) (domain.DatasetVersion, error)
-	BuildSentiment(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest) (domain.DatasetVersion, error)
-	BuildEmbeddings(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest) (domain.DatasetVersion, error)
-	BuildClusters(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest) (domain.DatasetVersion, error)
+	BuildClauseLabel(projectID, datasetID, datasetVersionID string, input domain.DatasetClauseLabelBuildRequest) (domain.DatasetVersion, error)
+	// ADR-017 / 5/19 결정 — clean 직후 doc-level 3-tier 진성 분류.
+	BuildDocGenuineness(projectID, datasetID, datasetVersionID string, input domain.DatasetDocGenuinenessBuildRequest) (domain.DatasetVersion, error)
 }
 
 type WaitingExecutionResumer interface {
@@ -78,6 +77,14 @@ type DatasetBuildConcurrencyLimits struct {
 	Sentiment int `json:"sentiment"`
 	Embedding int `json:"embedding"`
 	Cluster   int `json:"cluster"`
+}
+
+// RuntimeRegistrar — Temporal worker가 workflow + activity를 등록할 때 호출하는
+// 최소 surface. silverone 2026-05-21 δ-2에서 analysis_runtime.go 삭제 후 이
+// 인터페이스만 남겨 dataset_build_runtime에서 직접 사용.
+type RuntimeRegistrar interface {
+	RegisterWorkflowWithOptions(w interface{}, options workflow.RegisterOptions)
+	RegisterActivityWithOptions(a interface{}, options activity.RegisterOptions)
 }
 
 func RegisterDatasetBuildRuntime(registrar RuntimeRegistrar, activities *DatasetBuildActivities) {
@@ -270,33 +277,19 @@ func (a *DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, inp
 		}
 		_, err = a.Builder.BuildClean(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
 		return classifyDatasetBuildError(err)
-	case "prepare":
-		request, err := decodeBuildRequest[domain.DatasetPrepareRequest](job.Request)
+	case "clause_label":
+		request, err := decodeBuildRequest[domain.DatasetClauseLabelBuildRequest](job.Request)
 		if err != nil {
 			return temporal.NewNonRetryableApplicationError(err.Error(), "invalid_request", err)
 		}
-		_, err = a.Builder.BuildPrepare(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
+		_, err = a.Builder.BuildClauseLabel(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
 		return classifyDatasetBuildError(err)
-	case "sentiment":
-		request, err := decodeBuildRequest[domain.DatasetSentimentBuildRequest](job.Request)
+	case "doc_genuineness":
+		request, err := decodeBuildRequest[domain.DatasetDocGenuinenessBuildRequest](job.Request)
 		if err != nil {
 			return temporal.NewNonRetryableApplicationError(err.Error(), "invalid_request", err)
 		}
-		_, err = a.Builder.BuildSentiment(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
-		return classifyDatasetBuildError(err)
-	case "embedding":
-		request, err := decodeBuildRequest[domain.DatasetEmbeddingBuildRequest](job.Request)
-		if err != nil {
-			return temporal.NewNonRetryableApplicationError(err.Error(), "invalid_request", err)
-		}
-		_, err = a.Builder.BuildEmbeddings(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
-		return classifyDatasetBuildError(err)
-	case "cluster":
-		request, err := decodeBuildRequest[domain.DatasetClusterBuildRequest](job.Request)
-		if err != nil {
-			return temporal.NewNonRetryableApplicationError(err.Error(), "invalid_request", err)
-		}
-		_, err = a.Builder.BuildClusters(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
+		_, err = a.Builder.BuildDocGenuineness(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
 		return classifyDatasetBuildError(err)
 	default:
 		return temporal.NewNonRetryableApplicationError(
@@ -424,7 +417,8 @@ func (a *DatasetBuildActivities) ResumeWaitingExecutionsForDatasetVersion(ctx co
 	if err != nil {
 		return DatasetBuildLifecycleResult{}, err
 	}
-	job.ResumedExecutionCount = count
+	// 2026-05-21 — ResumedExecutionCount 필드 제거 (δ-3 executions drop 잔재).
+	// 본 path는 Resumer가 nil이라 unreachable이지만 시그니처 유지.
 	if err := repo.SaveDatasetBuildJob(job); err != nil {
 		return DatasetBuildLifecycleResult{}, err
 	}
@@ -467,16 +461,14 @@ func datasetBuildExecuteActivityOptions(buildType string) workflow.ActivityOptio
 	switch buildType {
 	case "clean":
 		timeout = 20 * time.Minute
-	case "prepare":
-		timeout = 75 * time.Minute
-	case "sentiment":
-		timeout = 45 * time.Minute
-	case "embedding":
-		timeout = 60 * time.Minute
-		maxAttempts = 3
-	case "cluster":
-		timeout = 60 * time.Minute
-		maxAttempts = 3
+	case "doc_genuineness", "clause_label":
+		// silverone 2026-05-28 — LLOA 2k+ doc 단위 build는 25~50분 소요.
+		// StartToCloseTimeout 20분이면 Temporal이 retry attempt를 일으키고
+		// worker-side cancel propagation이 없어 두 attempt가 동일 output_path에
+		// 동시 append → jsonl race corrupt 발생.
+		// timeout 90분 + retry 1회로 운영자 명시 재실행 모델로 전환.
+		timeout = 90 * time.Minute
+		maxAttempts = 1
 	}
 	return workflow.ActivityOptions{
 		StartToCloseTimeout: timeout,
@@ -637,14 +629,6 @@ func (l *datasetBuildLimiter) semaphore(buildType string) chan struct{} {
 	switch buildType {
 	case "clean":
 		return l.clean
-	case "prepare":
-		return l.prepare
-	case "sentiment":
-		return l.sentiment
-	case "embedding":
-		return l.embedding
-	case "cluster":
-		return l.cluster
 	default:
 		return nil
 	}

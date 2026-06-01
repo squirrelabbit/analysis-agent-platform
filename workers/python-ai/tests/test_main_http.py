@@ -25,8 +25,6 @@ def _test_config() -> SimpleNamespace:
         queue="analysis-support",
         llm_provider="anthropic",
         anthropic_model="claude-test",
-        anthropic_prepare_model="claude-test",
-        anthropic_sentiment_model="claude-test",
         openai_embedding_model="text-embedding-3-small",
         openai_embedding_dimensions=1536,
         local_embedding_model="",

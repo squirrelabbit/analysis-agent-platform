@@ -10,6 +10,7 @@
 @execution_id_to = replace-execution-id-to
 @step_id = replace-step-id
 @cluster_id = replace-cluster-id
+@profile_build_id = replace-profile-build-id
 @scenario_id = replace-scenario-id
 @draft_id = replace-draft-id
 
@@ -59,7 +60,15 @@ Content-Type: application/json
 {
   "name": "sns-data",
   "description": "SNS sample dataset",
-  "data_type": "unstructured"
+  "data_type": "unstructured",
+  "metadata": {
+    "doc_genuineness": {
+      "subject_type": "festival",
+      "subject_name": "강릉 국가유산야행",
+      "subject_aliases": ["문화유산야행", "문화재야행", "강릉야행"],
+      "recruitment_keywords": ["서포터즈", "푸드트럭"]
+    }
+  }
 }
 
 ### List datasets
@@ -67,6 +76,21 @@ GET {{api}}/projects/{{project_id}}/datasets
 
 ### Get dataset
 GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}
+
+### Update dataset metadata
+PATCH {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/metadata
+Content-Type: application/json
+
+{
+  "metadata": {
+    "doc_genuineness": {
+      "subject_type": "festival",
+      "subject_name": "강릉 국가유산야행",
+      "subject_aliases": ["강릉야행"],
+      "recruitment_keywords": ["서포터즈", "푸드트럭"]
+    }
+  }
+}
 
 ### Delete dataset
 DELETE {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}
@@ -117,14 +141,19 @@ Content-Type: application/json
   "dataset_version_id": "{{version_id}}"
 }
 
-### Clear active dataset version
-DELETE {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/active_version
+### Clear active dataset version (PUT with empty dataset_version_id)
+PUT {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/active_version
+Content-Type: application/json
+
+{
+  "dataset_version_id": ""
+}
 
 ### Source download
 GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/source_download
 
 ### Clean job
-POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/clean_jobs
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/clean
 Content-Type: application/json
 
 {
@@ -152,19 +181,13 @@ Content-Type: application/json
 }
 
 ### Prepare job
-POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/prepare_jobs
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/prepare
 Content-Type: application/json
 
 {
   "max_rows": 100,
   "force": true
 }
-
-### Prepare preview
-GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/prepare_preview?limit=20
-
-### Prepare download
-GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/prepare_download
 
 ### Sentiment sample
 POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/sentiment_sample
@@ -177,7 +200,7 @@ Content-Type: application/json
 }
 
 ### Sentiment job
-POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/sentiment_jobs
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/sentiment
 Content-Type: application/json
 
 {
@@ -185,14 +208,8 @@ Content-Type: application/json
   "force": true
 }
 
-### Sentiment preview
-GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/sentiment_preview?limit=20
-
-### Sentiment download
-GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/sentiment_download
-
 ### Embedding job
-POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/embedding_jobs
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/embeddings
 Content-Type: application/json
 
 {
@@ -201,7 +218,7 @@ Content-Type: application/json
 }
 
 ### Cluster job
-POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/cluster_jobs
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/cluster
 Content-Type: application/json
 
 {
@@ -217,61 +234,38 @@ GET {{api}}/projects/{{project_id}}/dataset_build_jobs/{{job_id}}
 ### Cluster members
 GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/clusters/{{cluster_id}}/members?limit=50&samples_only=false
 
-### Create analysis request
-POST {{api}}/projects/{{project_id}}/analysis_requests
+### Analyze dataset (creates a new analysis thread)
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/analyze
 Content-Type: application/json
 
 {
-  "dataset_id": "{{dataset_id}}",
-  "goal": "주요 불만 이슈를 요약해줘",
-  "constraints": [],
-  "context": {}
+  "user_question": "주요 불만 이슈를 요약해줘"
 }
 
-### Get analysis request
-GET {{api}}/projects/{{project_id}}/analysis_requests/{{request_id}}
-
-### Get plan
-GET {{api}}/projects/{{project_id}}/plans/{{plan_id}}
-
-### Execute plan
-POST {{api}}/projects/{{project_id}}/plans/{{plan_id}}/execute
+### Create analysis thread
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/analysis_threads
 Content-Type: application/json
 
-{}
+{
+  "title": "불만 이슈 분석"
+}
 
-### List executions
-GET {{api}}/projects/{{project_id}}/executions
+### List analysis threads
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/analysis_threads
 
-### Get execution
-GET {{api}}/projects/{{project_id}}/executions/{{execution_id}}
+### Get analysis thread
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/analysis_threads/{{thread_id}}
 
-### Execution progress
-GET {{api}}/projects/{{project_id}}/executions/{{execution_id}}/progress
-
-### Execution events
-GET {{api}}/projects/{{project_id}}/executions/{{execution_id}}/events
-
-### Execution step preview
-GET {{api}}/projects/{{project_id}}/executions/{{execution_id}}/steps/{{step_id}}
-
-### Execution result
-GET {{api}}/projects/{{project_id}}/executions/{{execution_id}}/result
-
-### Resume waiting execution
-POST {{api}}/projects/{{project_id}}/executions/{{execution_id}}/resume
+### Ask follow-up in analysis thread
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/analysis_threads/{{thread_id}}/messages
 Content-Type: application/json
 
-{}
+{
+  "content": "그중 긍정 리뷰만 보면?"
+}
 
-### Rerun execution
-POST {{api}}/projects/{{project_id}}/executions/{{execution_id}}/rerun
-Content-Type: application/json
-
-{}
-
-### Diff executions
-GET {{api}}/projects/{{project_id}}/executions/diff?from={{execution_id}}&to={{execution_id_to}}
+### Get analysis run
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/analysis_runs/{{run_id}}
 
 ### Create scenario
 POST {{api}}/projects/{{project_id}}/scenarios
@@ -339,3 +333,44 @@ Content-Type: application/json
 
 ### Get report draft
 GET {{api}}/projects/{{project_id}}/report_drafts/{{draft_id}}
+
+### -----------------------------------------------------------------
+### 5/12 (silverone) document_cluster_profile build skill + 운영자 confirm
+### Codex 검토 round-2 finding (1)~(4) 반영
+### -----------------------------------------------------------------
+
+### 1. POST document_cluster_profile (profile build trigger)
+### clean ready 필수. 매 호출은 새 UUID profile_build_id 발급 + 별도 immutable row.
+### fastembed + KMeans + claude-haiku-4-5 auto_label. 동기 ~40초.
+### 응답에서 "id" 값을 잡아 다음 PUT의 profile_build_id로 echo.
+POST {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/document_cluster_profile
+Content-Type: application/json
+
+{
+  "n_clusters": 4,
+  "target_domain": "강릉문화재야행 festival"
+}
+
+### 2. GET document_cluster_profile (read model — latest build + 그 build에 묶인 latest confirmation)
+### 응답의 profile_build_id를 PUT 시 그대로 echo. rebuild가 끼면 새 build_id로 바뀜.
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/document_cluster_profile
+
+### 3. PUT document_cluster_profile/confirmations (운영자 일괄 결정, append-only)
+### Codex finding 2~4 — profile_build_id required + status=ready + cluster_id valid set 검증.
+### 동일 결정은 noop, 변경 시 supersedes_id chain. pending/missing은 select가 기본 exclude.
+PUT {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/versions/{{version_id}}/document_cluster_profile/confirmations
+Content-Type: application/json
+
+{
+  "profile_build_id": "{{profile_build_id}}",
+  "confirmed_by": "silverone",
+  "confirmations": {
+    "0": { "operator_action": "exclude", "confirm_note": "공식 홍보/안내" },
+    "1": { "operator_action": "pending", "confirm_note": "재검토 필요" },
+    "2": { "operator_action": "include", "confirm_note": "진짜 후기" },
+    "3": { "operator_action": "exclude", "confirm_note": "전국 축제 카탈로그" }
+  }
+}
+
+### 4. GET cluster_confirmation_history (read-only 참고 catalog — 자동 적용 X)
+GET {{api}}/projects/{{project_id}}/datasets/{{dataset_id}}/cluster_confirmation_history

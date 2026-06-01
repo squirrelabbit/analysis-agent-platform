@@ -9,7 +9,6 @@ import (
 	"unicode"
 
 	"analysis-support-platform/control-plane/internal/domain"
-	"analysis-support-platform/control-plane/internal/store"
 )
 
 func normalizeDatasetProfile(profile *domain.DatasetProfile) *domain.DatasetProfile {
@@ -108,84 +107,11 @@ func resolveDatasetBuildTextSelection(
 	}
 }
 
-func resolveCleanPreprocessOptions(
-	metadata map[string]any,
-	input *domain.DatasetCleanPreprocessOptions,
-) map[string]bool {
-	if input != nil {
-		return cleanPreprocessOptionsFromDomain(input)
-	}
-	if metadata == nil {
-		return defaultCleanPreprocessOptions()
-	}
-	for _, key := range []string{"clean_preprocess_options", "preprocess_options"} {
-		if options := cleanPreprocessOptionsFromAny(metadata[key]); len(options) > 0 {
-			return options
-		}
-	}
-	return defaultCleanPreprocessOptions()
-}
-
-func defaultCleanPreprocessOptions() map[string]bool {
-	return map[string]bool{
-		"remove_english":       false,
-		"remove_numbers":       false,
-		"remove_special":       false,
-		"remove_monosyllables": false,
-	}
-}
-
-func cleanPreprocessOptionsFromDomain(input *domain.DatasetCleanPreprocessOptions) map[string]bool {
-	if input == nil {
-		return defaultCleanPreprocessOptions()
-	}
-	return map[string]bool{
-		"remove_english":       input.RemoveEnglish,
-		"remove_numbers":       input.RemoveNumbers,
-		"remove_special":       input.RemoveSpecial,
-		"remove_monosyllables": input.RemoveMonosyllables,
-	}
-}
-
-func cleanPreprocessOptionsFromAny(value any) map[string]bool {
-	result := defaultCleanPreprocessOptions()
-	hasKnownKey := false
-	if source, ok := value.(map[string]bool); ok {
-		for key := range result {
-			if raw, exists := source[key]; exists {
-				result[key] = raw
-				hasKnownKey = true
-			}
-		}
-		if !hasKnownKey {
-			return nil
-		}
-		return result
-	}
-	source, ok := value.(map[string]any)
-	if !ok {
-		return nil
-	}
-	for key := range result {
-		if raw, exists := source[key]; exists {
-			result[key] = anyBoolValue(raw)
-			hasKnownKey = true
-		}
-	}
-	if !hasKnownKey {
-		return nil
-	}
-	return result
-}
-
-func hasEnabledPreparePreprocessOption(options map[string]bool) bool {
-	for _, enabled := range options {
-		if enabled {
-			return true
-		}
-	}
-	return false
-}
+// 2026-05-21 — clean preprocess boolean option(remove_english/remove_numbers
+// /remove_special/remove_monosyllables) 4종 제거. 한글 SNS 후기 분석 흐름에서
+// 영문/숫자/공백/모노 음절은 모두 의미 신호라 거친 제거는 해가 됐다.
+// dataset domain별 미세조정이 필요해지면 `regex_rule_names` (config/regex_rules
+// JSON) + `noise_patterns` (config/noise_patterns JSON)로 명시 룰을 추가한다.
 
 func datasetBuildTextColumnLabel(columns []string) string {
 	normalized := normalizeStringList(columns)
@@ -308,7 +234,7 @@ func enrichDatasetVersionView(version *domain.DatasetVersion) {
 		version.CleanedAt = &cleanedAt
 	}
 	version.CleanSummary = buildCleanSummary(version.Metadata)
-	version.PrepareSummary = buildPrepareSummary(version.Metadata)
+	// silverone 2026-05-28 (β2 cleanup PR2) — PrepareSummary 필드 제거.
 }
 
 func (s *DatasetService) attachDatasetVersionArtifacts(version *domain.DatasetVersion) error {
@@ -341,7 +267,6 @@ func buildCleanSummary(metadata map[string]any) *domain.DatasetCleanSummary {
 		TextColumn:            strings.TrimSpace(anyStringValue(raw["text_column"])),
 		TextColumns:           anyStringList(raw["text_columns"]),
 		TextJoiner:            anyStringValue(raw["text_joiner"]),
-		PreprocessOptions:     boolMapValue(raw["preprocess_options"]),
 		SourceInputCharCount:  intValueOrZero(raw["source_input_char_count"]),
 		CleanedInputCharCount: intValueOrZero(raw["cleaned_input_char_count"]),
 		CleanReducedCharCount: intValueOrZero(raw["clean_reduced_char_count"]),
@@ -349,88 +274,11 @@ func buildCleanSummary(metadata map[string]any) *domain.DatasetCleanSummary {
 	}
 }
 
-func buildSentimentSummary(metadata map[string]any) *domain.DatasetSentimentSummary {
-	if len(metadata) == 0 {
-		return nil
-	}
-	raw, ok := metadata["sentiment_summary"].(map[string]any)
-	if !ok || len(raw) == 0 {
-		return nil
-	}
-	return &domain.DatasetSentimentSummary{
-		InputRowCount:      intValueOrZero(raw["input_row_count"]),
-		LabeledRowCount:    intValueOrZero(raw["labeled_row_count"]),
-		TextColumn:         strings.TrimSpace(anyStringValue(raw["text_column"])),
-		TextColumns:        anyStringList(raw["text_columns"]),
-		TextJoiner:         anyStringValue(raw["text_joiner"]),
-		SentimentBatchSize: intValueOrZero(raw["sentiment_batch_size"]),
-		LabelCounts:        intMapValue(raw["label_counts"]),
-	}
-}
-
-func buildPrepareSummary(metadata map[string]any) *domain.DatasetPrepareSummary {
-	if len(metadata) == 0 {
-		return nil
-	}
-	raw, ok := metadata["prepare_summary"].(map[string]any)
-	if !ok || len(raw) == 0 {
-		return nil
-	}
-	return &domain.DatasetPrepareSummary{
-		InputRowCount:  intValueOrZero(raw["input_row_count"]),
-		OutputRowCount: intValueOrZero(raw["output_row_count"]),
-		KeptCount:      intValueOrZero(raw["kept_count"]),
-		ReviewCount:    intValueOrZero(raw["review_count"]),
-		DroppedCount:   intValueOrZero(raw["dropped_count"]),
-		TextColumn:     strings.TrimSpace(anyStringValue(raw["text_column"])),
-		TextColumns:    anyStringList(raw["text_columns"]),
-		TextJoiner:     anyStringValue(raw["text_joiner"]),
-	}
-}
-
-func cloneSentimentSummary(summary *domain.DatasetSentimentSummary) *domain.DatasetSentimentSummary {
-	if summary == nil {
-		return nil
-	}
-	cloned := *summary
-	if len(summary.TextColumns) > 0 {
-		cloned.TextColumns = append([]string(nil), summary.TextColumns...)
-	}
-	if len(summary.LabelCounts) > 0 {
-		cloned.LabelCounts = cloneStringIntMap(summary.LabelCounts)
-	}
-	return &cloned
-}
-
-func clonePrepareSummary(summary *domain.DatasetPrepareSummary) *domain.DatasetPrepareSummary {
-	if summary == nil {
-		return nil
-	}
-	cloned := *summary
-	if len(summary.TextColumns) > 0 {
-		cloned.TextColumns = append([]string(nil), summary.TextColumns...)
-	}
-	return &cloned
-}
+// silverone 2026-05-28 (β2 cleanup PR2) — buildPrepareSummary 제거. β2로
+// prepare 단계 사라져 호출처 0 + DatasetPrepareSummary type 자체 제거됨.
 
 func datasetSourceForUnstructured(version domain.DatasetVersion) string {
 	return domain.ResolveDatasetSource(version).DatasetName
-}
-
-func datasetSourceForPrepare(version domain.DatasetVersion) (string, []string) {
-	source := domain.ResolvePrepareInputSource(version)
-	return source.DatasetName, source.TextColumns
-}
-
-func datasetSourceForSentiment(version domain.DatasetVersion) string {
-	if isSentimentReady(version) && version.SentimentURI != nil && strings.TrimSpace(*version.SentimentURI) != "" {
-		return strings.TrimSpace(*version.SentimentURI)
-	}
-	return deriveSentimentURI(version)
-}
-
-func defaultPreparedTextColumn(version domain.DatasetVersion) string {
-	return domain.DatasetSourceDefaultTextColumn(version)
 }
 
 func textSelectionMatchesRawSource(version domain.DatasetVersion, textColumn string, textColumns []string) bool {
@@ -461,35 +309,13 @@ func requiresClean(version domain.DatasetVersion) bool {
 	}
 }
 
-func requiresPrepare(version domain.DatasetVersion) bool {
-	switch version.DataType {
-	case "unstructured", "mixed", "both":
-		return version.PrepareStatus != "not_requested" && version.PrepareStatus != "not_applicable"
-	default:
-		return false
-	}
-}
-
-func requiresSentiment(version domain.DatasetVersion) bool {
-	switch version.DataType {
-	case "unstructured", "mixed", "both":
-		return version.SentimentStatus != "" && version.SentimentStatus != "not_requested" && version.SentimentStatus != "not_applicable"
-	default:
-		return false
-	}
-}
-
-func requiresEmbedding(version domain.DatasetVersion) bool {
-	switch version.DataType {
-	case "unstructured", "mixed", "both":
-		if metadataBool(version.Metadata, "embedding_required") {
-			return true
-		}
-		return version.EmbeddingStatus != "" && version.EmbeddingStatus != "not_requested" && version.EmbeddingStatus != "not_applicable"
-	default:
-		return false
-	}
-}
+// silverone 2026-05-28 (β2 cleanup PR2) — requiresPrepare /
+// requiresSentiment / requiresEmbedding은 β2로 모두 dead. 호출처 stub
+// (datasetBuildTypePrepare/Sentiment/Embedding stage 자체가 not_applicable).
+// stage view 정리(PR3) 시 함수 자체 제거.
+func requiresPrepare(_ domain.DatasetVersion) bool   { return false }
+func requiresSentiment(_ domain.DatasetVersion) bool { return false }
+func requiresEmbedding(_ domain.DatasetVersion) bool { return false }
 
 func cleanStatus(version domain.DatasetVersion) string {
 	status := strings.TrimSpace(metadataString(version.Metadata, "clean_status", ""))
@@ -508,33 +334,49 @@ func cleanStatus(version domain.DatasetVersion) string {
 	}
 }
 
+// 5/6 endpoint 통일 후 단수 endpoint(/sentiment, /embeddings, /cluster)가
+// 비동기 + jobs row 패턴으로 통합되면서 의존성 precondition을 백엔드에서
+// 검사하기 위한 helper. 옛날엔 호출자(스크립트/프론트)가 wait_for_status로
+// 보장했는데 잘못 호출 시 silent fail로 빠지던 부채 해소.
+
+// silverone 2026-05-28 (β2 cleanup PR2) — struct 필드 제거 후 metadata만 사용.
+func prepareStatus(version domain.DatasetVersion) string {
+	return strings.TrimSpace(metadataString(version.Metadata, "prepare_status", ""))
+}
+
+func embeddingStatus(version domain.DatasetVersion) string {
+	return strings.TrimSpace(metadataString(version.Metadata, "embedding_status", ""))
+}
+
+// 5/7 결정 5-step pipeline 신규 status helper. struct 컬럼 추가는 회피하고
+// metadata jsonb의 *_status key만 사용 — DB schema 변경 0. 기존 4 status는
+// struct 필드 + metadata 둘 다지만 신규 4는 metadata only(비대칭). 후속 plan
+// 에서 통합 검토.
+
+func clauseLabelStatus(version domain.DatasetVersion) string {
+	return strings.TrimSpace(metadataString(version.Metadata, "clause_label_status", ""))
+}
+
+// isClauseLabelPreconditionSatisfied — embedding_cluster / keyword_index 전
+// 검사. clause_label ready 필수.
+func isClauseLabelPreconditionSatisfied(status string) bool {
+	switch status {
+	case "ready", "not_applicable", "not_requested", "":
+		return true
+	default:
+		return false
+	}
+}
+
 func isCleanReady(version domain.DatasetVersion) bool {
 	return cleanStatus(version) == "ready" && cleanArtifactRef(version) != ""
 }
 
-func isPrepareReady(version domain.DatasetVersion) bool {
-	return version.PrepareStatus == "ready" && version.PrepareURI != nil && strings.TrimSpace(*version.PrepareURI) != ""
-}
-
-func isSentimentReady(version domain.DatasetVersion) bool {
-	return version.SentimentStatus == "ready" && version.SentimentURI != nil && strings.TrimSpace(*version.SentimentURI) != ""
-}
-
-func embeddingBuildReady(version domain.DatasetVersion) bool {
-	if version.EmbeddingStatus != "ready" {
-		return false
-	}
-	if version.EmbeddingURI != nil && strings.TrimSpace(*version.EmbeddingURI) != "" {
-		return true
-	}
-	if strings.TrimSpace(metadataString(version.Metadata, "embedding_index_source_ref", "")) != "" {
-		return true
-	}
-	if strings.TrimSpace(metadataString(version.Metadata, "embedding_index_ref", "")) != "" {
-		return true
-	}
-	return false
-}
+// silverone 2026-05-28 (β2 cleanup PR2) — β2 dead stage. struct 필드 제거.
+// stage 자체가 사용 안 되므로 항상 false.
+func isPrepareReady(_ domain.DatasetVersion) bool    { return false }
+func isSentimentReady(_ domain.DatasetVersion) bool  { return false }
+func embeddingBuildReady(_ domain.DatasetVersion) bool { return false }
 
 func datasetClusterReady(version domain.DatasetVersion) bool {
 	if strings.TrimSpace(metadataString(version.Metadata, "cluster_status", "")) != "ready" {
@@ -571,50 +413,6 @@ func cleanArtifactRef(version domain.DatasetVersion) string {
 	return strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
 }
 
-func resolvePrepareArtifact(version domain.DatasetVersion) (string, string, error) {
-	preparedRef := strings.TrimSpace(metadataString(version.Metadata, "prepared_ref", ""))
-	if preparedRef == "" && version.PrepareURI != nil {
-		preparedRef = strings.TrimSpace(*version.PrepareURI)
-	}
-	if version.PrepareStatus != "ready" || preparedRef == "" {
-		return "", "", ErrInvalidArgument{Message: "prepare artifact is not ready"}
-	}
-	prepareFormat := strings.TrimSpace(metadataString(version.Metadata, "prepared_format", ""))
-	if prepareFormat == "" {
-		prepareFormat = strings.TrimSpace(metadataString(version.Metadata, "prepare_format", ""))
-	}
-	if prepareFormat == "" {
-		prepareFormat = inferArtifactFormat(preparedRef, "parquet")
-	}
-	return preparedRef, prepareFormat, nil
-}
-
-func resolveSentimentArtifact(version domain.DatasetVersion) (string, string, error) {
-	sentimentRef := strings.TrimSpace(metadataString(version.Metadata, "sentiment_ref", ""))
-	if sentimentRef == "" && version.SentimentURI != nil {
-		sentimentRef = strings.TrimSpace(*version.SentimentURI)
-	}
-	if version.SentimentStatus != "ready" || sentimentRef == "" {
-		return "", "", ErrInvalidArgument{Message: "sentiment artifact is not ready"}
-	}
-	sentimentFormat := strings.TrimSpace(metadataString(version.Metadata, "sentiment_format", ""))
-	if sentimentFormat == "" {
-		sentimentFormat = inferArtifactFormat(sentimentRef, "parquet")
-	}
-	return sentimentRef, sentimentFormat, nil
-}
-
-func deriveClusterMembershipURI(summaryURI string) string {
-	summaryURI = strings.TrimSpace(summaryURI)
-	if summaryURI == "" {
-		return ""
-	}
-	if strings.HasSuffix(summaryURI, ".json") {
-		return strings.TrimSuffix(summaryURI, ".json") + ".memberships.parquet"
-	}
-	return summaryURI + ".memberships.parquet"
-}
-
 func artifactString(artifact map[string]any, key string) string {
 	if artifact == nil {
 		return ""
@@ -639,64 +437,6 @@ func artifactMap(artifact map[string]any, key string) map[string]any {
 		return nil
 	}
 	return typed
-}
-
-func artifactBoolMap(artifact map[string]any, key string) map[string]bool {
-	return boolMapValue(artifactMap(artifact, key))
-}
-
-type llmFallbackInfo struct {
-	Fallback bool
-	Reason   string
-	Count    int
-	Provider string
-	Model    string
-}
-
-func clearLLMFallbackMetadata(metadata map[string]any, prefix string) {
-	if metadata == nil {
-		return
-	}
-	delete(metadata, prefix+"_llm_fallback")
-	delete(metadata, prefix+"_llm_fallback_reason")
-	delete(metadata, prefix+"_llm_fallback_count")
-	delete(metadata, prefix+"_llm_fallback_reasons")
-	delete(metadata, prefix+"_llm_provider")
-	delete(metadata, prefix+"_llm_model")
-	delete(metadata, prefix+"_warning")
-}
-
-func applyLLMFallbackMetadata(metadata map[string]any, prefix string, artifact map[string]any) llmFallbackInfo {
-	info := llmFallbackInfo{
-		Fallback: artifactBool(artifact, "llm_fallback"),
-		Reason:   artifactString(artifact, "llm_fallback_reason"),
-		Provider: artifactString(artifact, "llm_provider"),
-		Model:    artifactString(artifact, "llm_model"),
-	}
-	if count, ok := artifactInt(artifact, "llm_fallback_count"); ok {
-		info.Count = count
-	}
-	if !info.Fallback {
-		return info
-	}
-	metadata[prefix+"_llm_fallback"] = true
-	metadata[prefix+"_llm_fallback_count"] = info.Count
-	if info.Reason != "" {
-		metadata[prefix+"_llm_fallback_reason"] = info.Reason
-		metadata[prefix+"_warning"] = fmt.Sprintf("%s llm fallback used: %s", prefix, info.Reason)
-	} else {
-		metadata[prefix+"_warning"] = fmt.Sprintf("%s llm fallback used", prefix)
-	}
-	if reasons := metadataStringList(artifact, "llm_fallback_reasons"); len(reasons) > 0 {
-		metadata[prefix+"_llm_fallback_reasons"] = reasons
-	}
-	if info.Provider != "" {
-		metadata[prefix+"_llm_provider"] = info.Provider
-	}
-	if info.Model != "" {
-		metadata[prefix+"_llm_model"] = info.Model
-	}
-	return info
 }
 
 func artifactBool(artifact map[string]any, key string) bool {
@@ -788,36 +528,6 @@ func resolveReadableEmbeddingRef(primary string, fallback string, versionURI *st
 	return resolveReadableArtifactRef(primary, fallback, derefString(versionURI))
 }
 
-func (s *DatasetService) syncEmbeddingIndex(version domain.DatasetVersion, embeddingRef string, chunkRef string) error {
-	indexer, ok := s.store.(store.EmbeddingChunkIndexer)
-	if !ok {
-		return nil
-	}
-	embeddingRef = strings.TrimSpace(embeddingRef)
-	if embeddingRef == "" {
-		return nil
-	}
-	records, err := loadEmbeddingIndexChunks(version.DatasetVersionID, embeddingRef, chunkRef, derefString(version.EmbeddingModel))
-	if err != nil {
-		return err
-	}
-	if err := indexer.ReplaceEmbeddingChunkIndex(version.DatasetVersionID, records); err != nil {
-		return err
-	}
-	if version.Metadata == nil {
-		version.Metadata = map[string]any{}
-	}
-	version.Metadata["embedding_index_backend"] = "pgvector"
-	version.Metadata["embedding_index_ref"] = fmt.Sprintf("pgvector://embedding_index_chunks?dataset_version_id=%s", version.DatasetVersionID)
-	vectorDim := 0
-	if len(records) > 0 {
-		vectorDim = records[0].VectorDim
-	}
-	version.Metadata["embedding_vector_dim"] = vectorDim
-	version.Metadata["embedding_indexed_chunk_count"] = len(records)
-	return nil
-}
-
 func anyToInt(value any) (int, bool) {
 	switch typed := value.(type) {
 	case int:
@@ -857,60 +567,11 @@ func intMapValue(value any) map[string]int {
 	return result
 }
 
-func boolMapValue(value any) map[string]bool {
-	if source, ok := value.(map[string]bool); ok {
-		return cloneStringBoolMap(source)
-	}
-	source, ok := value.(map[string]any)
-	if !ok || len(source) == 0 {
-		return nil
-	}
-	result := make(map[string]bool, len(source))
-	for key, item := range source {
-		result[key] = anyBoolValue(item)
-	}
-	if len(result) == 0 {
-		return nil
-	}
-	return result
-}
-
-func anyBoolValue(value any) bool {
-	switch typed := value.(type) {
-	case bool:
-		return typed
-	case string:
-		normalized := strings.TrimSpace(strings.ToLower(typed))
-		return normalized == "true" || normalized == "1" || normalized == "yes" || normalized == "y"
-	case int:
-		return typed != 0
-	case int32:
-		return typed != 0
-	case int64:
-		return typed != 0
-	case float64:
-		return typed != 0
-	default:
-		return false
-	}
-}
-
 func cloneStringIntMap(source map[string]int) map[string]int {
 	if len(source) == 0 {
 		return nil
 	}
 	result := make(map[string]int, len(source))
-	for key, value := range source {
-		result[key] = value
-	}
-	return result
-}
-
-func cloneStringBoolMap(source map[string]bool) map[string]bool {
-	if len(source) == 0 {
-		return nil
-	}
-	result := make(map[string]bool, len(source))
 	for key, value := range source {
 		result[key] = value
 	}

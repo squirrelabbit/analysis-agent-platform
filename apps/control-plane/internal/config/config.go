@@ -36,6 +36,8 @@ type Config struct {
 	DatasetBuildSentimentMaxConcurrent      int
 	DatasetBuildEmbeddingMaxConcurrent      int
 	DatasetBuildClusterMaxConcurrent        int
+	AnthropicExecutionTokenCeiling          int
+	PythonAIWorkerHTTPTimeoutSec            int
 }
 
 func Load() Config {
@@ -110,6 +112,12 @@ func Load() Config {
 	sentimentMaxConcurrent := envPositiveInt("DATASET_BUILD_SENTIMENT_MAX_CONCURRENT", 2)
 	embeddingMaxConcurrent := envPositiveInt("DATASET_BUILD_EMBEDDING_MAX_CONCURRENT", 1)
 	clusterMaxConcurrent := envPositiveInt("DATASET_BUILD_CLUSTER_MAX_CONCURRENT", 1)
+	anthropicExecutionTokenCeiling := envNonNegativeInt("ANTHROPIC_EXECUTION_TOKEN_CEILING", 0)
+	// Python AI worker LLM-backed skills can take well over 30s when the
+	// schema strict-mode is in effect (Anthropic JSON schema enforcement
+	// adds first-token latency). Default 120s gives Anthropic + worker
+	// retry budget without making the dev loop intolerably slow.
+	pythonAIWorkerHTTPTimeoutSec := envPositiveInt("PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC", 120)
 	return Config{
 		BindAddr:                                addr,
 		StoreBackend:                            storeBackend,
@@ -139,7 +147,21 @@ func Load() Config {
 		DatasetBuildSentimentMaxConcurrent:      sentimentMaxConcurrent,
 		DatasetBuildEmbeddingMaxConcurrent:      embeddingMaxConcurrent,
 		DatasetBuildClusterMaxConcurrent:        clusterMaxConcurrent,
+		AnthropicExecutionTokenCeiling:          anthropicExecutionTokenCeiling,
+		PythonAIWorkerHTTPTimeoutSec:            pythonAIWorkerHTTPTimeoutSec,
 	}
+}
+
+func envNonNegativeInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func detectWorkspaceRoot() string {

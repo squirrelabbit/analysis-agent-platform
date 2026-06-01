@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -41,7 +42,6 @@ func deriveDatasetVersionArtifacts(version domain.DatasetVersion, now time.Time)
 				"raw_text_column",
 				"raw_text_columns",
 				"text_joiner",
-				"clean_preprocess_options",
 				"clean_notes",
 				"clean_error",
 				"row_id_column",
@@ -53,110 +53,10 @@ func deriveDatasetVersionArtifacts(version domain.DatasetVersion, now time.Time)
 		items = append(items, datasetVersionArtifact(version, "clean_progress", "clean", cleanStatus, progressRef, inferDatasetArtifactFormat(progressRef, "json"), "", "", nil, nil, now))
 	}
 
-	prepareStatus := strings.TrimSpace(version.PrepareStatus)
-	prepareURI := firstNonEmpty(derefString(version.PrepareURI), metadataString(version.Metadata, "prepare_uri"), metadataString(version.Metadata, "prepared_ref"))
-	if shouldIncludeDatasetArtifact(prepareStatus, prepareURI) {
-		prepareFormat := firstNonEmpty(metadataString(version.Metadata, "prepare_format"), metadataString(version.Metadata, "prepared_format"), inferDatasetArtifactFormat(prepareURI, "parquet"))
-		items = append(items, datasetVersionArtifact(
-			version,
-			"prepare",
-			"prepare",
-			prepareStatus,
-			prepareURI,
-			prepareFormat,
-			derefString(version.PrepareModel),
-			derefString(version.PreparePromptVer),
-			artifactSummary(version.Metadata, "prepare_summary"),
-			artifactMetadata(version.Metadata, []string{
-				"prepare_progress_ref",
-				"prepared_text_column",
-				"text_column",
-				"text_columns",
-				"text_joiner",
-				"raw_text_column",
-				"raw_text_columns",
-				"prepare_notes",
-				"prepare_error",
-				"prepare_max_rows",
-				"prepare_usage",
-				"row_id_column",
-				"storage_contract_version",
-			}),
-			now,
-		))
-	}
-	if progressRef := metadataString(version.Metadata, "prepare_progress_ref"); progressRef != "" {
-		items = append(items, datasetVersionArtifact(version, "prepare_progress", "prepare", prepareStatus, progressRef, inferDatasetArtifactFormat(progressRef, "json"), "", "", nil, nil, now))
-	}
-
-	sentimentStatus := strings.TrimSpace(version.SentimentStatus)
-	sentimentURI := firstNonEmpty(derefString(version.SentimentURI), metadataString(version.Metadata, "sentiment_uri"), metadataString(version.Metadata, "sentiment_ref"))
-	if shouldIncludeDatasetArtifact(sentimentStatus, sentimentURI) {
-		sentimentFormat := firstNonEmpty(metadataString(version.Metadata, "sentiment_format"), inferDatasetArtifactFormat(sentimentURI, "parquet"))
-		items = append(items, datasetVersionArtifact(
-			version,
-			"sentiment",
-			"sentiment",
-			sentimentStatus,
-			sentimentURI,
-			sentimentFormat,
-			derefString(version.SentimentModel),
-			derefString(version.SentimentPromptVer),
-			artifactSummary(version.Metadata, "sentiment_summary"),
-			artifactMetadata(version.Metadata, []string{
-				"sentiment_text_column",
-				"sentiment_text_columns",
-				"sentiment_text_joiner",
-				"sentiment_label_column",
-				"sentiment_confidence_column",
-				"sentiment_reason_column",
-				"sentiment_notes",
-				"sentiment_error",
-				"sentiment_usage",
-				"row_id_column",
-				"storage_contract_version",
-			}),
-			now,
-		))
-	}
-
-	embeddingStatus := strings.TrimSpace(version.EmbeddingStatus)
-	embeddingURI := firstNonEmpty(derefString(version.EmbeddingURI), metadataString(version.Metadata, "embedding_uri"), metadataString(version.Metadata, "embedding_ref"))
-	if shouldIncludeDatasetArtifact(embeddingStatus, embeddingURI) {
-		embeddingFormat := firstNonEmpty(metadataString(version.Metadata, "embedding_format"), inferDatasetArtifactFormat(embeddingURI, "jsonl"))
-		items = append(items, datasetVersionArtifact(
-			version,
-			"embedding",
-			"embedding",
-			embeddingStatus,
-			embeddingURI,
-			embeddingFormat,
-			derefString(version.EmbeddingModel),
-			"",
-			artifactSummary(version.Metadata, "embedding_summary"),
-			artifactMetadata(version.Metadata, []string{
-				"embedding_dataset_name",
-				"embedding_notes",
-				"embedding_debug_export_jsonl",
-				"embedding_provider",
-				"embedding_representation",
-				"embedding_usage",
-				"embedding_error",
-				"embedding_vector_dim",
-				"text_column",
-				"storage_contract_version",
-			}),
-			now,
-		))
-	}
-	if indexRef := metadataString(version.Metadata, "embedding_index_source_ref"); indexRef != "" {
-		indexFormat := firstNonEmpty(metadataString(version.Metadata, "embedding_index_source_format"), inferDatasetArtifactFormat(indexRef, "parquet"))
-		items = append(items, datasetVersionArtifact(version, "embedding_index", "embedding", readyStatusForArtifact(embeddingStatus, indexRef), indexRef, indexFormat, derefString(version.EmbeddingModel), "", nil, artifactMetadata(version.Metadata, []string{"document_count", "chunk_count", "source_row_count", "embedding_vector_dim"}), now))
-	}
-	if chunkRef := metadataString(version.Metadata, "chunk_ref"); chunkRef != "" {
-		chunkFormat := firstNonEmpty(metadataString(version.Metadata, "chunk_format"), inferDatasetArtifactFormat(chunkRef, "parquet"))
-		items = append(items, datasetVersionArtifact(version, "embedding_chunks", "embedding", readyStatusForArtifact(embeddingStatus, chunkRef), chunkRef, chunkFormat, derefString(version.EmbeddingModel), "", nil, artifactMetadata(version.Metadata, []string{"chunk_id_column", "chunk_index_column", "chunk_text_column", "chunking_strategy", "row_id_column", "chunk_count"}), now))
-	}
+	// silverone 2026-05-28 (β2 cleanup PR2) — prepare / sentiment / embedding /
+	// embedding_index / embedding_chunks 5 artifact 분기 제거. ADR-018 β2로
+	// 단계 자체가 사라져 metadata에 채워지지 않음. cluster artifact는 본 PR
+	// scope 밖 (별도 metadata key 사용 — 보존).
 
 	clusterStatus := metadataString(version.Metadata, "cluster_status")
 	clusterSummaryRef := firstNonEmpty(metadataString(version.Metadata, "cluster_summary_ref"), metadataString(version.Metadata, "cluster_ref"))
@@ -194,6 +94,13 @@ func deriveDatasetVersionArtifacts(version domain.DatasetVersion, now time.Time)
 		items = append(items, datasetVersionArtifact(version, "cluster_membership", "cluster", readyStatusForArtifact(clusterStatus, membershipRef), membershipRef, membershipFormat, "", "", nil, artifactMetadata(version.Metadata, []string{"cluster_summary_ref", "cluster_algorithm", "cluster_params_hash"}), now))
 	}
 
+	// 5/12 (silverone) — document_cluster_profile은 별도 테이블
+	// dataset_version_cluster_profile_builds가 단일 진실 소스. 이 함수는
+	// dataset_version_artifacts row를 *derive*하므로 매번 같은 id로 upsert되어
+	// build immutability를 표현할 수 없다. Codex 검토 권고 (1) 반영 — derive
+	// 블럭 제거. latest build 상태는 GET /document_cluster_profile read model
+	// endpoint에서 직접 조회한다 (version.Metadata에 latest pointer만 유지).
+
 	sort.Slice(items, func(i, j int) bool {
 		if artifactStageOrder(items[i].Stage) == artifactStageOrder(items[j].Stage) {
 			return items[i].ArtifactType < items[j].ArtifactType
@@ -226,6 +133,42 @@ func datasetVersionArtifact(version domain.DatasetVersion, artifactType, stage, 
 
 func datasetVersionArtifactID(datasetVersionID, artifactType string) string {
 	return strings.TrimSpace(datasetVersionID) + ":" + strings.TrimSpace(artifactType)
+}
+
+// datasetVersionArtifactPayloadEqual — silverone 2026-05-28 (B1). UPSERT 시
+// no-op update 방지를 위해 *payload field*가 동일한지 비교한다. 같은
+// (dataset_version_id, artifact_type) 키면 artifact_id / project_id /
+// dataset_id는 reflective하게 동일하므로 비교 대상에서 제외. created_at /
+// updated_at은 본 비교에서 제외 (값 동일 여부 판단용).
+//
+// memory store가 동일 값 재attach 시 updated_at을 보존하는 데 사용. postgres
+// store는 같은 의미를 `ON CONFLICT DO UPDATE ... WHERE` SQL로 구현하므로 본
+// helper를 직접 호출하지 않는다 (DB가 직접 비교 — `IS DISTINCT FROM`).
+func datasetVersionArtifactPayloadEqual(a, b domain.DatasetVersionArtifact) bool {
+	if a.Stage != b.Stage ||
+		a.Status != b.Status ||
+		a.URI != b.URI ||
+		a.Format != b.Format ||
+		a.Model != b.Model ||
+		a.PromptVersion != b.PromptVersion {
+		return false
+	}
+	if !mapsEqualJSON(a.Summary, b.Summary) {
+		return false
+	}
+	if !mapsEqualJSON(a.Metadata, b.Metadata) {
+		return false
+	}
+	return true
+}
+
+func mapsEqualJSON(a, b map[string]any) bool {
+	aj, errA := json.Marshal(defaultMetadataMap(a))
+	bj, errB := json.Marshal(defaultMetadataMap(b))
+	if errA != nil || errB != nil {
+		return false
+	}
+	return string(aj) == string(bj)
 }
 
 func shouldIncludeDatasetArtifact(status, uri string) bool {

@@ -1,0 +1,84 @@
+{
+  "plan_version": "v2",
+  "steps": [
+    {
+      "id": "clause_docs",
+      "skill": "join",
+      "params": {
+        "left": "clauses",
+        "right": "docs",
+        "on": ["doc_id"],
+        "how": "inner"
+      }
+    },
+    {
+      "id": "last_year_clauses",
+      "skill": "filter",
+      "params": {
+        "input": "clause_docs",
+        "column": "created_at",
+        "operator": "between",
+        "value": ["2025-01-01T00:00:00", "2025-12-31T23:59:59"]
+      }
+    },
+    {
+      "id": "this_year_clauses",
+      "skill": "filter",
+      "params": {
+        "input": "clause_docs",
+        "column": "created_at",
+        "operator": "between",
+        "value": ["2026-01-01T00:00:00", "2026-12-31T23:59:59"]
+      }
+    },
+    {
+      "id": "last_aspect_count",
+      "skill": "aggregate",
+      "params": {
+        "input": "last_year_clauses",
+        "group_by": ["aspect"],
+        "metrics": [{"name": "count", "function": "count", "column": "*"}]
+      }
+    },
+    {
+      "id": "this_aspect_count",
+      "skill": "aggregate",
+      "params": {
+        "input": "this_year_clauses",
+        "group_by": ["aspect"],
+        "metrics": [{"name": "count", "function": "count", "column": "*"}]
+      }
+    },
+    {
+      "id": "aspect_compare",
+      "skill": "compare",
+      "params": {
+        "left": "last_aspect_count",
+        "right": "this_aspect_count",
+        "join_key": ["aspect"],
+        "left_label": "last_year",
+        "right_label": "this_year"
+      }
+    },
+    {
+      "id": "aspect_delta",
+      "skill": "calculate",
+      "params": {
+        "input": "aspect_compare",
+        "expressions": [
+          {"name": "delta_count", "operation": "subtract", "left": "this_year_count", "right": "last_year_count"},
+          {"name": "delta_rate", "operation": "percent_change", "base": "last_year_count", "current": "this_year_count"}
+        ]
+      }
+    },
+    {
+      "id": "out",
+      "skill": "present",
+      "params": {
+        "input": "aspect_delta",
+        "format": "table",
+        "title": "작년 대비 올해 aspect 증감"
+      }
+    }
+  ]
+}

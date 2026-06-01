@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -8,38 +9,43 @@ import (
 	"analysis-support-platform/control-plane/internal/domain"
 )
 
+// errInvalidStoreInput은 store 호출에서 입력 invariant 위반 시 사용.
+// service layer가 ErrInvalidArgument로 wrapping하기 전 단계 — store는
+// 직접 contract 위반만 보고하면 된다.
+func errInvalidStoreInput(message string) error {
+	return errors.New("store: " + message)
+}
+
 type MemoryStore struct {
-	mu             sync.RWMutex
-	projects       map[string]domain.Project
-	prompts        map[string]domain.Prompt
-	projectPrompts map[string]domain.ProjectPrompt
-	promptDefaults map[string]domain.ProjectPromptDefaults
-	scenarios      map[string]domain.Scenario
-	datasets       map[string]domain.Dataset
-	versions       map[string]domain.DatasetVersion
-	artifacts      map[string]domain.DatasetVersionArtifact
-	buildJobs      map[string]domain.DatasetBuildJob
-	requests       map[string]domain.AnalysisRequest
-	plans          map[string]domain.PlanRecord
-	executions     map[string]domain.ExecutionSummary
-	reports        map[string]domain.ReportDraft
+	mu                   sync.RWMutex
+	projects             map[string]domain.Project
+	projectPrompts       map[string]domain.ProjectPrompt
+	promptDefaults       map[string]domain.ProjectPromptDefaults
+	projectPromptChanges []domain.ProjectPromptChange // append-only, ordered
+	datasets             map[string]domain.Dataset
+	versions             map[string]domain.DatasetVersion
+	artifacts            map[string]domain.DatasetVersionArtifact
+	buildJobs            map[string]domain.DatasetBuildJob
+	analysisThreads      map[string]domain.AnalysisThread
+	analysisMessages     map[string]domain.AnalysisMessage
+	analysisRuns         map[string]domain.AnalysisRun
+	// document_cluster_profile build / confirmation 관련 필드는 β2 (5/19) 결정으로 제거.
+	// scenarios / requests / plans / executions / reports 필드는 δ-3 (5/21) plan_v2 도입에 따라 제거.
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		projects:       make(map[string]domain.Project),
-		prompts:        make(map[string]domain.Prompt),
-		projectPrompts: make(map[string]domain.ProjectPrompt),
-		promptDefaults: make(map[string]domain.ProjectPromptDefaults),
-		scenarios:      make(map[string]domain.Scenario),
-		datasets:       make(map[string]domain.Dataset),
-		versions:       make(map[string]domain.DatasetVersion),
-		artifacts:      make(map[string]domain.DatasetVersionArtifact),
-		buildJobs:      make(map[string]domain.DatasetBuildJob),
-		requests:       make(map[string]domain.AnalysisRequest),
-		plans:          make(map[string]domain.PlanRecord),
-		executions:     make(map[string]domain.ExecutionSummary),
-		reports:        make(map[string]domain.ReportDraft),
+		projects:             make(map[string]domain.Project),
+		projectPrompts:       make(map[string]domain.ProjectPrompt),
+		promptDefaults:       make(map[string]domain.ProjectPromptDefaults),
+		projectPromptChanges: nil,
+		datasets:             make(map[string]domain.Dataset),
+		versions:             make(map[string]domain.DatasetVersion),
+		artifacts:            make(map[string]domain.DatasetVersionArtifact),
+		buildJobs:            make(map[string]domain.DatasetBuildJob),
+		analysisThreads:      make(map[string]domain.AnalysisThread),
+		analysisMessages:     make(map[string]domain.AnalysisMessage),
+		analysisRuns:         make(map[string]domain.AnalysisRun),
 	}
 }
 
@@ -48,10 +54,6 @@ func (s *MemoryStore) SaveProject(project domain.Project) error {
 	defer s.mu.Unlock()
 	s.projects[project.ProjectID] = project
 	return nil
-}
-
-func scenarioKey(projectID, scenarioID string) string {
-	return projectID + "::" + scenarioID
 }
 
 func (s *MemoryStore) GetProject(projectID string) (domain.Project, error) {
@@ -97,11 +99,6 @@ func (s *MemoryStore) DeleteProject(projectID string) error {
 			delete(s.projectPrompts, key)
 		}
 	}
-	for key, scenario := range s.scenarios {
-		if scenario.ProjectID == projectID {
-			delete(s.scenarios, key)
-		}
-	}
 	for key, dataset := range s.datasets {
 		if dataset.ProjectID == projectID {
 			delete(s.datasets, key)
@@ -122,94 +119,27 @@ func (s *MemoryStore) DeleteProject(projectID string) error {
 			delete(s.buildJobs, key)
 		}
 	}
-	for key, request := range s.requests {
-		if request.ProjectID == projectID {
-			delete(s.requests, key)
+	for key, thread := range s.analysisThreads {
+		if thread.ProjectID == projectID {
+			delete(s.analysisThreads, key)
 		}
 	}
-	for key, plan := range s.plans {
-		if plan.ProjectID == projectID {
-			delete(s.plans, key)
+	for key, message := range s.analysisMessages {
+		if message.ProjectID == projectID {
+			delete(s.analysisMessages, key)
 		}
 	}
-	for key, execution := range s.executions {
-		if execution.ProjectID == projectID {
-			delete(s.executions, key)
-		}
-	}
-	for key, report := range s.reports {
-		if report.ProjectID == projectID {
-			delete(s.reports, key)
+	for key, run := range s.analysisRuns {
+		if run.ProjectID == projectID {
+			delete(s.analysisRuns, key)
 		}
 	}
 	return nil
 }
 
-func promptVersionKey(version, operation string) string {
-	return version + "::" + operation
-}
-
-func (s *MemoryStore) SavePrompt(prompt domain.Prompt) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.prompts[prompt.PromptID] = prompt
-	return nil
-}
-
-func (s *MemoryStore) GetPrompt(promptID string) (domain.Prompt, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	prompt, ok := s.prompts[promptID]
-	if !ok {
-		return domain.Prompt{}, ErrNotFound
-	}
-	return prompt, nil
-}
-
-func (s *MemoryStore) GetPromptByVersion(version, operation string) (domain.Prompt, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	targetKey := promptVersionKey(version, operation)
-	for _, prompt := range s.prompts {
-		if promptVersionKey(prompt.Version, prompt.Operation) == targetKey {
-			return prompt, nil
-		}
-	}
-	return domain.Prompt{}, ErrNotFound
-}
-
-func (s *MemoryStore) ListPrompts(operation string) ([]domain.Prompt, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	items := make([]domain.Prompt, 0, len(s.prompts))
-	filter := operation
-	for _, prompt := range s.prompts {
-		if filter != "" && prompt.Operation != filter {
-			continue
-		}
-		items = append(items, prompt)
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Operation == items[j].Operation {
-			if items[i].Version == items[j].Version {
-				return items[i].UpdatedAt.After(items[j].UpdatedAt)
-			}
-			return items[i].Version < items[j].Version
-		}
-		return items[i].Operation < items[j].Operation
-	})
-	return items, nil
-}
-
-func (s *MemoryStore) DeletePrompt(promptID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.prompts[promptID]; !ok {
-		return ErrNotFound
-	}
-	delete(s.prompts, promptID)
-	return nil
-}
+// 5/6 화면기획서 B안 채택: 전역 prompts 테이블 폐기. SavePrompt/GetPrompt/
+// GetPromptByVersion/ListPrompts/DeletePrompt 5개 + promptVersionKey 헬퍼
+// 모두 제거. 글로벌 prompt는 .md 코드 계약. project_prompts만 유지.
 
 func projectPromptKey(projectID, version, operation string) string {
 	return projectID + "::" + version + "::" + operation
@@ -271,40 +201,40 @@ func (s *MemoryStore) GetProjectPromptDefaults(projectID string) (domain.Project
 	return defaults, nil
 }
 
-func (s *MemoryStore) SaveScenario(scenario domain.Scenario) error {
+// AppendProjectPromptChange appends a single audit log row.
+// ADR-015 §C: append-only — caller never updates existing rows.
+func (s *MemoryStore) AppendProjectPromptChange(change domain.ProjectPromptChange) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.scenarios[scenarioKey(scenario.ProjectID, scenario.ScenarioID)] = scenario
+	s.projectPromptChanges = append(s.projectPromptChanges, change)
 	return nil
 }
 
-func (s *MemoryStore) GetScenario(projectID, scenarioID string) (domain.Scenario, error) {
+// ListProjectPromptChanges returns the audit log filtered by project (and
+// optionally operation), oldest-first. An empty operation returns every
+// project change so the API layer can paginate as needed.
+func (s *MemoryStore) ListProjectPromptChanges(projectID, operation string) ([]domain.ProjectPromptChange, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	scenario, ok := s.scenarios[scenarioKey(projectID, scenarioID)]
-	if !ok {
-		return domain.Scenario{}, ErrNotFound
-	}
-	return scenario, nil
-}
-
-func (s *MemoryStore) ListScenarios(projectID string) ([]domain.Scenario, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	items := make([]domain.Scenario, 0)
-	for _, scenario := range s.scenarios {
-		if scenario.ProjectID != projectID {
+	out := make([]domain.ProjectPromptChange, 0)
+	for _, change := range s.projectPromptChanges {
+		if change.ProjectID != projectID {
 			continue
 		}
-		items = append(items, scenario)
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
-			return items[i].ScenarioID < items[j].ScenarioID
+		if operation != "" && change.Operation != operation {
+			continue
 		}
-		return items[i].CreatedAt.Before(items[j].CreatedAt)
-	})
-	return items, nil
+		out = append(out, change)
+	}
+	return out, nil
+}
+
+// 5/7 결정: rule/taxonomy/stopwords를 DB 기반으로 관리. 자산별 7 메서드 ×
+// 3 자산 = 21 메서드. PK는 (project_id, version). prompt 정책의 패턴을
+// 그대로 답습 — defaults는 1 프로젝트당 active 1개, changes는 append-only.
+
+func projectAssetKey(projectID, version string) string {
+	return projectID + "::" + version
 }
 
 func (s *MemoryStore) SaveDataset(dataset domain.Dataset) error {
@@ -366,6 +296,21 @@ func (s *MemoryStore) DeleteDataset(projectID, datasetID string) error {
 	for key, job := range s.buildJobs {
 		if job.ProjectID == projectID && job.DatasetID == datasetID {
 			delete(s.buildJobs, key)
+		}
+	}
+	for key, thread := range s.analysisThreads {
+		if thread.ProjectID == projectID && thread.DatasetID == datasetID {
+			delete(s.analysisThreads, key)
+		}
+	}
+	for key, message := range s.analysisMessages {
+		if message.ProjectID == projectID && message.DatasetID == datasetID {
+			delete(s.analysisMessages, key)
+		}
+	}
+	for key, run := range s.analysisRuns {
+		if run.ProjectID == projectID && run.DatasetID == datasetID {
+			delete(s.analysisRuns, key)
 		}
 	}
 	return nil
@@ -453,19 +398,39 @@ func (s *MemoryStore) ListDatasetVersionArtifacts(projectID, datasetVersionID st
 
 func (s *MemoryStore) syncDatasetVersionArtifactsLocked(version domain.DatasetVersion) {
 	now := time.Now().UTC()
-	existingCreatedAt := make(map[string]time.Time)
+	// silverone 2026-05-28 (B1): no-op update 방지. 기존 row와 payload field가
+	// 모두 동일하면 UpdatedAt을 그대로 유지한다. postgres store의 `ON CONFLICT
+	// DO UPDATE ... WHERE` SQL과 같은 의미. GET dataset_version 흐름이 본
+	// 함수를 호출해도 값이 같으면 row가 touch되지 않는다.
+	existingByType := make(map[string]domain.DatasetVersionArtifact)
+	keyByType := make(map[string]string)
 	for key, artifact := range s.artifacts {
 		if artifact.DatasetVersionID != version.DatasetVersionID {
 			continue
 		}
-		existingCreatedAt[artifact.ArtifactType] = artifact.CreatedAt
-		delete(s.artifacts, key)
+		existingByType[artifact.ArtifactType] = artifact
+		keyByType[artifact.ArtifactType] = key
 	}
-	for _, artifact := range deriveDatasetVersionArtifacts(version, now) {
-		if createdAt, ok := existingCreatedAt[artifact.ArtifactType]; ok && !createdAt.IsZero() {
-			artifact.CreatedAt = createdAt
+
+	derived := deriveDatasetVersionArtifacts(version, now)
+	derivedTypes := make(map[string]struct{}, len(derived))
+	for _, next := range derived {
+		derivedTypes[next.ArtifactType] = struct{}{}
+		if prev, ok := existingByType[next.ArtifactType]; ok {
+			if !prev.CreatedAt.IsZero() {
+				next.CreatedAt = prev.CreatedAt
+			}
+			if datasetVersionArtifactPayloadEqual(prev, next) {
+				next.UpdatedAt = prev.UpdatedAt
+			}
 		}
-		s.artifacts[artifact.ArtifactID] = cloneDatasetVersionArtifact(artifact)
+		s.artifacts[next.ArtifactID] = cloneDatasetVersionArtifact(next)
+	}
+	// derive에 없는 옛 artifact_type은 stale — 제거.
+	for artifactType, key := range keyByType {
+		if _, kept := derivedTypes[artifactType]; !kept {
+			delete(s.artifacts, key)
+		}
 	}
 }
 
@@ -499,23 +464,11 @@ func cloneDatasetVersion(version domain.DatasetVersion) domain.DatasetVersion {
 		profile.GarbageRuleNames = append([]string(nil), version.Profile.GarbageRuleNames...)
 		cloned.Profile = &profile
 	}
-	if version.PrepareSummary != nil {
-		summary := *version.PrepareSummary
-		if len(version.PrepareSummary.TextColumns) > 0 {
-			summary.TextColumns = append([]string(nil), version.PrepareSummary.TextColumns...)
-		}
-		cloned.PrepareSummary = &summary
-	}
+	// silverone 2026-05-28 (β2 cleanup PR2) — PrepareSummary deep clone 제거.
 	if version.CleanSummary != nil {
 		summary := *version.CleanSummary
 		if len(version.CleanSummary.TextColumns) > 0 {
 			summary.TextColumns = append([]string(nil), version.CleanSummary.TextColumns...)
-		}
-		if len(version.CleanSummary.PreprocessOptions) > 0 {
-			summary.PreprocessOptions = make(map[string]bool, len(version.CleanSummary.PreprocessOptions))
-			for key, value := range version.CleanSummary.PreprocessOptions {
-				summary.PreprocessOptions[key] = value
-			}
 		}
 		if len(version.CleanSummary.CleanRegexRuleHits) > 0 {
 			summary.CleanRegexRuleHits = make(map[string]int, len(version.CleanSummary.CleanRegexRuleHits))
@@ -634,93 +587,220 @@ func (s *MemoryStore) ListDatasetBuildJobs(projectID, datasetVersionID string) (
 	return items, nil
 }
 
-func (s *MemoryStore) SaveRequest(request domain.AnalysisRequest) error {
+func (s *MemoryStore) SaveAnalysisThread(thread domain.AnalysisThread) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.requests[request.RequestID] = request
+	if existing, ok := s.analysisThreads[thread.ThreadID]; ok {
+		if thread.CreatedAt.IsZero() {
+			thread.CreatedAt = existing.CreatedAt
+		}
+	}
+	if thread.CreatedAt.IsZero() {
+		thread.CreatedAt = time.Now().UTC()
+	}
+	if thread.UpdatedAt.IsZero() {
+		thread.UpdatedAt = thread.CreatedAt
+	}
+	s.analysisThreads[thread.ThreadID] = thread
 	return nil
 }
 
-func (s *MemoryStore) GetRequest(projectID, requestID string) (domain.AnalysisRequest, error) {
+func (s *MemoryStore) GetAnalysisThread(projectID, datasetID, threadID string) (domain.AnalysisThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	request, ok := s.requests[requestID]
-	if !ok || request.ProjectID != projectID {
-		return domain.AnalysisRequest{}, ErrNotFound
+	thread, ok := s.analysisThreads[threadID]
+	if !ok || thread.ProjectID != projectID || thread.DatasetID != datasetID {
+		return domain.AnalysisThread{}, ErrNotFound
 	}
-	return request, nil
+	return s.withAnalysisThreadStatsLocked(thread), nil
 }
 
-func (s *MemoryStore) SavePlan(plan domain.PlanRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.plans[plan.PlanID] = plan
-	return nil
-}
-
-func (s *MemoryStore) GetPlan(projectID, planID string) (domain.PlanRecord, error) {
+func (s *MemoryStore) ListAnalysisThreads(projectID, datasetID string) ([]domain.AnalysisThread, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	plan, ok := s.plans[planID]
-	if !ok || plan.ProjectID != projectID {
-		return domain.PlanRecord{}, ErrNotFound
-	}
-	return plan, nil
-}
-
-func (s *MemoryStore) SaveExecution(execution domain.ExecutionSummary) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if existing, ok := s.executions[execution.ExecutionID]; ok && execution.CreatedAt.IsZero() {
-		execution.CreatedAt = existing.CreatedAt
-	}
-	if execution.CreatedAt.IsZero() {
-		execution.CreatedAt = time.Now().UTC()
-	}
-	s.executions[execution.ExecutionID] = execution
-	return nil
-}
-
-func (s *MemoryStore) GetExecution(projectID, executionID string) (domain.ExecutionSummary, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	execution, ok := s.executions[executionID]
-	if !ok || execution.ProjectID != projectID {
-		return domain.ExecutionSummary{}, ErrNotFound
-	}
-	return execution, nil
-}
-
-func (s *MemoryStore) ListExecutions(projectID string) ([]domain.ExecutionSummary, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	items := make([]domain.ExecutionSummary, 0)
-	for _, execution := range s.executions {
-		if execution.ProjectID != projectID {
+	items := make([]domain.AnalysisThread, 0)
+	for _, thread := range s.analysisThreads {
+		if thread.ProjectID != projectID || thread.DatasetID != datasetID {
 			continue
 		}
-		items = append(items, execution)
+		items = append(items, s.withAnalysisThreadStatsLocked(thread))
 	}
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedAt.After(items[j].CreatedAt)
+		if items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
+			return items[i].ThreadID > items[j].ThreadID
+		}
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
 	})
 	return items, nil
 }
 
-func (s *MemoryStore) SaveReportDraft(draft domain.ReportDraft) error {
+// silverone 2026-06-01 — project 사이드바 채팅 count. dataset 무관 합산.
+func (s *MemoryStore) CountAnalysisThreadsByProject(projectID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, thread := range s.analysisThreads {
+		if thread.ProjectID == projectID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *MemoryStore) SaveAnalysisMessage(message domain.AnalysisMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.reports[draft.DraftID] = draft
+	if message.CreatedAt.IsZero() {
+		message.CreatedAt = time.Now().UTC()
+	}
+	message.ContextSummary = cloneAnyMap(message.ContextSummary)
+	s.analysisMessages[message.MessageID] = message
+	if thread, ok := s.analysisThreads[message.ThreadID]; ok {
+		thread.UpdatedAt = message.CreatedAt
+		if thread.Title == "" && message.Role == "user" {
+			thread.Title = truncateAnalysisTitle(message.Content)
+		}
+		s.analysisThreads[message.ThreadID] = thread
+	}
 	return nil
 }
 
-func (s *MemoryStore) GetReportDraft(projectID, draftID string) (domain.ReportDraft, error) {
+func (s *MemoryStore) ListAnalysisMessages(projectID, threadID string) ([]domain.AnalysisMessage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	draft, ok := s.reports[draftID]
-	if !ok || draft.ProjectID != projectID {
-		return domain.ReportDraft{}, ErrNotFound
+	if thread, ok := s.analysisThreads[threadID]; !ok || thread.ProjectID != projectID {
+		return nil, ErrNotFound
 	}
-	return draft, nil
+	items := make([]domain.AnalysisMessage, 0)
+	for _, message := range s.analysisMessages {
+		if message.ProjectID != projectID || message.ThreadID != threadID {
+			continue
+		}
+		cloned := message
+		cloned.ContextSummary = cloneAnyMap(message.ContextSummary)
+		items = append(items, cloned)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].MessageID < items[j].MessageID
+		}
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+	return items, nil
 }
+
+func (s *MemoryStore) SaveAnalysisRun(run domain.AnalysisRun) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.analysisRuns[run.RunID]; ok && run.CreatedAt.IsZero() {
+		run.CreatedAt = existing.CreatedAt
+	}
+	if run.CreatedAt.IsZero() {
+		run.CreatedAt = time.Now().UTC()
+	}
+	run.RequestJSON = cloneAnyMap(run.RequestJSON)
+	run.ResultJSON = append([]byte(nil), run.ResultJSON...)
+	s.analysisRuns[run.RunID] = run
+	return nil
+}
+
+func (s *MemoryStore) GetAnalysisRun(projectID, runID string) (domain.AnalysisRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	run, ok := s.analysisRuns[runID]
+	if !ok || run.ProjectID != projectID {
+		return domain.AnalysisRun{}, ErrNotFound
+	}
+	run.RequestJSON = cloneAnyMap(run.RequestJSON)
+	run.ResultJSON = append([]byte(nil), run.ResultJSON...)
+	return run, nil
+}
+
+// GetLastSuccessfulAnalysisRun — silverone 2026-05-26 (plan reuse POC-1).
+// thread 안 모든 run 중 status == "completed" 이고 가장 늦은 created_at을
+// 가진 run을 반환한다. 없으면 ErrNotFound. tie-break은 RunID 사전순.
+func (s *MemoryStore) GetLastSuccessfulAnalysisRun(projectID, threadID string) (domain.AnalysisRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var best *domain.AnalysisRun
+	for runID, run := range s.analysisRuns {
+		if run.ProjectID != projectID || run.ThreadID != threadID {
+			continue
+		}
+		if run.Status != "completed" {
+			continue
+		}
+		if best == nil ||
+			run.CreatedAt.After(best.CreatedAt) ||
+			(run.CreatedAt.Equal(best.CreatedAt) && runID > best.RunID) {
+			r := run
+			best = &r
+		}
+	}
+	if best == nil {
+		return domain.AnalysisRun{}, ErrNotFound
+	}
+	out := *best
+	out.RequestJSON = cloneAnyMap(out.RequestJSON)
+	out.ResultJSON = append([]byte(nil), out.ResultJSON...)
+	return out, nil
+}
+
+// ListInFlightDatasetBuildJobs / ListInFlightAnalysisRuns —
+// silverone 2026-05-27 (Codex adversarial review fix-2). startup reconciliation
+// 에서 사용. 전체 system 단위로 미완료 row를 가져온다.
+func (s *MemoryStore) ListInFlightDatasetBuildJobs() ([]domain.DatasetBuildJob, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.DatasetBuildJob, 0)
+	for _, job := range s.buildJobs {
+		if job.Status == "queued" || job.Status == "running" {
+			items = append(items, job)
+		}
+	}
+	return items, nil
+}
+
+func (s *MemoryStore) ListInFlightAnalysisRuns() ([]domain.AnalysisRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.AnalysisRun, 0)
+	for _, run := range s.analysisRuns {
+		if run.Status == "running" {
+			out := run
+			out.RequestJSON = cloneAnyMap(out.RequestJSON)
+			out.ResultJSON = append([]byte(nil), out.ResultJSON...)
+			items = append(items, out)
+		}
+	}
+	return items, nil
+}
+
+func (s *MemoryStore) withAnalysisThreadStatsLocked(thread domain.AnalysisThread) domain.AnalysisThread {
+	thread.MessageCount = 0
+	thread.LastMessage = ""
+	var lastAt time.Time
+	for _, message := range s.analysisMessages {
+		if message.ThreadID != thread.ThreadID || message.ProjectID != thread.ProjectID {
+			continue
+		}
+		thread.MessageCount++
+		if message.CreatedAt.After(lastAt) || lastAt.IsZero() {
+			lastAt = message.CreatedAt
+			thread.LastMessage = truncateAnalysisTitle(message.Content)
+		}
+	}
+	return thread
+}
+
+func truncateAnalysisTitle(value string) string {
+	const maxRunes = 80
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[:maxRunes])
+}
+
+// document_cluster_profile build / confirmation 관련 memory store method는
+// β2 (5/19) 결정으로 제거.

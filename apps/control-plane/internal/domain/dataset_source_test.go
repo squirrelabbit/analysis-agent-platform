@@ -2,42 +2,12 @@ package domain
 
 import "testing"
 
-func TestResolveDatasetSourceUsesPreparedBeforeClean(t *testing.T) {
-	prepareURI := "prepared.parquet"
-	cleanedRef := "cleaned.parquet"
-	version := DatasetVersion{
-		StorageURI:    "raw.csv",
-		PrepareStatus: "ready",
-		PrepareURI:    &prepareURI,
-		CleanedRef:    &cleanedRef,
-		Metadata: map[string]any{
-			"clean_status":         "ready",
-			"cleaned_ref":          cleanedRef,
-			"cleaned_text_column":  "cleaned_text",
-			"prepared_text_column": "normalized_text",
-			"raw_text_columns":     []string{"제목", "본문"},
-			"raw_text_column":      "제목 + 본문",
-			"text_columns":         []string{"제목", "본문"},
-			"text_column":          "제목 + 본문",
-		},
-	}
-
-	got := ResolveDatasetSource(version)
-	if got.Stage != DatasetSourceStagePrepared {
-		t.Fatalf("expected prepared stage, got %s", got.Stage)
-	}
-	if got.DatasetName != prepareURI {
-		t.Fatalf("expected prepared ref, got %s", got.DatasetName)
-	}
-	if got.TextColumn != "normalized_text" {
-		t.Fatalf("expected normalized_text, got %s", got.TextColumn)
-	}
-}
+// silverone 2026-05-28 (β2 cleanup PR2) — prepared stage 자체가 사라져
+// TestResolveDatasetSourceUsesPreparedBeforeClean 제거.
 
 func TestResolveDatasetSourceUsesCleanBeforeRaw(t *testing.T) {
 	version := DatasetVersion{
-		StorageURI:    "raw.csv",
-		PrepareStatus: "not_requested",
+		StorageURI: "raw.csv",
 		Metadata: map[string]any{
 			"clean_status":        "ready",
 			"cleaned_ref":         "cleaned.parquet",

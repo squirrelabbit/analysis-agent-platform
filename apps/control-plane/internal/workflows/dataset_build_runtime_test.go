@@ -9,62 +9,6 @@ import (
 	"go.temporal.io/sdk/temporal"
 )
 
-func TestDatasetBuildLimiterHonorsPerTypeConcurrency(t *testing.T) {
-	limiter := newDatasetBuildLimiter(DatasetBuildConcurrencyLimits{
-		Prepare:   1,
-		Sentiment: 2,
-		Embedding: 1,
-	})
-
-	releasePrepare, err := limiter.acquire(context.Background(), "prepare")
-	if err != nil {
-		t.Fatalf("unexpected first prepare acquire error: %v", err)
-	}
-	defer releasePrepare()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if _, err := limiter.acquire(ctx, "prepare"); err == nil {
-		t.Fatal("expected second prepare acquire to block until context timeout")
-	}
-
-	releaseSentiment1, err := limiter.acquire(context.Background(), "sentiment")
-	if err != nil {
-		t.Fatalf("unexpected first sentiment acquire error: %v", err)
-	}
-	defer releaseSentiment1()
-	releaseSentiment2, err := limiter.acquire(context.Background(), "sentiment")
-	if err != nil {
-		t.Fatalf("unexpected second sentiment acquire error: %v", err)
-	}
-	defer releaseSentiment2()
-}
-
-func TestDatasetBuildExecuteActivityOptionsUseBuildSpecificPolicy(t *testing.T) {
-	prepareOptions := datasetBuildExecuteActivityOptions("prepare")
-	sentimentOptions := datasetBuildExecuteActivityOptions("sentiment")
-	embeddingOptions := datasetBuildExecuteActivityOptions("embedding")
-
-	if prepareOptions.StartToCloseTimeout != 75*time.Minute {
-		t.Fatalf("unexpected prepare timeout: %s", prepareOptions.StartToCloseTimeout)
-	}
-	if sentimentOptions.StartToCloseTimeout != 45*time.Minute {
-		t.Fatalf("unexpected sentiment timeout: %s", sentimentOptions.StartToCloseTimeout)
-	}
-	if embeddingOptions.StartToCloseTimeout != 60*time.Minute {
-		t.Fatalf("unexpected embedding timeout: %s", embeddingOptions.StartToCloseTimeout)
-	}
-	if prepareOptions.RetryPolicy == nil || prepareOptions.RetryPolicy.MaximumAttempts != 4 {
-		t.Fatalf("unexpected prepare retry policy: %+v", prepareOptions.RetryPolicy)
-	}
-	if sentimentOptions.RetryPolicy == nil || sentimentOptions.RetryPolicy.MaximumAttempts != 4 {
-		t.Fatalf("unexpected sentiment retry policy: %+v", sentimentOptions.RetryPolicy)
-	}
-	if embeddingOptions.RetryPolicy == nil || embeddingOptions.RetryPolicy.MaximumAttempts != 3 {
-		t.Fatalf("unexpected embedding retry policy: %+v", embeddingOptions.RetryPolicy)
-	}
-}
-
 func TestClassifyDatasetBuildErrorTreatsWorkerTimeoutAsNonRetryable(t *testing.T) {
 	err := classifyDatasetBuildError(context.DeadlineExceeded)
 	var appErr *temporal.ApplicationError
@@ -73,5 +17,35 @@ func TestClassifyDatasetBuildErrorTreatsWorkerTimeoutAsNonRetryable(t *testing.T
 	}
 	if appErr.Type() != "worker_timeout" {
 		t.Fatalf("unexpected error type: %s", appErr.Type())
+	}
+}
+
+// silverone 2026-05-28 — LLOA long-running build (doc_genuineness / clause_label)
+// 의 timeout + retry race 잠금. 동일 output_path에 두 attempt가 append 하지 않도록
+// MaximumAttempts=1 + StartToCloseTimeout 90분.
+func TestDatasetBuildExecuteActivityOptionsLLOABuildTypes(t *testing.T) {
+	cases := []struct {
+		buildType       string
+		wantTimeout     time.Duration
+		wantMaxAttempts int32
+	}{
+		{"clean", 20 * time.Minute, 4},
+		{"doc_genuineness", 90 * time.Minute, 1},
+		{"clause_label", 90 * time.Minute, 1},
+		{"unknown_build_type", 20 * time.Minute, 4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.buildType, func(t *testing.T) {
+			opts := datasetBuildExecuteActivityOptions(tc.buildType)
+			if opts.StartToCloseTimeout != tc.wantTimeout {
+				t.Errorf("StartToCloseTimeout: want %v, got %v", tc.wantTimeout, opts.StartToCloseTimeout)
+			}
+			if opts.RetryPolicy == nil {
+				t.Fatalf("RetryPolicy should not be nil")
+			}
+			if opts.RetryPolicy.MaximumAttempts != tc.wantMaxAttempts {
+				t.Errorf("MaximumAttempts: want %d, got %d", tc.wantMaxAttempts, opts.RetryPolicy.MaximumAttempts)
+			}
+		})
 	}
 }

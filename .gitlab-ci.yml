@@ -1,0 +1,76 @@
+# GitLab CI — Go/Python 기본 테스트 파이프라인 (2026-06-01)
+#
+# 1차 범위: merge 전 회귀 방지 최소 안전망.
+#   - go-test       : apps/control-plane go build + go test ./...
+#   - python-test   : Python 3.11 install + unittest discover (442 tests)
+#   - release-guard : openapi.yaml/openapi.frontend.yaml YAML parse
+#                     + boot-time destructive SQL guard (grep)
+#
+# 의도적으로 제외:
+#   - smoke (smoke_analyze_endpoint.sh 등) — docker compose + LLOA/Anthropic 외부
+#     API 의존. 후속 manual/staging job 후보 (scripts/ci.sh 가 로컬에서 수행).
+#
+# 검증 명령은 CLAUDE.md "검증 명령" / .github/workflows/ci.yml 과 동일하게 유지한다.
+
+stages:
+  - test
+
+# ---------------------------------------------------------------------------
+# 1. Go test — apps/control-plane
+# ---------------------------------------------------------------------------
+go-test:
+  stage: test
+  image: golang:1.25
+  variables:
+    GOPATH: "$CI_PROJECT_DIR/.gocache/gopath"
+    GOCACHE: "$CI_PROJECT_DIR/.gocache/build"
+  cache:
+    key:
+      files:
+        - apps/control-plane/go.sum
+    paths:
+      - .gocache/gopath/pkg/mod
+      - .gocache/build
+  script:
+    - cd apps/control-plane
+    - go build ./...
+    - go test ./...
+
+# ---------------------------------------------------------------------------
+# 2. Python test — workers/python-ai (Python 3.11 고정)
+# ---------------------------------------------------------------------------
+python-test:
+  stage: test
+  image: python:3.11
+  variables:
+    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip-cache"
+    PYTHONPATH: "workers/python-ai/src"
+  cache:
+    key:
+      files:
+        - workers/python-ai/pyproject.toml
+    paths:
+      - .pip-cache
+  script:
+    - python --version
+    - python -m pip install --upgrade pip
+    - python -m pip install -e workers/python-ai
+    - python -m unittest discover -s workers/python-ai/tests -p 'test_*.py'
+
+# ---------------------------------------------------------------------------
+# 3. Release guard — OpenAPI parse + boot-time destructive SQL guard
+# ---------------------------------------------------------------------------
+release-guard:
+  stage: test
+  image: ruby:3.2-slim
+  script:
+    - ruby -e 'require "yaml"; YAML.load_file("docs/api/openapi.yaml"); YAML.load_file("docs/api/openapi.frontend.yaml"); puts "openapi parse ok"'
+    - |
+      if grep -rnE 'DROP TABLE IF EXISTS (report_drafts|executions|skill_plans|analysis_requests)' \
+          apps/control-plane/internal/store/ \
+          apps/control-plane/cmd/ \
+          apps/control-plane/internal/service/; then
+        echo "legacy table DROP found in boot path. Move destructive cleanup to operator-run migration." >&2
+        exit 1
+      fi
+      echo "no legacy DROP in boot path"

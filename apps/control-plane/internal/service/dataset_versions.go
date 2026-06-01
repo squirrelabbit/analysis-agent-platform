@@ -123,6 +123,33 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 		embeddingStatus = "queued"
 	}
 
+	// silverone 2026-05-28 (β2 cleanup PR2) — struct 필드 제거 후 prepare /
+	// sentiment / embedding 관련 status는 metadata jsonb로만 보존.
+	if prepareStatus != "" {
+		metadata["prepare_status"] = prepareStatus
+	}
+	if prepareLLMMode != "" {
+		metadata["prepare_llm_mode"] = prepareLLMMode
+	}
+	if input.PrepareModel != nil && strings.TrimSpace(*input.PrepareModel) != "" {
+		metadata["prepare_model"] = *input.PrepareModel
+	}
+	if sentimentStatus != "" {
+		metadata["sentiment_status"] = sentimentStatus
+	}
+	if sentimentLLMMode != "" {
+		metadata["sentiment_llm_mode"] = sentimentLLMMode
+	}
+	if input.SentimentModel != nil && strings.TrimSpace(*input.SentimentModel) != "" {
+		metadata["sentiment_model"] = *input.SentimentModel
+	}
+	if embeddingStatus != "" {
+		metadata["embedding_status"] = embeddingStatus
+	}
+	if input.EmbeddingModel != nil && strings.TrimSpace(*input.EmbeddingModel) != "" {
+		metadata["embedding_model"] = *input.EmbeddingModel
+	}
+
 	version := domain.DatasetVersion{
 		DatasetVersionID: id.New(),
 		DatasetID:        dataset.DatasetID,
@@ -132,24 +159,7 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 		RecordCount:      input.RecordCount,
 		Metadata:         metadata,
 		Profile:          profile,
-		PrepareStatus:    prepareStatus,
-		PrepareLLMMode:   prepareLLMMode,
-		PrepareModel:     input.PrepareModel,
-		SentimentStatus:  sentimentStatus,
-		SentimentLLMMode: sentimentLLMMode,
-		SentimentModel:   input.SentimentModel,
-		EmbeddingStatus:  embeddingStatus,
-		EmbeddingModel:   input.EmbeddingModel,
 		CreatedAt:        time.Now().UTC(),
-	}
-	if input.PrepareModel != nil && strings.TrimSpace(*input.PrepareModel) == "" {
-		version.PrepareModel = nil
-	}
-	if input.SentimentModel != nil && strings.TrimSpace(*input.SentimentModel) == "" {
-		version.SentimentModel = nil
-	}
-	if input.EmbeddingModel != nil && strings.TrimSpace(*input.EmbeddingModel) == "" {
-		version.EmbeddingModel = nil
 	}
 	if prepareRequired {
 		textColumns := metadataStringList(version.Metadata, "text_columns")
@@ -198,45 +208,9 @@ func (s *DatasetService) maybeRunEagerClean(projectID, datasetID string, version
 	return version
 }
 
-func (s *DatasetService) maybeRunEagerSentiment(projectID, datasetID string, version domain.DatasetVersion) domain.DatasetVersion {
-	if strings.TrimSpace(s.pythonAIWorkerURL) == "" {
-		return version
-	}
-	if !requiresSentiment(version) || !isPrepareReady(version) {
-		return version
-	}
-	if _, err := s.CreateSentimentJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetSentimentBuildRequest{}, "dataset_prepare_complete", ""); err == nil {
-		latest, getErr := s.GetDatasetVersion(projectID, datasetID, version.DatasetVersionID)
-		if getErr == nil {
-			return latest
-		}
-	}
-	return version
-}
-
-func (s *DatasetService) maybeRunEagerEmbedding(projectID, datasetID string, version domain.DatasetVersion) domain.DatasetVersion {
-	if strings.TrimSpace(s.pythonAIWorkerURL) == "" {
-		return version
-	}
-	if !requiresEmbedding(version) || embeddingBuildReady(version) {
-		return version
-	}
-	if requiresPrepare(version) && !isPrepareReady(version) {
-		return version
-	}
-	if _, err := s.CreateEmbeddingJob(projectID, datasetID, version.DatasetVersionID, domain.DatasetEmbeddingBuildRequest{}, "dataset_prepare_complete", ""); err == nil {
-		latest, getErr := s.GetDatasetVersion(projectID, datasetID, version.DatasetVersionID)
-		if getErr == nil {
-			return latest
-		}
-	}
-	return version
-}
-
-func (s *DatasetService) maybeRunEagerPostPrepareBuilds(projectID, datasetID string, version domain.DatasetVersion) domain.DatasetVersion {
-	result := s.maybeRunEagerSentiment(projectID, datasetID, version)
-	return s.maybeRunEagerEmbedding(projectID, datasetID, result)
-}
+// maybeRunEagerSentiment / maybeRunEagerEmbedding / maybeRunEagerPostPrepareBuilds
+// 제거됨 — dataset_build 7 task 제거에 따라 prepare 후 자동 sentiment/embedding
+// trigger도 사라졌다. DatasetVersion struct field 정리는 후속 task.
 
 func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionID string) (domain.DatasetVersion, error) {
 	dataset, err := s.GetDataset(projectID, datasetID)
@@ -277,12 +251,130 @@ func (s *DatasetService) ListDatasetVersions(projectID, datasetID string) (domai
 	if err != nil {
 		return domain.DatasetVersionListResponse{}, err
 	}
+	list := make([]domain.DatasetVersionListItem, 0, len(items))
 	for index := range items {
 		enrichDatasetVersionView(&items[index])
 		markDatasetVersionActive(&items[index], dataset)
-		items[index].BuildStages = buildDatasetVersionStages(items[index], nil)
+		list = append(list, summarizeDatasetVersionForList(items[index]))
 	}
-	return domain.DatasetVersionListResponse{Items: items}, nil
+	return domain.DatasetVersionListResponse{Items: list}, nil
+}
+
+func (s *DatasetService) GetDatasetVersionDetail(projectID, datasetID, datasetVersionID string) (domain.DatasetVersionDetail, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetVersionDetail{}, err
+	}
+	return summarizeDatasetVersionDetail(version), nil
+}
+
+// summarizeDatasetVersionDetail — GET /versions/{version_id} 응답용 변환.
+// 운영자가 detail에서 보고 싶은 것: 각 stage 결과 + 파일 형태 요약. 내부
+// URI/artifacts/build_jobs/profile 등 노출 안 함.
+func summarizeDatasetVersionDetail(version domain.DatasetVersion) domain.DatasetVersionDetail {
+	detail := domain.DatasetVersionDetail{
+		DatasetVersionID: version.DatasetVersionID,
+		CreatedAt:        version.CreatedAt,
+		ReadyAt:          version.ReadyAt,
+		IsActive:         version.IsActive,
+		Columns:          []string{},
+		Clean: domain.DatasetVersionStageDetail{
+			Status:      version.CleanStatus,
+			CompletedAt: version.CleanedAt,
+		},
+		DocGenuineness: domain.DatasetVersionStageDetail{
+			Status:      metadataString(version.Metadata, "doc_genuineness_status", ""),
+			CompletedAt: optionalMetadataTime(version.Metadata, "doc_genuineness_completed_at"),
+		},
+		ClauseLabel: domain.DatasetVersionStageDetail{
+			Status:      metadataString(version.Metadata, "clause_label_status", ""),
+			CompletedAt: optionalMetadataTime(version.Metadata, "clause_label_completed_at"),
+		},
+	}
+	if version.CleanSummary != nil {
+		detail.Clean.Summary = version.CleanSummary
+	}
+	if summary, ok := version.Metadata["doc_genuineness_summary"]; ok {
+		// silverone 2026-05-28 (C 옵션) — build-detail과 동일한 normalized shape
+		// (`genuineness` + `total`)으로 응답. raw tier_counts 키는 제거하지만
+		// 저장된 metadata 자체는 건드리지 않는다.
+		detail.DocGenuineness.Summary = normalizeDocGenuinenessSummary(summary)
+	}
+	if summary, ok := version.Metadata["clause_label_summary"]; ok {
+		// 동일 — aspect / sentiment / total로 정리, raw *_counts / clause_count
+		// 키는 제거. taxonomy_id 등 부수 필드는 보존.
+		detail.ClauseLabel.Summary = normalizeClauseLabelSummary(summary)
+	}
+	if version.SourceSummary != nil {
+		if version.SourceSummary.RowCount != nil {
+			detail.RowCount = *version.SourceSummary.RowCount
+		}
+		detail.ColumnCount = version.SourceSummary.ColumnCount
+		for _, col := range version.SourceSummary.Columns {
+			detail.Columns = append(detail.Columns, col.Name)
+		}
+	}
+	if upload, ok := version.Metadata["upload"].(map[string]any); ok {
+		switch b := upload["byte_size"].(type) {
+		case int64:
+			detail.ByteSize = b
+		case int:
+			detail.ByteSize = int64(b)
+		case float64:
+			detail.ByteSize = int64(b)
+		}
+	}
+	return detail
+}
+
+// optionalMetadataTime — metadataTime(...)을 *time.Time으로 래핑. 값 없거나
+// zero면 nil로 노출해 omitempty 처리한다.
+func optionalMetadataTime(meta map[string]any, key string) *time.Time {
+	t, ok := metadataTime(meta, key)
+	if !ok || t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
+// summarizeDatasetVersionForList — version 목록 응답용 요약. 파일 형태 정보는
+// storageURI에서 DuckDB로 한 번 더 파싱한다(sample row 생략). versions 수가
+// 많아지면 캐싱이나 lazy 필드로 옮기는 걸 검토할 것.
+func summarizeDatasetVersionForList(version domain.DatasetVersion) domain.DatasetVersionListItem {
+	item := domain.DatasetVersionListItem{
+		DatasetVersionID:     version.DatasetVersionID,
+		CreatedAt:            version.CreatedAt,
+		IsActive:             version.IsActive,
+		Columns:              []string{},
+		CleanStatus:          version.CleanStatus,
+		DocGenuinenessStatus: metadataString(version.Metadata, "doc_genuineness_status", ""),
+		ClauseLabelStatus:    metadataString(version.Metadata, "clause_label_status", ""),
+	}
+	item.OriginalFilename = metadataNestedString(version.Metadata, "upload", "original_filename")
+	if item.OriginalFilename == "" {
+		item.OriginalFilename = metadataNestedString(version.Metadata, "upload", "stored_filename")
+	}
+	summary := loadDatasetSourceSummary(version.StorageURI, 0)
+	if summary != nil {
+		if summary.RowCount != nil {
+			item.RowCount = *summary.RowCount
+		}
+		item.ColumnCount = summary.ColumnCount
+		for _, col := range summary.Columns {
+			item.Columns = append(item.Columns, col.Name)
+		}
+	}
+	if upload, ok := version.Metadata["upload"].(map[string]any); ok {
+		switch b := upload["byte_size"].(type) {
+		case int64:
+			item.ByteSize = b
+		case int:
+			item.ByteSize = int64(b)
+		case float64:
+			item.ByteSize = int64(b)
+		}
+	}
+	return item
 }
 
 func (s *DatasetService) DeleteDatasetVersion(projectID, datasetID, datasetVersionID string) error {

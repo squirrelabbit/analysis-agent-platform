@@ -6,12 +6,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from .._migration_targets import canonical_skill_name
+from ..obs import get as _get_logger
 from .common import (
     _bucket_label,
     _duplicate_similarity,
     _iter_documents,
-    _iter_embedding_records,
     _iter_rows,
     _load_cluster_membership_rows,
     _looks_cluster_goal,
@@ -23,6 +22,8 @@ from .common import (
     _tokenize,
     _vector_norm,
 )
+
+_LOG = _get_logger(__name__)
 
 _RESULT_SCOPE_ALIASES = {
     "subset_filtered": "document_subset",
@@ -93,12 +94,22 @@ def _extract_semantic_candidates(prior_artifacts: Any) -> list[dict[str, Any]]:
         return []
 
     candidates: list[dict[str, Any]] = []
-    for artifact in prior_artifacts.values():
+    for artifact_key, artifact in prior_artifacts.items():
         normalized = artifact
         if isinstance(normalized, str):
             try:
                 normalized = json.loads(normalized)
             except json.JSONDecodeError:
+                # Codex round 3B silent fallback finding: a malformed prior
+                # artifact string used to drop semantic candidates silently
+                # and evidence selection downgraded to lexical_overlap with
+                # no operator signal. Surface a warning so the affected
+                # artifact key is identifiable.
+                _LOG.warning(
+                    "artifact.prior_artifact_json_invalid",
+                    artifact_key=str(artifact_key),
+                    extractor="semantic_candidates",
+                )
                 continue
         if not isinstance(normalized, dict):
             continue
@@ -137,7 +148,7 @@ def _extract_cluster_membership_candidates(prior_artifacts: Any, normalized: dic
     if not _looks_cluster_goal(query):
         return []
 
-    summary_artifact = _find_prior_artifact(prior_artifacts, "issue_cluster_summary")
+    summary_artifact = _find_legacy_or_consolidated_view(prior_artifacts, "issue_cluster_summary")
     if summary_artifact is not None:
         candidates = _cluster_candidates_from_artifact(summary_artifact, normalized)
         if candidates:
@@ -228,24 +239,63 @@ def _iter_prior_artifacts(prior_artifacts: Any) -> list[dict[str, Any]]:
 
 
 def _find_prior_artifact(prior_artifacts: Any, skill_name: str) -> dict[str, Any] | None:
-    requested_name = canonical_skill_name(str(skill_name or "").strip())
+    requested_name = str(skill_name or "").strip()
     for artifact in reversed(_iter_prior_artifacts(prior_artifacts)):
-        artifact_name = canonical_skill_name(str(artifact.get("skill_name") or "").strip())
+        artifact_name = str(artifact.get("skill_name") or "").strip()
         if artifact_name == requested_name:
             return artifact
     return None
 
 
+# ADR-012 Phase 3: legacy issue_*_summary skill name → consolidated
+# issue_summary view discriminator. The planner now emits the consolidated
+# skill, but downstream analysis_context lookups (issue_evidence_summary,
+# cluster membership extraction) still ask for the legacy name. The helper
+# below tries the legacy artifact first (so direct legacy callers keep
+# working) then falls back to issue_summary with the matching view.
+_LEGACY_SUMMARIZE_VIEW: dict[str, str] = {
+    "issue_trend_summary": "trend",
+    "issue_breakdown_summary": "breakdown",
+    "issue_period_compare": "period_compare",
+    "issue_taxonomy_summary": "taxonomy",
+    "unstructured_issue_summary": "overview",
+}
+
+
+def _find_legacy_or_consolidated_view(prior_artifacts: Any, legacy_skill_name: str) -> dict[str, Any] | None:
+    direct = _find_prior_artifact(prior_artifacts, legacy_skill_name)
+    if direct is not None:
+        return direct
+    view = _LEGACY_SUMMARIZE_VIEW.get(legacy_skill_name)
+    if view is None:
+        return None
+    for artifact in reversed(_iter_prior_artifacts(prior_artifacts)):
+        skill_value = str(artifact.get("skill_name") or "").strip()
+        if skill_value != "issue_summary":
+            continue
+        if str(artifact.get("view_name") or "").strip() != view:
+            continue
+        return artifact
+    return None
+
+
 def _analysis_context_entries(prior_artifacts: Any) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
+    # ADR-012 Phase 3: each "issue_*_summary" lookup also matches a
+    # consolidated ``issue_summary`` artifact carrying the equivalent
+    # ``view_name``. ``_first_prior_artifact`` keeps the original
+    # legacy-or-priorshape priority list (e.g., trend → time_bucket_count
+    # fallback) — we just check the legacy summarize name through the
+    # view-aware helper before that list.
     for artifact in (
-        _first_prior_artifact(prior_artifacts, "issue_trend_summary", "time_bucket_count"),
-        _first_prior_artifact(prior_artifacts, "issue_breakdown_summary", "meta_group_count"),
-        _first_prior_artifact(prior_artifacts, "issue_period_compare"),
-        _first_prior_artifact(prior_artifacts, "issue_cluster_summary", "cluster_label_candidates", "embedding_cluster"),
-        _first_prior_artifact(prior_artifacts, "issue_taxonomy_summary", "dictionary_tagging"),
-        _first_prior_artifact(prior_artifacts, "issue_sentiment_summary"),
-        _first_prior_artifact(prior_artifacts, "unstructured_issue_summary"),
+        _find_legacy_or_consolidated_view(prior_artifacts, "issue_trend_summary")
+            or _first_prior_artifact(prior_artifacts, "time_bucket_count"),
+        _find_legacy_or_consolidated_view(prior_artifacts, "issue_breakdown_summary")
+            or _first_prior_artifact(prior_artifacts, "meta_group_count"),
+        _find_legacy_or_consolidated_view(prior_artifacts, "issue_period_compare"),
+        _find_legacy_or_consolidated_view(prior_artifacts, "issue_taxonomy_summary")
+            or _first_prior_artifact(prior_artifacts, "dictionary_tagging"),
+        _find_legacy_or_consolidated_view(prior_artifacts, "unstructured_issue_summary"),
         _first_prior_artifact(prior_artifacts, "term_frequency"),
     ):
         if artifact is None:
@@ -279,7 +329,7 @@ def _analysis_context_entry(artifact: dict[str, Any]) -> dict[str, Any] | None:
 
 def _analysis_context_summary(artifact: dict[str, Any]) -> str:
     skill_name = str(artifact.get("skill_name") or "").strip()
-    canonical_name = canonical_skill_name(skill_name)
+    canonical_name = skill_name
     summary = artifact.get("summary") or {}
     if not isinstance(summary, dict):
         summary = {}
@@ -613,20 +663,6 @@ def _rank_sample_rows(rows: list[dict[str, Any]], query: str, sample_n: int) -> 
     for rank, item in enumerate(limited, start=1):
         item["rank"] = rank
     return limited
-
-
-def _selected_embedding_records(embedding_uri: str, prior_artifacts: Any) -> list[dict[str, Any]]:
-    selected_indices = _selected_source_indices(prior_artifacts)
-    records = []
-    for record in _iter_embedding_records(Path(embedding_uri)):
-        try:
-            source_index = int(record.get("source_index") or 0)
-        except (TypeError, ValueError):
-            continue
-        if selected_indices is not None and source_index not in selected_indices:
-            continue
-        records.append(record)
-    return records
 
 
 def _dense_embedding_vector(value: Any) -> list[float]:
@@ -1107,7 +1143,6 @@ __all__ = [
     "_rank_sample_rows",
     "_row_source_index",
     "_select_evidence_candidates",
-    "_selected_embedding_records",
     "_selected_source_indices",
     "_selected_text_rows",
 ]

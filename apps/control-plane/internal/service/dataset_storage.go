@@ -64,6 +64,15 @@ func (s *DatasetService) datasetArtifactPath(version domain.DatasetVersion, scop
 	return absolutePath, true
 }
 
+// datasetArtifactPathOrFallback — artifactRoot 미설정 환경 fallback. 5/7 결정
+// 5-step pipeline 신규 4 build skill에서 활용.
+func (s *DatasetService) datasetArtifactPathOrFallback(version domain.DatasetVersion, scope, filename string) string {
+	if path, ok := s.datasetArtifactPath(version, scope, filename); ok {
+		return path
+	}
+	return strings.TrimSpace(version.StorageURI) + "." + filename
+}
+
 func (s *DatasetService) removeDatasetArtifacts(projectID, datasetID string) error {
 	roots := []string{s.uploadRoot, s.artifactRoot}
 	for _, root := range roots {
