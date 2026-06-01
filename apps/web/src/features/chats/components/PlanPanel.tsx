@@ -15,19 +15,16 @@ export default function PlanPanel({ plan }: { plan: ChatPlan }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-2 text-zinc-600 hover:bg-zinc-50 transition-colors"
+        className="w-full flex items-center gap-1.5 px-3 py-2 text-zinc-600 hover:bg-zinc-50 transition-colors"
       >
-        <span className="flex items-center gap-1.5">
-          <ChevronRight
-            className={cn(
-              "w-3.5 h-3.5 transition-transform",
-              open && "rotate-90",
-            )}
-          />
-          <span className="font-medium">분석 계획</span>
-          <span className="text-zinc-400">({stepCount}단계)</span>
-        </span>
-        <span className="font-mono text-[10px] text-zinc-400">{plan.version}</span>
+        <ChevronRight
+          className={cn(
+            "w-3.5 h-3.5 transition-transform",
+            open && "rotate-90",
+          )}
+        />
+        <span className="font-medium">분석 계획</span>
+        <span className="text-zinc-400">({stepCount}단계)</span>
       </button>
       {open && (
         <ol className="border-t border-zinc-100 divide-y divide-zinc-50">
