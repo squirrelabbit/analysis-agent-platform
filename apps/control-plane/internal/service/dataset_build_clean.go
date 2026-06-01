@@ -17,8 +17,8 @@ func (s *DatasetService) BuildClean(projectID, datasetID, datasetVersionID strin
 		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "dataset clean requires unstructured or mixed dataset version"}
 	}
 
-	force := input.Force != nil && *input.Force
-	if isCleanReady(version) && !force {
+	// 2026-05-21 — force flag 제거. 이미 ready면 그대로 반환 (재정제는 새 upload로).
+	if isCleanReady(version) {
 		return version, nil
 	}
 
@@ -30,11 +30,7 @@ func (s *DatasetService) BuildClean(projectID, datasetID, datasetVersionID strin
 	textColumns := textSelection.Columns
 	textJoiner := textSelection.Joiner
 	outputPath := s.deriveCleanURI(version)
-	if input.OutputPath != nil && strings.TrimSpace(*input.OutputPath) != "" {
-		outputPath = strings.TrimSpace(*input.OutputPath)
-	}
 	progressPath := outputPath + ".progress.json"
-	preprocessOptions := resolveCleanPreprocessOptions(version.Metadata, input.PreprocessOptions)
 
 	if version.Metadata == nil {
 		version.Metadata = map[string]any{}
@@ -51,8 +47,12 @@ func (s *DatasetService) BuildClean(projectID, datasetID, datasetVersionID strin
 	version.Metadata["raw_text_column"] = textColumn
 	version.Metadata["raw_text_columns"] = append([]string(nil), textColumns...)
 	version.Metadata["text_joiner"] = textJoiner
-	version.Metadata["clean_preprocess_options"] = cloneStringBoolMap(preprocessOptions)
-	invalidateDownstreamArtifactsForClean(&version, "clean output changed")
+	// δ-3 (5/21) — ADR-018 β2로 prepare/sentiment/embedding/segment 단계가
+	// 사라지면서 invalidateDownstreamArtifactsForClean → invalidatePrepareArtifacts
+	// 체인이 모두 dead-code가 됐다. 현재 downstream(doc_genuineness, clause_label)
+	// 은 명시 트리거라 재실행 시 metadata가 자연히 덮어써진다. 명시적
+	// invalidation이 필요해지면 여기서 doc_genuineness_status / clause_label_status
+	// 를 stale로 표시하는 helper를 도입.
 	if err := ensureParentDir(outputPath); err != nil {
 		return domain.DatasetVersion{}, err
 	}
@@ -68,13 +68,27 @@ func (s *DatasetService) BuildClean(projectID, datasetID, datasetVersionID strin
 		"text_joiner":        textJoiner,
 		"output_path":        outputPath,
 		"progress_path":      progressPath,
-		"preprocess_options": cloneStringBoolMap(preprocessOptions),
+	}
+	// silverone 2026-05-28 (clean 정식화) — date_column 명시 시 worker에
+	// 전달. worker가 source row의 해당 컬럼을 created_at ISO 8601로 변환.
+	if input.DateColumn != nil {
+		if v := strings.TrimSpace(*input.DateColumn); v != "" {
+			payload["date_column"] = v
+			version.Metadata["clean_date_column"] = v
+		}
 	}
 	if version.Profile != nil && len(version.Profile.RegexRuleNames) > 0 {
 		payload["regex_rule_names"] = append([]string(nil), version.Profile.RegexRuleNames...)
 	}
 
-	response, err := s.runWorkerTask(context.Background(), "/tasks/dataset_clean", payload)
+	// 5/11 (silverone): dataset_build를 plan skill과 분리한다는 결정에 따라
+	// clean 단계가 PythonBuildClient로 첫 마이그레이션. taskPath/timeout/4xx-5xx
+	// wrap 로직은 client 내부에 그대로 이동했다. 다른 build 단계는 후속 작업.
+	// response 변환은 동일 shape의 workerTaskResponse(다른 7 service가 아직
+	// runWorkerTask 사용 중)로 옮겨서 기존 후속 처리 코드 (artifactString 등)
+	// 변경 없이 호환.
+	buildResp, err := s.buildClient().RunDatasetClean(context.Background(), payload)
+	response := workerTaskResponse{Notes: buildResp.Notes, Artifact: buildResp.Artifact, Artifacts: buildResp.Artifacts}
 	if err != nil {
 		version.CleanStatus = "failed"
 		version.Metadata["clean_status"] = "failed"
@@ -119,9 +133,6 @@ func (s *DatasetService) BuildClean(projectID, datasetID, datasetVersionID strin
 	}
 	if progressRef := artifactString(response.Artifact, "progress_ref"); progressRef != "" {
 		cleanMetadata["clean_progress_ref"] = progressRef
-	}
-	if artifactPreprocessOptions := artifactBoolMap(response.Artifact, "preprocess_options"); len(artifactPreprocessOptions) > 0 {
-		cleanMetadata["clean_preprocess_options"] = artifactPreprocessOptions
 	}
 	for _, key := range []string{
 		"source_input_char_count",

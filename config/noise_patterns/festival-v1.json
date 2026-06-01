@@ -1,0 +1,12 @@
+{
+  "version": "festival-v1",
+  "description": "festival 도메인 inline noise scrub 패턴. clean 단계에서 row 차단 X — 문장 안의 placeholder 문자열만 strip. garbage_rules(row 차단)와 책임 분리. 2026-05-11 sentence cluster 검증에서 placeholder 반복 cluster 확인 후 도입 + v3 cluster 20 'NAVER Corp 위치 메타 fragment' 추가. 2026-05-12 festival.csv 2121 rows 검증에서 NAVER Corp 잔존 111건 발견 — 거리 단위 변형(100m/5km) + 단위 없는 위치 메타 fragment 패턴 2종 추가.",
+  "patterns": [
+    "존재하지 않는 이미지입니다\\.?",
+    "존재하지 않는 스티커입니다\\.?",
+    "네트워크 오류가 발생했습니다\\.?",
+    "50m NAVER Corp\\.[^.!?]{0,300}",
+    "\\d+(?:km|m)\\s*NAVER Corp\\.[^.!?]{0,300}",
+    "NAVER Corp\\.[^.!?]{0,300}"
+  ]
+}

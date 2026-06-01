@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import load_config
-from ..openai_client import OpenAIEmbeddingClient, OpenAIEmbeddingConfig
+from ..obs import get as _get_logger
+from ..clients.openai import OpenAIEmbeddingClient, OpenAIEmbeddingConfig
 from .constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_LOCAL_EMBEDDING_MODEL, TOKEN_OVERLAP_EMBEDDING_MODEL
 
 try:
@@ -13,6 +14,8 @@ except ImportError:  # pragma: no cover - optional local backend
     TextEmbedding = None
     ModelSource = None
     PoolingType = None
+
+_LOG = _get_logger(__name__)
 
 _FASTEMBED_CUSTOM_MODEL_DIMS = {
     "intfloat/multilingual-e5-small": 384,
@@ -186,7 +189,19 @@ def _local_embedding_model(model: str) -> Any | None:
     _register_fastembed_custom_model(resolved_model)
     try:
         embedding_model = TextEmbedding(model_name=resolved_model)
-    except Exception:
+    except Exception as exc:
+        # Codex round 3B silent fallback finding: TextEmbedding init failure
+        # used to swallow silently and downstream silently fell back to
+        # token-overlap embeddings, leaving operators no signal that the
+        # dense backend was unavailable. Surface a structured warning so a
+        # single grep on event=embedding.fastembed_model_init_failed catches
+        # the degradation.
+        _LOG.warning(
+            "embedding.fastembed_model_init_failed",
+            model=resolved_model,
+            error_category=type(exc).__name__,
+            error_message=str(exc),
+        )
         return None
     _FASTEMBED_MODEL_CACHE[resolved_model] = embedding_model
     return embedding_model
@@ -200,7 +215,16 @@ def _register_fastembed_custom_model(model: str) -> None:
         return
     try:
         supported = {str(item.get("model") or "").strip() for item in TextEmbedding.list_supported_models()}
-    except Exception:
+    except Exception as exc:
+        # Reading fastembed's supported list shouldn't fail in practice, but
+        # if it does we still try to register and let the caller surface the
+        # downstream init failure. Keep the warn so back-to-back failures
+        # are correlated.
+        _LOG.warning(
+            "embedding.fastembed_supported_models_query_failed",
+            model=model,
+            error_category=type(exc).__name__,
+        )
         supported = set()
     if model in supported:
         return
@@ -213,7 +237,18 @@ def _register_fastembed_custom_model(model: str) -> None:
             dim=dim,
             model_file="onnx/model.onnx",
         )
-    except Exception:
+    except Exception as exc:
+        # Codex round 3B silent fallback finding: custom model registration
+        # failures previously fell through silently and downstream model
+        # init failed without a signal pointing to registration. Emit a
+        # warning so operators can correlate the two events.
+        _LOG.warning(
+            "embedding.fastembed_custom_model_registration_failed",
+            model=model,
+            dim=dim,
+            error_category=type(exc).__name__,
+            error_message=str(exc),
+        )
         return
 
 

@@ -24,7 +24,8 @@
 | `src/python_ai_worker/prompt_registry.py` | prompt version -> Markdown template resolver |
 | `src/python_ai_worker/skill_policy_registry.py` | skill policy version -> JSON policy resolver |
 | `src/python_ai_worker/runtime` | payload, rule, artifact, embedding, LLM helper |
-| `src/python_ai_worker/skills/dataset_build.py` | prepare, sentiment, embedding, cluster build |
+| `src/python_ai_worker/dataset_build/` | clean, prepare, sentiment, embedding, cluster, segment, clause_label, embedding_cluster, keyword_index, document_cluster_profile (전처리 build 단계 — `skills/` 와 층위 분리. 현재 `__init__.py` 단일 모듈, 후속 refactor에서 파일 분할 예정) |
+| `src/python_ai_worker/lloa_client.py` | 사내 wisenut LLOA 호출 클라이언트 (전처리 LLM 단계 전용; 다른 plan skill은 `anthropic_client` 사용) |
 | `src/python_ai_worker/skills/preprocess.py` | filter, dedup, sentence split, sample |
 | `src/python_ai_worker/skills/aggregate.py` | keyword, noun, time/group count, taxonomy tagging |
 | `src/python_ai_worker/skills/retrieve.py` | semantic search, cluster, cluster labeling |

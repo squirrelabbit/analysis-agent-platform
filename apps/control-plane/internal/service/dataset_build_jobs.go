@@ -14,11 +14,10 @@ import (
 )
 
 const (
-	datasetBuildTypeClean     = "clean"
-	datasetBuildTypePrepare   = "prepare"
-	datasetBuildTypeSentiment = "sentiment"
-	datasetBuildTypeEmbedding = "embedding"
-	datasetBuildTypeCluster   = "cluster"
+	datasetBuildTypeClean       = "clean"
+	datasetBuildTypeClauseLabel = "clause_label"
+	// ADR-017 / 5/19 결정 — clean 직후 doc-level 3-tier 진성 분류.
+	datasetBuildTypeDocGenuineness = "doc_genuineness"
 )
 
 func (s *DatasetService) CreateCleanJob(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
@@ -69,170 +68,6 @@ func (s *DatasetService) CreateCleanJob(projectID, datasetID, datasetVersionID s
 	return job, nil
 }
 
-func (s *DatasetService) CreatePrepareJob(projectID, datasetID, datasetVersionID string, input domain.DatasetPrepareRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
-	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
-	if err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	if status := cleanStatus(version); status == "queued" || status == "cleaning" || status == "failed" || status == "stale" {
-		return domain.DatasetBuildJob{}, ErrInvalidArgument{Message: "dataset clean must be ready before prepare"}
-	}
-	if active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, datasetBuildTypePrepare); err != nil {
-		return domain.DatasetBuildJob{}, err
-	} else if active != nil {
-		return *active, nil
-	}
-
-	job := domain.DatasetBuildJob{
-		JobID:            id.New(),
-		ProjectID:        projectID,
-		DatasetID:        datasetID,
-		DatasetVersionID: datasetVersionID,
-		BuildType:        datasetBuildTypePrepare,
-		Status:           "queued",
-		Request:          requestToMap(input),
-		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
-		CreatedAt:        time.Now().UTC(),
-	}
-	version.PrepareStatus = "queued"
-	if err := s.store.SaveDatasetVersion(version); err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	if err := s.store.SaveDatasetBuildJob(job); err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
-		_, err := s.BuildPrepare(projectID, datasetID, datasetVersionID, input)
-		return err
-	}); err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	return job, nil
-}
-
-func (s *DatasetService) CreateSentimentJob(projectID, datasetID, datasetVersionID string, input domain.DatasetSentimentBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
-	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
-	if err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	if active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, datasetBuildTypeSentiment); err != nil {
-		return domain.DatasetBuildJob{}, err
-	} else if active != nil {
-		return *active, nil
-	}
-
-	job := domain.DatasetBuildJob{
-		JobID:            id.New(),
-		ProjectID:        projectID,
-		DatasetID:        datasetID,
-		DatasetVersionID: datasetVersionID,
-		BuildType:        datasetBuildTypeSentiment,
-		Status:           "queued",
-		Request:          requestToMap(input),
-		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
-		CreatedAt:        time.Now().UTC(),
-	}
-	version.SentimentStatus = "queued"
-	if err := s.store.SaveDatasetVersion(version); err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	if err := s.store.SaveDatasetBuildJob(job); err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
-		_, err := s.BuildSentiment(projectID, datasetID, datasetVersionID, input)
-		return err
-	}); err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	return job, nil
-}
-
-func (s *DatasetService) CreateEmbeddingJob(projectID, datasetID, datasetVersionID string, input domain.DatasetEmbeddingBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
-	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
-	if err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	if active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, datasetBuildTypeEmbedding); err != nil {
-		return domain.DatasetBuildJob{}, err
-	} else if active != nil {
-		return *active, nil
-	}
-
-	job := domain.DatasetBuildJob{
-		JobID:            id.New(),
-		ProjectID:        projectID,
-		DatasetID:        datasetID,
-		DatasetVersionID: datasetVersionID,
-		BuildType:        datasetBuildTypeEmbedding,
-		Status:           "queued",
-		Request:          requestToMap(input),
-		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
-		CreatedAt:        time.Now().UTC(),
-	}
-	version.EmbeddingStatus = "queued"
-	if err := s.store.SaveDatasetVersion(version); err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	if err := s.store.SaveDatasetBuildJob(job); err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
-		_, err := s.BuildEmbeddings(projectID, datasetID, datasetVersionID, input)
-		return err
-	}); err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	return job, nil
-}
-
-func (s *DatasetService) CreateClusterJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClusterBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
-	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
-	if err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	if active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, datasetBuildTypeCluster); err != nil {
-		return domain.DatasetBuildJob{}, err
-	} else if active != nil {
-		return *active, nil
-	}
-
-	job := domain.DatasetBuildJob{
-		JobID:            id.New(),
-		ProjectID:        projectID,
-		DatasetID:        datasetID,
-		DatasetVersionID: datasetVersionID,
-		BuildType:        datasetBuildTypeCluster,
-		Status:           "queued",
-		Request:          requestToMap(input),
-		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
-		CreatedAt:        time.Now().UTC(),
-	}
-	if version.Metadata == nil {
-		version.Metadata = map[string]any{}
-	}
-	normalizedRequest := domain.NormalizeClusterBuildRequest(input)
-	version.Metadata["cluster_status"] = "queued"
-	version.Metadata["cluster_similarity_threshold"] = *normalizedRequest.SimilarityThreshold
-	version.Metadata["cluster_top_n"] = *normalizedRequest.TopN
-	version.Metadata["cluster_sample_n"] = *normalizedRequest.SampleN
-	version.Metadata["cluster_params_hash"] = domain.ClusterRequestHash(normalizedRequest)
-	delete(version.Metadata, "cluster_stale_reason")
-	if err := s.store.SaveDatasetVersion(version); err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	if err := s.store.SaveDatasetBuildJob(job); err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
-		_, err := s.BuildClusters(projectID, datasetID, datasetVersionID, input)
-		return err
-	}); err != nil {
-		return domain.DatasetBuildJob{}, err
-	}
-	return job, nil
-}
-
 func (s *DatasetService) GetDatasetBuildJob(projectID, jobID string) (domain.DatasetBuildJob, error) {
 	job, err := s.store.GetDatasetBuildJob(projectID, jobID)
 	if err != nil {
@@ -273,10 +108,8 @@ func (s *DatasetService) latestDatasetVersionBuildJobStatuses(projectID string, 
 	latestByType := latestDatasetBuildJobsByType(items)
 	orderedTypes := []string{
 		datasetBuildTypeClean,
-		datasetBuildTypePrepare,
-		datasetBuildTypeSentiment,
-		datasetBuildTypeEmbedding,
-		datasetBuildTypeCluster,
+		datasetBuildTypeDocGenuineness,
+		datasetBuildTypeClauseLabel,
 	}
 	result := make([]domain.DatasetVersionBuildJobStatus, 0, len(latestByType))
 	for _, buildType := range orderedTypes {
@@ -428,12 +261,11 @@ func withBuildJobDiagnostics(job domain.DatasetBuildJob) domain.DatasetBuildJob 
 		retryCount = 0
 	}
 	job.Diagnostics = &domain.BuildJobDiagnostics{
-		RetryCount:            retryCount,
-		LastErrorType:         cloneStringPointer(job.LastErrorType),
-		LastErrorMessage:      cloneStringPointer(job.ErrorMessage),
-		WorkflowID:            cloneStringPointer(job.WorkflowID),
-		WorkflowRunID:         cloneStringPointer(job.WorkflowRunID),
-		ResumedExecutionCount: job.ResumedExecutionCount,
+		RetryCount:       retryCount,
+		LastErrorType:    cloneStringPointer(job.LastErrorType),
+		LastErrorMessage: cloneStringPointer(job.ErrorMessage),
+		WorkflowID:       cloneStringPointer(job.WorkflowID),
+		WorkflowRunID:    cloneStringPointer(job.WorkflowRunID),
 	}
 	return job
 }
@@ -517,10 +349,10 @@ func buildJobMetadataPrefix(buildType string) string {
 	switch strings.TrimSpace(buildType) {
 	case datasetBuildTypeClean:
 		return "clean"
-	case datasetBuildTypePrepare:
-		return "prepare"
-	case datasetBuildTypeSentiment:
-		return "sentiment"
+	case datasetBuildTypeClauseLabel:
+		return "clause_label"
+	case datasetBuildTypeDocGenuineness:
+		return "doc_genuineness"
 	default:
 		return ""
 	}
@@ -550,4 +382,106 @@ func cloneStringPointer(value *string) *string {
 	}
 	trimmed := strings.TrimSpace(*value)
 	return &trimmed
+}
+
+// CreateDocGenuinenessJob — ADR-017 / 5/19 결정 clean 직후 doc-level 3-tier
+// 진성 분류. clean ready 검증 + idempotent active lookup + dispatch.
+// BuildDocGenuineness은 LLOA 호출이라 prod env에서는 LLOA_API_KEY 필수
+// (handler가 fail-loud).
+func (s *DatasetService) CreateDocGenuinenessJob(projectID, datasetID, datasetVersionID string, input domain.DatasetDocGenuinenessBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if _, err := extractDocGenuinenessConfig(dataset.Metadata); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if status := cleanStatus(version); status == "queued" || status == "cleaning" || status == "failed" || status == "stale" {
+		return domain.DatasetBuildJob{}, ErrInvalidArgument{Message: "dataset clean must be ready before doc_genuineness"}
+	}
+	if active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, datasetBuildTypeDocGenuineness); err != nil {
+		return domain.DatasetBuildJob{}, err
+	} else if active != nil {
+		return *active, nil
+	}
+
+	job := domain.DatasetBuildJob{
+		JobID:            id.New(),
+		ProjectID:        projectID,
+		DatasetID:        datasetID,
+		DatasetVersionID: datasetVersionID,
+		BuildType:        datasetBuildTypeDocGenuineness,
+		Status:           "queued",
+		Request:          requestToMap(input),
+		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
+		CreatedAt:        time.Now().UTC(),
+	}
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.Metadata["doc_genuineness_status"] = "queued"
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := s.store.SaveDatasetBuildJob(job); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
+		_, err := s.BuildDocGenuineness(projectID, datasetID, datasetVersionID, input)
+		return err
+	}); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	return job, nil
+}
+
+func (s *DatasetService) CreateClauseLabelJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClauseLabelBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	// ADR-017 / 5/19 — clause_label 입력 source가 segment → clean으로 변경.
+	// segment 단계는 PR-4에서 deprecate 예정. 옵션 include_genuineness 명시 시
+	// doc_genuineness ready도 BuildClauseLabel가 검증.
+	if status := cleanStatus(version); status == "queued" || status == "cleaning" || status == "failed" || status == "stale" {
+		return domain.DatasetBuildJob{}, ErrInvalidArgument{Message: "dataset clean must be ready before clause_label"}
+	}
+	if active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, datasetBuildTypeClauseLabel); err != nil {
+		return domain.DatasetBuildJob{}, err
+	} else if active != nil {
+		return *active, nil
+	}
+
+	job := domain.DatasetBuildJob{
+		JobID:            id.New(),
+		ProjectID:        projectID,
+		DatasetID:        datasetID,
+		DatasetVersionID: datasetVersionID,
+		BuildType:        datasetBuildTypeClauseLabel,
+		Status:           "queued",
+		Request:          requestToMap(input),
+		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
+		CreatedAt:        time.Now().UTC(),
+	}
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.Metadata["clause_label_status"] = "queued"
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := s.store.SaveDatasetBuildJob(job); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
+		_, err := s.BuildClauseLabel(projectID, datasetID, datasetVersionID, input)
+		return err
+	}); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	return job, nil
 }

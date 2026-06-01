@@ -2,39 +2,81 @@ openapi: 3.1.0
 info:
   title: Analysis Support Platform Control Plane API
   version: 0.1.0
-  summary: Go control-plane API for dataset lifecycle, planning, execution, and rerun/diff
+  summary: 분석 지원 플랫폼 Go control-plane API (전체 명세)
   description: |
-    현재 구현 기준 control-plane API 명세다.
+    Go control-plane이 노출하는 전체 HTTP API 명세다. 백엔드/운영자 도구가
+    참조하는 기준 문서. 프론트엔드 화면용 축약본은
+    [`openapi.frontend.yaml`](./openapi.frontend.yaml)에 있다.
 
-    주요 흐름:
-    1. 프로젝트 생성
-    2. dataset / dataset version 생성 또는 upload
-    3. clean / prepare sample / prepare / sentiment / embeddings / cluster build
-    4. analysis request -> plan -> execute
-    5. result / resume / rerun / diff
+    ## 전체 흐름
 
-    `storage_uri`는 원본 dataset 위치다.
-    - `versions` API를 직접 호출할 때는 호출자가 넘기는 절대 경로다.
-    - `uploads` API를 쓰면 서버가 `UPLOAD_ROOT` 아래에 저장한 실제 파일 경로로 채운다.
+    1. **프로젝트 생성** — `POST /projects`
+    2. **dataset 생성 + 파일 업로드** — `POST /projects/{pid}/datasets` →
+       `POST /projects/{pid}/datasets/{did}/uploads`로 raw 파일 업로드.
+       업로드 즉시 `dataset_version`이 만들어지고, `metadata.text_columns`가
+       있으면 clean도 자동 큐잉된다.
+    3. **dataset_build 단계** — clean → doc_genuineness → clause_label 3단계.
+       각 단계는 `POST /versions/{vid}/{단계}`로 큐잉(202 + `job_id`)하고,
+       `GET /versions/{vid}/{단계}` 같은 path GET을 화면이 1~2초 주기로 polling한다.
+       view는 status / progress / error_message / summary / (단계별) items를
+       묶어서 반환하므로 build job endpoint를 직접 호출할 필요가 없다.
+    4. **분석 실행 / 채팅형 thread** — 중심 객체는 `analysis_thread` +
+       `analysis_message` + `analysis_run` 3개. endpoint는 모두 이 모델을 다루는
+       shortcut/이어질문/debug의 세 갈래로 정리된다.
+       - 첫 turn shortcut: `POST /datasets/{did}/analyze`, body
+         `{user_question: "..."}` 1 필드. active version을 1회 resolve해
+         `thread.dataset_version_id`로 **고정**하고 첫 user message + run을 저장한다.
+       - 이어질문: `POST /datasets/{did}/analysis_threads/{tid}/messages`,
+         body `{content: "..."}`. thread에 잠긴 dataset_version_id 그대로 분석한다.
+         이어질문은 rule-based plan reuse를 먼저 시도하고 실패하면 planner LLM으로
+         fallback (응답에 `result.reuse` metadata 노출). 최근 assistant
+         `context_summary` 3턴/2000 bytes를 worker에 inject.
+       - debug/replay: `POST /versions/{vid}/analyze`, body `{plan: {...}}` 1 필드.
+         user_question은 받지 않고 thread/message/run 저장도 없는 stateless 흐름.
+       - 실패 시(이어질문/첫 turn 공통): `analysis_run.status=failed` +
+         assistant placeholder message가 thread에 저장된다. 응답 자체는 HTTP error.
+       - 실행은 현재 모두 sync HTTP. async 전환 및 step status 분리는 후속
+         (vault `analysis_api_model_2026-05-26` §7-8).
+
+    ## build job endpoint 역할 분리 원칙 (2026-05-22 확정)
+
+    - `POST /versions/{vid}/{단계}` — build job **접수만** 담당. 응답은 slim
+      `DatasetBuildJobAccepted` (job_id, build_type, status, created_at).
+    - `GET /versions/{vid}/{단계}` — **화면 polling/status/result 조회 단일
+      진입점**. status / progress / summary / items / applied / error_message
+      모두 묶어서 반환. 화면은 이 endpoint만 polling한다.
+    - `GET /dataset_build_jobs/{job_id}` — **debug / audit 전용**. Temporal
+      workflow 추적 / 운영자 디버그용. **화면 polling에 쓰지 않는다.**
+    - `GET /versions/{vid}/build_jobs` (list) — Phase 3 (2026-05-22) 정리로
+      제거됨. retry 이력 trace가 필요하면 Temporal UI / DB 직접 조회.
+
+    ## storage_uri 규칙
+
+    `dataset_version.storage_uri`는 원본 dataset 파일의 절대 경로다.
+    `uploads` API를 쓰면 서버가 `UPLOAD_ROOT` 아래에 저장한 실제 경로로 자동
+    채운다. 외부 시스템 경로를 직접 다루려면 `versions` API에 절대 경로를 명시.
 servers:
   - url: http://127.0.0.1:18080
-    description: Local development
+    description: 로컬 개발 서버 (compose dev)
 tags:
   - name: System
-  - name: Prompts
+    description: 헬스 체크 / 런타임 상태 등 운영용 메타 엔드포인트
   - name: Projects
+    description: 프로젝트 + 프로젝트 prompt 관리
   - name: Datasets
+    description: dataset / dataset version / build / 다운로드
   - name: Analysis
-  - name: Executions
+    description: 저장형 analysis thread / message / run + plan replay
 paths:
   /health:
     get:
       tags: [System]
-      summary: Health check
+      summary: 헬스 체크
+      description: 서버가 살아있는지 단순 확인. 인증 불필요.
       operationId: getHealth
       responses:
         "200":
-          description: Service is healthy
+          description: 정상 상태
           content:
             application/json:
               schema:
@@ -42,150 +84,31 @@ paths:
   /runtime_status:
     get:
       tags: [System]
-      summary: Runtime status and Temporal durability mode
+      summary: 런타임 상태 + Temporal 연결 상태
+      description: workflow engine / store backend / Temporal 연결 정보 등 운영 진단용 메타.
       operationId: getRuntimeStatus
       responses:
         "200":
-          description: Runtime status
+          description: 런타임 상태
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RuntimeStatusResponse"
-  /skills:
-    get:
-      tags: [System]
-      summary: List supported skills
-      operationId: listSkills
-      responses:
-        "200":
-          description: Supported skill names
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: string
-  /prompts:
-    get:
-      tags: [Prompts]
-      summary: List global prompts
-      operationId: listPrompts
-      parameters:
-        - name: operation
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [prepare, prepare_batch, sentiment, sentiment_batch]
-      responses:
-        "200":
-          description: Global prompt list
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PromptListResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-    post:
-      tags: [Prompts]
-      summary: Create global prompt
-      operationId: createPrompt
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PromptCreateRequest"
-      responses:
-        "201":
-          description: Global prompt created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Prompt"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "409":
-          $ref: "#/components/responses/ErrorResponse"
-  /prompts/{prompt_id}:
-    get:
-      tags: [Prompts]
-      summary: Get global prompt
-      operationId: getPrompt
-      parameters:
-        - name: prompt_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Global prompt detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Prompt"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-    patch:
-      tags: [Prompts]
-      summary: Update global prompt
-      operationId: updatePrompt
-      parameters:
-        - name: prompt_id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PromptUpdateRequest"
-      responses:
-        "200":
-          description: Global prompt updated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Prompt"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-        "409":
-          $ref: "#/components/responses/ErrorResponse"
-    delete:
-      tags: [Prompts]
-      summary: Delete global prompt
-      operationId: deletePrompt
-      parameters:
-        - name: prompt_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "204":
-          description: Global prompt deleted
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
   /projects:
     get:
       tags: [Projects]
-      summary: List projects
+      summary: 프로젝트 목록 조회
       operationId: listProjects
       responses:
         "200":
-          description: Project list
+          description: 프로젝트 목록
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProjectListResponse"
     post:
       tags: [Projects]
-      summary: Create project
+      summary: 프로젝트 생성
       operationId: createProject
       requestBody:
         required: true
@@ -195,7 +118,7 @@ paths:
               $ref: "#/components/schemas/ProjectCreateRequest"
       responses:
         "201":
-          description: Project created
+          description: 프로젝트 생성 완료
           content:
             application/json:
               schema:
@@ -205,13 +128,13 @@ paths:
   /projects/{project_id}:
     get:
       tags: [Projects]
-      summary: Get project
+      summary: 프로젝트 단건 조회
       operationId: getProject
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       responses:
         "200":
-          description: Project detail
+          description: 프로젝트 상세
           content:
             application/json:
               schema:
@@ -220,284 +143,252 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
     delete:
       tags: [Projects]
-      summary: Delete project
+      summary: 프로젝트 삭제
+      description: 프로젝트와 그 아래 모든 dataset / dataset version / build job을 함께 삭제한다. 파일시스템의 업로드/artifact도 정리.
       operationId: deleteProject
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       responses:
         "204":
-          description: Project deleted
+          description: 삭제 완료
         "404":
           $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/prompts:
-    get:
-      tags: [Projects]
-      summary: List project prompt templates
-      operationId: listProjectPrompts
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-      responses:
-        "200":
-          description: Project prompt list
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProjectPromptListResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-    post:
-      tags: [Projects]
-      summary: Create a project prompt template version
-      operationId: saveProjectPrompt
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProjectPromptUpsertRequest"
-            examples:
-              prepare:
-                summary: Prepare prompt example
-                value:
-                  version: project-prepare-v1
-                  operation: prepare
-                  content: |
-                    ---
-                    title: 프로젝트 전처리 v1
-                    operation: prepare
-                    status: experimental
-                    summary: 프로젝트 전용 전처리 프롬프트
-                    ---
-                    아래 원문을 정제해 주세요.
-                    {{raw_text}}
-              prepare_batch:
-                summary: Prepare batch prompt example
-                value:
-                  version: project-prepare-v1
-                  operation: prepare_batch
-                  content: |
-                    ---
-                    title: 프로젝트 전처리 배치 v1
-                    operation: prepare_batch
-                    status: experimental
-                    summary: 프로젝트 전용 전처리 배치 프롬프트
-                    ---
-                    아래 JSON rows를 한 번에 정제해 주세요.
-                    {{rows_json}}
-              sentiment:
-                summary: Sentiment prompt example
-                value:
-                  version: project-sentiment-v1
-                  operation: sentiment
-                  content: |
-                    ---
-                    title: 프로젝트 감성 분석 v1
-                    operation: sentiment
-                    status: active
-                    summary: 프로젝트 전용 감성 분석 프롬프트
-                    ---
-                    아래 텍스트의 감성을 분류해 주세요.
-                    {{text}}
-      responses:
-        "201":
-          description: Project prompt saved
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProjectPrompt"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "409":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/prompt_defaults:
-    get:
-      tags: [Projects]
-      summary: Get project prompt defaults
-      operationId: getProjectPromptDefaults
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-      responses:
-        "200":
-          description: Project prompt default versions
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProjectPromptDefaults"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-    put:
-      tags: [Projects]
-      summary: Replace project prompt defaults
-      operationId: updateProjectPromptDefaults
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ProjectPromptDefaultsUpdateRequest"
-      responses:
-        "200":
-          description: Updated project prompt default versions
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ProjectPromptDefaults"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/scenarios:
-    post:
-      tags: [Projects]
-      summary: Register scenario
-      operationId: createScenario
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ScenarioCreateRequest"
-      responses:
-        "201":
-          description: Scenario created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Scenario"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-    get:
-      tags: [Projects]
-      summary: List registered scenarios
-      operationId: listScenarios
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-      responses:
-        "200":
-          description: Scenario list
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ScenarioListResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/scenarios/import:
-    post:
-      tags: [Projects]
-      summary: Import scenarios from row-oriented sheet payload
-      operationId: importScenarios
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ScenarioImportRequest"
-      responses:
-        "201":
-          description: Scenarios imported
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ScenarioImportResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/scenarios/{scenario_id}:
-    get:
-      tags: [Projects]
-      summary: Get registered scenario
-      operationId: getScenario
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - name: scenario_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Scenario detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Scenario"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/scenarios/{scenario_id}/plans:
-    post:
-      tags: [Projects]
-      summary: Create analysis request and plan from registered scenario
-      operationId: createScenarioPlan
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - name: scenario_id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ScenarioPlanCreateRequest"
-      responses:
-        "201":
-          description: Analysis request and plan created from scenario
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AnalysisPlanResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/scenarios/{scenario_id}/execute:
-    post:
-      tags: [Projects]
-      summary: Create analysis request, plan, and execution from registered scenario
-      operationId: executeScenario
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - name: scenario_id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ScenarioPlanCreateRequest"
-      responses:
-        "202":
-          description: Analysis request, plan, and execution created from scenario
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AnalysisExecuteResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
+  # /projects/{project_id}/prompts:
+  #   get:
+  #     tags: [Projects]
+  #     summary: 프로젝트 prompt 목록 조회
+  #     description: 해당 프로젝트가 가진 prompt 템플릿 전체 버전 목록.
+  #     operationId: listProjectPrompts
+  #     parameters:
+  #       - $ref: "#/components/parameters/ProjectId"
+  #     responses:
+  #       "200":
+  #         description: prompt 목록
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/ProjectPromptListResponse"
+  #       "404":
+  #         $ref: "#/components/responses/ErrorResponse"
+  #   post:
+  #     tags: [Projects]
+  #     summary: 프로젝트 prompt 신규 버전 등록
+  #     description: |
+  #       해당 프로젝트의 prompt 템플릿 새 버전을 등록한다. 같은 operation에
+  #       이미 active 버전이 있으면 새 버전이 active가 되고 이전 버전은 history로 남는다.
+  #     operationId: saveProjectPrompt
+  #     parameters:
+  #       - $ref: "#/components/parameters/ProjectId"
+  #     requestBody:
+  #       required: true
+  #       content:
+  #         application/json:
+  #           schema:
+  #             $ref: "#/components/schemas/ProjectPromptUpsertRequest"
+  #           examples:
+  #             prepare:
+  #               summary: Prepare prompt example
+  #               value:
+  #                 version: project-prepare-v1
+  #                 operation: prepare
+  #                 content: |
+  #                   ---
+  #                   title: 프로젝트 전처리 v1
+  #                   operation: prepare
+  #                   status: experimental
+  #                   summary: 프로젝트 전용 전처리 프롬프트
+  #                   ---
+  #                   아래 원문을 정제해 주세요.
+  #                   {{raw_text}}
+  #             prepare_batch:
+  #               summary: Prepare batch prompt example
+  #               value:
+  #                 version: project-prepare-v1
+  #                 operation: prepare_batch
+  #                 content: |
+  #                   ---
+  #                   title: 프로젝트 전처리 배치 v1
+  #                   operation: prepare_batch
+  #                   status: experimental
+  #                   summary: 프로젝트 전용 전처리 배치 프롬프트
+  #                   ---
+  #                   아래 JSON rows를 한 번에 정제해 주세요.
+  #                   {{rows_json}}
+  #             sentiment:
+  #               summary: Sentiment prompt example
+  #               value:
+  #                 version: project-sentiment-v1
+  #                 operation: sentiment
+  #                 content: |
+  #                   ---
+  #                   title: 프로젝트 감성 분석 v1
+  #                   operation: sentiment
+  #                   status: active
+  #                   summary: 프로젝트 전용 감성 분석 프롬프트
+  #                   ---
+  #                   아래 텍스트의 감성을 분류해 주세요.
+  #                   {{text}}
+  #     responses:
+  #       "201":
+  #         description: prompt 신규 버전 저장 완료
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/ProjectPrompt"
+  #       "400":
+  #         $ref: "#/components/responses/ErrorResponse"
+  #       "409":
+  #         $ref: "#/components/responses/ErrorResponse"
+  #       "404":
+  #         $ref: "#/components/responses/ErrorResponse"
+  # /projects/{project_id}/prompt_history:
+  #   get:
+  #     tags: [Projects]
+  #     summary: 프로젝트 prompt 변경 이력 조회 (audit log)
+  #     description: |
+  #       프로젝트의 prompt 변경 이력(create/update/revert)을 오래된 순서대로 반환.
+  #       `operation` query로 특정 operation의 이력만 필터 가능.
+  #     operationId: listProjectPromptHistory
+  #     parameters:
+  #       - $ref: "#/components/parameters/ProjectId"
+  #       - in: query
+  #         name: operation
+  #         required: false
+  #         schema:
+  #           type: string
+  #         description: "필터할 operation 이름. 비우면 전체 operation."
+  #     responses:
+  #       "200":
+  #         description: prompt 변경 이력
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/ProjectPromptHistoryResponse"
+  #       "404":
+  #         $ref: "#/components/responses/ErrorResponse"
+  # /projects/{project_id}/prompts/{operation}/revert:
+  #   post:
+  #     tags: [Projects]
+  #     summary: prompt를 이전 버전으로 되돌리기 (새 버전으로 복제)
+  #     description: |
+  #       지정한 이전 버전의 본문을 새 버전 이름으로 복제해 저장한다. 활성 행을
+  #       직접 수정하지 않고 항상 *새 버전*을 만드는 방식으로 audit 흔적을 남긴다.
+  #     operationId: revertProjectPrompt
+  #     parameters:
+  #       - $ref: "#/components/parameters/ProjectId"
+  #       - in: path
+  #         name: operation
+  #         required: true
+  #         schema:
+  #           type: string
+  #         description: 되돌릴 operation 이름
+  #     requestBody:
+  #       required: true
+  #       content:
+  #         application/json:
+  #           schema:
+  #             $ref: "#/components/schemas/ProjectPromptRevertRequest"
+  #     responses:
+  #       "201":
+  #         description: 새 버전으로 revert 완료
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/ProjectPrompt"
+  #       "400":
+  #         $ref: "#/components/responses/ErrorResponse"
+  #       "404":
+  #         $ref: "#/components/responses/ErrorResponse"
+  #       "409":
+  #         $ref: "#/components/responses/ErrorResponse"
+  # /projects/{project_id}/prompts/{operation}/diff:
+  #   get:
+  #     tags: [Projects]
+  #     summary: prompt 두 버전 본문 diff
+  #     description: 서버에서 unified diff와 변경 라인 통계를 계산해 반환. 화면 history/edit 비교용.
+  #     operationId: diffProjectPromptVersions
+  #     parameters:
+  #       - $ref: "#/components/parameters/ProjectId"
+  #       - in: path
+  #         name: operation
+  #         required: true
+  #         schema:
+  #           type: string
+  #       - in: query
+  #         name: base
+  #         required: true
+  #         schema:
+  #           type: string
+  #         description: 기준 버전 이름
+  #       - in: query
+  #         name: head
+  #         required: true
+  #         schema:
+  #           type: string
+  #         description: 비교 대상 버전 이름
+  #     responses:
+  #       "200":
+  #         description: 두 버전 diff 결과
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/ProjectPromptDiffResponse"
+  #       "400":
+  #         $ref: "#/components/responses/ErrorResponse"
+  #       "404":
+  #         $ref: "#/components/responses/ErrorResponse"
+  # /projects/{project_id}/prompt_defaults:
+  #   get:
+  #     tags: [Projects]
+  #     summary: 프로젝트 prompt default 버전 조회
+  #     description: 각 operation별로 *해당 프로젝트가 사용하는 기본 prompt 버전* 매핑. 분석/build 시 explicit override가 없으면 이 default를 사용.
+  #     operationId: getProjectPromptDefaults
+  #     parameters:
+  #       - $ref: "#/components/parameters/ProjectId"
+  #     responses:
+  #       "200":
+  #         description: prompt default 버전
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/ProjectPromptDefaults"
+  #       "404":
+  #         $ref: "#/components/responses/ErrorResponse"
+  #   put:
+  #     tags: [Projects]
+  #     summary: 프로젝트 prompt default 버전 갱신
+  #     description: 전체 default 매핑을 새 값으로 교체. partial update가 아닌 전체 replace.
+  #     operationId: updateProjectPromptDefaults
+  #     parameters:
+  #       - $ref: "#/components/parameters/ProjectId"
+  #     requestBody:
+  #       required: true
+  #       content:
+  #         application/json:
+  #           schema:
+  #             $ref: "#/components/schemas/ProjectPromptDefaultsUpdateRequest"
+  #     responses:
+  #       "200":
+  #         description: prompt default 갱신 완료
+  #         content:
+  #           application/json:
+  #             schema:
+  #               $ref: "#/components/schemas/ProjectPromptDefaults"
+  #       "400":
+  #         $ref: "#/components/responses/ErrorResponse"
+  #       "404":
+  #         $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets:
     post:
       tags: [Datasets]
-      summary: Create dataset
+      summary: dataset 생성
+      description: |
+        dataset을 생성한다. `metadata.doc_genuineness`를 body에 함께 보내면
+        subject 설정이 dataset-level metadata로 저장되고, 이후
+        doc_genuineness build 시 prompt 변수로 주입된다.
+
+        생성 후 subject 설정을 바꿔야 하면
+        `PATCH /projects/{project_id}/datasets/{dataset_id}/metadata`로 수정한다.
       operationId: createDataset
       parameters:
         - $ref: "#/components/parameters/ProjectId"
@@ -507,9 +398,24 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/DatasetCreateRequest"
+            example:
+              name: sns-data
+              description: SNS sample dataset
+              data_type: unstructured
+              metadata:
+                doc_genuineness:
+                  subject_type: festival
+                  subject_name: 강릉 국가유산야행
+                  subject_aliases:
+                    - 문화유산야행
+                    - 문화재야행
+                    - 강릉야행
+                  recruitment_keywords:
+                    - 서포터즈
+                    - 푸드트럭
       responses:
         "201":
-          description: Dataset created
+          description: dataset 생성 완료
           content:
             application/json:
               schema:
@@ -520,13 +426,13 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
     get:
       tags: [Datasets]
-      summary: List datasets
+      summary: dataset 목록 조회
       operationId: listDatasets
       parameters:
         - $ref: "#/components/parameters/ProjectId"
       responses:
         "200":
-          description: Dataset list
+          description: dataset 목록
           content:
             application/json:
               schema:
@@ -536,14 +442,14 @@ paths:
   /projects/{project_id}/datasets/{dataset_id}:
     get:
       tags: [Datasets]
-      summary: Get dataset
+      summary: dataset 단건 조회
       operationId: getDataset
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/DatasetId"
       responses:
         "200":
-          description: Dataset detail
+          description: dataset 상세
           content:
             application/json:
               schema:
@@ -552,20 +458,65 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
     delete:
       tags: [Datasets]
-      summary: Delete dataset
+      summary: dataset 삭제
+      description: dataset과 그 아래 모든 version / build job / artifact를 함께 삭제한다.
       operationId: deleteDataset
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/DatasetId"
       responses:
         "204":
-          description: Dataset deleted
+          description: 삭제 완료
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/metadata:
+    patch:
+      tags: [Datasets]
+      summary: dataset metadata 갱신
+      description: |
+        dataset-level 설정(`metadata`)을 patch한다. silverone 2026-05-22
+        (옵션 α1) — dataset 생성 시 `POST /projects/{pid}/datasets` body에
+        `metadata.doc_genuineness`를 넣어 기본 등록하고, 이후 운영 중 subject
+        설정 변경이 필요할 때 이 endpoint로 갱신한다.
+
+        Patch 시맨틱:
+        - top-level key 단위 merge. patch에 있는 key는 새 값으로 overwrite,
+          patch에 없는 key는 기존 값 보존.
+        - nested object(예: `doc_genuineness`)는 deep merge 하지 않고 통째로
+          overwrite. 부분 수정이 필요하면 운영자가 항상 nested object 전체를
+          보내야 한다.
+
+        Request body는 `{"metadata": {...}}` 형태와 `{...}` 형태(top-level
+        wrapper 생략)를 둘 다 허용한다.
+      operationId: updateDatasetMetadata
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetMetadataPatchRequest"
+      responses:
+        "200":
+          description: metadata 갱신 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/active_version:
     put:
       tags: [Datasets]
-      summary: Activate dataset version for a dataset
+      summary: dataset의 활성 version 설정/해제
+      description: |
+        `dataset_version_id`가 빈 문자열이면 active version 해제, 값이 있으면
+        해당 version을 활성화. 분석 endpoint(`/datasets/{did}/analyze`)는 활성
+        version을 자동으로 사용한다.
       operationId: activateDatasetVersion
       parameters:
         - $ref: "#/components/parameters/ProjectId"
@@ -578,7 +529,7 @@ paths:
               $ref: "#/components/schemas/DatasetActiveVersionUpdateRequest"
       responses:
         "200":
-          description: Dataset active version updated
+          description: 활성 version 갱신 완료
           content:
             application/json:
               schema:
@@ -587,35 +538,16 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
-    delete:
-      tags: [Datasets]
-      summary: Clear active dataset version for a dataset
-      operationId: deactivateDatasetVersion
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-      responses:
-        "200":
-          description: Dataset active version cleared
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Dataset"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/uploads:
     post:
       tags: [Datasets]
-      summary: Upload raw dataset file and create dataset version
+      summary: 원본 파일 업로드 + dataset version 생성
       description: |
-        `multipart/form-data` 업로드 endpoint다.
+        multipart/form-data로 파일을 업로드하면 서버가 `UPLOAD_ROOT` 아래에
+        저장하고 dataset_version row를 만든다.
 
-        주의:
-        - `file` 외의 form field는 문자열로 파싱된다.
-        - `metadata`는 JSON 문자열이어야 한다.
-        - `prepare_required`, `sentiment_required`, `embedding_required`는 `true` 또는 `false` 문자열이어야 한다.
-        - `activate_on_create`는 optional이며 `true` 또는 `false` 문자열이다. 기본값은 `true`다.
-        - `prepare_llm_mode`, `sentiment_llm_mode`는 `default`, `enabled`, `disabled` 중 하나여야 한다.
+        - `activate_on_create=true` (기본): 업로드된 version을 즉시 활성으로 설정
+        - `metadata.text_columns`가 있으면 clean 단계가 자동 큐잉됨
       operationId: uploadDatasetVersion
       parameters:
         - $ref: "#/components/parameters/ProjectId"
@@ -628,50 +560,27 @@ paths:
               $ref: "#/components/schemas/DatasetUploadRequest"
       responses:
         "201":
-          description: Uploaded file saved and dataset version created
+          description: 업로드 완료 + version 생성
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DatasetVersion"
+                $ref: "#/components/schemas/DatasetUploadResponse"
         "400":
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions:
-    post:
-      tags: [Datasets]
-      summary: Create dataset version from existing storage path
-      operationId: createDatasetVersion
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DatasetVersionCreateRequest"
-      responses:
-        "201":
-          description: Dataset version created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetVersion"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
     get:
       tags: [Datasets]
-      summary: List dataset versions
+      summary: dataset version 목록 조회
+      description: 활성 version + 비활성 버전 모두 포함. 응답 항목은 화면에서 필요한 최소 메타(파일명, row/column 수, build 단계 상태 등)만.
       operationId: listDatasetVersions
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/DatasetId"
       responses:
         "200":
-          description: Dataset version list
+          description: version 목록
           content:
             application/json:
               schema:
@@ -681,7 +590,8 @@ paths:
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}:
     get:
       tags: [Datasets]
-      summary: Get dataset version
+      summary: dataset version 상세 조회
+      description: clean / doc_genuineness / clause_label 각 단계의 status, 완료 시각, 요약(summary)을 묶어서 반환. 단계별 결과 페이지는 `/versions/{vid}/doc_genuineness` 등 별도 endpoint로.
       operationId: getDatasetVersion
       parameters:
         - $ref: "#/components/parameters/ProjectId"
@@ -689,16 +599,17 @@ paths:
         - $ref: "#/components/parameters/VersionId"
       responses:
         "200":
-          description: Dataset version detail
+          description: version 상세 + 단계별 status
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DatasetVersion"
+                $ref: "#/components/schemas/DatasetVersionDetail"
         "404":
           $ref: "#/components/responses/ErrorResponse"
     delete:
       tags: [Datasets]
-      summary: Delete dataset version
+      summary: dataset version 삭제
+      description: 해당 version의 모든 build artifact를 함께 정리. 활성 version을 삭제하면 active_dataset_version_id가 자동 null로 변경된다.
       operationId: deleteDatasetVersion
       parameters:
         - $ref: "#/components/parameters/ProjectId"
@@ -712,8 +623,10 @@ paths:
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/source_download:
     get:
       tags: [Datasets]
-      summary: Download uploaded source file for a dataset version
-      description: Uploaded local source files only. Dataset versions created from arbitrary storage_uri values cannot be downloaded through this endpoint.
+      summary: 원본 업로드 파일 다운로드
+      description: |
+        업로드 endpoint(`/uploads`)로 저장한 원본 파일을 그대로 내려준다.
+        외부 storage_uri로 직접 만든 dataset version은 다운로드 불가.
       operationId: downloadDatasetSource
       parameters:
         - $ref: "#/components/parameters/ProjectId"
@@ -721,7 +634,7 @@ paths:
         - $ref: "#/components/parameters/VersionId"
       responses:
         "200":
-          description: Uploaded source file download
+          description: 원본 파일 binary
           content:
             application/octet-stream:
               schema:
@@ -731,147 +644,15 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_preview:
-    get:
-      tags: [Datasets]
-      summary: Get structured prepare preview for a dataset version
-      operationId: getDatasetPreparePreview
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 20
-            default: 10
-      responses:
-        "200":
-          description: Prepare preview detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetPreparePreviewResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_download:
-    get:
-      tags: [Datasets]
-      summary: Download prepared dataset as CSV for a dataset version
-      operationId: downloadPreparedDataset
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-      responses:
-        "200":
-          description: Prepared CSV download
-          content:
-            text/csv:
-              schema:
-                type: string
-                format: binary
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_preview:
-    get:
-      tags: [Datasets]
-      summary: Get structured sentiment preview for a dataset version
-      operationId: getDatasetSentimentPreview
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 20
-            default: 10
-      responses:
-        "200":
-          description: Sentiment preview detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetSentimentPreviewResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_download:
-    get:
-      tags: [Datasets]
-      summary: Download sentiment-labeled dataset as CSV for a dataset version
-      operationId: downloadSentimentDataset
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-      responses:
-        "200":
-          description: Sentiment CSV download
-          content:
-            text/csv:
-              schema:
-                type: string
-                format: binary
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clusters/{cluster_id}/members:
-    get:
-      tags: [Datasets]
-      summary: Get materialized members for a cluster
-      operationId: getClusterMembers
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-        - name: cluster_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 500
-            default: 50
-        - name: samples_only
-          in: query
-          required: false
-          schema:
-            type: boolean
-            default: false
-      responses:
-        "200":
-          description: Cluster membership rows
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetClusterMembersResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_jobs:
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean:
     post:
       tags: [Datasets]
-      summary: Enqueue async deterministic text clean job
+      summary: clean build job 큐잉
+      description: |
+        텍스트 정제(regex 룰셋 + noise pattern + 알려진 placeholder strip) build
+        job을 큐에 넣는다. 응답은 `DatasetBuildJobAccepted` (job_id 등 4 필드).
+        진행 상태는 `GET /dataset_build_jobs/{job_id}` 또는 `GET /versions/{vid}`
+        로 polling.
       operationId: createCleanJob
       parameters:
         - $ref: "#/components/parameters/ProjectId"
@@ -885,19 +666,44 @@ paths:
               $ref: "#/components/schemas/DatasetCleanRequest"
       responses:
         "202":
-          description: Clean build job enqueued
+          description: clean build job 큐잉 완료 (slim shape, 4 필드)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DatasetBuildJob"
+                $ref: "#/components/schemas/DatasetBuildJobAccepted"
         "400":
           $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      tags: [Datasets]
+      summary: clean 진행 상태 + 결과 요약 조회 (화면 polling용)
+      description: |
+        POST는 build job 접수만 한다. 같은 path GET이 *현재 진행 상태 +
+        progress + summary*를 묶어 반환해 화면이 build job endpoint를 직접
+        polling하지 않게 한다. items / pagination은 clean view에 포함하지 않고,
+        결과 원본은 `/clean_download`로 받는다.
+      operationId: getCleanView
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: clean artifact view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CleanView"
         "404":
           $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clean_download:
     get:
       tags: [Datasets]
-      summary: Download cleaned dataset as CSV for a dataset version
+      summary: clean 결과 CSV 다운로드
+      description: |
+        clean artifact (parquet)를 DuckDB로 즉시 CSV로 변환해 UTF-8 BOM과 함께
+        스트림한다. 한글 Excel 안전. clean이 ready가 아니면 404.
       operationId: downloadCleanedDataset
       parameters:
         - $ref: "#/components/parameters/ProjectId"
@@ -905,7 +711,7 @@ paths:
         - $ref: "#/components/parameters/VersionId"
       responses:
         "200":
-          description: Cleaned CSV download
+          description: CSV (UTF-8 BOM) 스트림
           content:
             text/csv:
               schema:
@@ -915,11 +721,16 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare:
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness:
     post:
       tags: [Datasets]
-      summary: Build prepare artifact for dataset version
-      operationId: buildPrepare
+      summary: doc_genuineness build job 큐잉
+      description: |
+        cleaned doc 단위로 LLOA에 한 호출씩 보내 `genuine_review` / `mixed` /
+        `non_review` 3-tier 라벨을 부여한다. clean이 ready 상태여야 호출 가능.
+        후속 `clause_label`에서 `include_genuineness=["genuine_review","mixed"]`
+        옵션을 쓰면 후기성 doc만 절 분리/감성·aspect 라벨링 단계로 흘려보낸다.
+      operationId: createDocGenuinenessJob
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/DatasetId"
@@ -929,248 +740,419 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/DatasetPrepareRequest"
+              $ref: "#/components/schemas/DatasetDocGenuinenessBuildRequest"
       responses:
         "202":
-          description: Prepare build handled
+          description: doc_genuineness build job 큐잉 완료 (slim shape)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DatasetVersion"
+                $ref: "#/components/schemas/DatasetBuildJobAccepted"
         "400":
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_sample:
-    post:
-      tags: [Datasets]
-      summary: Run prepare on a small sample without saving dataset version state
-      operationId: buildPrepareSample
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DatasetPrepareSampleRequest"
-      responses:
-        "200":
-          description: Prepare sample result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetPrepareSampleResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/prepare_jobs:
-    post:
-      tags: [Datasets]
-      summary: Enqueue async prepare build job
-      operationId: createPrepareJob
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DatasetPrepareRequest"
-      responses:
-        "202":
-          description: Prepare build job enqueued
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetBuildJob"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment:
-    post:
-      tags: [Datasets]
-      summary: Build sentiment-labeled artifact for dataset version
-      operationId: buildSentiment
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DatasetSentimentBuildRequest"
-      responses:
-        "202":
-          description: Sentiment build handled
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetVersion"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_sample:
-    post:
-      tags: [Datasets]
-      summary: Run sentiment on a small sample without saving dataset version state
-      operationId: buildSentimentSample
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DatasetSentimentSampleRequest"
-      responses:
-        "200":
-          description: Sentiment sample result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetSentimentSampleResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/sentiment_jobs:
-    post:
-      tags: [Datasets]
-      summary: Enqueue async sentiment build job
-      operationId: createSentimentJob
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DatasetSentimentBuildRequest"
-      responses:
-        "202":
-          description: Sentiment build job enqueued
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetBuildJob"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embeddings:
-    post:
-      tags: [Datasets]
-      summary: Build embedding sidecar for dataset version
-      operationId: buildEmbeddings
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DatasetEmbeddingBuildRequest"
-      responses:
-        "202":
-          description: Embedding build handled
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetVersion"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/embedding_jobs:
-    post:
-      tags: [Datasets]
-      summary: Enqueue async embedding build job
-      operationId: createEmbeddingJob
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DatasetEmbeddingBuildRequest"
-      responses:
-        "202":
-          description: Embedding build job enqueued
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetBuildJob"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/cluster_jobs:
-    post:
-      tags: [Datasets]
-      summary: Enqueue async cluster materialization job
-      operationId: createClusterJob
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DatasetId"
-        - $ref: "#/components/parameters/VersionId"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DatasetClusterBuildRequest"
-      responses:
-        "202":
-          description: Cluster build job enqueued
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetBuildJob"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/build_jobs:
     get:
       tags: [Datasets]
-      summary: List dataset build jobs for a dataset version
-      operationId: listDatasetBuildJobs
+      summary: doc_genuineness 진행 상태 + 결과 조회 (화면 polling용)
+      description: |
+        POST가 build job 접수만 한다면, 같은 path GET은 *현재 진행 상태 +
+        통계 + 페이지된 items*를 반환한다. 화면이 1~2초 간격으로 polling하다가
+        `status="completed"`가 되면 summary/items를 렌더링하는 용도.
+
+        artifact는 DuckDB on-demand 집계. 큰 dataset(1만+ row)에서 성능 이슈가
+        생기면 build 완료 시 metadata에 summary를 캐시하는 방향으로 확장 예정.
+      operationId: getDocGenuinenessView
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - $ref: "#/components/parameters/ArtifactLimit"
+        - $ref: "#/components/parameters/ArtifactOffset"
+      responses:
+        "200":
+          description: doc_genuineness artifact view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocGenuinenessView"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness_download:
+    get:
+      tags: [Datasets]
+      summary: doc_genuineness 결과 CSV 다운로드
+      description: |
+        doc_genuineness artifact (jsonl)를 DuckDB로 즉시 CSV로 변환해 UTF-8 BOM
+        과 함께 스트림. clean_download / clause_label_download와 동일 패턴.
+
+        silverone 2026-06-01 (다운로드 컬럼 확장) — cleaned.parquet과 doc_id
+        기준 LEFT JOIN해 본문/원본 추적 컬럼을 함께 포함한다.
+
+        컬럼 순서 (CSV header 고정):
+        `doc_id, genuineness, reason, prompt_version, source,
+        cleaned_text, raw_text, created_at, source_row_index`
+
+        clean artifact가 없거나 join miss인 doc은 cleaned_text / raw_text /
+        created_at / source_row_index가 빈 값으로 표시되고 row 자체는 유지된다.
+        jsonl에 저장되지 않는 model / taxonomy / subject_name은 포함하지 않는다.
+      operationId: downloadDocGenuinenessDataset
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/DatasetId"
         - $ref: "#/components/parameters/VersionId"
       responses:
         "200":
-          description: Dataset build jobs
+          description: CSV (UTF-8 BOM) 스트림
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label:
+    post:
+      tags: [Datasets]
+      summary: clause_label build job 큐잉
+      description: |
+        cleaned doc 단위로 LLOA에 한 호출씩 보내 절 분리 + sentiment + aspect를
+        한 번에 라벨링한다. clean이 ready 상태여야 호출 가능. 옵션
+        `include_genuineness=["genuine_review","mixed"]` 명시 시 doc_genuineness
+        도 ready여야 한다 (후기성 doc만 통과).
+      operationId: createClauseLabelJob
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetClauseLabelBuildRequest"
+      responses:
+        "202":
+          description: clause_label build job 큐잉 완료 (slim shape)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DatasetBuildJobListResponse"
+                $ref: "#/components/schemas/DatasetBuildJobAccepted"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      tags: [Datasets]
+      summary: clause_label 진행 상태 + 결과 조회 (화면 polling용)
+      description: |
+        POST가 build job 접수만 한다면, 같은 path GET은 *현재 진행 상태 +
+        sentiment / aspect 통계 + 페이지된 clauses*를 반환한다. `clause_id`는
+        artifact에 저장돼 있지 않아 `{doc_id}-{partition_row_index}` (0-base)
+        형식으로 서버가 즉시 생성. 같은 artifact 재조회 시 같은 clause_id가
+        나온다.
+      operationId: getClauseLabelView
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - $ref: "#/components/parameters/ArtifactLimit"
+        - $ref: "#/components/parameters/ArtifactOffset"
+      responses:
+        "200":
+          description: clause_label artifact view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClauseLabelView"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label_download:
+    get:
+      tags: [Datasets]
+      summary: clause_label 결과 CSV 다운로드
+      description: |
+        clause_label artifact (jsonl)를 DuckDB로 즉시 CSV로 변환해 UTF-8 BOM과
+        함께 스트림. clean_download / doc_genuineness_download와 동일 패턴.
+
+        silverone 2026-06-01 (다운로드 컬럼 확장) — cleaned.parquet 본문 +
+        doc_genuineness.jsonl genuineness를 doc_id 기준 LEFT JOIN해 함께 포함.
+
+        컬럼 순서 (CSV header 고정):
+        `doc_id, clause_id, clause_text, aspect, sentiment,
+        prompt_version, source,
+        cleaned_text, raw_text, created_at, source_row_index, genuineness`
+
+        clean 또는 doc_genuineness artifact가 없거나 join miss인 row는 해당
+        컬럼이 빈 값으로 표시되고 clause row 자체는 유지된다. jsonl에 저장되지
+        않는 aspect_reason / sentiment_reason / taxonomy_* 필드는 포함하지 않는다.
+      operationId: downloadClauseLabelDataset
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: clause_label CSV download (UTF-8 BOM)
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/analyze:
+    post:
+      tags: [Analysis]
+      summary: 분석 실행 (첫 turn shortcut, user_question만 받음)
+      description: |
+        analysis API의 중심은 이 endpoint가 아니라 `analysis_thread` +
+        `analysis_message` + `analysis_run` 3 객체다. 이 endpoint는
+        **첫 turn shortcut** — (create thread + first user message + start run)
+        한 흐름으로 묶어 호출한다.
+
+        흐름:
+        - active dataset version 1회 resolve → `thread.dataset_version_id`에 고정.
+          이후 같은 thread의 messages/runs는 active version을 다시 resolve하지 않고
+          잠긴 version을 그대로 쓴다.
+        - user message 저장 → `analysis_run` 생성 → sync 분석 실행 → assistant
+          message 저장 → run completed/failed 업데이트.
+
+        요청 body: `{user_question: "..."}` 1 필드. planner LLM이 자연어 질의를
+        받아 plan을 생성하고 executor가 결정론적으로 실행한다. plan을 직접
+        던지는 debug/replay는 `POST /versions/{vid}/analyze`.
+
+        실패 시: `analysis_run.status=failed`로 업데이트되고 assistant placeholder
+        message (`"분석 실행 중 오류가 발생했습니다…"`)가 thread에 저장된다.
+        응답은 HTTP error (4xx/5xx). thread reload 시 user/assistant 한 쌍이
+        보인다.
+
+        **answer composition** (ADR-020 PR-A): 성공 run은 sync 실행 직후
+        post-execution layer (deterministic composer)가 `assistant_content` /
+        `display` / `context_summary`를 생성해 `result.composer`로 노출한다.
+        `assistant_message.content`/`context_summary`는 이 값을 우선 저장한다.
+
+        이어질문은 `POST /analysis_threads/{thread_id}/messages`.
+
+        active version이 없으면 400.
+      operationId: analyzeDatasetActive
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeUserQuestionRequest"
+      responses:
+        "200":
+          description: 저장된 analysis thread 첫 메시지 + 분석 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisThreadMessageResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/analysis_threads:
+    post:
+      tags: [Analysis]
+      summary: analysis thread 생성
+      description: |
+        새 분석 채팅 thread를 만든다. **`thread.dataset_version_id`는 생성 시점의
+        active version으로 고정**되고, 이후 같은 thread의 모든 message/run이 이
+        version을 사용한다 (dataset의 active version이 바뀌어도 thread는 영향
+        없음). 새 version으로 분석하려면 새 thread를 만든다.
+
+        일반적으로는 `POST /datasets/{did}/analyze` shortcut으로 thread 생성과 첫
+        분석 실행을 함께 처리하고, 이 endpoint는 빈 thread를 미리 만들거나
+        title만 지정하는 흐름에서 사용한다.
+      operationId: createAnalysisThread
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalysisThreadCreateRequest"
+      responses:
+        "201":
+          description: analysis thread 생성 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisThread"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      tags: [Analysis]
+      summary: analysis thread 목록 조회
+      description: result_json 없이 가벼운 thread 목록(last_message, message_count)을 반환한다.
+      operationId: listAnalysisThreads
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: analysis thread 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisThreadListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/analysis_threads/{thread_id}:
+    get:
+      tags: [Analysis]
+      summary: analysis thread 상세 조회
+      description: thread metadata와 messages를 반환한다. run의 full result_json은 `/analysis_runs/{run_id}`로 조회한다.
+      operationId: getAnalysisThread
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/ThreadId"
+      responses:
+        "200":
+          description: analysis thread 상세
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisThreadDetail"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/analysis_threads/{thread_id}/messages:
+    post:
+      tags: [Analysis]
+      summary: analysis thread 이어질문 실행
+      description: |
+        기존 thread에 user message를 추가하고 thread에 잠긴 `dataset_version_id`
+        그대로 분석을 실행한다 (dataset의 현재 active version을 재resolve하지
+        않음).
+
+        흐름:
+        - user message 저장 → `analysis_run` 생성 → sync 분석 실행 → assistant
+          message 저장 → run completed/failed 업데이트.
+        - **plan reuse** — `add_limit`, `change_present_format` 같은 단순
+          follow-up이면 rule-based classifier가 이전 successful run의 plan을
+          patch해 planner LLM을 건너뛴다. classifier no_match / patch fail /
+          validator fail / executor fail이면 모두 planner LLM 흐름으로 fallback.
+          결과에 `result.reuse` metadata가 inject된다 (성공/실패 모두).
+        - **conversation context** — 최근 assistant `context_summary` 최대 3턴,
+          누적 직렬화 2000 bytes 한도로 worker payload에 주입. full result_json은
+          넘기지 않는다. failed run placeholder는 `context_summary`가 비어 있어
+          자동으로 다음 turn 입력에서 제외된다.
+        - **answer composition** (ADR-020 PR-A) — sync 실행 직후 deterministic
+          composer가 `result.composer`를 만든다. reuse 분기에서도 composer가
+          `reuse_applied` 템플릿으로 답변을 생성. `assistant_message.content`/
+          `context_summary`는 composer 결과를 우선 사용한다.
+
+        실패 시: `analysis_run.status=failed`로 업데이트되고 assistant placeholder
+        message가 thread에 저장된다 (응답은 HTTP error).
+      operationId: postAnalysisThreadMessage
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/ThreadId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalysisThreadMessageRequest"
+      responses:
+        "200":
+          description: 저장된 메시지 + 분석 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisThreadMessageResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/analysis_runs/{run_id}:
+    get:
+      tags: [Analysis]
+      summary: analysis run 상세 조회
+      description: 저장된 분석 실행의 request_json/result_json을 조회한다.
+      operationId: getAnalysisRun
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: analysis run 상세
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisRun"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/analyze:
+    post:
+      tags: [Analysis]
+      summary: plan 디버깅용 분석 실행 (version 고정, plan만 받음)
+      description: |
+        version-specific **debug/replay** 경로. `analysis_thread` /
+        `analysis_message` / `analysis_run`을 저장하지 않는 stateless 실행.
+        plan_v2 JSON을 직접 던져 LLM 호출 없이 validator → executor만 돌린다.
+        어제 LLM이 만든 plan을 그대로 다시 돌려 결과를 재현하거나, 운영자가
+        plan을 손으로 작성해 step별 동작을 확인할 때 사용.
+
+        요청 body: `{plan: {...}}` 1 필드 (user_question은 받지 않음).
+        응답: thread/message wrapper가 없는 단순 analyze result shape.
+
+        화면 분석(자연어 질의)은 `POST /datasets/{did}/analyze` (첫 turn) +
+        `POST /analysis_threads/{tid}/messages` (이어질문)를 사용한다.
+      operationId: analyzeDatasetVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeDebugRequest"
+      responses:
+        "200":
+          description: plan 실행 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyzeResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/dataset_build_jobs/{job_id}:
     get:
       tags: [Datasets]
-      summary: Get dataset build job
+      summary: build job 단건 상세 조회 (debug/audit 전용, 화면 polling 비권장)
+      description: |
+        debug / audit 용도 endpoint. **화면 polling에 사용하지 않는다** —
+        화면은 `GET /versions/{vid}/{단계}` view를 polling한다.
+
+        Phase 3 (2026-05-22) 정리:
+        - `/versions/{vid}/build_jobs` (list)는 제거됐다
+        - 본 endpoint는 운영자가 특정 job의 attempt / workflow_id /
+          workflow_run_id / Temporal 이력을 추적할 때만 사용
+        - 인증/권한 체계 도입 시 internal/admin 라우트로 격리 예정
+
+        화면이 build job 진행을 확인하려면:
+        `POST /versions/{vid}/clean` → `GET /versions/{vid}/clean` polling.
       operationId: getDatasetBuildJob
       parameters:
         - $ref: "#/components/parameters/ProjectId"
@@ -1179,399 +1161,14 @@ paths:
           required: true
           schema:
             type: string
+          description: POST 응답의 `job_id`
       responses:
         "200":
-          description: Dataset build job detail
+          description: build job 상세 (디버그 / 감사용)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/DatasetBuildJob"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /dataset_profiles/validate:
-    get:
-      tags: [Datasets]
-      summary: Validate dataset profile registry and prompt/rule references
-      operationId: validateDatasetProfiles
-      responses:
-        "200":
-          description: Dataset profile validation result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetProfileValidationResponse"
-  /dataset_profiles:
-    get:
-      tags: [Datasets]
-      summary: Get dataset profile registry view
-      operationId: getDatasetProfileRegistry
-      responses:
-        "200":
-          description: Dataset profile registry
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DatasetProfileRegistryView"
-  /prompt_catalog:
-    get:
-      tags: [Datasets]
-      summary: Get prompt template catalog
-      operationId: getPromptCatalog
-      responses:
-        "200":
-          description: Prompt catalog response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PromptCatalogResponse"
-  /skill_policy_catalog:
-    get:
-      tags: [Datasets]
-      summary: Get skill policy catalog
-      operationId: getSkillPolicyCatalog
-      responses:
-        "200":
-          description: Skill policy catalog response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SkillPolicyCatalogResponse"
-  /rule_catalog:
-    get:
-      tags: [Datasets]
-      summary: Get worker rule catalog
-      operationId: getRuleCatalog
-      responses:
-        "200":
-          description: Rule catalog response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RuleCatalogResponse"
-  /skill_policies/validate:
-    get:
-      tags: [Datasets]
-      summary: Validate worker skill policies
-      operationId: validateSkillPolicies
-      responses:
-        "200":
-          description: Skill policy validation response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SkillPolicyValidationResponse"
-  /projects/{project_id}/analysis_requests:
-    post:
-      tags: [Analysis]
-      summary: Submit analysis request and generate plan
-      operationId: submitAnalysis
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AnalysisSubmitRequest"
-      responses:
-        "201":
-          description: Request and plan created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AnalysisPlanResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/analysis_requests/{request_id}:
-    get:
-      tags: [Analysis]
-      summary: Get analysis request
-      operationId: getAnalysisRequest
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/RequestId"
-      responses:
-        "200":
-          description: Analysis request detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AnalysisRequest"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/plans/{plan_id}:
-    get:
-      tags: [Analysis]
-      summary: Get plan record
-      operationId: getPlan
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/PlanId"
-      responses:
-        "200":
-          description: Plan detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlanRecord"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/plans/{plan_id}/execute:
-    post:
-      tags: [Executions]
-      summary: Execute plan
-      operationId: executePlan
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/PlanId"
-      responses:
-        "202":
-          description: Execution created and handed off
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlanExecuteResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/executions:
-    get:
-      tags: [Executions]
-      summary: List executions with snapshot preview
-      operationId: listExecutions
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-      responses:
-        "200":
-          description: Execution list
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExecutionListResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/executions/{execution_id}:
-    get:
-      tags: [Executions]
-      summary: Get execution
-      operationId: getExecution
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/ExecutionId"
-      responses:
-        "200":
-          description: Execution detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExecutionSummary"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/executions/{execution_id}/events:
-    get:
-      tags: [Executions]
-      summary: Get execution event timeline
-      operationId: getExecutionEvents
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/ExecutionId"
-      responses:
-        "200":
-          description: Execution event timeline
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExecutionEventsResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/executions/{execution_id}/progress:
-    get:
-      tags: [Executions]
-      summary: Get execution live progress and partial preview
-      operationId: getExecutionProgress
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/ExecutionId"
-      responses:
-        "200":
-          description: Execution progress detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExecutionProgressResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/executions/{execution_id}/steps/{step_id}:
-    get:
-      tags: [Executions]
-      summary: Get execution step preview
-      operationId: getExecutionStepPreview
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/ExecutionId"
-        - name: step_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Execution step preview
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExecutionStepPreviewResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/executions/{execution_id}/result:
-    get:
-      tags: [Executions]
-      summary: Get execution result contract
-      operationId: getExecutionResult
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/ExecutionId"
-      responses:
-        "200":
-          description: Execution result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExecutionResultResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/operations/summary:
-    get:
-      tags: [Executions]
-      summary: Get aggregated operations summary for a project
-      operationId: getOperationsSummary
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-      responses:
-        "200":
-          description: Operations summary
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OperationsSummaryResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/executions/{execution_id}/resume:
-    post:
-      tags: [Executions]
-      summary: Resume waiting execution
-      operationId: resumeExecution
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/ExecutionId"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ExecutionResumeRequest"
-      responses:
-        "202":
-          description: Resume requested
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExecutionRerunResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/executions/{execution_id}/rerun:
-    post:
-      tags: [Executions]
-      summary: Rerun execution
-      operationId: rerunExecution
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/ExecutionId"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ExecutionRerunRequest"
-      responses:
-        "202":
-          description: Rerun requested
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExecutionRerunResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/executions/diff:
-    get:
-      tags: [Executions]
-      summary: Diff two executions
-      operationId: diffExecutions
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/DiffFrom"
-        - $ref: "#/components/parameters/DiffTo"
-      responses:
-        "200":
-          description: Execution diff
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExecutionDiffResponse"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/report_drafts:
-    post:
-      tags: [Executions]
-      summary: Create report draft from selected executions
-      operationId: createReportDraft
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ReportDraftCreateRequest"
-      responses:
-        "201":
-          description: Report draft created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ReportDraft"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/report_drafts/{draft_id}:
-    get:
-      tags: [Executions]
-      summary: Get stored report draft
-      operationId: getReportDraft
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - name: draft_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Report draft detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ReportDraft"
         "404":
           $ref: "#/components/responses/ErrorResponse"
 components:
@@ -1601,36 +1198,37 @@ components:
       required: true
       schema:
         type: string
-    RequestId:
-      name: request_id
+    ThreadId:
+      name: thread_id
       in: path
       required: true
       schema:
         type: string
-    PlanId:
-      name: plan_id
+    RunId:
+      name: run_id
       in: path
       required: true
       schema:
         type: string
-    ExecutionId:
-      name: execution_id
-      in: path
-      required: true
-      schema:
-        type: string
-    DiffFrom:
-      name: from
+    ArtifactLimit:
+      name: limit
       in: query
-      required: true
+      required: false
+      description: 페이지당 items 수. 기본 100, 최대 1000.
       schema:
-        type: string
-    DiffTo:
-      name: to
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+    ArtifactOffset:
+      name: offset
       in: query
-      required: true
+      required: false
+      description: items 시작 offset (0-base).
       schema:
-        type: string
+        type: integer
+        minimum: 0
+        default: 0
   schemas:
     HealthResponse:
       type: object
@@ -1718,7 +1316,15 @@ components:
           type: integer
         prompt_count:
           type: integer
-      required: [project_id, name, created_at, dataset_version_count, scenario_count, prompt_count]
+        analysis_thread_count:
+          type: integer
+          description: |
+            project 단위 analysis thread 합산 count (silverone 2026-06-01).
+            사이드바 채팅 count 표시용. dataset 단위 thread API
+            (`GET /projects/{pid}/datasets/{did}/analysis_threads`)는 그대로 유지.
+            프론트가 dataset별 N+1 호출 안 하도록 server-side 단일 COUNT 합산.
+            thread 0건이면 0.
+      required: [project_id, name, created_at, dataset_version_count, scenario_count, prompt_count, analysis_thread_count]
     ProjectCreateRequest:
       type: object
       properties:
@@ -1798,81 +1404,98 @@ components:
           items:
             $ref: "#/components/schemas/ProjectPrompt"
       required: [items]
-    Prompt:
-      type: object
-      properties:
-        prompt_id:
-          type: string
-        version:
-          type: string
-        operation:
-          type: string
-        title:
-          type: string
-        status:
-          type: string
-        summary:
-          type: string
-        content:
-          type: string
-        content_hash:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-      required: [prompt_id, version, operation, title, status, content, content_hash, created_at, updated_at]
-    PromptCreateRequest:
+    ProjectPromptChange:
       type: object
       description: |
-        글로벌 prompt는 `version`, `operation`, `content` 3개 필드로 등록한다.
-
-        - 같은 `version + operation` 조합은 다시 등록할 수 없다.
-        - operation별 필수 placeholder:
-          - `prepare`: `{{raw_text}}`
-          - `prepare_batch`: `{{rows_json}}`
-          - `sentiment`: `{{text}}`
-          - `sentiment_batch`: `{{rows_json}}`
+        ADR-015 §C audit log 1행. ``project_prompt_changes`` 테이블의
+        append-only row 모양. 운영자가 prompt 변경마다 ``change_reason``
+        의무, revert는 새 version + ``base_version`` 기록.
       properties:
+        change_id:
+          type: string
+        project_id:
+          type: string
         version:
           type: string
         operation:
           type: string
-          enum: [prepare, prepare_batch, sentiment, sentiment_batch]
-        content:
+        action:
           type: string
-      required: [version, operation, content]
-    PromptUpdateRequest:
-      type: object
-      description: |
-        글로벌 prompt를 부분 수정한다.
-
-        - `version`, `operation`, `content` 중 하나 이상을 보내야 한다.
-        - `content`를 바꾸면 front matter 기준으로 `title`, `status`, `summary`도 함께 다시 계산된다.
-      properties:
-        version:
-          type:
-            - string
-            - "null"
-        operation:
-          type:
-            - string
-            - "null"
-          enum: [prepare, prepare_batch, sentiment, sentiment_batch, null]
-        content:
-          type:
-            - string
-            - "null"
-    PromptListResponse:
+          description: "create / update / revert"
+          enum: [create, update, revert]
+        change_reason:
+          type: string
+        changed_by:
+          type: string
+          description: 빈 문자열은 auth 도입 전 placeholder.
+        previous_content_hash:
+          type: string
+        new_content_hash:
+          type: string
+        base_version:
+          type: string
+          description: "action=revert인 경우만 채워짐 (clone 원본 version)."
+        changed_at:
+          type: string
+          format: date-time
+      required: [change_id, project_id, version, operation, action, change_reason, new_content_hash, changed_at]
+    ProjectPromptHistoryResponse:
       type: object
       properties:
         items:
           type: array
           items:
-            $ref: "#/components/schemas/Prompt"
+            $ref: "#/components/schemas/ProjectPromptChange"
       required: [items]
+    ProjectPromptRevertRequest:
+      type: object
+      description: |
+        ADR-015 §C: revert는 활성 row를 in-place 수정하지 않고, ``to_version``
+        본문을 ``new_version`` 이름으로 *새 행*에 clone + audit 행 append.
+      properties:
+        to_version:
+          type: string
+          description: 본문을 가져올 기존 version 이름.
+        new_version:
+          type: string
+          description: clone 결과를 저장할 새 version 이름.
+        change_reason:
+          type: string
+          description: 의무. 비우면 HTTP 400.
+      required: [to_version, new_version, change_reason]
+    ProjectPromptDiffStats:
+      type: object
+      properties:
+        added_lines:
+          type: integer
+        removed_lines:
+          type: integer
+        base_lines:
+          type: integer
+        head_lines:
+          type: integer
+      required: [added_lines, removed_lines, base_lines, head_lines]
+    ProjectPromptDiffResponse:
+      type: object
+      properties:
+        project_id:
+          type: string
+        operation:
+          type: string
+        base_version:
+          type: string
+        head_version:
+          type: string
+        base_content:
+          type: string
+        head_content:
+          type: string
+        unified_diff:
+          type: string
+          description: GNU unified diff 형식 (``--- base`` / ``+++ head`` 헤더 포함).
+        stats:
+          $ref: "#/components/schemas/ProjectPromptDiffStats"
+      required: [project_id, operation, base_version, head_version, base_content, head_content, unified_diff, stats]
     ProjectPromptDefaults:
       type: object
       properties:
@@ -1886,6 +1509,22 @@ components:
           type:
             - string
             - "null"
+        planner_prompt_version:
+          type:
+            - string
+            - "null"
+        planner_meta_prompt_version:
+          type:
+            - string
+            - "null"
+        issue_evidence_summary_prompt_version:
+          type:
+            - string
+            - "null"
+        execution_final_answer_prompt_version:
+          type:
+            - string
+            - "null"
         updated_at:
           type:
             - string
@@ -1895,10 +1534,11 @@ components:
     ProjectPromptDefaultsUpdateRequest:
       type: object
       description: |
-        프로젝트 기본 prompt version을 교체한다.
+        프로젝트 기본 prompt version을 교체한다 (ADR-015 Phase A5, 6 operation).
 
-        - dataset version이 `prepare_prompt_version`, `sentiment_prompt_version`를 직접 지정하면 그 값이 우선한다.
+        - dataset version이 `prepare_prompt_version`, `sentiment_prompt_version`을 직접 지정하면 그 값이 우선한다.
         - 직접 지정하지 않은 경우 여기서 설정한 project 기본값이 fallback으로 사용된다.
+        - planner / planner_meta / issue_evidence_summary / execution_final_answer는 dataset version 단위가 아닌 분석 실행 단위로 적용된다 (ADR-015 §B의 4-tier resolution).
       properties:
         prepare_prompt_version:
           type:
@@ -1912,151 +1552,30 @@ components:
             - "null"
           description: |
             프로젝트 기본 sentiment prompt version. 해제하려면 `null`.
-    Scenario:
-      type: object
-      properties:
-        scenario_id:
-          type: string
-        project_id:
-          type: string
-        planning_mode:
-          type: string
-        user_query:
-          type: string
-        query_type:
-          type: string
-        interpretation:
-          type: string
-        analysis_scope:
-          type: string
-        steps:
-          type: array
-          items:
-            $ref: "#/components/schemas/ScenarioStep"
-        created_at:
-          type: string
-          format: date-time
-      required: [scenario_id, project_id, planning_mode, user_query, query_type, interpretation, analysis_scope, steps, created_at]
-    ScenarioCreateRequest:
-      type: object
-      properties:
-        scenario_id:
-          type: string
-        planning_mode:
+        planner_prompt_version:
           type:
             - string
             - "null"
-        user_query:
-          type: string
-        query_type:
-          type: string
-        interpretation:
-          type: string
-        analysis_scope:
-          type: string
-        steps:
-          type: array
-          items:
-            $ref: "#/components/schemas/ScenarioStep"
-      required: [scenario_id, user_query, query_type, interpretation, analysis_scope, steps]
-    ScenarioStep:
-      type: object
-      properties:
-        step:
-          type: integer
-        function_name:
-          type: string
-        runtime_skill_name:
+          description: |
+            프로젝트 기본 planner prompt version (ADR-015 §D2 — 분석가는 preset 선택만, 운영자만 편집).
+        planner_meta_prompt_version:
           type:
             - string
             - "null"
-        parameter_text:
+          description: |
+            프로젝트 기본 planner_meta prompt version (operator_only).
+        issue_evidence_summary_prompt_version:
           type:
             - string
             - "null"
-        parameters:
-          $ref: "#/components/schemas/AnyMap"
-        result_description:
-          type: string
-      required: [step, function_name, result_description]
-    ScenarioListResponse:
-      type: object
-      properties:
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/Scenario"
-      required: [items]
-    ScenarioImportRow:
-      type: object
-      properties:
-        scenario_id:
-          type: string
-        planning_mode:
+          description: |
+            프로젝트 기본 issue_evidence_summary prompt version.
+        execution_final_answer_prompt_version:
           type:
             - string
             - "null"
-        user_query:
-          type: string
-        query_type:
-          type: string
-        interpretation:
-          type: string
-        analysis_scope:
-          type: string
-        step:
-          type: integer
-        function_name:
-          type: string
-        runtime_skill_name:
-          type:
-            - string
-            - "null"
-        parameter_text:
-          type:
-            - string
-            - "null"
-        parameters:
-          $ref: "#/components/schemas/AnyMap"
-        result_description:
-          type: string
-      required: [scenario_id, user_query, query_type, interpretation, analysis_scope, step, function_name, result_description]
-    ScenarioImportRequest:
-      type: object
-      properties:
-        rows:
-          type: array
-          items:
-            $ref: "#/components/schemas/ScenarioImportRow"
-      required: [rows]
-    ScenarioImportResponse:
-      type: object
-      properties:
-        scenario_count:
-          type: integer
-        row_count:
-          type: integer
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/Scenario"
-      required: [scenario_count, row_count, items]
-    ScenarioPlanCreateRequest:
-      type: object
-      properties:
-        dataset_id:
-          type: string
-        goal:
-          type:
-            - string
-            - "null"
-        constraints:
-          type: array
-          items:
-            type: string
-        context:
-          $ref: "#/components/schemas/AnyMap"
-      required: [dataset_id]
+          description: |
+            프로젝트 기본 execution_final_answer prompt version.
     Dataset:
       type: object
       properties:
@@ -2081,6 +1600,16 @@ components:
             - string
             - "null"
           format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+          description: |
+            dataset-level 설정 jsonb. silverone 2026-05-22 (옵션 α1).
+            현재 정의된 keypath:
+              - `metadata.doc_genuineness` — {subject_type, subject_name,
+                subject_aliases[], recruitment_keywords[]} (값 채워지면
+                doc_genuineness build 시 prompt placeholder로 inject 예정).
+            그 외 key는 forward-compat용으로 그대로 보존된다.
         created_at:
           type: string
           format: date-time
@@ -2098,7 +1627,41 @@ components:
           type:
             - string
             - "null"
+        metadata:
+          type: object
+          additionalProperties: true
+          description: |
+            dataset 생성 시 함께 저장할 dataset-level 설정. doc_genuineness
+            subject는 기본적으로 여기서 등록한다. 이후 수정은
+            `PATCH /projects/{pid}/datasets/{did}/metadata`를 사용한다.
+            키 정의는 `Dataset.metadata` 참고. 생략하면 빈 object로 저장.
+          example:
+            doc_genuineness:
+              subject_type: festival
+              subject_name: 강릉 국가유산야행
+              subject_aliases:
+                - 문화유산야행
+                - 문화재야행
+                - 강릉야행
+              recruitment_keywords:
+                - 서포터즈
+                - 푸드트럭
       required: [name]
+    DatasetMetadataPatchRequest:
+      type: object
+      description: |
+        PATCH `/projects/{pid}/datasets/{did}/metadata` body.
+        `{"metadata": {...}}` wrapper와 top-level key 그대로 보내는 형태(`{...}`)
+        둘 다 허용한다. top-level key 단위 merge — patch에 있는 key는
+        overwrite, 없는 key는 보존. nested object는 deep merge 하지 않음.
+      properties:
+        metadata:
+          type: object
+          additionalProperties: true
+          description: |
+            새 metadata patch. 생략하면 top-level key가 patch 본문으로 그대로
+            해석된다.
+      additionalProperties: true
     DatasetListResponse:
       type: object
       properties:
@@ -2118,22 +1681,12 @@ components:
       properties:
         profile_id:
           type: string
-        prepare_prompt_version:
-          type:
-            - string
-            - "null"
-        sentiment_prompt_version:
-          type:
-            - string
-            - "null"
+        # ADR-018 β2 — prepare/sentiment/embedding 단계 삭제로 prepare_prompt_version /
+        # sentiment_prompt_version / embedding_model 필드 제거 (응답에 더 이상 채워지지 않음).
         regex_rule_names:
           $ref: "#/components/schemas/StringList"
         garbage_rule_names:
           $ref: "#/components/schemas/StringList"
-        embedding_model:
-          type:
-            - string
-            - "null"
     PromptTemplateMetadata:
       type: object
       properties:
@@ -2177,188 +1730,6 @@ components:
           $ref: "#/components/schemas/StringList"
         default_garbage_rule_names:
           $ref: "#/components/schemas/StringList"
-    DatasetProfileRegistryView:
-      type: object
-      properties:
-        source_path:
-          type:
-            - string
-            - "null"
-        prompt_templates_dir:
-          type:
-            - string
-            - "null"
-        defaults:
-          additionalProperties:
-            type: string
-          type: object
-        profiles:
-          additionalProperties:
-            $ref: "#/components/schemas/DatasetProfile"
-          type: object
-        available_prompt_versions:
-          $ref: "#/components/schemas/StringList"
-        prompt_catalog:
-          type: array
-          items:
-            $ref: "#/components/schemas/PromptTemplateMetadata"
-        rule_catalog:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetProfileRuleCatalog"
-            - type: "null"
-    DatasetProfileValidationIssue:
-      type: object
-      properties:
-        severity:
-          type: string
-        code:
-          type: string
-        message:
-          type: string
-        scope:
-          type:
-            - string
-            - "null"
-        resource_ref:
-          type:
-            - string
-            - "null"
-      required: [severity, code, message]
-    DatasetProfileValidationResponse:
-      type: object
-      properties:
-        registry:
-          $ref: "#/components/schemas/DatasetProfileRegistryView"
-        valid:
-          type: boolean
-        issues:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetProfileValidationIssue"
-      required: [registry, valid]
-    PromptCatalogResponse:
-      type: object
-      properties:
-        source_path:
-          type:
-            - string
-            - "null"
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/PromptTemplateMetadata"
-      required: [items]
-    SkillPolicyValidationIssue:
-      type: object
-      properties:
-        severity:
-          type: string
-        code:
-          type: string
-        message:
-          type: string
-        scope:
-          type:
-            - string
-            - "null"
-        resource_ref:
-          type:
-            - string
-            - "null"
-      required: [severity, code, message]
-    SkillPolicyCatalogResponse:
-      type: object
-      properties:
-        available:
-          type: boolean
-        source:
-          type: string
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/SkillPolicyMetadata"
-        warning:
-          type:
-            - string
-            - "null"
-      required: [available]
-    SkillPolicyValidationResponse:
-      type: object
-      properties:
-        available:
-          type: boolean
-        source:
-          type: string
-        valid:
-          type: boolean
-        issues:
-          type: array
-          items:
-            $ref: "#/components/schemas/SkillPolicyValidationIssue"
-        catalog:
-          type: array
-          items:
-            $ref: "#/components/schemas/SkillPolicyMetadata"
-        warning:
-          type:
-            - string
-            - "null"
-      required: [available, valid]
-    RuleCatalogResponse:
-      type: object
-      properties:
-        available:
-          type: boolean
-        source:
-          type: string
-        catalog:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetProfileRuleCatalog"
-            - type: "null"
-        warning:
-          type:
-            - string
-            - "null"
-      required: [available]
-    DatasetSourceColumnSummary:
-      type: object
-      properties:
-        name:
-          type: string
-        type:
-          type: string
-      required: [name]
-    DatasetSourceSummary:
-      type: object
-      properties:
-        available:
-          type: boolean
-        status:
-          type: string
-          enum: [ready, missing, unsupported, error, unavailable]
-          description: 원본 요약 상태. ready면 columns/row_count/sample_rows가 채워진다.
-        format:
-          type: string
-          description: "원본 파일 포맷. 예: csv, tsv, parquet, jsonl."
-        row_count:
-          type:
-            - integer
-            - "null"
-        column_count:
-          type: integer
-        columns:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetSourceColumnSummary"
-        sample_limit:
-          type: integer
-        sample_rows:
-          type: array
-          items:
-            $ref: "#/components/schemas/AnyMap"
-        error_message:
-          type: string
-      required: [available]
     DatasetVersionBuildJobStatus:
       type: object
       properties:
@@ -2394,213 +1765,6 @@ components:
             - $ref: "#/components/schemas/BuildJobDiagnostics"
             - type: "null"
       required: [job_id, build_type, status, attempt, created_at]
-    DatasetVersion:
-      type: object
-      description: |
-        Dataset version detail.
-
-        `storage_uri`는 원본 dataset 위치다.
-        - direct create: caller supplied path
-        - upload: server-saved raw file path
-      properties:
-        dataset_version_id:
-          type: string
-        dataset_id:
-          type: string
-        project_id:
-          type: string
-        storage_uri:
-          type: string
-        data_type:
-          type: string
-        record_count:
-          type:
-            - integer
-            - "null"
-        metadata:
-          $ref: "#/components/schemas/AnyMap"
-        source_summary:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetSourceSummary"
-            - type: "null"
-        build_jobs:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetVersionBuildJobStatus"
-        build_stages:
-          type: array
-          description: source, clean, prepare, sentiment, embedding, cluster를 프론트 상태 표시용으로 정규화한 단계별 상태
-          items:
-            $ref: "#/components/schemas/DatasetVersionBuildStage"
-        artifacts:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetVersionArtifact"
-        profile:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetProfile"
-            - type: "null"
-        clean_status:
-          type: string
-          description: deterministic text clean stage status
-        clean_uri:
-          type:
-            - string
-            - "null"
-        cleaned_ref:
-          type:
-            - string
-            - "null"
-        cleaned_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        clean_summary:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetCleanSummary"
-            - type: "null"
-        prepare_status:
-          type: string
-        prepare_llm_mode:
-          type: string
-          enum: [default, enabled, disabled]
-        prepare_model:
-          type:
-            - string
-            - "null"
-        prepare_prompt_version:
-          type:
-            - string
-            - "null"
-        prepare_uri:
-          type:
-            - string
-            - "null"
-        prepared_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        prepare_summary:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetPrepareSummary"
-            - type: "null"
-        sentiment_status:
-          type: string
-        sentiment_llm_mode:
-          type: string
-          enum: [default, enabled, disabled]
-        sentiment_model:
-          type:
-            - string
-            - "null"
-        sentiment_uri:
-          type:
-            - string
-            - "null"
-        sentiment_labeled_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        sentiment_prompt_version:
-          type:
-            - string
-            - "null"
-        embedding_status:
-          type: string
-        embedding_model:
-          type:
-            - string
-            - "null"
-        embedding_uri:
-          type:
-            - string
-            - "null"
-        is_active:
-          type: boolean
-        created_at:
-          type: string
-          format: date-time
-        ready_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-      required:
-        - dataset_version_id
-        - dataset_id
-        - project_id
-        - storage_uri
-        - data_type
-        - metadata
-        - clean_status
-        - prepare_status
-        - sentiment_status
-        - embedding_status
-        - is_active
-        - created_at
-    DatasetVersionBuildStage:
-      type: object
-      properties:
-        stage:
-          type: string
-          enum: [source, clean, prepare, sentiment, embedding, cluster]
-        status:
-          type: string
-        applicable:
-          type: boolean
-        required:
-          type: boolean
-        ready:
-          type: boolean
-        depends_on:
-          type: array
-          description: 이 stage가 논리적으로 의존하는 stage 목록. sentiment와 embedding은 모두 prepare에만 의존하므로 병렬 실행 가능하다.
-          items:
-            type: string
-            enum: [source, clean, prepare, sentiment, embedding, cluster]
-        can_run:
-          type: boolean
-          description: 현재 상태에서 해당 stage 실행 API를 호출할 수 있는지 여부
-        run_group:
-          type: string
-          description: 프론트 병렬/순차 표시용 실행 그룹. sentiment와 embedding은 post_prepare 그룹이다.
-        auto_run_eligible:
-          type: boolean
-          description: required 설정과 현재 의존성 기준으로 자동 실행 대상이 될 수 있는지 여부
-        blocked_reason:
-          type:
-            - string
-            - "null"
-        latest_job:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetVersionBuildJobStatus"
-            - type: "null"
-        primary_artifact:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetVersionArtifact"
-            - type: "null"
-        artifacts:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetVersionArtifact"
-        summary:
-          $ref: "#/components/schemas/AnyMap"
-        model:
-          type: string
-        prompt_version:
-          type: string
-        error_message:
-          type:
-            - string
-            - "null"
-        diagnostics:
-          anyOf:
-            - $ref: "#/components/schemas/BuildJobDiagnostics"
-            - type: "null"
-      required: [stage, status, applicable, required, ready, depends_on, can_run, run_group, auto_run_eligible]
     DatasetVersionArtifact:
       type: object
       properties:
@@ -2639,82 +1803,115 @@ components:
           type: string
           format: date-time
       required: [artifact_id, project_id, dataset_id, dataset_version_id, artifact_type, stage, status, created_at, updated_at]
-    DatasetVersionCreateRequest:
-      type: object
-      properties:
-        storage_uri:
-          type: string
-          description: Absolute path or caller-managed dataset URI
-        data_type:
-          type:
-            - string
-            - "null"
-        record_count:
-          type:
-            - integer
-            - "null"
-        metadata:
-          allOf:
-            - $ref: "#/components/schemas/AnyMap"
-          description: clean/prepare 대상 텍스트 컬럼과 clean 옵션을 담는다. 업로드 직후 자동 clean을 실행하려면 text_columns가 필요하다.
-          example:
-            text_columns: ["제목", "본문"]
-            clean_preprocess_options:
-              remove_english: false
-              remove_numbers: false
-              remove_special: false
-              remove_monosyllables: true
-        profile:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetProfile"
-            - type: "null"
-        activate_on_create:
-          type:
-            - boolean
-            - "null"
-        prepare_required:
-          type:
-            - boolean
-            - "null"
-        prepare_llm_mode:
-          type:
-            - string
-            - "null"
-          enum: [default, enabled, disabled, null]
-        prepare_model:
-          type:
-            - string
-            - "null"
-        sentiment_required:
-          type:
-            - boolean
-            - "null"
-        sentiment_llm_mode:
-          type:
-            - string
-            - "null"
-          enum: [default, enabled, disabled, null]
-        sentiment_model:
-          type:
-            - string
-            - "null"
-        embedding_required:
-          type:
-            - boolean
-            - "null"
-        embedding_model:
-          type:
-            - string
-            - "null"
-      required: [storage_uri]
     DatasetVersionListResponse:
       type: object
       properties:
         items:
           type: array
           items:
-            $ref: "#/components/schemas/DatasetVersion"
+            $ref: "#/components/schemas/DatasetVersionListItem"
       required: [items]
+    DatasetVersionDetail:
+      type: object
+      description: "GET /versions/{version_id} 응답. 각 단계 결과 + 파일 형태 요약만 노출. 내부 URI/artifacts/build_jobs/profile 등은 노출하지 않음."
+      properties:
+        dataset_version_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        ready_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        is_active:
+          type: boolean
+        row_count:
+          type: integer
+        column_count:
+          type: integer
+        columns:
+          type: array
+          items:
+            type: string
+        byte_size:
+          type: integer
+          format: int64
+        clean:
+          $ref: "#/components/schemas/DatasetVersionStageDetail"
+        doc_genuineness:
+          $ref: "#/components/schemas/DatasetVersionStageDetail"
+        clause_label:
+          $ref: "#/components/schemas/DatasetVersionStageDetail"
+      required: [dataset_version_id, created_at, is_active, row_count, column_count, columns, byte_size, clean, doc_genuineness, clause_label]
+    DatasetVersionStageDetail:
+      type: object
+      properties:
+        status:
+          type: string
+        completed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        summary:
+          description: |
+            단계 처리 결과 요약. 단계별 키 셋이 다름.
+
+            silverone 2026-05-28 (C 옵션) — `doc_genuineness` / `clause_label`은 build-detail
+            (`GET /datasets/.../{type}`)과 동일한 normalized core를 노출하면서 운영·감사용
+            metadata는 superset으로 포함한다. 프론트 매퍼는 normalized key만 사용한다.
+
+            - `doc_genuineness`: core `{ genuineness: {genuine_review, mixed, non_review, uncertain}, total }`
+              + metadata (`applied`, `model`, `prompt_version`, `input_row_count`, `processed_row_count`,
+              `parse_failures`, `total_prompt_tokens`, `total_completion_tokens`).
+              `total`은 `processed_row_count`가 있으면 우선, 없으면 `genuineness` 값 합.
+            - `clause_label`: core `{ aspect: {...}, sentiment: {positive,negative,neutral}, total }`
+              + metadata (`applied`, `model`, `prompt_version`, `taxonomy_id`, `taxonomy_hash`,
+              `reasoning_effort`, `concurrency`, `include_genuineness`, `skipped_by_filter`,
+              `skipped_empty`, `parse_failures`, `processed_doc_count`, `input_row_count`,
+              `total_prompt_tokens`, `total_completion_tokens`).
+              `total`은 `clause_count`에서 옮겨진 값.
+            - `clean`: `{ input_row_count, output_row_count, kept_count, dropped_count, text_column, text_columns, text_joiner, clean_regex_rule_hits, ... }`.
+
+            raw count key (`tier_counts` / `aspect_counts` / `sentiment_counts` / `clause_count`)는
+            응답에 노출되지 않는다 (저장된 metadata 자체는 유지).
+          type: object
+          additionalProperties: true
+      required: [status]
+    DatasetVersionListItem:
+      type: object
+      description: "version 목록 응답 항목. 처리 상태 + 파일 형태 요약만 노출. 상세 메타·artifacts·build_jobs는 GET /versions/{version_id}로 조회."
+      properties:
+        dataset_version_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        is_active:
+          type: boolean
+        row_count:
+          type: integer
+        column_count:
+          type: integer
+        columns:
+          type: array
+          items:
+            type: string
+        byte_size:
+          type: integer
+          format: int64
+        clean_status:
+          type: string
+        doc_genuineness_status:
+          type: string
+        clause_label_status:
+          type: string
+        original_filename:
+          type: string
+          description: "업로드 시 저장한 사용자 파일명. metadata.upload.original_filename → stored_filename fallback. 옛 row(직접 storage_uri로 만든 version 등)는 빈 문자열."
+      required: [dataset_version_id, created_at, is_active, row_count, column_count, columns, byte_size, clean_status, doc_genuineness_status, clause_label_status]
     DatasetCleanSummary:
       type: object
       properties:
@@ -2736,8 +1933,6 @@ components:
             type: string
         text_joiner:
           type: string
-        preprocess_options:
-          $ref: "#/components/schemas/DatasetCleanPreprocessOptions"
         source_input_char_count:
           type: integer
           description: clean 전 원본 텍스트 총 글자 수.
@@ -2750,44 +1945,6 @@ components:
         clean_regex_rule_hits:
           $ref: "#/components/schemas/IntegerMap"
       required: [input_row_count, output_row_count, kept_count, dropped_count]
-    DatasetPrepareSummary:
-      type: object
-      properties:
-        input_row_count:
-          type: integer
-        output_row_count:
-          type: integer
-        kept_count:
-          type: integer
-        review_count:
-          type: integer
-        dropped_count:
-          type: integer
-        text_column:
-          type: string
-        text_columns:
-          type: array
-          items:
-            type: string
-        text_joiner:
-          type: string
-      required: [input_row_count, output_row_count, kept_count, review_count, dropped_count]
-    DatasetPrepareSample:
-      type: object
-      properties:
-        source_row_index:
-          type: integer
-        row_id:
-          type: string
-        raw_text:
-          type: string
-        normalized_text:
-          type: string
-        prepare_disposition:
-          type: string
-        prepare_reason:
-          type: string
-      required: [source_row_index, row_id, raw_text, normalized_text, prepare_disposition, prepare_reason]
     DatasetTableColumn:
       type: object
       properties:
@@ -2801,494 +1958,1053 @@ components:
           type: string
           description: number, string 등 프론트 렌더링 힌트
       required: [key, label]
-    DatasetPrepareWarningPanel:
-      type: object
-      properties:
-        review_count:
-          type: integer
-        samples:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetPrepareSample"
-      required: [review_count, samples]
-    DatasetPreparePreviewResponse:
-      type: object
-      properties:
-        project_id:
-          type: string
-        dataset_id:
-          type: string
-        dataset_version_id:
-          type: string
-        prepare_status:
-          type: string
-        prepared_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        prepared_ref:
-          type: string
-        prepare_format:
-          type: string
-        raw_text_column:
-          type: string
-        raw_text_columns:
-          type: array
-          items:
-            type: string
-        text_joiner:
-          type: string
-        prepared_text_column:
-          type: string
-        row_id_column:
-          type: string
-        summary:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetPrepareSummary"
-            - type: "null"
-        sample_limit:
-          type: integer
-        columns:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetTableColumn"
-        samples:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetPrepareSample"
-        warning_panel:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetPrepareWarningPanel"
-            - type: "null"
-      required: [project_id, dataset_id, dataset_version_id, prepare_status, prepared_ref, prepare_format, raw_text_column, prepared_text_column, row_id_column, sample_limit, columns, samples]
-    DatasetPrepareSampleResponse:
-      type: object
-      properties:
-        project_id:
-          type: string
-        dataset_id:
-          type: string
-        dataset_version_id:
-          type: string
-        prepared_ref:
-          type: string
-        prepare_format:
-          type: string
-        sample_limit:
-          type: integer
-        summary:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetPrepareSummary"
-            - type: "null"
-        columns:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetTableColumn"
-        samples:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetPrepareSample"
-      required: [project_id, dataset_id, dataset_version_id, prepared_ref, prepare_format, sample_limit, columns, samples]
-    DatasetSentimentSummary:
-      type: object
-      properties:
-        input_row_count:
-          type: integer
-        labeled_row_count:
-          type: integer
-        text_column:
-          type: string
-        text_columns:
-          type: array
-          items:
-            type: string
-        text_joiner:
-          type: string
-        sentiment_batch_size:
-          type: integer
-        label_counts:
-          $ref: "#/components/schemas/IntegerMap"
-      required: [input_row_count, labeled_row_count, text_column, sentiment_batch_size]
-    DatasetSentimentSample:
-      type: object
-      properties:
-        source_row_index:
-          type: integer
-        row_id:
-          type: string
-        sentiment_label:
-          type: string
-        sentiment_confidence:
-          type: number
-          format: double
-        sentiment_reason:
-          type: string
-      required: [source_row_index, row_id, sentiment_label, sentiment_confidence, sentiment_reason]
-    DatasetSentimentPreviewResponse:
-      type: object
-      properties:
-        project_id:
-          type: string
-        dataset_id:
-          type: string
-        dataset_version_id:
-          type: string
-        sentiment_status:
-          type: string
-        sentiment_labeled_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        sentiment_ref:
-          type: string
-        sentiment_format:
-          type: string
-        sentiment_text_column:
-          type: string
-        sentiment_text_columns:
-          type: array
-          items:
-            type: string
-        text_joiner:
-          type: string
-        sentiment_label_column:
-          type: string
-        sentiment_confidence_column:
-          type: string
-        sentiment_reason_column:
-          type: string
-        row_id_column:
-          type: string
-        summary:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetSentimentSummary"
-            - type: "null"
-        sample_limit:
-          type: integer
-        columns:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetTableColumn"
-        samples:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetSentimentSample"
-      required: [project_id, dataset_id, dataset_version_id, sentiment_status, sentiment_ref, sentiment_format, sentiment_text_column, sentiment_label_column, sentiment_confidence_column, sentiment_reason_column, row_id_column, sample_limit, columns, samples]
-    DatasetSentimentSampleResponse:
-      type: object
-      properties:
-        project_id:
-          type: string
-        dataset_id:
-          type: string
-        dataset_version_id:
-          type: string
-        sentiment_ref:
-          type: string
-        sentiment_format:
-          type: string
-        sample_limit:
-          type: integer
-        summary:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetSentimentSummary"
-            - type: "null"
-        columns:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetTableColumn"
-        samples:
-          type: array
-          items:
-            $ref: "#/components/schemas/DatasetSentimentSample"
-      required: [project_id, dataset_id, dataset_version_id, sentiment_ref, sentiment_format, sample_limit, columns, samples]
     DatasetUploadRequest:
       type: object
+      description: "ADR-018 β2 (2026-05-20) — record_count / metadata / prepare/sentiment/embedding 관련 9 form field 제거. file + data_type + activate_on_create만 받음. text_columns 등 clean 옵션은 후속 POST /clean에서 명시."
       properties:
         file:
           type: string
           format: binary
         data_type:
           type: string
-        record_count:
-          type: string
-          description: Integer string
-        metadata:
-          type: string
-          description: JSON object string. 업로드 직후 자동 clean을 실행하려면 text_columns가 필요하다. clean_preprocess_options를 넣으면 clean 작업에 전달된다.
-          example: '{"text_columns":["제목","본문"],"clean_preprocess_options":{"remove_english":false,"remove_numbers":false,"remove_special":false,"remove_monosyllables":true}}'
         activate_on_create:
           type: string
           enum: ["true", "false"]
-        prepare_required:
-          type: string
-          enum: ["true", "false"]
-        prepare_llm_mode:
-          type: string
-          enum: [default, enabled, disabled]
-        sentiment_required:
-          type: string
-          enum: ["true", "false"]
-        sentiment_llm_mode:
-          type: string
-          enum: [default, enabled, disabled]
-        embedding_required:
-          type: string
-          enum: ["true", "false"]
-        prepare_model:
-          type: string
-        sentiment_model:
-          type: string
-        embedding_model:
-          type: string
       required: [file]
-    ClusterMember:
+    DatasetUploadResponse:
+      type: object
+      description: "업로드 성공 여부 + 후속 호출용 식별자 + 파일 형태 요약(행/열/바이트). 상세 메타는 GET /versions/{version_id}로 조회."
+      properties:
+        dataset_version_id:
+          type: string
+        row_count:
+          type: integer
+          description: 데이터 행 수. 형식을 분석할 수 없으면 0.
+        column_count:
+          type: integer
+          description: 컬럼 수. 형식을 분석할 수 없으면 0.
+        columns:
+          type: array
+          description: 컬럼 이름 목록.
+          items:
+            type: string
+        byte_size:
+          type: integer
+          format: int64
+          description: 저장된 원본 파일 바이트 크기.
+      required: [dataset_version_id, row_count, column_count, columns, byte_size]
+    DatasetCleanRequest:
+      type: object
+      description: |
+        2026-05-21 — output_path / force / preprocess_options 3 필드 제거.
+        text_columns는 upload 시 metadata에 저장되면 생략 가능.
+
+        silverone 2026-05-28 (clean 정식화) — date_column optional 추가. 명시되면
+        해당 source 컬럼을 ISO 8601 UTC string `created_at`으로 변환해 cleaned.parquet
+        에 노출. 원본 row 전체는 `source_json` 컬럼(JSON string)에 보존되어 운영자가
+        한글/괄호 source 컬럼 값을 확인할 수 있음. 표준 9 컬럼 schema:
+        `row_id` / `doc_id` / `source_row_index` / `raw_text` / `cleaned_text` /
+        `created_at` / `clean_status` / `clean_reason` / `source_json`.
+      properties:
+        text_columns:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: clean 대상 원본 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다. upload metadata에 text_columns가 있으면 생략 가능.
+        date_column:
+          type:
+            - string
+            - "null"
+          description: |
+            cleaned.parquet에 `created_at` ISO 8601 UTC string으로 변환할 source date 컬럼명.
+            예시 `"게시일"`. 명시 안 하면 `created_at` 컬럼은 모두 null. parse 실패 / Invalid date /
+            빈 값은 row별 null로 처리 (전체 row는 유지). 분리형 date(`pub_year` / `month` / `day`)
+            지원은 후속 PR (`date_parts`).
+    AnalysisThread:
       type: object
       properties:
-        cluster_id:
+        thread_id:
           type: string
-        cluster_rank:
-          type: integer
-        cluster_document_count:
-          type: integer
-        source_index:
-          type: integer
-        row_id:
-          type: string
-        chunk_id:
-          type: string
-        chunk_index:
-          type: integer
-        text:
-          type: string
-        is_sample:
-          type: boolean
-      required: [cluster_id, cluster_rank, cluster_document_count, source_index, row_id, chunk_id, chunk_index, text, is_sample]
-    DatasetClusterMembersResponse:
-      type: object
-      properties:
         project_id:
           type: string
         dataset_id:
           type: string
         dataset_version_id:
           type: string
-        cluster_id:
+          description: thread 생성 시점의 active version. thread 안의 모든 분석은 이 version 기준.
+        title:
           type: string
-        cluster_summary_ref:
+        created_at:
           type: string
-        cluster_membership_ref:
+          format: date-time
+        updated_at:
           type: string
-        limit:
+          format: date-time
+        message_count:
           type: integer
-        samples_only:
-          type: boolean
-        total_count:
-          type: integer
-        sample_count:
-          type: integer
-        cluster:
-          $ref: "#/components/schemas/AnyMap"
+        last_message:
+          type: string
+      required: [thread_id, project_id, dataset_id, dataset_version_id, created_at, updated_at]
+    AnalysisThreadCreateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+    AnalysisThreadListResponse:
+      type: object
+      properties:
         items:
           type: array
           items:
-            $ref: "#/components/schemas/ClusterMember"
-      required: [project_id, dataset_id, dataset_version_id, cluster_id, cluster_summary_ref, cluster_membership_ref, limit, samples_only, total_count, sample_count, items]
-    DatasetPrepareRequest:
+            $ref: "#/components/schemas/AnalysisThread"
+      required: [items]
+    AnalysisMessage:
       type: object
       properties:
-        text_columns:
+        message_id:
+          type: string
+        thread_id:
+          type: string
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+          description: |
+            user 발언 원문 또는 assistant 응답. assistant message는 두 종류로
+            저장된다. (1) 성공 run의 답변 본문 — ADR-020 PR-A composer가 만든
+            `result.composer.assistant_content`가 우선 저장. (2) failed run
+            placeholder (`"분석 실행 중 오류가 발생했습니다…"` 글로벌 한국어 한 문장).
+            placeholder는 error 상세를 노출하지 않고 사용자용 일반 문구만 담는다.
+            error 원문은 `analysis_run.error_message`로 조회한다.
+        context_summary:
+          type: object
+          additionalProperties: true
+          description: |
+            다음 이어질문 planner에 넣는 짧은 구조화 요약. full result_json은
+            포함하지 않는다. ADR-020 PR-A composer가 만든
+            `result.composer.context_summary`가 우선 저장된다 (`question`은
+            caller가 user_question으로 덮어쓴다). 사용자에게 직접 노출하지
+            않으며 다음 turn의 `conversation_context` 생성에 사용된다.
+            failed run placeholder의 경우 비어있어 다음 turn conversation_context
+            에서 자동 제외된다.
+        run_id:
+          type:
+            - string
+            - "null"
+          description: |
+            assistant message만 보유. 성공/실패 모두 자기 run을 가리킨다.
+            failed run에서도 placeholder message가 run_id로 실패 run에 연결되어
+            화면에서 재시도/이력 조회가 가능하다.
+        created_at:
+          type: string
+          format: date-time
+        display:
+          allOf:
+            - $ref: "#/components/schemas/ComposerDisplay"
+          description: |
+            assistant message display projection for history rendering
+            (silverone 2026-06-01).
+
+            GET `/projects/{pid}/datasets/{did}/analysis_threads/{tid}` thread
+            detail 응답에서 assistant message가 연결된 `run.result_json` 안에
+            `composer.display`가 있으면 lightweight projection으로 채워진다.
+            keep set은 `ComposerDisplay`의 `type` / `title` / `columns` /
+            `rows` / `total_rows` / `returned_rows` / `max_rows` / `truncated`
+            / `warnings` / `recommended_view` / `chart_spec` 11 키 — POST 응답의
+            `result.composer.display`와 schema 동일.
+
+            POST `/datasets/{did}/analyze` / `POST /analysis_threads/{tid}/messages`
+            응답에는 포함되지 않는다 (그 응답은 `result.composer.display`로 받음).
+            user message에는 항상 없음. run_id가 없거나 result_json에 display가
+            없으면 omit (null로 보내지 않음).
+        plan:
+          allOf:
+            - $ref: "#/components/schemas/AnalyzePlanView"
+          description: |
+            assistant message plan projection for history rendering
+            (silverone 2026-06-01).
+
+            GET `/projects/{pid}/datasets/{did}/analysis_threads/{tid}` thread
+            detail 응답에서 assistant message가 연결된 `run.result_json` 안에
+            `plan`이 있으면 POST 응답의 `result.plan`과 동일 keep-set
+            (`plan_version` + `steps[].id` / `.skill` / `.params`)으로 채워진다.
+
+            POST `/datasets/{did}/analyze` / `POST /analysis_threads/{tid}/messages`
+            응답에는 포함되지 않는다 (그 응답은 `result.plan`으로 받음).
+            user message에는 항상 없음. run_id가 없거나 result_json에 plan이
+            없으면 omit (null로 보내지 않음). step status / duration_ms /
+            row_count 같은 추가 메타는 후속 PR.
+      required: [message_id, thread_id, project_id, dataset_id, role, content, created_at]
+    AnalysisThreadDetail:
+      allOf:
+        - $ref: "#/components/schemas/AnalysisThread"
+        - type: object
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: "#/components/schemas/AnalysisMessage"
+          required: [messages]
+    AnalysisThreadMessageRequest:
+      type: object
+      properties:
+        content:
+          type: string
+      required: [content]
+    AnalysisRun:
+      type: object
+      properties:
+        run_id:
+          type: string
+        thread_id:
+          type: string
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        user_message_id:
+          type: string
+        request_json:
+          type: object
+          additionalProperties: true
+        result_json:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+          enum: [running, completed, failed]
+        error_message:
+          type:
+            - string
+            - "null"
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required: [run_id, thread_id, project_id, dataset_id, dataset_version_id, status, created_at]
+    AnalysisThreadMessageResponse:
+      type: object
+      description: |
+        silverone 2026-05-28 — stateful frontend path (`POST /datasets/{did}/analyze`,
+        `POST /analysis_threads/{tid}/messages`)의 frontend-safe lightweight 응답.
+        DB에는 full result_json / message.context_summary / run.request_json이
+        보존되지만, 응답에서는 view schema로 stripping된다.
+
+        debug/replay path (`POST /versions/{vid}/analyze`)는 본 정책에서 제외 —
+        full result(`AnalyzeResponse`)를 그대로 반환한다.
+
+        ## 응답 keep 필드 (사용자 명시 2026-05-28)
+
+        | 영역 | keep |
+        |---|---|
+        | top-level | `project_id`, `dataset_id`, `thread_id`, `dataset_version_id`, `mode`, `user_message`, `assistant_message`, `run`, `result` |
+        | `user_message` (AnalysisMessageView) | `message_id`, `role`, `content`, `created_at` |
+        | `assistant_message` (AnalysisMessageView) | `message_id`, `role`, `content`, `run_id`, `created_at` |
+        | `run` (AnalysisRunView) | `run_id`, `thread_id`, `dataset_version_id`, `user_message_id`, `status`, `error_message`, `created_at`, `completed_at` |
+        | `result` (FrontendAnalyzeResultView) | `plan` (plan_version + steps[].id/.skill/.params), `composer` (assistant_content + metadata.{mode,template,fallback_reason} + display.{type,title,columns,rows,total_rows,returned_rows,max_rows,truncated,warnings}), `taxonomy_check` |
+
+        ## 응답 drop 필드
+
+        | 위치 | drop |
+        |---|---|
+        | `assistant_message` | `context_summary` (DB에는 보존, 다음 turn `conversation_context` 생성에만 사용) |
+        | `run` | `request_json` (conversation_context raw 등 internal), `result_json` (top-level `result`와 중복), `project_id` / `dataset_id` (top-level과 중복) |
+        | `result` | `steps`, `steps[].sample_rows`, `planner`, `planner.usage`, `planner.attempts`, `planner.attempts[].raw`, `artifact_paths`, `composer.context_summary`, raw prompt / token usage / internal artifact paths |
+      properties:
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        thread_id:
+          type: string
+        dataset_version_id:
+          type: string
+        user_message:
+          $ref: "#/components/schemas/AnalysisMessageView"
+        assistant_message:
+          $ref: "#/components/schemas/AnalysisMessageView"
+        run:
+          $ref: "#/components/schemas/AnalysisRunView"
+        mode:
+          type: string
+          enum: [user_question]
+        result:
+          $ref: "#/components/schemas/FrontendAnalyzeResultView"
+      required: [project_id, dataset_id, thread_id, dataset_version_id, user_message, run, mode]
+    AnalysisMessageView:
+      type: object
+      description: |
+        AnalysisMessage의 frontend-safe view (silverone 2026-05-28).
+        `context_summary`는 DB에 저장된 AnalysisMessage에는 보존되지만 응답
+        view에서는 stripping된다 (다음 turn `conversation_context` 생성에만 사용,
+        사용자 노출 X). `thread_id` / `project_id` / `dataset_id`는 top-level과
+        중복이라 view에서 제외.
+      properties:
+        message_id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        run_id:
+          type:
+            - string
+            - "null"
+          description: assistant message만 보유. user message는 omit.
+        created_at:
+          type: string
+          format: date-time
+      required: [message_id, role, content, created_at]
+    AnalysisRunView:
+      type: object
+      description: |
+        AnalysisRun의 frontend-safe view (silverone 2026-05-28). `request_json`
+        (conversation_context raw 등 internal payload) / `result_json` (top-level
+        `result`와 중복) / `project_id` / `dataset_id` (top-level과 중복)을
+        응답에서 제외한다. DB의 analysis_run row에는 모두 보존된다.
+      properties:
+        run_id:
+          type: string
+        thread_id:
+          type: string
+        dataset_version_id:
+          type: string
+        user_message_id:
+          type: string
+        status:
+          type: string
+          enum: [running, completed, failed]
+        error_message:
+          type:
+            - string
+            - "null"
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required: [run_id, thread_id, dataset_version_id, status, created_at]
+    FrontendAnalyzeResultView:
+      type: object
+      description: |
+        analyze response `result`의 frontend-safe projection (silverone 2026-05-28).
+        worker가 만든 full result에서 `plan` / `composer` / `taxonomy_check` 3
+        영역만 통과시킨다. 정의되지 않은 top-level result key는 default deny —
+        steps / planner / artifact_paths 등은 모두 응답에서 누락된다.
+      properties:
+        plan:
+          $ref: "#/components/schemas/AnalyzePlanView"
+        composer:
+          $ref: "#/components/schemas/FrontendComposerView"
+        taxonomy_check:
+          type: object
+          additionalProperties: true
+          description: |
+            clause_label artifact taxonomy 정합성 체크 결과 (Phase 3-B). 4-branch
+            status: `ok` / `legacy_missing` / `hash_mismatch` / `id_mismatch`.
+      additionalProperties: false
+    FrontendComposerView:
+      type: object
+      description: |
+        `result.composer`의 frontend-safe view (silverone 2026-05-28).
+        ADR-020 PR-A의 ComposerOutput에서 `context_summary`만 stripping. 나머지
+        구조(`assistant_content` / `metadata` / `display`)는 그대로 노출하되
+        명시된 sub-field만 통과.
+      properties:
+        assistant_content:
+          type: string
+          description: 사용자에게 보여줄 자연어 답변.
+        metadata:
+          type: object
+          properties:
+            mode:
+              type: string
+              enum: [deterministic, llm_backed, deterministic_fallback, error, fallback]
+            template:
+              type: string
+              enum: [table_normal, table_truncated, empty, reuse_applied, failed, fallback]
+            fallback_reason:
+              type:
+                - string
+                - "null"
+          required: [mode, template]
+          additionalProperties: false
+        display:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [table, chart, json]
+            title:
+              type:
+                - string
+                - "null"
+            columns:
+              type: array
+              items:
+                type: string
+            rows:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            total_rows:
+              type: integer
+            returned_rows:
+              type: integer
+            max_rows:
+              type: integer
+            truncated:
+              type: boolean
+            warnings:
+              type: array
+              items:
+                type: string
+              description: |
+                사용자 화면 노출 가능한 짧은 경고 list (display-warnings v1):
+                empty / truncated / null ratio 등.
+          additionalProperties: false
+      required: [assistant_content]
+      additionalProperties: false
+    AnalyzeUserQuestionRequest:
+      type: object
+      description: |
+        화면 분석 경로(`POST /datasets/{did}/analyze`) request body.
+        `user_question` 1 필드만 받는다. 서버가 active version을 고정한 새
+        analysis thread를 만들고, dataset별 추가 컬럼은 SourceSummary로 자동 inject한다.
+      properties:
+        user_question:
+          description: 자연어 분석 질의. planner LLM이 받아 plan_v2 생성.
+          type: string
+      required: [user_question]
+    AnalyzeDebugRequest:
+      type: object
+      description: |
+        plan 디버깅 경로(`POST /versions/{vid}/analyze`) request body.
+        `plan` 1 필드만 받는다. LLM 호출 없이 validator → executor만 실행.
+        화면 분석(자연어 질의)은 본 endpoint가 아니라 `/datasets/{did}/analyze`.
+      properties:
+        plan:
+          description: plan_v2 JSON 객체 (plan_version, steps 등).
+          type: object
+          additionalProperties: true
+      required: [plan]
+    AnalyzeResponse:
+      type: object
+      description: "Python /tasks/analyze 응답을 passthrough + 최소 wrapping (옛 /tasks/analyze_v2는 worker side alias)."
+      properties:
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        version_id:
+          type: string
+        mode:
+          type: string
+          enum: [plan, user_question]
+        result:
+          description: |
+            Python /tasks/analyze 응답 (steps + present + composer + planner).
+            Go에서 재가공 X.
+
+            주요 sub-payload:
+            - `result.present` — `PresentResultPayload` 형태. SQL-4 정책으로
+              `max_rows` / `returned_rows` / `total_rows` / `truncated` 포함.
+            - `result.composer` — `ComposerOutput` 형태 (ADR-020 PR-A).
+              post-execution layer가 만든 사용자-facing 답변. `assistant_content`
+              자연어 + `display` 렌더링 데이터 + `context_summary` 다음 turn용.
+              `assistant_message.content` / `assistant_message.context_summary`는
+              이 값을 우선 사용한다.
+            - `result.plan` — `AnalyzePlanView` 형태 (silverone 2026-05-28).
+              planner_v2가 만든 plan_v2 본문. 분석 상세 패널에서 실행 단계를
+              보여주는 용도. step.id / step.skill / step.params 3 필드만 표시
+              권장 — `inputs` / SQL / sample_rows 등은 operator/debug 영역.
+
+            **Frontend 표시 정책 (silverone 2026-05-28, "플랜만 표시" cut)**:
+
+            *프론트가 사용하는 필드*:
+            - `result.composer.assistant_content` — 사용자에게 보여줄 답변 본문
+            - `result.composer.display` — 표/차트 렌더링 데이터
+            - `result.composer.display.warnings` — 사용자 화면 노출 가능 경고
+            - `result.plan` — 분석 상세 패널 (plan_version + steps[].id/.skill/.params)
+
+            *operator/debug 전용 (frontend 노출 X)*:
+            - `result.steps` — executor가 만든 step별 실행 결과 (sample_rows 포함)
+            - `result.steps[].sample_rows` — step row sample
+            - SQL / query 본문 — 미지원
+            - `result.plan.steps[].inputs` — plan step 의존성 (frontend cut 1차에서 노출 X)
+            - `result.planner.attempts[].raw` — planner LLM raw 응답
+            - `result.planner.usage` — token usage
+            - `result.artifact_paths` — 내부 storage path
+            - `result.composer.context_summary` — 다음 turn 입력용 (사용자 노출 금지)
+
+            include_debug 같은 opt-in 플래그는 이 PR 범위 외. 후속 PR에서 검토.
+          type: object
+          additionalProperties: true
+      required: [project_id, dataset_id, version_id, mode, result]
+    AnalyzePlanView:
+      type: object
+      description: |
+        analyze 응답의 `result.plan` 형태 (silverone 2026-05-28, frontend 플랜
+        표시 cut 1차). planner_v2 LLM이 만든 plan_v2 본문을 그대로 프론트가
+        분석 상세 패널에서 단계 list로 표시한다. plan_v2 본 schema는 Python
+        `planner.schema.SKILL_CATALOG`로 잠금되어 있고 본 view는 *프론트가
+        실제로 사용하는 부분만* 명시한 reference schema다.
+
+        ## 권장 렌더링 (silverone 2026-05-28)
+
+        ```
+        1. real_reviews / filter
+        2. joined / join
+        3. with_doc / join
+        4. last_year / filter
+        5. this_year / filter
+        6. last_by_aspect / aggregate
+        7. this_by_aspect / aggregate
+        8. delta_pair / compare
+        9. delta / calculate
+        10. present_delta / present
+        ```
+
+        format: `{index}. {step.id} / {step.skill}` 한 줄 + clicked detail에
+        `step.params`. `inputs` / SQL / sample_rows / planner.attempts.raw /
+        usage / artifact_paths는 화면에 노출하지 않는다.
+      properties:
+        plan_version:
+          type: string
+          enum: [v2]
+          description: plan_v2 wire contract. rename PR 이후에도 v2 유지.
+        steps:
           type: array
           items:
-            type: string
-          minItems: 1
-          description: prepare 대상 텍스트 컬럼 목록. clean이 ready면 생략 시 cleaned_text를 사용한다.
-        output_path:
+            $ref: "#/components/schemas/AnalyzePlanStepView"
+      required: [plan_version, steps]
+    AnalyzePlanStepView:
+      type: object
+      description: |
+        `result.plan.steps[]`의 frontend 표시 필드. silverone 2026-05-28 cut
+        1차에서는 id / skill / params 3 필드만 노출했고, silverone 2026-06-01
+        에 백엔드가 합성한 사용자 화면용 `display = {label, expression}`이
+        추가됐다. `inputs`는 plan_v2 스키마에 존재하지만 frontend 노출 대상이
+        아니며 (의존 그래프는 operator/debug 영역) 후속 PR에서 별도 cut으로
+        다룬다.
+      properties:
+        id:
+          type: string
+          description: step 식별자. plan 내 다른 step의 `inputs`로 참조된다.
+        skill:
+          type: string
+          enum: [join, filter, aggregate, compare, calculate, sort, present, summarize]
+          description: plan_v2 8 skill catalog. `planner.schema.SKILL_CATALOG` 잠금.
+        params:
+          type: object
+          additionalProperties: true
+          description: |
+            skill별 parameter object. validator가 skill별 hardcoded rule로
+            검증한다. 프론트가 직접 해석하지 않고 `display`를 우선 사용 —
+            `display`가 없으면 raw params로 fallback 한다. 고급 보기 안에서만
+            raw 노출 권장.
+        display:
+          type: object
+          description: |
+            백엔드가 합성한 사용자 화면용 표시 필드 (silverone 2026-06-01).
+            프론트는 `label` / `expression`만 렌더링해도 분석 계획 화면이
+            완성되도록 설계됐다. raw params JSON은 고급 보기에만 노출.
+
+            예시:
+            - filter: `{label: "조건 필터", expression: "WHERE genuineness != 'non_review'"}`
+            - aggregate: `{label: "aspect별 집계", expression: "GROUP BY aspect · COUNT(*) AS count"}`
+            - sort: `{label: "정렬", expression: "ORDER BY count DESC"}`
+            - calculate(ratio): `{label: "비율 계산", expression: "negative_ratio = negative_count / total_count * 100"}`
+            - present: `{label: "결과 표시", expression: "TABLE: 아스펙트별 건수"}`
+
+            expression은 SQL-like 직관 표현이며 실제 executor SQL과는 무관
+            (debug 노출 금지). 알 수 없는 skill이거나 params가 깨져 있으면
+            display 자체가 omit되고 프론트는 raw params로 fallback.
+          properties:
+            label:
+              type: string
+              description: skill 종류별 한국어 일반명 (예 "조건 필터", "정렬").
+            expression:
+              type: string
+              description: SQL-like 직관 표현 1줄.
+          required: [label, expression]
+      required: [id, skill, params]
+    PresentResultPayload:
+      type: object
+      description: |
+        analyze 응답의 `result.present` 형태 (SQL-4, audit M7).
+        present skill이 최종 결과 row를 `rows`에 담아 반환한다. 한도 정책:
+        - default `max_rows` = 1000
+        - plan에 `present.limit`이 명시되면 그 값을 사용 (1~10000 허용, validator에서 reject)
+        - hard cap = 10000. validator를 통과해도 executor에서 다시 한 번 clamp.
+      properties:
+        step_id:
+          type: string
+        format:
+          type: string
+          enum: [table, chart, json]
+        title:
           type:
             - string
             - "null"
-        model:
-          type:
-            - string
-            - "null"
+        row_count:
+          type: integer
+          description: |
+            호환 필드 — `total_rows`와 동일한 값을 갖는다. SQL-4 이전 코드/화면이
+            row_count를 참조하던 것을 깨지 않기 위해 유지.
+        total_rows:
+          type: integer
+          description: 전체 결과 row 수 (DuckDB COUNT).
+        returned_rows:
+          type: integer
+          description: 응답에 실제로 담은 rows 배열의 길이.
         max_rows:
-          type:
-            - integer
-            - "null"
-          minimum: 1
-          description: "전처리 비용 확인용으로 처리할 최대 row 수. 예: 10이면 앞 10개 row만 전처리한다."
-        batch_size:
-          type:
-            - integer
-            - "null"
-          minimum: 1
-          description: 동기 LLM 전처리 호출당 묶을 row 수. Anthropic Message Batches API가 아니라 내부 batch prompt 크기다.
-        force:
-          type:
-            - boolean
-            - "null"
-    DatasetPrepareSampleRequest:
-      type: object
-      properties:
-        text_columns:
+          type: integer
+          description: 이번 응답에 적용된 반환 한도. default 1000, present.limit 명시 시 해당 값.
+        truncated:
+          type: boolean
+          description: returned_rows < total_rows이면 true.
+        rows:
           type: array
+          description: present 결과 데이터. 최대 max_rows건.
           items:
-            type: string
-          minItems: 1
-          description: prepare sample 대상 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
-        model:
+            type: object
+            additionalProperties: true
+      required: [step_id, format, row_count, total_rows, returned_rows, max_rows, truncated, rows]
+    ComposerOutput:
+      type: object
+      description: |
+        analyze 응답의 `result.composer` 형태 (ADR-020 PR-A).
+        post-execution layer가 executor 결과를 사용자-facing 답변으로 변환한다.
+        PR-A는 LLM 호출 없이 deterministic 템플릿 5종으로 생성. 후속 PR-B에서
+        LLM composer가 `assistant_content`를 보강한다.
+
+        저장 경로:
+        - `assistant_message.content` ← `composer.assistant_content`
+        - `assistant_message.context_summary` ← `composer.context_summary`
+        - `analysis_run.result_json.composer` ← composer 전체 payload (debug/audit)
+
+        실행이 실패한 turn은 composer를 호출하지 않고 별도 placeholder 정책 적용
+        (`analysis_api_model_2026-05-26` §4).
+      properties:
+        assistant_content:
+          type: string
+          description: 사용자에게 보여줄 자연어 답변. assistant_message.content로 저장.
+        display:
+          anyOf:
+            - $ref: "#/components/schemas/ComposerDisplay"
+            - type: "null"
+          description: 프론트 렌더링용 데이터. PR-A에서는 present payload를 거의 그대로 전달.
+        context_summary:
+          $ref: "#/components/schemas/ComposerContextSummary"
+        metadata:
+          $ref: "#/components/schemas/ComposerMetadata"
+      required: [assistant_content, context_summary, metadata]
+    ComposerDisplay:
+      type: object
+      description: |
+        프론트 표/차트/JSON 렌더링용 페이로드. `result.present`와 거의 동일한
+        shape이며 ADR-020 PR-A에서는 변환 없이 그대로 전달한다. 자연어 답변
+        (`assistant_content`)과 데이터 (`display`)를 분리해 화면이 각각 처리.
+        v1은 table-first — `recommended_view` / `chart_spec`는 chart-ready
+        metadata 힌트만 제공하고, 완전한 chart spec(Vega-Lite 등)은 v2로 보류.
+      properties:
+        type:
+          type: string
+          enum: [table, chart, json]
+          description: present.format을 그대로 매핑.
+        title:
           type:
             - string
             - "null"
+        columns:
+          type: array
+          items:
+            type: string
+          description: |
+            프론트 table 렌더링용 컬럼 key 순서 (silverone 2026-05-27 display-columns).
+            v1은 string list만 — `rows[0]`의 key 순서를 그대로 노출. rows가
+            비어있으면 `[]`. label / type / format / chart_spec 등 보강 필드는
+            후속 PR.
+        rows:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        total_rows:
+          type: integer
+          description: 전체 결과 row 수.
+        returned_rows:
+          type: integer
+          description: rows 배열의 길이.
         max_rows:
-          type:
-            - integer
-            - "null"
-          minimum: 1
-          maximum: 20
-          description: 전처리 샘플로 처리할 최대 row 수. 기본값은 10, 최대값은 20이다.
-        batch_size:
-          type:
-            - integer
-            - "null"
-          minimum: 1
-          description: 동기 LLM 전처리 호출당 묶을 row 수. Anthropic Message Batches API가 아니라 내부 batch prompt 크기다.
-    DatasetCleanRequest:
-      type: object
-      properties:
-        text_columns:
+          type: integer
+          description: 적용된 반환 한도 (default 1000).
+        truncated:
+          type: boolean
+          description: returned_rows < total_rows이면 true.
+        warnings:
           type: array
           items:
             type: string
-          minItems: 1
-          description: clean 대상 원본 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
-        output_path:
-          type:
-            - string
-            - "null"
-        preprocess_options:
-          $ref: "#/components/schemas/DatasetCleanPreprocessOptions"
-          description: prepare/LLM 호출 전에 적용할 비용 절감용 로컬 텍스트 정제 옵션.
-        force:
-          type:
-            - boolean
-            - "null"
-    DatasetCleanPreprocessOptions:
+          description: |
+            사용자 화면 노출 가능한 짧은 경고 문자열 list (silverone 2026-05-27
+            display-warnings v1). v1 후보 3종:
+            (1) empty result — "조건에 맞는 결과가 없습니다."
+            (2) truncated — "전체 {total_rows}건 중 {returned_rows}건만 표시했습니다."
+            (3) null ratio/percent_change — "일부 비율 값은 기준값이 없어
+            계산되지 않았습니다." (plan.calculate.ratio / percent_change
+            expression의 결과 column에 null row가 있을 때).
+            warnings는 사용자에게 노출. context_summary는 노출 금지.
+            normal result는 `[]`.
+        recommended_view:
+          type: string
+          enum: [table, bar, line]
+          description: |
+            프론트가 기본 렌더링할 view 힌트 (silverone 2026-06-01 chart-ready
+            metadata v1). deterministic 휴리스틱:
+            - rows 0건 / 1건 / 단일 컬럼 → `table`
+            - compare 결과 (delta_* 또는 last_*/this_* 컬럼 존재) → `bar`
+            - x축이 created_at/year/month/date 계열 + numeric metric → `line`
+            - 단일 categorical group_by + numeric metric → `bar`
+            - 모호하면 `table`
+            display.type은 항상 "table" 유지 — recommended_view는 화면 힌트만.
+            pie / scatter는 v2로 보류.
+        chart_spec:
+          anyOf:
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  enum: [bar, line]
+                x:
+                  type: string
+                  description: x축으로 쓸 컬럼 key.
+                y:
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: string
+                  description: |
+                    y축으로 쓸 컬럼 key. 단일 numeric metric이면 string,
+                    compare처럼 last_/this_/delta_ 다중 metric을 한 그래프에
+                    묶을 때는 array.
+                series:
+                  type:
+                    - string
+                    - "null"
+                  description: |
+                    series로 나눌 컬럼 key. v1은 항상 null — 단일 dimension만
+                    추정한다. compare는 wide-format(한 row에 last/this/delta가
+                    모여 있음)이라 series 분기가 불필요.
+              required: [kind, x, y, series]
+            - type: "null"
+          description: |
+            chart 렌더링에 필요한 최소 spec (silverone 2026-06-01 chart-ready
+            metadata v1). `recommended_view`가 `table`이면 항상 null.
+      required: [type, columns, rows, total_rows, returned_rows, max_rows, truncated, warnings, recommended_view, chart_spec]
+    ComposerContextSummary:
       type: object
+      description: |
+        다음 turn의 conversation_context를 만들 때 사용되는 짧은 구조화 요약.
+        **사용자에게 직접 노출하지 않는다**. `assistant_message.context_summary`로
+        저장되어 후속 PostAnalysisThreadMessage에서 worker payload의
+        `conversation_context`로 inject된다 (최근 3턴 / 2000 bytes 한도).
+        ADR-020 PR-A v1은 LLM 요약 없이 deterministic 생성.
       properties:
-        remove_english:
-          type: boolean
-          description: 영문 알파벳을 clean 단계에서 제거한다.
-        remove_numbers:
-          type: boolean
-          description: 숫자를 clean 단계에서 제거한다.
-        remove_special:
-          type: boolean
-          description: 특수문자/기호/공백 구분자를 clean 단계에서 공백으로 정리한다.
-        remove_monosyllables:
-          type: boolean
-          description: ㅋㅋㅋ, ㅠㅠ 같은 한글 자모 반복을 clean 단계에서 제거한다.
-    DatasetEmbeddingBuildRequest:
+        question:
+          type: string
+          description: user_question. 호출자(Go control plane)가 caller-supplied 값으로 덮어쓴다.
+        present_title:
+          type:
+            - string
+            - "null"
+        total_rows:
+          type: integer
+        row_count:
+          type: integer
+          description: 호환 필드 — total_rows와 동일.
+        returned_rows:
+          type: integer
+        columns:
+          type: array
+          items:
+            type: string
+          description: present.rows[0]의 컬럼명 list.
+        key_dimensions:
+          type: array
+          items:
+            type: string
+          description: PR-A 1차 cut에서는 columns와 동일. 후속 PR에서 의미 분화 가능.
+        answer_summary:
+          type: string
+          description: assistant_content와 동일 (한 문장 deterministic 요약).
+      additionalProperties: true
+    ComposerMetadata:
       type: object
+      description: composer debug/audit 정보. 화면 default 노출 X.
       properties:
-        text_column:
+        mode:
+          type: string
+          enum: [deterministic, llm_backed, deterministic_fallback, error, fallback]
+          description: |
+            - deterministic: PR-A 정상 흐름 (현재 default).
+            - llm_backed / deterministic_fallback: PR-B 도입 후 사용.
+            - error: error_metadata 분기로 placeholder 문구 사용.
+            - fallback: composer가 present를 못 읽거나 예외 발생.
+        template:
+          type: string
+          enum: [table_normal, table_truncated, empty, reuse_applied, failed, fallback]
+        fallback_reason:
           type:
             - string
             - "null"
-        embedding_model:
-          type:
-            - string
-            - "null"
-        debug_export_jsonl:
-          type:
-            - boolean
-            - "null"
-        force:
-          type:
-            - boolean
-            - "null"
-    DatasetClusterBuildRequest:
+          description: mode != deterministic일 때 진단용 사유. 정상이면 null.
+      required: [mode, template]
+    ArtifactPagination:
       type: object
+      description: doc_genuineness / clause_label view에서만 사용. items 페이지네이션.
       properties:
-        embedding_index_source_ref:
-          type:
-            - string
-            - "null"
-        chunk_ref:
-          type:
-            - string
-            - "null"
-        output_path:
-          type:
-            - string
-            - "null"
-        similarity_threshold:
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+          description: 전체 행 수 (summary 통계는 total 기반, items는 페이지 슬라이스).
+      required: [limit, offset, total]
+    ArtifactProgress:
+      type: object
+      description: |
+        build job 진행률. worker가 progress 파일(`{prefix}_progress_ref`)에 percent /
+        processed_rows / total_rows를 쓰면 service가 매 GET마다 읽어서 노출.
+        status=`running` 외 단계에서는 정보가 없거나 stale일 수 있다.
+      properties:
+        percent:
+          type: number
+          format: double
+        processed_rows:
+          type: integer
+        total_rows:
+          type: integer
+        eta_seconds:
           type:
             - number
             - "null"
-        top_n:
+          format: double
+        message:
+          type: string
+        updated_at:
           type:
-            - integer
+            - string
             - "null"
-        sample_n:
-          type:
-            - integer
-            - "null"
-        force:
-          type:
-            - boolean
-            - "null"
-    DatasetSentimentBuildRequest:
+          format: date-time
+      required: [percent]
+    ArtifactViewCommon:
       type: object
+      description: |
+        clean / doc_genuineness / clause_label 3 view가 공유하는 공통 필드.
+        화면은 이 필드만 polling하면 build job 진행 상태를 단일 진입점으로
+        추적할 수 있다.
+
+        status enum:
+        - not_started: artifact 없음 + 같은 build_type의 job 없음
+        - queued / running / failed: 최신 build job status를 그대로 노출
+        - completed: artifact ready + 최신 job completed
       properties:
-        text_columns:
-          type: array
-          items:
-            type: string
-          minItems: 1
-          description: 감성 분석 대상 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
-        output_path:
+        build_type:
+          type: string
+          enum: [clean, doc_genuineness, clause_label]
+        status:
+          type: string
+          enum: [not_started, queued, running, failed, completed]
+        job_id:
           type:
             - string
             - "null"
-        model:
+          description: 가장 최근 build job ID. 옛 dataset에서 job row 없이 artifact만 남은 경우 null.
+        started_at:
           type:
             - string
             - "null"
-        force:
+          format: date-time
+        completed_at:
           type:
-            - boolean
+            - string
             - "null"
-      required: [text_columns]
-    DatasetSentimentSampleRequest:
+          format: date-time
+        duration_seconds:
+          type:
+            - number
+            - "null"
+          description: |
+            작업 경과 시간(초). 화면이 started_at/completed_at를 직접 빼지
+            않아도 되게 서버가 채운다.
+            - completed/failed: `completed_at - started_at` (확정).
+            - queued/running: `now - started_at` (진행 중 실시간).
+            - `started_at`이 null이면 null.
+        error_message:
+          type:
+            - string
+            - "null"
+          description: status=`failed` 또는 worker 측 일시 오류 메시지. 그 외는 null.
+        progress:
+          anyOf:
+            - $ref: "#/components/schemas/ArtifactProgress"
+            - type: "null"
+      required: [build_type, status]
+    CleanView:
+      allOf:
+        - $ref: "#/components/schemas/ArtifactViewCommon"
+        - type: object
+          description: |
+            GET /versions/{vid}/clean 응답. status=`completed`일 때만 summary가
+            의미 있다. clean은 단계 특성상 items / pagination / applied 없음
+            (원본 raw row는 `/clean_download`로 받는다).
+          properties:
+            summary:
+              type: object
+              description: |
+                clean 결과 통계. input/output/kept/dropped row count, text 컬럼,
+                clean 전후 char count 등.
+              additionalProperties: true
+    DocGenuinenessView:
+      allOf:
+        - $ref: "#/components/schemas/ArtifactViewCommon"
+        - type: object
+          description: |
+            GET /versions/{vid}/doc_genuineness 응답. status=`completed`일 때만
+            summary/items가 의미 있다. queued/running/failed/not_started 상태
+            에서는 summary 비어 있고 items=[]일 수 있다.
+          properties:
+            applied:
+              type: object
+              description: 실제 적용된 prompt_version 등. artifact 첫 행에서 회수.
+              properties:
+                prompt_version:
+                  type: string
+            summary:
+              type: object
+              properties:
+                total:
+                  type: integer
+                genuineness:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                  description: "key: genuine_review / mixed / non_review / unknown / value: doc count"
+            items:
+              type: array
+              items:
+                type: object
+                properties:
+                  doc_id:
+                    type: string
+                  genuineness:
+                    type: string
+                  reason:
+                    type:
+                      - string
+                      - "null"
+                  source:
+                    type:
+                      - string
+                      - "null"
+            pagination:
+              $ref: "#/components/schemas/ArtifactPagination"
+    ClauseLabelView:
+      allOf:
+        - $ref: "#/components/schemas/ArtifactViewCommon"
+        - type: object
+          description: |
+            GET /versions/{vid}/clause_label 응답. clause_id는 artifact에 저장돼
+            있지 않아 `{doc_id}-{partition_row_index}` (0-base) 형식으로
+            on-the-fly 생성된다. 같은 artifact 재조회 시 같은 clause_id가 나온다.
+          properties:
+            applied:
+              type: object
+              properties:
+                prompt_version:
+                  type: string
+            summary:
+              type: object
+              properties:
+                total:
+                  type: integer
+                sentiment:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                  description: "key: positive / neutral / negative / unknown / value: clause count"
+                aspect:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                  description: "key: aspect label / value: clause count"
+            items:
+              type: array
+              items:
+                type: object
+                properties:
+                  clause_id:
+                    type: string
+                    description: "`{doc_id}-{partition_row_index}` 형식 (0-base)"
+                  doc_id:
+                    type: string
+                  clause:
+                    type: string
+                  sentiment:
+                    type:
+                      - string
+                      - "null"
+                  aspect:
+                    type:
+                      - string
+                      - "null"
+                  source:
+                    type:
+                      - string
+                      - "null"
+            pagination:
+              $ref: "#/components/schemas/ArtifactPagination"
+    DatasetBuildJobAccepted:
       type: object
+      description: |
+        POST /clean / /doc_genuineness / /clause_label 응답 slim shape.
+        2026-05-21 결정: project_id/dataset_id/dataset_version_id는 URL path에
+        이미 있고, attempt/triggered_by/workflow_*/diagnostics 같은 상세 필드는
+        GET /dataset_build_jobs/{job_id} 또는 /versions/{version_id}/build_jobs
+        로 위임한다. POST 응답은 "큐에 들어갔다" 알림 + polling key + 상태만.
       properties:
-        text_columns:
-          type: array
-          items:
-            type: string
-          minItems: 1
-          description: 감성 분석 샘플 실행 대상 텍스트 컬럼 목록. 단일 컬럼도 배열 하나로 전달한다.
-        model:
-          type:
-            - string
-            - "null"
-        max_rows:
-          type:
-            - integer
-            - "null"
-          minimum: 1
-          maximum: 20
-          description: 감성 분석 샘플로 처리할 최대 row 수. 기본값은 10, 최대값은 20이다.
-        batch_size:
-          type:
-            - integer
-            - "null"
-          minimum: 1
-          description: 동기 LLM 감성 분석 호출당 묶을 row 수. Anthropic Message Batches API가 아니라 내부 batch prompt 크기다.
-      required: [text_columns]
+        job_id:
+          type: string
+        build_type:
+          type: string
+          enum: [clean, doc_genuineness, clause_label]
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required: [job_id, build_type, status, created_at]
     DatasetBuildJob:
       type: object
       properties:
@@ -3302,7 +3018,11 @@ components:
           type: string
         build_type:
           type: string
-          enum: [prepare, sentiment, embedding, cluster]
+          enum: [clean, doc_genuineness, clause_label]
+          description: |
+            현재 hot path dataset_build task 3종 (ADR-018 β2 결정).
+            옛 prepare / sentiment / embedding / cluster / segment / embedding_cluster /
+            keyword_index / document_cluster_profile는 모두 삭제됐다.
         status:
           type: string
         request:
@@ -3323,8 +3043,6 @@ components:
           type:
             - string
             - "null"
-        resumed_execution_count:
-          type: integer
         created_at:
           type: string
           format: date-time
@@ -3354,7 +3072,6 @@ components:
         - build_type
         - status
         - attempt
-        - resumed_execution_count
         - created_at
     DatasetBuildJobListResponse:
       type: object
@@ -3385,8 +3102,6 @@ components:
           type:
             - string
             - "null"
-        resumed_execution_count:
-          type: integer
         progress:
           anyOf:
             - $ref: "#/components/schemas/BuildJobProgress"
@@ -3416,7 +3131,7 @@ components:
           type: array
           items:
             type: string
-      required: [retry_count, resumed_execution_count]
+      required: [retry_count]
     BuildJobProgress:
       type: object
       properties:
@@ -3443,880 +3158,27 @@ components:
             - "null"
           format: date-time
       required: [percent, processed_rows, total_rows]
-    SkillPlanStep:
+    DatasetDocGenuinenessBuildRequest:
       type: object
+      description: "ADR-017 / 5/19 — clean 직후 doc-level 3-tier 진성 분류 build payload. LLOA 호출이므로 worker에 LLOA_API_KEY 필수. 5/20 결정으로 output_path/max_tokens 제거 — worker default 사용."
       properties:
-        step_id:
+        doc_genuineness_prompt_version:
           type: string
-        skill_name:
-          type: string
-        dataset_name:
-          type: string
-        inputs:
-          $ref: "#/components/schemas/AnyMap"
-      required: [skill_name, dataset_name, inputs]
-    SkillPlan:
-      type: object
-      properties:
-        plan_id:
-          type: string
-        steps:
-          type: array
-          items:
-            $ref: "#/components/schemas/SkillPlanStep"
-        notes:
-          type:
-            - string
-            - "null"
-        created_at:
-          type: string
-          format: date-time
-      required: [steps]
-    AnalysisRequest:
-      type: object
-      properties:
-        request_id:
-          type: string
-        project_id:
-          type: string
-        dataset_name:
-          type:
-            - string
-            - "null"
-        dataset_version_id:
-          description: Resolved active dataset version used at request submission time.
-          type:
-            - string
-            - "null"
-        goal:
-          type: string
-        constraints:
-          $ref: "#/components/schemas/StringList"
-        context:
-          $ref: "#/components/schemas/AnyMap"
-        requested_plan:
-          oneOf:
-            - $ref: "#/components/schemas/SkillPlan"
-            - type: "null"
-        created_at:
-          type: string
-          format: date-time
-      required: [request_id, project_id, goal, constraints, context, created_at]
-    AnalysisSubmitRequest:
-      type: object
-      properties:
-        dataset_id:
-          type:
-            - string
-            - "null"
-        dataset_name:
-          type:
-            - string
-            - "null"
-        data_type:
-          type:
-            - string
-            - "null"
-        goal:
-          type: string
-        constraints:
-          $ref: "#/components/schemas/StringList"
-        context:
-          $ref: "#/components/schemas/AnyMap"
-        requested_plan:
-          oneOf:
-            - $ref: "#/components/schemas/SkillPlan"
-            - type: "null"
-      required: [dataset_id, goal]
-    PlanRecord:
-      type: object
-      properties:
-        plan_id:
-          type: string
-        request_id:
-          type: string
-        project_id:
-          type: string
-        dataset_name:
-          type: string
-        dataset_version_id:
-          description: Resolved active dataset version used when the plan was created.
-          type:
-            - string
-            - "null"
-        plan:
-          $ref: "#/components/schemas/SkillPlan"
-        status:
-          type: string
-        planner_type:
-          type:
-            - string
-            - "null"
-        planner_model:
-          type:
-            - string
-            - "null"
-        planner_prompt_version:
-          type:
-            - string
-            - "null"
-        plan_hash:
-          type:
-            - string
-            - "null"
-        created_at:
-          type: string
-          format: date-time
-      required: [plan_id, request_id, project_id, dataset_name, plan, status, created_at]
-    AnalysisPlanResponse:
-      type: object
-      properties:
-        request:
-          $ref: "#/components/schemas/AnalysisRequest"
-        plan:
-          $ref: "#/components/schemas/PlanRecord"
-      required: [request, plan]
-    AnalysisExecuteResponse:
-      type: object
-      properties:
-        request:
-          $ref: "#/components/schemas/AnalysisRequest"
-        plan:
-          $ref: "#/components/schemas/PlanRecord"
-        execution:
-          $ref: "#/components/schemas/ExecutionSummary"
-        job_id:
-          type:
-            - string
-            - "null"
-      required: [request, plan, execution]
-    ExecutionEvent:
-      type: object
-      properties:
-        execution_id:
-          type: string
-        ts:
-          type: string
-          format: date-time
-        level:
-          type: string
-        event_type:
-          type: string
-        message:
-          type: string
-        payload:
-          $ref: "#/components/schemas/AnyMap"
-      required: [execution_id, ts, level, event_type, message]
-    ExecutionSummary:
-      type: object
-      properties:
-        execution_id:
-          type: string
-        project_id:
-          type: string
-        request_id:
-          type: string
-        plan:
-          $ref: "#/components/schemas/SkillPlan"
-        status:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-        ended_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        required_hashes:
-          $ref: "#/components/schemas/StringList"
-        embedding_model_version:
-          type:
-            - string
-            - "null"
-        artifacts:
-          description: Step artifact map. Values are JSON-serialized strings.
-          $ref: "#/components/schemas/StringMap"
-        dataset_version_id:
-          description: Resolved active dataset version used when the execution was created.
-          type:
-            - string
-            - "null"
-        code_version:
-          type:
-            - string
-            - "null"
-        params_hash:
-          type:
-            - string
-            - "null"
-        skill_bundle_version:
-          type:
-            - string
-            - "null"
-        profile_snapshot:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetProfile"
-            - type: "null"
-        events:
-          type: array
-          items:
-            $ref: "#/components/schemas/ExecutionEvent"
-        diagnostics:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionDiagnostics"
-            - type: "null"
-      required:
-        - execution_id
-        - project_id
-        - request_id
-        - plan
-        - status
-        - created_at
-        - required_hashes
-        - artifacts
-        - events
-    ExecutionListResponse:
-      type: object
-      properties:
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/ExecutionListItem"
-      required: [items]
-    ExecutionListItem:
-      type: object
-      properties:
-        execution_id:
-          type: string
-        status:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-        ended_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        dataset_version_id:
-          type:
-            - string
-            - "null"
-        primary_skill_name:
-          type:
-            - string
-            - "null"
-        answer_preview:
-          type:
-            - string
-            - "null"
-        warning_count:
-          type: integer
-        waiting:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionWaitingState"
-            - type: "null"
-        diagnostics:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionDiagnostics"
-            - type: "null"
-      required: [execution_id, status, created_at, warning_count]
-    PlanExecuteResponse:
-      type: object
-      properties:
-        plan:
-          $ref: "#/components/schemas/PlanRecord"
-        execution:
-          $ref: "#/components/schemas/ExecutionSummary"
-        job_id:
-          type:
-            - string
-            - "null"
-      required: [plan, execution]
-    ExecutionResumeRequest:
-      type: object
-      properties:
-        reason:
-          type:
-            - string
-            - "null"
-        triggered_by:
-          type:
-            - string
-            - "null"
-    ExecutionRerunRequest:
-      type: object
-      properties:
-        mode:
-          type:
-            - string
-            - "null"
-        triggered_by:
-          type:
-            - string
-            - "null"
-    ExecutionRerunResponse:
-      type: object
-      properties:
-        execution:
-          $ref: "#/components/schemas/ExecutionSummary"
-        job_id:
-          type:
-            - string
-            - "null"
-      required: [execution]
-    ExecutionResultResponse:
-      type: object
-      properties:
-        execution_id:
-          type: string
-        artifacts:
-          description: Step artifact map. Values are JSON-serialized strings.
-          $ref: "#/components/schemas/StringMap"
-        contract:
-          $ref: "#/components/schemas/AnyMap"
-        result_v1:
-          $ref: "#/components/schemas/ExecutionResultV1"
-        final_answer:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionFinalAnswer"
-            - type: "null"
-        diagnostics:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionDiagnostics"
-            - type: "null"
-      required: [execution_id, artifacts, contract, result_v1]
-    ExecutionEventsResponse:
-      type: object
-      properties:
-        execution_id:
-          type: string
-        status:
-          type: string
-        event_count:
-          type: integer
-        events:
-          type: array
-          items:
-            $ref: "#/components/schemas/ExecutionEvent"
-        diagnostics:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionDiagnostics"
-            - type: "null"
-      required: [execution_id, status, event_count, events]
-    ExecutionProgressResponse:
-      type: object
-      properties:
-        execution_id:
-          type: string
-        status:
-          type: string
-        total_steps:
-          type: integer
-        completed_steps:
-          type: integer
-        failed_steps:
-          type: integer
-        last_event_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        running_step:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionStepProgress"
-            - type: "null"
-        waiting:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionWaitingState"
-            - type: "null"
-        build_dependencies:
-          type: array
-          items:
-            $ref: "#/components/schemas/ExecutionBuildDependency"
-        steps:
-          type: array
-          items:
-            $ref: "#/components/schemas/ExecutionStepProgress"
-        available_artifacts:
-          type: array
-          items:
-            type: string
-        result_preview:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionResultAnswer"
-            - type: "null"
-        diagnostics:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionDiagnostics"
-            - type: "null"
-      required: [execution_id, status, total_steps, completed_steps, failed_steps, steps]
-    ExecutionStepPreviewResponse:
-      type: object
-      properties:
-        execution_id:
-          type: string
-        step_id:
-          type: string
-        skill_name:
-          type: string
-        status:
-          type: string
-        started_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        completed_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        artifact_key:
-          type:
-            - string
-            - "null"
-        artifact_ref:
-          type:
-            - string
-            - "null"
-        summary:
-          type: string
-        warnings:
-          type: array
-          items:
-            type: string
-        selection_mode:
-          type: string
-        usage:
-          $ref: "#/components/schemas/AnyMap"
-        preview:
-          $ref: "#/components/schemas/AnyMap"
-        event_count:
-          type: integer
-        events:
-          type: array
-          items:
-            $ref: "#/components/schemas/ExecutionEvent"
-        diagnostics:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionDiagnostics"
-            - type: "null"
-      required: [execution_id, step_id, skill_name, status, event_count]
-    OperationsFailureItem:
-      type: object
-      properties:
-        id:
-          type: string
-        status:
-          type: string
-        type:
-          type: string
-        message:
-          type: string
-        occurred_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        retry_count:
-          type: integer
-        resource_ref:
-          type: string
-      required: [id, status]
-    OperationsExecutionSummary:
-      type: object
-      properties:
-        total:
-          type: integer
-        by_status:
-          $ref: "#/components/schemas/IntegerMap"
-        waiting_by_dependency:
-          $ref: "#/components/schemas/IntegerMap"
-        final_answer_by_status:
-          $ref: "#/components/schemas/IntegerMap"
-        recent_failures:
-          type: array
-          items:
-            $ref: "#/components/schemas/OperationsFailureItem"
-      required: [total]
-    OperationsBuildJobSummary:
-      type: object
-      properties:
-        total:
-          type: integer
-        by_status:
-          $ref: "#/components/schemas/IntegerMap"
-        by_type:
-          type: object
-          additionalProperties:
-            $ref: "#/components/schemas/IntegerMap"
-        retrying_jobs:
-          type: integer
-        recent_failures:
-          type: array
-          items:
-            $ref: "#/components/schemas/OperationsFailureItem"
-      required: [total, retrying_jobs]
-    OperationsSummaryResponse:
-      type: object
-      properties:
-        project_id:
-          type: string
-        generated_at:
-          type: string
-          format: date-time
-        executions:
-          $ref: "#/components/schemas/OperationsExecutionSummary"
-        build_jobs:
-          $ref: "#/components/schemas/OperationsBuildJobSummary"
-      required: [project_id, generated_at, executions, build_jobs]
-    ExecutionResultV1:
-      type: object
-      properties:
-        schema_version:
-          type: string
-        status:
-          type: string
-        primary_artifact_key:
-          type:
-            - string
-            - "null"
-        primary_skill_name:
-          type:
-            - string
-            - "null"
-        answer:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionResultAnswer"
-            - type: "null"
-        step_results:
-          type: array
-          items:
-            $ref: "#/components/schemas/ExecutionStepResultV1"
-        usage_summary:
-          $ref: "#/components/schemas/AnyMap"
-        profile:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetProfile"
-            - type: "null"
-        warnings:
-          type: array
-          items:
-            type: string
-        waiting:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionWaitingState"
-            - type: "null"
-      required: [schema_version, status, step_results]
-    ExecutionFinalAnswer:
-      type: object
-      properties:
-        schema_version:
-          type: string
-        status:
-          type: string
-        generation_mode:
-          type: string
-        headline:
-          type: string
-        answer_text:
-          type: string
-        key_points:
-          type: array
-          items:
-            type: string
-        caveats:
-          type: array
-          items:
-            type: string
-        evidence:
-          type: array
-          items:
-            $ref: "#/components/schemas/AnyMap"
-        follow_up_questions:
-          type: array
-          items:
-            type: string
-        prompt_version:
-          type:
-            - string
-            - "null"
-        model:
-          type:
-            - string
-            - "null"
-        usage:
-          $ref: "#/components/schemas/AnyMap"
-        generated_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-      required: [schema_version, status, answer_text]
-    ExecutionResultAnswer:
-      type: object
-      properties:
-        summary:
-          type: string
-        key_findings:
-          type: array
-          items:
-            type: string
-        evidence:
-          type: array
-          items:
-            $ref: "#/components/schemas/AnyMap"
-        follow_up_questions:
-          type: array
-          items:
-            type: string
-        selection_source:
-          type: string
-        citation_mode:
-          type: string
-      required: [summary]
-    ExecutionStepResultV1:
-      type: object
-      properties:
-        step_id:
-          type: string
-        skill_name:
-          type: string
-        status:
-          type: string
-        artifact_key:
-          type:
-            - string
-            - "null"
-        summary:
-          type: string
-        usage:
-          $ref: "#/components/schemas/AnyMap"
-        artifact_ref:
-          type:
-            - string
-            - "null"
-        warnings:
-          type: array
-          items:
-            type: string
-        selection_mode:
-          type: string
-      required: [step_id, skill_name, status]
-    ExecutionStepProgress:
-      type: object
-      properties:
-        step_id:
-          type: string
-        skill_name:
-          type: string
-        status:
-          type: string
-        started_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        completed_at:
-          type:
-            - string
-            - "null"
-          format: date-time
-        artifact_key:
-          type:
-            - string
-            - "null"
-        summary:
-          type: string
-        warnings:
-          type: array
-          items:
-            type: string
-        selection_mode:
-          type: string
-      required: [step_id, skill_name, status]
-    ExecutionBuildDependency:
-      type: object
-      properties:
-        build_type:
-          type: string
-          enum: [prepare, sentiment, embedding, cluster]
-        status:
-          type: string
-        ready:
+          description: "request inline prompt 버전 label. 미지정 시 tier 4 default (dataset-doc-genuineness-v1)."
+        force:
           type: boolean
-        waiting_for:
-          type: boolean
-        latest_job:
-          anyOf:
-            - $ref: "#/components/schemas/DatasetBuildJob"
-            - type: "null"
-      required: [build_type, status, ready]
-    ExecutionWaitingState:
+          default: false
+    DatasetClauseLabelBuildRequest:
       type: object
+      description: "ADR-017 / 5/19 + 5/20 — cleaned doc 단위 LLOA 한 호출 절 분리 + sentiment + aspect 라벨링 build payload. prompt v3 schema (clause/sentiment/aspect 3 필드). 5/20 결정으로 output_path/batch_size/max_tokens/aspect_taxonomy_version 제거 — worker default 사용 + default include_genuineness=[\"genuine_review\",\"mixed\"]."
       properties:
-        waiting_for:
+        clause_label_prompt_version:
           type: string
-        reason:
-          type: string
-      required: [waiting_for]
-    ExecutionDiagnostics:
-      type: object
-      properties:
-        event_count:
-          type: integer
-        latest_event_type:
-          type: string
-        latest_event_message:
-          type: string
-        failure_reason:
-          type: string
-        waiting:
-          anyOf:
-            - $ref: "#/components/schemas/ExecutionWaitingState"
-            - type: "null"
-        final_answer_status:
-          type: string
-        final_answer_error:
-          type: string
-        artifact_count:
-          type: integer
-        artifact_payload_bytes:
-          type: integer
-        largest_artifact_key:
-          type: string
-        largest_artifact_bytes:
-          type: integer
-        artifact_storage_mode:
-          type: string
-      required: [event_count]
-    ReportDraftCreateRequest:
-      type: object
-      properties:
-        title:
-          type:
-            - string
-            - "null"
-        execution_ids:
+          description: "request inline prompt 버전 label. 미지정 시 tier 4 default (dataset-clause-label-v3)."
+        include_genuineness:
           type: array
           items:
             type: string
-      required: [execution_ids]
-    ReportDraft:
-      type: object
-      properties:
-        draft_id:
-          type: string
-        project_id:
-          type: string
-        title:
-          type: string
-        execution_ids:
-          type: array
-          items:
-            type: string
-        content:
-          $ref: "#/components/schemas/ReportDraftV1"
-        created_at:
-          type: string
-          format: date-time
-      required: [draft_id, project_id, title, execution_ids, content, created_at]
-    ReportDraftV1:
-      type: object
-      properties:
-        schema_version:
-          type: string
-        title:
-          type: string
-        overview:
-          type: string
-        execution_count:
-          type: integer
-        sections:
-          type: array
-          items:
-            $ref: "#/components/schemas/ReportDraftSection"
-        key_findings:
-          type: array
-          items:
-            type: string
-        evidence:
-          type: array
-          items:
-            $ref: "#/components/schemas/AnyMap"
-        follow_up_questions:
-          type: array
-          items:
-            type: string
-        usage_summary:
-          $ref: "#/components/schemas/AnyMap"
-        warnings:
-          type: array
-          items:
-            type: string
-      required: [schema_version, title, overview, execution_count]
-    ReportDraftSection:
-      type: object
-      properties:
-        execution_id:
-          type: string
-        status:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-        primary_skill_name:
-          type:
-            - string
-            - "null"
-        summary:
-          type: string
-        key_findings:
-          type: array
-          items:
-            type: string
-        evidence:
-          type: array
-          items:
-            $ref: "#/components/schemas/AnyMap"
-        warning_count:
-          type: integer
-      required: [execution_id, status, created_at, summary, warning_count]
-    ExecutionDiffStep:
-      type: object
-      properties:
-        step_id:
-          type: string
-        skill_name:
-          type: string
-        status:
-          type: string
-        from_hash:
-          type:
-            - string
-            - "null"
-        to_hash:
-          type:
-            - string
-            - "null"
-        stats:
-          $ref: "#/components/schemas/AnyMap"
-      required: [step_id, skill_name, status]
-    ExecutionDiffResponse:
-      type: object
-      properties:
-        from_execution_id:
-          type: string
-        to_execution_id:
-          type: string
-        total_steps:
-          type: integer
-        changed_steps:
-          type: integer
-        steps:
-          type: array
-          items:
-            $ref: "#/components/schemas/ExecutionDiffStep"
-      required: [from_execution_id, to_execution_id, total_steps, changed_steps, steps]
+            enum: [genuine_review, mixed, non_review]
+          description: "doc_genuineness 결과로 필터링 (예: ['genuine_review','mixed']). 명시 안 하면 모든 doc 처리. 명시 시 doc_genuineness ready 필요."
+        force: { type: boolean }

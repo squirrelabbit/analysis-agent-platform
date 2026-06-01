@@ -1,268 +1,81 @@
 package service
 
 import (
-	"encoding/json"
-	"fmt"
-	"strings"
+	"context"
 	"time"
 
-	"analysis-support-platform/control-plane/internal/domain"
 	"analysis-support-platform/control-plane/internal/obs"
-	"analysis-support-platform/control-plane/internal/store"
-	"analysis-support-platform/control-plane/internal/workflows"
 )
 
-type StartupReconciliationSummary struct {
-	BuildJobsRequeued        int `json:"build_jobs_requeued"`
-	ExecutionsReenqueued     int `json:"executions_reenqueued"`
-	WaitingExecutionsResumed int `json:"waiting_executions_resumed"`
-}
-
-// LogBootReconciled emits the service.boot.reconciled structured event.
-// Call from server startup after all reconciliation steps complete.
-func LogBootReconciled(summary StartupReconciliationSummary, durationMs int64) {
-	obs.Logger.Info("startup reconciliation completed",
-		"event", "service.boot.reconciled",
-		"duration_ms", durationMs,
-		"restored_dataset", summary.BuildJobsRequeued,
-		"restored_execution", summary.ExecutionsReenqueued,
-		"restored_waiting", summary.WaitingExecutionsResumed,
-	)
-}
-
-func (s *DatasetService) ReconcileStartupBuildJobs() (int, error) {
-	projects, err := s.store.ListProjects()
-	if err != nil {
-		return 0, err
-	}
-
-	requeued := 0
-	for _, project := range projects {
-		jobs, err := s.store.ListDatasetBuildJobs(project.ProjectID, "")
-		if err != nil {
-			return requeued, err
-		}
-		for _, job := range jobs {
-			if job.Status != "queued" && job.Status != "running" {
-				continue
-			}
-			if err := s.requeueDatasetBuildJob(job); err != nil {
-				return requeued, err
-			}
-			requeued++
-		}
-	}
-	return requeued, nil
-}
-
-func (s *DatasetService) requeueDatasetBuildJob(job domain.DatasetBuildJob) error {
-	runner, err := s.recoveryDatasetBuildRunner(job)
-	if err != nil {
-		return err
-	}
-
-	job.ErrorMessage = nil
-	job.LastErrorType = nil
-	job.WorkflowRunID = nil
-	if err := s.store.SaveDatasetBuildJob(job); err != nil {
-		return err
-	}
-
-	if s.buildJobStarter != nil && s.buildJobStarter.EngineName() == "temporal" {
-		workflowID, err := s.buildJobStarter.StartDatasetBuildWorkflow(workflows.StartDatasetBuildInput{
-			JobID:            job.JobID,
-			ProjectID:        job.ProjectID,
-			DatasetID:        job.DatasetID,
-			DatasetVersionID: job.DatasetVersionID,
-			BuildType:        job.BuildType,
-			RequestID:        normalizeDatasetBuildRequestID("", job.JobID),
-		})
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(workflowID) != "" {
-			job.WorkflowID = &workflowID
-		}
-		return s.store.SaveDatasetBuildJob(job)
-	}
-
-	go s.runDatasetBuildJob(job, runner)
-	return nil
-}
-
-func (s *DatasetService) recoveryDatasetBuildRunner(job domain.DatasetBuildJob) (func() error, error) {
-	switch job.BuildType {
-	case datasetBuildTypeClean:
-		request, err := decodeStartupBuildRequest[domain.DatasetCleanRequest](job.Request)
-		if err != nil {
-			return nil, err
-		}
-		return func() error {
-			_, err := s.BuildClean(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
-			return err
-		}, nil
-	case datasetBuildTypePrepare:
-		request, err := decodeStartupBuildRequest[domain.DatasetPrepareRequest](job.Request)
-		if err != nil {
-			return nil, err
-		}
-		return func() error {
-			_, err := s.BuildPrepare(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
-			return err
-		}, nil
-	case datasetBuildTypeSentiment:
-		request, err := decodeStartupBuildRequest[domain.DatasetSentimentBuildRequest](job.Request)
-		if err != nil {
-			return nil, err
-		}
-		return func() error {
-			_, err := s.BuildSentiment(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
-			return err
-		}, nil
-	case datasetBuildTypeEmbedding:
-		request, err := decodeStartupBuildRequest[domain.DatasetEmbeddingBuildRequest](job.Request)
-		if err != nil {
-			return nil, err
-		}
-		return func() error {
-			_, err := s.BuildEmbeddings(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
-			return err
-		}, nil
-	case datasetBuildTypeCluster:
-		request, err := decodeStartupBuildRequest[domain.DatasetClusterBuildRequest](job.Request)
-		if err != nil {
-			return nil, err
-		}
-		return func() error {
-			_, err := s.BuildClusters(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
-			return err
-		}, nil
-	default:
-		return nil, fmt.Errorf("unsupported dataset build type for reconciliation: %s", job.BuildType)
-	}
-}
-
-func (s *AnalysisService) ReconcileStartupExecutions() (StartupReconciliationSummary, error) {
-	summary := StartupReconciliationSummary{}
-	if s.starter == nil || strings.TrimSpace(s.starter.EngineName()) == "" || s.starter.EngineName() == "noop" {
-		return summary, nil
-	}
-
-	projects, err := s.store.ListProjects()
-	if err != nil {
-		return summary, err
-	}
-
-	for _, project := range projects {
-		executions, err := s.store.ListExecutions(project.ProjectID)
-		if err != nil {
-			return summary, err
-		}
-
-		waitingVersions := map[string]struct{}{}
-		for _, item := range executions {
-			switch item.Status {
-			case "queued", "running":
-				execution, err := s.GetExecution(project.ProjectID, item.ExecutionID)
-				if err != nil {
-					return summary, err
-				}
-				if _, err := s.requeueExecutionInternal(
-					execution,
-					"control-plane restarted while execution was in-flight",
-					"startup_reconciliation",
-					"STARTUP_REENQUEUED",
-					"execution re-enqueued during startup reconciliation",
-				); err != nil {
-					return summary, err
-				}
-				summary.ExecutionsReenqueued++
-			case "waiting":
-				if item.DatasetVersionID == nil {
-					continue
-				}
-				versionID := strings.TrimSpace(*item.DatasetVersionID)
-				if versionID != "" {
-					waitingVersions[versionID] = struct{}{}
-				}
-			}
-		}
-
-		for versionID := range waitingVersions {
-			resumed, err := s.ResumeWaitingExecutionsForDatasetVersion(
-				project.ProjectID,
-				versionID,
-				"control-plane restarted and re-evaluated waiting execution dependencies",
-				"startup_reconciliation",
-			)
-			if err != nil {
-				return summary, err
-			}
-			summary.WaitingExecutionsResumed += resumed
-		}
-	}
-
-	return summary, nil
-}
-
-func (s *AnalysisService) requeueExecutionInternal(
-	execution domain.ExecutionSummary,
-	reason string,
-	triggeredBy string,
-	eventType string,
-	message string,
-) (domain.ExecutionSummary, error) {
-	if execution.DatasetVersionID != nil && strings.TrimSpace(*execution.DatasetVersionID) != "" {
-		version, err := s.store.GetDatasetVersion(execution.ProjectID, strings.TrimSpace(*execution.DatasetVersionID))
-		if err != nil && err != store.ErrNotFound {
-			return domain.ExecutionSummary{}, err
-		}
-		if err == nil {
-			execution.Plan = refreshPlanWithDatasetVersion(execution.Plan, version)
-		}
-	}
-
-	workflowID, err := s.starter.StartAnalysisWorkflow(workflows.StartAnalysisInput{
-		ExecutionID:      execution.ExecutionID,
-		ProjectID:        execution.ProjectID,
-		RequestID:        execution.RequestID,
-		PlanID:           execution.Plan.PlanID,
-		DatasetVersionID: execution.DatasetVersionID,
-	})
-	if err != nil {
-		return domain.ExecutionSummary{}, err
-	}
-
+// ReconcileStartup — silverone 2026-05-27 (Codex adversarial review fix-2).
+// control-plane 부팅 시 호출. 직전 프로세스가 in-flight 상태로 남긴 row를
+// 모두 단말 상태로 마감해 active job lookup이 영원히 막히지 않게 한다.
+//
+// 정책:
+//   - analysis_runs.status='running' → 'failed' + error_message=
+//     "control-plane restarted during analysis execution" + completed_at=now.
+//     plan reuse 흐름의 GetLastSuccessfulAnalysisRun에 영향 없음 (running이라
+//     원래 source 후보가 아님).
+//   - dataset_build_jobs.status in ('queued','running') → 'failed' +
+//     error_message="control-plane restarted before job completion" +
+//     completed_at=now. Temporal workflow 재조회는 후속 작업으로 분리
+//     (장기적으로 workflow_id로 status pull). 1차 cut은 fail-loud.
+//   - 둘 다 idempotent — 다음 부팅 때 row가 없으면 no-op.
+//
+// 호출자(main.go)는 결과 metric을 obs로 기록한다 (운영자가 재기동 후 어떤
+// row가 정리됐는지 즉시 확인).
+func (s *DatasetService) ReconcileStartup(ctx context.Context) (ReconcileReport, error) {
+	report := ReconcileReport{}
 	now := time.Now().UTC()
-	execution.Status = "queued"
-	execution.EndedAt = nil
-	execution.Events = append(execution.Events, domain.ExecutionEvent{
-		ExecutionID: execution.ExecutionID,
-		TS:          now,
-		Level:       "info",
-		EventType:   eventType,
-		Message:     message,
-		Payload: map[string]any{
-			"reason":          reason,
-			"triggered_by":    triggeredBy,
-			"workflow_id":     workflowID,
-			"workflow_engine": s.starter.EngineName(),
-		},
-	})
-	if err := s.store.SaveExecution(execution); err != nil {
-		return domain.ExecutionSummary{}, err
+
+	runs, err := s.store.ListInFlightAnalysisRuns()
+	if err != nil {
+		return report, err
 	}
-	return execution, nil
+	for _, run := range runs {
+		message := "control-plane restarted during analysis execution"
+		run.Status = "failed"
+		run.ErrorMessage = &message
+		run.CompletedAt = &now
+		if err := s.store.SaveAnalysisRun(run); err != nil {
+			obs.Logger.Warn("startup.reconcile.analysis_run_save_failed",
+				"event", "startup.reconcile.analysis_run_save_failed",
+				"run_id", run.RunID,
+				"error", err.Error(),
+			)
+			continue
+		}
+		report.AnalysisRunsFailed = append(report.AnalysisRunsFailed, run.RunID)
+	}
+
+	jobs, err := s.store.ListInFlightDatasetBuildJobs()
+	if err != nil {
+		return report, err
+	}
+	for _, job := range jobs {
+		message := "control-plane restarted before job completion"
+		job.Status = "failed"
+		job.ErrorMessage = &message
+		job.CompletedAt = &now
+		if err := s.store.SaveDatasetBuildJob(job); err != nil {
+			obs.Logger.Warn("startup.reconcile.build_job_save_failed",
+				"event", "startup.reconcile.build_job_save_failed",
+				"job_id", job.JobID,
+				"error", err.Error(),
+			)
+			continue
+		}
+		report.DatasetBuildJobsFailed = append(report.DatasetBuildJobsFailed, job.JobID)
+	}
+
+	_ = ctx // 후속에서 Temporal workflow pull 시 사용 예정
+	return report, nil
 }
 
-func decodeStartupBuildRequest[T any](payload map[string]any) (T, error) {
-	var result T
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return result, err
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return result, err
-	}
-	return result, nil
+// ReconcileReport — startup reconciliation 결과 요약. main.go가 obs log로
+// 노출. failed assistant placeholder 저장은 후속 결정 항목 — 이번 PR에서는
+// run.error_message만으로 운영자 추적 가능.
+type ReconcileReport struct {
+	AnalysisRunsFailed     []string
+	DatasetBuildJobsFailed []string
 }

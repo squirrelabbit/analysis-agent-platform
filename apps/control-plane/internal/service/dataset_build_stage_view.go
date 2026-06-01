@@ -8,6 +8,13 @@ import (
 
 const (
 	datasetBuildStageSource = "source"
+	// dataset_build 7 task 제거 후에도 stage view는 metadata 기반 status 표시를
+	// 유지 (DatasetVersion struct field는 별도 task로 정리). 따라서 stage 이름은
+	// 여기서만 사용되는 로컬 상수로 보존.
+	datasetBuildTypePrepare   = "prepare"
+	datasetBuildTypeSentiment = "sentiment"
+	datasetBuildTypeEmbedding = "embedding"
+	datasetBuildTypeCluster   = "cluster"
 )
 
 func buildDatasetVersionStages(version domain.DatasetVersion, buildJobs []domain.DatasetVersionBuildJobStatus) []domain.DatasetVersionBuildStage {
@@ -102,27 +109,11 @@ func datasetVersionStageState(version domain.DatasetVersion, stage string) datas
 			required:   requiresClean(version),
 			ready:      isCleanReady(version),
 		}
-	case datasetBuildTypePrepare:
-		return datasetVersionStageRuntimeState{
-			status:     datasetVersionStatusOrNotApplicable(version.PrepareStatus, unstructured),
-			applicable: unstructured,
-			required:   requiresPrepare(version),
-			ready:      isPrepareReady(version),
-		}
-	case datasetBuildTypeSentiment:
-		return datasetVersionStageRuntimeState{
-			status:     datasetVersionStatusOrNotApplicable(version.SentimentStatus, unstructured),
-			applicable: unstructured,
-			required:   requiresSentiment(version),
-			ready:      isSentimentReady(version),
-		}
-	case datasetBuildTypeEmbedding:
-		return datasetVersionStageRuntimeState{
-			status:     datasetVersionStatusOrNotApplicable(version.EmbeddingStatus, unstructured),
-			applicable: unstructured,
-			required:   requiresEmbedding(version),
-			ready:      embeddingBuildReady(version),
-		}
+	case datasetBuildTypePrepare, datasetBuildTypeSentiment, datasetBuildTypeEmbedding:
+		// silverone 2026-05-28 (β2 cleanup PR2) — prepare/sentiment/embedding
+		// stage는 ADR-018 β2로 사라졌다. struct 필드 의존 분기 stub. stage view
+		// 자체를 어디서 노출할지(frontend stage enum)는 PR3에서 정리.
+		return datasetVersionStageRuntimeState{status: "not_applicable"}
 	case datasetBuildTypeCluster:
 		status := strings.TrimSpace(metadataString(version.Metadata, "cluster_status", ""))
 		return datasetVersionStageRuntimeState{
@@ -224,7 +215,8 @@ func datasetVersionStageAutoRunEligible(version domain.DatasetVersion, stage str
 	case datasetBuildTypeSentiment:
 		return metadataBool(version.Metadata, "sentiment_required")
 	case datasetBuildTypeEmbedding:
-		return metadataBool(version.Metadata, "embedding_required") || version.EmbeddingStatus == "queued"
+		// β2 dead stage — auto-run 안 일어남.
+		return false
 	case datasetBuildTypeCluster:
 		return metadataBool(version.Metadata, "cluster_required")
 	default:
@@ -298,27 +290,21 @@ func datasetVersionStageSummary(version domain.DatasetVersion, stage string) map
 }
 
 func datasetVersionStageModel(version domain.DatasetVersion, stage string) string {
-	switch stage {
-	case datasetBuildTypePrepare:
-		return derefString(version.PrepareModel)
-	case datasetBuildTypeSentiment:
-		return derefString(version.SentimentModel)
-	case datasetBuildTypeEmbedding:
-		return derefString(version.EmbeddingModel)
-	default:
+	// silverone 2026-05-28 (β2 cleanup PR2) — prepare/sentiment/embedding model
+	// 필드는 제거. stage view에서 model은 metadata.*_model로 fallback.
+	if stage == "" {
 		return ""
 	}
+	return metadataString(version.Metadata, stage+"_model", "")
 }
 
 func datasetVersionStagePromptVersion(version domain.DatasetVersion, stage string) string {
-	switch stage {
-	case datasetBuildTypePrepare:
-		return derefString(version.PreparePromptVer)
-	case datasetBuildTypeSentiment:
-		return derefString(version.SentimentPromptVer)
-	default:
+	// silverone 2026-05-28 (β2 cleanup PR2) — prepare/sentiment prompt 필드 제거.
+	// stage view에서 prompt_version은 metadata.*_prompt_version로 fallback.
+	if stage == "" {
 		return ""
 	}
+	return metadataString(version.Metadata, stage+"_prompt_version", "")
 }
 
 func datasetVersionPrimaryArtifact(stage string, artifacts []domain.DatasetVersionArtifact) (domain.DatasetVersionArtifact, bool) {

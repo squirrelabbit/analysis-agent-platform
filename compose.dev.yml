@@ -13,7 +13,7 @@ services:
       POSTGRES_DB: postgres
       TZ: Asia/Seoul
     ports:
-      - "15432:5432"
+      - "127.0.0.1:15432:5432"
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
       - ./apps/control-plane/dev/postgres-init.sql:/docker-entrypoint-initdb.d/10-analysis_support.sql:ro
@@ -29,7 +29,7 @@ services:
     environment:
       TZ: Asia/Seoul
     ports:
-      - "17233:7233"
+      - "127.0.0.1:17233:7233"
     restart: unless-stopped
 
   python-ai-worker:
@@ -46,14 +46,26 @@ services:
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
       ANTHROPIC_PREPARE_MODEL: ${ANTHROPIC_PREPARE_MODEL:-claude-haiku-4-5}
       ANTHROPIC_SENTIMENT_MODEL: ${ANTHROPIC_SENTIMENT_MODEL:-claude-haiku-4-5}
+      ANTHROPIC_TIMEOUT_SEC: ${ANTHROPIC_TIMEOUT_SEC:-90}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       OPENAI_EMBEDDING_DIMENSIONS: ${OPENAI_EMBEDDING_DIMENSIONS:-0}
       OPENAI_EMBEDDING_BATCH_SIZE: ${OPENAI_EMBEDDING_BATCH_SIZE:-32}
       OPENAI_TIMEOUT_SEC: ${OPENAI_TIMEOUT_SEC:-30}
       LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
+      # ADR-017 / 5/19 결정 — LLOA(사내 wisenut vLLM) 전처리 LLM 단계 전용 env.
+      # silverone .env의 WISENUT_LLOA_MAX_V1_2_1_API_KEY와 호환 (config.py에서 fallback chain).
+      LLOA_API_KEY: ${LLOA_API_KEY:-}
+      WISENUT_LLOA_API_KEY: ${WISENUT_LLOA_API_KEY:-}
+      WISENUT_LLOA_MAX_V1_2_1_API_KEY: ${WISENUT_LLOA_MAX_V1_2_1_API_KEY:-}
+      LLOA_API_URL: ${LLOA_API_URL:-http://210.180.82.135:9023/v1/chat/completions}
+      LLOA_MODEL: ${LLOA_MODEL:-wisenut/wise-lloa-max-v1.2.1}
+      LLOA_MAX_TOKENS: ${LLOA_MAX_TOKENS:-65536}
+      LLOA_TIMEOUT_SEC: ${LLOA_TIMEOUT_SEC:-180}
+      LLOA_REASONING_EFFORT: ${LLOA_REASONING_EFFORT:-low}
+      LLOA_PREPEND_NO_THINK: ${LLOA_PREPEND_NO_THINK:-true}
     ports:
-      - "18090:8090"
+      - "127.0.0.1:18090:8090"
     volumes:
       - ./data:/workspace/data
     restart: unless-stopped
@@ -79,9 +91,10 @@ services:
       TEMPORAL_RETENTION_MODE: temporal_dev_default
       TEMPORAL_RECOVERY_MODE: startup_reconciliation
       PYTHON_AI_WORKER_URL: http://python-ai-worker:8090
+      PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC: ${PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC:-5400}
       PLANNER_BACKEND: python-ai
     ports:
-      - "18080:8080"
+      - "127.0.0.1:18080:8080"
     volumes:
       - ./data:/workspace/data
     depends_on:
@@ -120,6 +133,7 @@ services:
       DATASET_BUILD_SENTIMENT_MAX_CONCURRENT: 2
       DATASET_BUILD_EMBEDDING_MAX_CONCURRENT: 1
       PYTHON_AI_WORKER_URL: http://python-ai-worker:8090
+      PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC: ${PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC:-5400}
     depends_on:
       postgres:
         condition: service_healthy
@@ -129,6 +143,23 @@ services:
         condition: service_started
     volumes:
       - ./data:/workspace/data
+    restart: unless-stopped
+
+  # silverone 2026-06-01 — web(Vite+React SPA) 빌드 후 nginx 정적 serve (Option B).
+  # 동일출처 구조: 브라우저는 web(:5173)만 호출하고, nginx가 /api/* 를 control-plane
+  # 으로 reverse-proxy(prefix 제거)한다. axios는 VITE_API_BASE_URL=/api 로 빌드되어
+  # `/api/...` 로 요청 → 동일출처라 Content-Disposition 등 응답 헤더가 JS에 노출되어
+  # 다운로드 파일명이 정상 동작한다(백엔드 CORS 수정 불필요).
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      - control-plane
     restart: unless-stopped
 
 volumes:

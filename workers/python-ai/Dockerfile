@@ -6,15 +6,23 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tzdata \
-    && python -m pip install --no-cache-dir "fastembed>=0.8,<0.9" "pydantic>=2.8,<3.0" "pyarrow>=21,<22" "psycopg[binary]>=3.2,<3.3" "structlog>=24,<26" \
+    && python -m pip install --no-cache-dir "fastembed>=0.8,<0.9" "pydantic>=2.8,<3.0" "pyarrow>=21,<22" "duckdb>=1.1,<2.0" "psycopg[binary]>=3.2,<3.3" "structlog>=24,<26" "scikit-learn>=1.5,<1.7" \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY workers/python-ai/src /app/src
-COPY config/skill_bundle.json /app/config/skill_bundle.json
+# ADR-017 (2026-05-19) — internal task routing 카탈로그 (planner와 분리).
+# δ-4 (2026-05-21)로 skill_bundle.json은 삭제됐다 — plan은 planner_v2가
+# LLM으로 생성하므로 고정 카탈로그가 필요하지 않다.
+COPY config/task_registry.json /app/config/task_registry.json
 COPY config/prompts /app/config/prompts
-COPY config/skill_policies /app/config/skill_policies
+# 5/11: clean 단계 inline noise scrub 패턴 — `_load_noise_patterns`가 tier 4
+# config fallback으로 직접 read.
+COPY config/noise_patterns /app/config/noise_patterns
+# taxonomy-driven config Phase 1 (2026-05-27) — aspect/sentiment taxonomy
+# single source. clause_label / planner schema가 점진적으로 여기서 derive.
+COPY config/taxonomies /app/config/taxonomies
 
 EXPOSE 8090
 

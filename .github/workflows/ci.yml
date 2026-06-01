@@ -35,3 +35,28 @@ jobs:
       - name: Build Go binaries
         working-directory: apps/control-plane
         run: go build ./...
+
+  release-guard:
+    # silverone 2026-05-27 — Codex adversarial review fix-4. release safety:
+    # openapi parse + boot-time destructive SQL guard. smoke는 docker 의존이라
+    # 로컬 scripts/ci.sh에서만 돌린다.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Ruby (for YAML parse)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+      - name: openapi YAML parse
+        run: |
+          ruby -e 'require "yaml"; YAML.load_file("docs/api/openapi.yaml"); YAML.load_file("docs/api/openapi.frontend.yaml"); puts "ok"'
+      - name: boot-time destructive SQL guard (grep)
+        run: |
+          if grep -rnE 'DROP TABLE IF EXISTS (report_drafts|executions|skill_plans|analysis_requests)' \
+              apps/control-plane/internal/store/ \
+              apps/control-plane/cmd/ \
+              apps/control-plane/internal/service/; then
+            echo "legacy table DROP found in boot path. Move destructive cleanup to operator-run migration." >&2
+            exit 1
+          fi

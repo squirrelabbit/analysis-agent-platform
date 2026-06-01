@@ -88,10 +88,6 @@ func (s *ProjectService) DeleteProject(projectID string) error {
 }
 
 func (s *ProjectService) withProjectCounts(project domain.Project) (domain.Project, error) {
-	scenarios, err := s.store.ListScenarios(project.ProjectID)
-	if err != nil {
-		return domain.Project{}, err
-	}
 	prompts, err := s.store.ListProjectPrompts(project.ProjectID)
 	if err != nil {
 		return domain.Project{}, err
@@ -110,9 +106,17 @@ func (s *ProjectService) withProjectCounts(project domain.Project) (domain.Proje
 		datasetVersionCount += len(versions)
 	}
 
+	// silverone 2026-06-01 — project 사이드바 채팅 count. dataset별 N+1 회피
+	// 위해 단일 COUNT 쿼리. dataset 정책(archive/delete)이 없으므로 모든 thread
+	// 합산 — dataset_version_count와 동일 기준.
+	threadCount, err := s.store.CountAnalysisThreadsByProject(project.ProjectID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+
 	project.DatasetVersionCount = datasetVersionCount
-	project.ScenarioCount = len(scenarios)
 	project.PromptCount = len(prompts)
+	project.AnalysisThreadCount = threadCount
 	return project, nil
 }
 

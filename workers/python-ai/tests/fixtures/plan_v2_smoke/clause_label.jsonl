@@ -1,0 +1,5 @@
+{"doc_id": "d1", "clause": "분위기 좋았어요", "sentiment": "positive", "aspect": "ambiance_scenery", "prompt_version": "dataset-clause-label-v3", "source": "lloa"}
+{"doc_id": "d2", "clause": "음식이 맛있었어요", "sentiment": "positive", "aspect": "food", "prompt_version": "dataset-clause-label-v3", "source": "lloa"}
+{"doc_id": "d3", "clause": "분위기가 더 좋아졌다", "sentiment": "positive", "aspect": "ambiance_scenery", "prompt_version": "dataset-clause-label-v3", "source": "lloa"}
+{"doc_id": "d3", "clause": "야간 조명이 인상적이었다", "sentiment": "positive", "aspect": "ambiance_scenery", "prompt_version": "dataset-clause-label-v3", "source": "lloa"}
+{"doc_id": "d4", "clause": "콘텐츠가 다양했다", "sentiment": "positive", "aspect": "show_program", "prompt_version": "dataset-clause-label-v3", "source": "lloa"}

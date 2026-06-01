@@ -7,6 +7,7 @@ dependencies = [
   "fastembed>=0.8,<0.9",
   "pydantic>=2.8,<3.0",
   "pyarrow>=21,<22",
+  "duckdb>=1.1,<2.0",
   "psycopg[binary]>=3.2,<3.3",
   "structlog>=24,<26",
 ]

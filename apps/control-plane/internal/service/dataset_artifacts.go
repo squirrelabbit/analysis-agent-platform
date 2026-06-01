@@ -4,9 +4,35 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"analysis-support-platform/control-plane/internal/domain"
+	"time"
 )
+
+// silverone 2026-06-01 (다운로드 파일명 타임스탬프) — 다운로드 파일명에
+// KST `_YYYYMMDD_HHMMSS` 접미를 붙인다. source / clean / doc_genuineness /
+// clause_label 4 endpoint 공통. 같은 파일을 여러 번 받아도 파일명이 겹치지
+// 않게 한다.
+//
+// 형식: `<base>_20260601_134523.<ext>`. 확장자가 없으면 `<name>_<ts>`.
+// Asia/Seoul 로드 실패는 fallback으로 UTC 사용 (서버 timezone 무관).
+func appendDownloadTimestamp(name string) string {
+	now := time.Now()
+	if loc, err := time.LoadLocation("Asia/Seoul"); err == nil {
+		now = now.In(loc)
+	} else {
+		now = now.UTC()
+	}
+	ts := now.Format("20060102_150405")
+	if name == "" {
+		return ts
+	}
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	if base == "" {
+		// 점으로 시작하는 hidden file (예: ".env") — 그대로 + _ts.
+		return name + "_" + ts
+	}
+	return base + "_" + ts + ext
+}
 
 func (s *DatasetService) ResolveSourceDownload(projectID, datasetID, datasetVersionID string) (string, string, string, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
@@ -50,108 +76,7 @@ func (s *DatasetService) ResolveSourceDownload(projectID, datasetID, datasetVers
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	return absolutePath, filename, contentType, nil
-}
-
-func (s *DatasetService) GetPreparePreview(
-	projectID, datasetID, datasetVersionID string,
-	input domain.DatasetPreparePreviewQuery,
-) (domain.DatasetPreparePreviewResponse, error) {
-	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
-	if err != nil {
-		return domain.DatasetPreparePreviewResponse{}, err
-	}
-
-	preparedRef, prepareFormat, err := resolvePrepareArtifact(version)
-	if err != nil {
-		return domain.DatasetPreparePreviewResponse{}, err
-	}
-	if prepareFormat != "parquet" {
-		return domain.DatasetPreparePreviewResponse{}, ErrInvalidArgument{Message: "prepare preview supports parquet artifact only"}
-	}
-
-	limit := defaultPreparePreviewLimit
-	if input.Limit != nil {
-		limit = *input.Limit
-	}
-	if limit <= 0 {
-		return domain.DatasetPreparePreviewResponse{}, ErrInvalidArgument{Message: "limit must be a positive integer"}
-	}
-	if limit > maxPreparePreviewLimit {
-		limit = maxPreparePreviewLimit
-	}
-
-	samples, err := loadPrepareSamplesFromParquet(preparedRef, limit, "")
-	if err != nil {
-		return domain.DatasetPreparePreviewResponse{}, err
-	}
-
-	rawTextColumn := metadataString(version.Metadata, "raw_text_column", metadataString(version.Metadata, "text_column", "text"))
-	rawTextColumns := metadataStringList(version.Metadata, "raw_text_columns")
-	if len(rawTextColumns) == 0 {
-		rawTextColumns = metadataStringList(version.Metadata, "text_columns")
-	}
-	if len(rawTextColumns) == 0 && strings.TrimSpace(rawTextColumn) != "" {
-		rawTextColumns = []string{rawTextColumn}
-	}
-	textJoiner, _ := metadataRawString(version.Metadata, "text_joiner")
-
-	response := domain.DatasetPreparePreviewResponse{
-		ProjectID:          projectID,
-		DatasetID:          datasetID,
-		DatasetVersionID:   datasetVersionID,
-		PrepareStatus:      version.PrepareStatus,
-		PreparedAt:         version.PreparedAt,
-		PreparedRef:        preparedRef,
-		PrepareFormat:      prepareFormat,
-		RawTextColumn:      rawTextColumn,
-		RawTextColumns:     rawTextColumns,
-		TextJoiner:         textJoiner,
-		PreparedTextColumn: metadataString(version.Metadata, "prepared_text_column", "normalized_text"),
-		RowIDColumn:        metadataString(version.Metadata, "row_id_column", "row_id"),
-		Summary:            clonePrepareSummary(version.PrepareSummary),
-		SampleLimit:        limit,
-		Columns:            prepareSampleColumns(),
-		Samples:            samples,
-	}
-
-	if response.Summary != nil && response.Summary.ReviewCount > 0 {
-		reviewLimit := response.Summary.ReviewCount
-		if reviewLimit > limit {
-			reviewLimit = limit
-		}
-		reviewSamples, err := loadPrepareSamplesFromParquet(preparedRef, reviewLimit, "review")
-		if err != nil {
-			return domain.DatasetPreparePreviewResponse{}, err
-		}
-		response.WarningPanel = &domain.DatasetPrepareWarningPanel{
-			ReviewCount: response.Summary.ReviewCount,
-			Samples:     reviewSamples,
-		}
-	}
-
-	return response, nil
-}
-
-func prepareSampleColumns() []domain.DatasetTableColumn {
-	return []domain.DatasetTableColumn{
-		{Key: "source_row_index", Label: "행 번호", Type: "number"},
-		{Key: "row_id", Label: "Row ID", Type: "string"},
-		{Key: "raw_text", Label: "원문", Type: "string"},
-		{Key: "normalized_text", Label: "전처리 결과", Type: "string"},
-		{Key: "prepare_disposition", Label: "처리 상태", Type: "string"},
-		{Key: "prepare_reason", Label: "처리 사유", Type: "string"},
-	}
-}
-
-func sentimentSampleColumns() []domain.DatasetTableColumn {
-	return []domain.DatasetTableColumn{
-		{Key: "source_row_index", Label: "행 번호", Type: "number"},
-		{Key: "row_id", Label: "Row ID", Type: "string"},
-		{Key: "sentiment_label", Label: "감성", Type: "string"},
-		{Key: "sentiment_confidence", Label: "신뢰도", Type: "number"},
-		{Key: "sentiment_reason", Label: "판단 사유", Type: "string"},
-	}
+	return absolutePath, appendDownloadTimestamp(filename), contentType, nil
 }
 
 func (s *DatasetService) ResolveCleanDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
@@ -188,208 +113,86 @@ func (s *DatasetService) ResolveCleanDownload(projectID, datasetID, datasetVersi
 	} else {
 		filename = filename + ".csv"
 	}
-	return exportPath, filename, nil
+	return exportPath, appendDownloadTimestamp(filename), nil
 }
 
-func (s *DatasetService) ResolvePrepareDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
+// ResolveDocGenuinenessDownload — doc_genuineness jsonl artifact를 CSV로
+// 변환해 임시 파일 경로 + 다운로드 filename 반환. handler가 응답 후 임시
+// 파일을 정리한다. silverone 2026-06-01 (다운로드 컬럼 확장) — cleaned.parquet
+// LEFT JOIN으로 cleaned_text / raw_text / created_at / source_row_index를
+// 함께 포함. clean artifact가 없으면 그 컬럼들은 빈 값. exportDocGenuiness
+// EnrichedCSV 참조.
+func (s *DatasetService) ResolveDocGenuinenessDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
 		return "", "", err
 	}
-	preparedRef, prepareFormat, err := resolvePrepareArtifact(version)
+	ref := strings.TrimSpace(metadataString(version.Metadata, "doc_genuineness_ref", ""))
+	if ref == "" {
+		ref = strings.TrimSpace(metadataString(version.Metadata, "doc_genuineness_uri", ""))
+	}
+	if ref == "" {
+		return "", "", ErrNotFound{Resource: "doc_genuineness artifact"}
+	}
+	cleanRef := strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
+	if cleanRef == "" {
+		cleanRef = strings.TrimSpace(metadataString(version.Metadata, "clean_uri", ""))
+	}
+	exportPath, err := exportDocGenuinenessEnrichedCSV(ref, cleanRef)
 	if err != nil {
 		return "", "", err
 	}
-	if prepareFormat != "parquet" {
-		return "", "", ErrInvalidArgument{Message: "prepare download supports parquet artifact only"}
-	}
-	info, statErr := os.Stat(preparedRef)
-	if statErr != nil {
-		if os.IsNotExist(statErr) {
-			return "", "", ErrNotFound{Resource: "prepare artifact"}
-		}
-		return "", "", statErr
-	}
-	if info.IsDir() {
-		return "", "", ErrInvalidArgument{Message: "prepare artifact must be a file"}
-	}
-	exportPath, err := exportPrepareCSVFromParquet(preparedRef)
+	return exportPath, deriveDownloadFilename(ref, "doc_genuineness.csv"), nil
+}
+
+// ResolveClauseLabelDownload — clause_label jsonl artifact를 CSV로 변환.
+// silverone 2026-06-01 (다운로드 컬럼 확장) — cleaned.parquet + doc_genuineness
+// .jsonl LEFT JOIN으로 cleaned_text / raw_text / created_at / source_row_index
+// / genuineness를 함께 포함. 어느 한쪽 artifact가 없거나 join이 실패해도
+// row는 유지되고 해당 컬럼만 빈 값. exportClauseLabelEnrichedCSV 참조.
+func (s *DatasetService) ResolveClauseLabelDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
 		return "", "", err
 	}
-	filename := strings.TrimSpace(filepath.Base(preparedRef))
+	ref := strings.TrimSpace(metadataString(version.Metadata, "clause_label_ref", ""))
+	if ref == "" {
+		ref = strings.TrimSpace(metadataString(version.Metadata, "clause_label_uri", ""))
+	}
+	if ref == "" {
+		return "", "", ErrNotFound{Resource: "clause_label artifact"}
+	}
+	cleanRef := strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
+	if cleanRef == "" {
+		cleanRef = strings.TrimSpace(metadataString(version.Metadata, "clean_uri", ""))
+	}
+	dgRef := strings.TrimSpace(metadataString(version.Metadata, "doc_genuineness_ref", ""))
+	if dgRef == "" {
+		dgRef = strings.TrimSpace(metadataString(version.Metadata, "doc_genuineness_uri", ""))
+	}
+	exportPath, err := exportClauseLabelEnrichedCSV(ref, cleanRef, dgRef)
+	if err != nil {
+		return "", "", err
+	}
+	return exportPath, deriveDownloadFilename(ref, "clause_label.csv"), nil
+}
+
+// deriveDownloadFilename — 원본 파일명(예: `xxx.jsonl`)을 `xxx.csv`로 치환한
+// 뒤 KST 타임스탬프를 덧붙인다 (`xxx_20260601_134523.csv`). 빈 케이스는
+// fallback 사용. doc_genuineness / clause_label 공통.
+func deriveDownloadFilename(ref string, fallback string) string {
+	filename := strings.TrimSpace(filepath.Base(ref))
 	if filename == "" || filename == "." || filename == string(filepath.Separator) {
-		filename = "prepared.csv"
-	} else if strings.HasSuffix(strings.ToLower(filename), ".parquet") {
+		return appendDownloadTimestamp(fallback)
+	}
+	lower := strings.ToLower(filename)
+	switch {
+	case strings.HasSuffix(lower, ".jsonl"):
+		filename = filename[:len(filename)-len(".jsonl")] + ".csv"
+	case strings.HasSuffix(lower, ".parquet"):
 		filename = filename[:len(filename)-len(".parquet")] + ".csv"
-	} else {
+	default:
 		filename = filename + ".csv"
 	}
-	return exportPath, filename, nil
-}
-
-func (s *DatasetService) GetSentimentPreview(
-	projectID, datasetID, datasetVersionID string,
-	input domain.DatasetSentimentPreviewQuery,
-) (domain.DatasetSentimentPreviewResponse, error) {
-	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
-	if err != nil {
-		return domain.DatasetSentimentPreviewResponse{}, err
-	}
-
-	sentimentRef, sentimentFormat, err := resolveSentimentArtifact(version)
-	if err != nil {
-		return domain.DatasetSentimentPreviewResponse{}, err
-	}
-	if sentimentFormat != "parquet" {
-		return domain.DatasetSentimentPreviewResponse{}, ErrInvalidArgument{Message: "sentiment preview supports parquet artifact only"}
-	}
-
-	limit := defaultSentimentPreviewLimit
-	if input.Limit != nil {
-		limit = *input.Limit
-	}
-	if limit <= 0 {
-		return domain.DatasetSentimentPreviewResponse{}, ErrInvalidArgument{Message: "limit must be a positive integer"}
-	}
-	if limit > maxSentimentPreviewLimit {
-		limit = maxSentimentPreviewLimit
-	}
-
-	samples, err := loadSentimentSamplesFromParquet(sentimentRef, limit)
-	if err != nil {
-		return domain.DatasetSentimentPreviewResponse{}, err
-	}
-
-	sentimentTextColumn := metadataString(version.Metadata, "sentiment_text_column", defaultPreparedTextColumn(version))
-	sentimentTextColumns := metadataStringList(version.Metadata, "sentiment_text_columns")
-	if len(sentimentTextColumns) == 0 && strings.TrimSpace(sentimentTextColumn) != "" {
-		sentimentTextColumns = []string{sentimentTextColumn}
-	}
-	sentimentTextJoiner, _ := metadataRawString(version.Metadata, "sentiment_text_joiner")
-
-	response := domain.DatasetSentimentPreviewResponse{
-		ProjectID:                 projectID,
-		DatasetID:                 datasetID,
-		DatasetVersionID:          datasetVersionID,
-		SentimentStatus:           version.SentimentStatus,
-		SentimentLabeledAt:        version.SentimentLabeledAt,
-		SentimentRef:              sentimentRef,
-		SentimentFormat:           sentimentFormat,
-		SentimentTextColumn:       sentimentTextColumn,
-		SentimentTextColumns:      sentimentTextColumns,
-		TextJoiner:                sentimentTextJoiner,
-		SentimentLabelColumn:      metadataString(version.Metadata, "sentiment_label_column", "sentiment_label"),
-		SentimentConfidenceColumn: metadataString(version.Metadata, "sentiment_confidence_column", "sentiment_confidence"),
-		SentimentReasonColumn:     metadataString(version.Metadata, "sentiment_reason_column", "sentiment_reason"),
-		RowIDColumn:               metadataString(version.Metadata, "row_id_column", "row_id"),
-		Summary:                   cloneSentimentSummary(buildSentimentSummary(version.Metadata)),
-		SampleLimit:               limit,
-		Columns:                   sentimentSampleColumns(),
-		Samples:                   samples,
-	}
-
-	return response, nil
-}
-
-func (s *DatasetService) ResolveSentimentDownload(projectID, datasetID, datasetVersionID string) (string, string, error) {
-	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
-	if err != nil {
-		return "", "", err
-	}
-	sentimentRef, sentimentFormat, err := resolveSentimentArtifact(version)
-	if err != nil {
-		return "", "", err
-	}
-	if sentimentFormat != "parquet" {
-		return "", "", ErrInvalidArgument{Message: "sentiment download supports parquet artifact only"}
-	}
-	info, statErr := os.Stat(sentimentRef)
-	if statErr != nil {
-		if os.IsNotExist(statErr) {
-			return "", "", ErrNotFound{Resource: "sentiment artifact"}
-		}
-		return "", "", statErr
-	}
-	if info.IsDir() {
-		return "", "", ErrInvalidArgument{Message: "sentiment artifact must be a file"}
-	}
-	exportPath, err := exportSentimentCSVFromParquet(sentimentRef)
-	if err != nil {
-		return "", "", err
-	}
-	filename := strings.TrimSpace(filepath.Base(sentimentRef))
-	if filename == "" || filename == "." || filename == string(filepath.Separator) {
-		filename = "sentiment.csv"
-	} else if strings.HasSuffix(strings.ToLower(filename), ".parquet") {
-		filename = filename[:len(filename)-len(".parquet")] + ".csv"
-	} else {
-		filename = filename + ".csv"
-	}
-	return exportPath, filename, nil
-}
-
-func (s *DatasetService) GetClusterMembers(
-	projectID, datasetID, datasetVersionID, clusterID string,
-	input domain.DatasetClusterMembersQuery,
-) (domain.DatasetClusterMembersResponse, error) {
-	clusterID = strings.TrimSpace(clusterID)
-	if clusterID == "" {
-		return domain.DatasetClusterMembersResponse{}, ErrInvalidArgument{Message: "cluster_id is required"}
-	}
-	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
-	if err != nil {
-		return domain.DatasetClusterMembersResponse{}, err
-	}
-
-	clusterSummaryRef := strings.TrimSpace(metadataString(version.Metadata, "cluster_summary_ref", ""))
-	if clusterSummaryRef == "" {
-		clusterSummaryRef = strings.TrimSpace(metadataString(version.Metadata, "cluster_ref", ""))
-	}
-	if clusterSummaryRef == "" {
-		return domain.DatasetClusterMembersResponse{}, ErrInvalidArgument{Message: "cluster summary artifact is not ready"}
-	}
-	clusterMembershipRef := strings.TrimSpace(metadataString(version.Metadata, "cluster_membership_ref", ""))
-	if clusterMembershipRef == "" {
-		clusterMembershipRef = deriveClusterMembershipURI(clusterSummaryRef)
-	}
-	if clusterMembershipRef == "" {
-		return domain.DatasetClusterMembersResponse{}, ErrInvalidArgument{Message: "cluster membership artifact is not ready"}
-	}
-
-	clusterSummary, err := loadClusterSummary(clusterSummaryRef, clusterID)
-	if err != nil {
-		return domain.DatasetClusterMembersResponse{}, err
-	}
-
-	limit := defaultClusterMembersLimit
-	if input.Limit != nil {
-		limit = *input.Limit
-	}
-	if limit <= 0 {
-		return domain.DatasetClusterMembersResponse{}, ErrInvalidArgument{Message: "limit must be a positive integer"}
-	}
-	if limit > maxClusterMembersLimit {
-		limit = maxClusterMembersLimit
-	}
-	samplesOnly := input.SamplesOnly != nil && *input.SamplesOnly
-
-	items, totalCount, sampleCount, err := loadClusterMembersFromParquet(clusterMembershipRef, clusterID, limit, samplesOnly)
-	if err != nil {
-		return domain.DatasetClusterMembersResponse{}, err
-	}
-	return domain.DatasetClusterMembersResponse{
-		ProjectID:            projectID,
-		DatasetID:            datasetID,
-		DatasetVersionID:     datasetVersionID,
-		ClusterID:            clusterID,
-		ClusterSummaryRef:    clusterSummaryRef,
-		ClusterMembershipRef: clusterMembershipRef,
-		Limit:                limit,
-		SamplesOnly:          samplesOnly,
-		TotalCount:           totalCount,
-		SampleCount:          sampleCount,
-		Cluster:              clusterSummary,
-		Items:                items,
-	}, nil
+	return appendDownloadTimestamp(filename)
 }

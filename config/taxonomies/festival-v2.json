@@ -1,0 +1,53 @@
+{
+  "taxonomy_id": "festival-v2",
+  "domain": "festival",
+  "aspects": [
+    {
+      "key": "show_program",
+      "label": "공연/프로그램",
+      "description": "공연, 퍼레이드, 드론쇼, 불꽃놀이, 버스킹 등 관람형 콘텐츠에 대한 평가"
+    },
+    {
+      "key": "experience_booth",
+      "label": "체험/참여 부스",
+      "description": "체험 부스, 만들기, 스탬프 투어 등 참여형 프로그램에 대한 평가"
+    },
+    {
+      "key": "ambiance_scenery",
+      "label": "분위기/경관",
+      "description": "축제장의 분위기, 조명, 포토존, 야경 등 감성적 환경 요소에 대한 평가"
+    },
+    {
+      "key": "food",
+      "label": "음식/음료",
+      "description": "음식 및 음료의 맛, 메뉴 구성, 다양성에 대한 평가 (가격 제외)"
+    },
+    {
+      "key": "price_cost",
+      "label": "가격/가성비",
+      "description": "음식, 체험, 기념품 등 축제 내 가격 및 가성비에 대한 평가"
+    },
+    {
+      "key": "facility_crowd",
+      "label": "편의시설/혼잡도",
+      "description": "화장실, 쉼터, 청결도, 인파, 혼잡도 등 편의시설 및 환경에 대한 평가"
+    },
+    {
+      "key": "access_traffic",
+      "label": "교통/접근성",
+      "description": "교통, 주차, 셔틀버스 등 축제장 접근성에 대한 평가"
+    },
+    {
+      "key": "operation_service",
+      "label": "운영/서비스",
+      "description": "스태프, 안내, 운영 방식, 기획력, 결제 시스템 등 운영 전반에 대한 평가"
+    },
+    {
+      "key": "etc",
+      "label": "기타",
+      "description": "축제와 관련되어 있으나 위 8개 항목에 해당하지 않는 것"
+    }
+  ],
+  "sentiments": ["positive", "negative", "neutral"],
+  "fallback_aspect": "etc"
+}

@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Project struct {
 	ProjectID           string    `json:"project_id"`
@@ -10,6 +13,10 @@ type Project struct {
 	DatasetVersionCount int       `json:"dataset_version_count"`
 	ScenarioCount       int       `json:"scenario_count"`
 	PromptCount         int       `json:"prompt_count"`
+	// silverone 2026-06-01 — project 단위 analysis thread 합산. 사이드바
+	// 채팅 count 표시용. dataset 단위 thread API(ListAnalysisThreads)는 그대로
+	// 유지. 프론트가 dataset별로 N+1 호출 안 하도록 service에서 단일 COUNT 합산.
+	AnalysisThreadCount int `json:"analysis_thread_count"`
 }
 
 type ProjectCreateRequest struct {
@@ -38,120 +45,100 @@ type ProjectPromptUpsertRequest struct {
 	Version   string `json:"version"`
 	Operation string `json:"operation"`
 	Content   string `json:"content"`
+	// ChangeReason is required (ADR-015 §C2). Empty string ⇒ HTTP 400.
+	// Records why this version was created/edited so audit history is
+	// useful — silverone explicitly flagged that "변경이 진짜 많을
+	// 것"이고 audit 부재가 운영자 가치 깎는다고 했음.
+	ChangeReason string `json:"change_reason"`
+	// CallerIsOperator is set by the HTTP handler when the request carries
+	// the ``X-Operator-Mode: 1`` header (ADR-015 §D1 soft enforcement
+	// until auth lands). Service rejects operator_only operations
+	// (planner / planner_meta) when this is false. The field is JSON-
+	// excluded so analysts cannot self-elevate via the body.
+	CallerIsOperator bool `json:"-"`
 }
 
 type ProjectPromptListResponse struct {
 	Items []ProjectPrompt `json:"items"`
 }
 
-type Prompt struct {
-	PromptID    string    `json:"prompt_id"`
-	Version     string    `json:"version"`
-	Operation   string    `json:"operation"`
-	Title       string    `json:"title"`
-	Status      string    `json:"status"`
-	Summary     string    `json:"summary,omitempty"`
-	Content     string    `json:"content"`
-	ContentHash string    `json:"content_hash"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+// ProjectPromptChange is one event in the ADR-015 §C audit log for a
+// per-project prompt. Created/updated/reverted actions all append a
+// row; the table is append-only so history is preserved even after
+// the prompt itself is deleted.
+type ProjectPromptChange struct {
+	ChangeID            string    `json:"change_id"`
+	ProjectID           string    `json:"project_id"`
+	Version             string    `json:"version"`
+	Operation           string    `json:"operation"`
+	Action              string    `json:"action"` // create / update / revert
+	ChangeReason        string    `json:"change_reason"`
+	ChangedBy           string    `json:"changed_by,omitempty"` // empty until auth lands
+	PreviousContentHash string    `json:"previous_content_hash,omitempty"`
+	NewContentHash      string    `json:"new_content_hash"`
+	BaseVersion         string    `json:"base_version,omitempty"` // populated on action=revert
+	ChangedAt           time.Time `json:"changed_at"`
 }
 
-type PromptCreateRequest struct {
-	Version   string `json:"version"`
-	Operation string `json:"operation"`
-	Content   string `json:"content"`
+type ProjectPromptHistoryResponse struct {
+	Items []ProjectPromptChange `json:"items"`
 }
 
-type PromptUpdateRequest struct {
-	Version   *string `json:"version,omitempty"`
-	Operation *string `json:"operation,omitempty"`
-	Content   *string `json:"content,omitempty"`
+type ProjectPromptRevertRequest struct {
+	ToVersion    string `json:"to_version"`
+	NewVersion   string `json:"new_version"`
+	ChangeReason string `json:"change_reason"`
+	// CallerIsOperator — see ProjectPromptUpsertRequest. Plumbed from
+	// the X-Operator-Mode HTTP header by the handler.
+	CallerIsOperator bool `json:"-"`
 }
 
-type PromptListResponse struct {
-	Items []Prompt `json:"items"`
+type ProjectPromptDiffResponse struct {
+	ProjectID   string                 `json:"project_id"`
+	Operation   string                 `json:"operation"`
+	BaseVersion string                 `json:"base_version"`
+	HeadVersion string                 `json:"head_version"`
+	BaseContent string                 `json:"base_content"`
+	HeadContent string                 `json:"head_content"`
+	UnifiedDiff string                 `json:"unified_diff"`
+	Stats       ProjectPromptDiffStats `json:"stats"`
 }
+
+type ProjectPromptDiffStats struct {
+	AddedLines   int `json:"added_lines"`
+	RemovedLines int `json:"removed_lines"`
+	BaseLines    int `json:"base_lines"`
+	HeadLines    int `json:"head_lines"`
+}
+
+// 5/6 화면기획서 B안 채택: 전역 prompt 도메인 타입 (Prompt / PromptCreateRequest /
+// PromptUpdateRequest / PromptListResponse) 4개 제거. 글로벌 prompt는 .md 코드
+// 계약. 프로젝트별 타입 (ProjectPrompt 등)은 그대로 유지.
 
 type ProjectPromptDefaults struct {
-	ProjectID              string     `json:"project_id"`
-	PreparePromptVersion   *string    `json:"prepare_prompt_version,omitempty"`
-	SentimentPromptVersion *string    `json:"sentiment_prompt_version,omitempty"`
-	UpdatedAt              *time.Time `json:"updated_at,omitempty"`
+	ProjectID                         string     `json:"project_id"`
+	PreparePromptVersion              *string    `json:"prepare_prompt_version,omitempty"`
+	SentimentPromptVersion            *string    `json:"sentiment_prompt_version,omitempty"`
+	PlannerPromptVersion              *string    `json:"planner_prompt_version,omitempty"`
+	PlannerMetaPromptVersion          *string    `json:"planner_meta_prompt_version,omitempty"`
+	IssueEvidenceSummaryPromptVersion *string    `json:"issue_evidence_summary_prompt_version,omitempty"`
+	ExecutionFinalAnswerPromptVersion *string    `json:"execution_final_answer_prompt_version,omitempty"`
+	UpdatedAt                         *time.Time `json:"updated_at,omitempty"`
 }
 
 type ProjectPromptDefaultsUpdateRequest struct {
-	PreparePromptVersion   *string `json:"prepare_prompt_version"`
-	SentimentPromptVersion *string `json:"sentiment_prompt_version"`
+	PreparePromptVersion              *string `json:"prepare_prompt_version"`
+	SentimentPromptVersion            *string `json:"sentiment_prompt_version"`
+	PlannerPromptVersion              *string `json:"planner_prompt_version"`
+	PlannerMetaPromptVersion          *string `json:"planner_meta_prompt_version"`
+	IssueEvidenceSummaryPromptVersion *string `json:"issue_evidence_summary_prompt_version"`
+	ExecutionFinalAnswerPromptVersion *string `json:"execution_final_answer_prompt_version"`
 }
 
-type Scenario struct {
-	ScenarioID     string         `json:"scenario_id"`
-	ProjectID      string         `json:"project_id"`
-	PlanningMode   string         `json:"planning_mode"`
-	UserQuery      string         `json:"user_query"`
-	QueryType      string         `json:"query_type"`
-	Interpretation string         `json:"interpretation"`
-	AnalysisScope  string         `json:"analysis_scope"`
-	Steps          []ScenarioStep `json:"steps"`
-	CreatedAt      time.Time      `json:"created_at"`
-}
-
-type ScenarioStep struct {
-	Step              int            `json:"step"`
-	FunctionName      string         `json:"function_name"`
-	RuntimeSkillName  *string        `json:"runtime_skill_name,omitempty"`
-	ParameterText     *string        `json:"parameter_text,omitempty"`
-	Parameters        map[string]any `json:"parameters,omitempty"`
-	ResultDescription string         `json:"result_description"`
-}
-
-type ScenarioCreateRequest struct {
-	ScenarioID     string         `json:"scenario_id"`
-	PlanningMode   *string        `json:"planning_mode,omitempty"`
-	UserQuery      string         `json:"user_query"`
-	QueryType      string         `json:"query_type"`
-	Interpretation string         `json:"interpretation"`
-	AnalysisScope  string         `json:"analysis_scope"`
-	Steps          []ScenarioStep `json:"steps"`
-}
-
-type ScenarioListResponse struct {
-	Items []Scenario `json:"items"`
-}
-
-type ScenarioImportRow struct {
-	ScenarioID        string         `json:"scenario_id"`
-	PlanningMode      *string        `json:"planning_mode,omitempty"`
-	UserQuery         string         `json:"user_query"`
-	QueryType         string         `json:"query_type"`
-	Interpretation    string         `json:"interpretation"`
-	AnalysisScope     string         `json:"analysis_scope"`
-	Step              int            `json:"step"`
-	FunctionName      string         `json:"function_name"`
-	RuntimeSkillName  *string        `json:"runtime_skill_name,omitempty"`
-	ParameterText     *string        `json:"parameter_text,omitempty"`
-	Parameters        map[string]any `json:"parameters,omitempty"`
-	ResultDescription string         `json:"result_description"`
-}
-
-type ScenarioImportRequest struct {
-	Rows []ScenarioImportRow `json:"rows"`
-}
-
-type ScenarioImportResponse struct {
-	ScenarioCount int        `json:"scenario_count"`
-	RowCount      int        `json:"row_count"`
-	Items         []Scenario `json:"items"`
-}
-
-type ScenarioPlanCreateRequest struct {
-	DatasetID        string         `json:"dataset_id,omitempty"`
-	DatasetVersionID string         `json:"dataset_version_id,omitempty"`
-	Goal             *string        `json:"goal,omitempty"`
-	Constraints      []string       `json:"constraints,omitempty"`
-	Context          map[string]any `json:"context,omitempty"`
-}
+// δ-3 (5/21) — Scenario / ScenarioStep / ScenarioCreateRequest /
+// ScenarioListResponse / ScenarioImportRow / ScenarioImportRequest /
+// ScenarioImportResponse / ScenarioPlanCreateRequest 8 type 제거.
+// 옛 1.x 시나리오 흐름은 analyze endpoint로 대체됨.
 
 type Dataset struct {
 	DatasetID              string     `json:"dataset_id"`
@@ -161,17 +148,177 @@ type Dataset struct {
 	DataType               string     `json:"data_type"`
 	ActiveDatasetVersionID *string    `json:"active_dataset_version_id,omitempty"`
 	ActiveVersionUpdatedAt *time.Time `json:"active_version_updated_at,omitempty"`
-	CreatedAt              time.Time  `json:"created_at"`
+	// Metadata — dataset-level 설정. silverone 2026-05-22 (옵션 α) — subject 분류
+	// 등 dataset 단위 설정을 dataset_version과 분리해 보존한다. 현재 정의된
+	// keypath:
+	//   - metadata.doc_genuineness — {subject_type, subject_name,
+	//     subject_aliases, recruitment_keywords}. control plane이 build 시
+	//     payload에 inject + version metadata에 applied snapshot 저장.
+	// 다른 key는 forward-compat용으로 그대로 보존된다.
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 type DatasetCreateRequest struct {
-	Name        string  `json:"name"`
-	Description *string `json:"description,omitempty"`
-	DataType    *string `json:"data_type,omitempty"`
+	Name        string         `json:"name"`
+	Description *string        `json:"description,omitempty"`
+	DataType    *string        `json:"data_type,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// DatasetMetadataPatchRequest — PATCH /projects/{pid}/datasets/{did}/metadata
+// 의 request body. top-level key 단위 merge (같은 key는 overwrite, 다른 key는
+// 보존). nested object는 *통째로* overwrite (deep merge X) — patch 시맨틱을
+// 단순하게 유지.
+type DatasetMetadataPatchRequest struct {
+	Metadata map[string]any `json:"metadata"`
 }
 
 type DatasetListResponse struct {
 	Items []Dataset `json:"items"`
+}
+
+type AnalysisThread struct {
+	ThreadID         string    `json:"thread_id"`
+	ProjectID        string    `json:"project_id"`
+	DatasetID        string    `json:"dataset_id"`
+	DatasetVersionID string    `json:"dataset_version_id"`
+	Title            string    `json:"title,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	MessageCount     int       `json:"message_count,omitempty"`
+	LastMessage      string    `json:"last_message,omitempty"`
+}
+
+type AnalysisMessage struct {
+	MessageID      string         `json:"message_id"`
+	ThreadID       string         `json:"thread_id"`
+	ProjectID      string         `json:"project_id"`
+	DatasetID      string         `json:"dataset_id"`
+	Role           string         `json:"role"`
+	Content        string         `json:"content"`
+	ContextSummary map[string]any `json:"context_summary,omitempty"`
+	RunID          *string        `json:"run_id,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+	// silverone 2026-06-01 — thread detail history rendering용 lightweight
+	// display projection. assistant message + 연결된 run의 result_json에
+	// composer.display 있으면 GetAnalysisThread service가 채워서 응답.
+	// DB 컬럼 X — pure response-time projection (full result_json은 그대로
+	// run.result_json에 보존). user message에는 항상 nil.
+	Display map[string]any `json:"display,omitempty"`
+	// silverone 2026-06-01 — thread detail history에 분석 계획도 노출. Display와
+	// 같은 패턴으로 run.result_json의 plan을 projectAnalyzePlan keep-set으로
+	// 추출해 채운다 (plan_version + steps[].id/.skill/.params). user message에
+	// 는 항상 nil. step status/duration_ms/row_count 같은 추가 메타는 후속 PR.
+	Plan map[string]any `json:"plan,omitempty"`
+}
+
+type AnalysisRun struct {
+	RunID            string          `json:"run_id"`
+	ThreadID         string          `json:"thread_id"`
+	ProjectID        string          `json:"project_id"`
+	DatasetID        string          `json:"dataset_id"`
+	DatasetVersionID string          `json:"dataset_version_id"`
+	UserMessageID    string          `json:"user_message_id,omitempty"`
+	RequestJSON      map[string]any  `json:"request_json,omitempty"`
+	ResultJSON       json.RawMessage `json:"result_json,omitempty"`
+	Status           string          `json:"status"`
+	ErrorMessage     *string         `json:"error_message,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	CompletedAt      *time.Time      `json:"completed_at,omitempty"`
+}
+
+type AnalysisThreadCreateRequest struct {
+	Title string `json:"title,omitempty"`
+}
+
+type AnalysisThreadListResponse struct {
+	Items []AnalysisThread `json:"items"`
+}
+
+type AnalysisThreadDetail struct {
+	AnalysisThread
+	Messages []AnalysisMessage `json:"messages"`
+}
+
+type AnalysisThreadMessageRequest struct {
+	Content string `json:"content"`
+}
+
+type AnalysisThreadMessageResponse struct {
+	ProjectID        string              `json:"project_id"`
+	DatasetID        string              `json:"dataset_id"`
+	ThreadID         string              `json:"thread_id"`
+	DatasetVersionID string              `json:"dataset_version_id"`
+	UserMessage      AnalysisMessageView `json:"user_message"`
+	AssistantMessage AnalysisMessageView `json:"assistant_message,omitempty"`
+	Run              AnalysisRunView     `json:"run"`
+	Mode             string              `json:"mode"`
+	Result           json.RawMessage     `json:"result,omitempty"`
+}
+
+// AnalysisMessageView — silverone 2026-05-28 frontend-safe projection. context_summary는
+// 응답에서 제외 (DB에는 AnalysisMessage 원본 그대로 보존). user_message는
+// run_id가 없으므로 omitempty로 자연 누락.
+type AnalysisMessageView struct {
+	MessageID string    `json:"message_id"`
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	RunID     *string   `json:"run_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// AnalysisRunView — silverone 2026-05-28 frontend-safe projection. request_json /
+// result_json은 응답에서 제외 (raw payload·top-level result와 중복). project_id /
+// dataset_id도 top-level과 중복이라 제외. thread_id / dataset_version_id /
+// user_message_id는 식별자성으로 유지.
+type AnalysisRunView struct {
+	RunID            string     `json:"run_id"`
+	ThreadID         string     `json:"thread_id"`
+	DatasetVersionID string     `json:"dataset_version_id"`
+	UserMessageID    string     `json:"user_message_id,omitempty"`
+	Status           string     `json:"status"`
+	ErrorMessage     *string    `json:"error_message,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+}
+
+// ToView — AnalysisMessage(DB 원본)를 frontend-safe view로 projection.
+// silverone 2026-05-28.
+func (m AnalysisMessage) ToView() AnalysisMessageView {
+	view := AnalysisMessageView{
+		MessageID: m.MessageID,
+		Role:      m.Role,
+		Content:   m.Content,
+		CreatedAt: m.CreatedAt,
+	}
+	if m.RunID != nil {
+		runID := *m.RunID
+		view.RunID = &runID
+	}
+	return view
+}
+
+// ToView — AnalysisRun(DB 원본)을 frontend-safe view로 projection.
+// silverone 2026-05-28.
+func (r AnalysisRun) ToView() AnalysisRunView {
+	view := AnalysisRunView{
+		RunID:            r.RunID,
+		ThreadID:         r.ThreadID,
+		DatasetVersionID: r.DatasetVersionID,
+		UserMessageID:    r.UserMessageID,
+		Status:           r.Status,
+		CreatedAt:        r.CreatedAt,
+	}
+	if r.ErrorMessage != nil {
+		msg := *r.ErrorMessage
+		view.ErrorMessage = &msg
+	}
+	if r.CompletedAt != nil {
+		completedAt := *r.CompletedAt
+		view.CompletedAt = &completedAt
+	}
+	return view
 }
 
 type DatasetProfile struct {
@@ -201,25 +348,12 @@ type DatasetVersion struct {
 	CleanedRef         *string                        `json:"cleaned_ref,omitempty"`
 	CleanedAt          *time.Time                     `json:"cleaned_at,omitempty"`
 	CleanSummary       *DatasetCleanSummary           `json:"clean_summary,omitempty"`
-	PrepareStatus      string                         `json:"prepare_status"`
-	PrepareLLMMode     string                         `json:"prepare_llm_mode"`
-	PrepareModel       *string                        `json:"prepare_model,omitempty"`
-	PreparePromptVer   *string                        `json:"prepare_prompt_version,omitempty"`
-	PrepareURI         *string                        `json:"prepare_uri,omitempty"`
-	PreparedAt         *time.Time                     `json:"prepared_at,omitempty"`
-	PrepareSummary     *DatasetPrepareSummary         `json:"prepare_summary,omitempty"`
-	SentimentStatus    string                         `json:"sentiment_status"`
-	SentimentLLMMode   string                         `json:"sentiment_llm_mode"`
-	SentimentModel     *string                        `json:"sentiment_model,omitempty"`
-	SentimentURI       *string                        `json:"sentiment_uri,omitempty"`
-	SentimentLabeledAt *time.Time                     `json:"sentiment_labeled_at,omitempty"`
-	SentimentPromptVer *string                        `json:"sentiment_prompt_version,omitempty"`
-	EmbeddingStatus    string                         `json:"embedding_status"`
-	EmbeddingModel     *string                        `json:"embedding_model,omitempty"`
-	EmbeddingURI       *string                        `json:"embedding_uri,omitempty"`
-	IsActive           bool                           `json:"is_active"`
-	CreatedAt          time.Time                      `json:"created_at"`
-	ReadyAt            *time.Time                     `json:"ready_at,omitempty"`
+	// silverone 2026-05-28 (β2 cleanup PR2) — prepare/sentiment/embedding 15
+	// 필드 제거. ADR-018 β2로 단계 자체가 사라졌고 row에 NULL/default만 채워져
+	// 있었음. DB 컬럼은 그대로 두고(PR5 마이그레이션) Go side read/write만 정리.
+	IsActive  bool       `json:"is_active"`
+	CreatedAt time.Time  `json:"created_at"`
+	ReadyAt   *time.Time `json:"ready_at,omitempty"`
 }
 
 type DatasetVersionArtifact struct {
@@ -309,7 +443,47 @@ type DatasetVersionCreateRequest struct {
 }
 
 type DatasetVersionListResponse struct {
-	Items []DatasetVersion `json:"items"`
+	Items []DatasetVersionListItem `json:"items"`
+}
+
+// DatasetVersionDetail — GET /versions/{version_id} 응답. 운영자가 한 version을
+// 열어 "각 단계 결과 + 파일 형태"만 보도록 압축한다. 내부 URI/artifacts/
+// build_jobs/profile 등은 노출하지 않는다 — 실행 이력은 별도 endpoint.
+type DatasetVersionDetail struct {
+	DatasetVersionID string                    `json:"dataset_version_id"`
+	CreatedAt        time.Time                 `json:"created_at"`
+	ReadyAt          *time.Time                `json:"ready_at,omitempty"`
+	IsActive         bool                      `json:"is_active"`
+	RowCount         int                       `json:"row_count"`
+	ColumnCount      int                       `json:"column_count"`
+	Columns          []string                  `json:"columns"`
+	ByteSize         int64                     `json:"byte_size"`
+	Clean            DatasetVersionStageDetail `json:"clean"`
+	DocGenuineness   DatasetVersionStageDetail `json:"doc_genuineness"`
+	ClauseLabel      DatasetVersionStageDetail `json:"clause_label"`
+}
+
+type DatasetVersionStageDetail struct {
+	Status      string     `json:"status"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	Summary     any        `json:"summary,omitempty"`
+}
+
+// DatasetVersionListItem — version 목록에서 운영자가 한눈에 보고 다음 호출을
+// 결정하는 데 필요한 최소 필드만 노출한다. 상세 메타·artifacts·build_jobs는
+// GET /versions/{version_id}로 조회.
+type DatasetVersionListItem struct {
+	DatasetVersionID     string    `json:"dataset_version_id"`
+	CreatedAt            time.Time `json:"created_at"`
+	IsActive             bool      `json:"is_active"`
+	RowCount             int       `json:"row_count"`
+	ColumnCount          int       `json:"column_count"`
+	Columns              []string  `json:"columns"`
+	ByteSize             int64     `json:"byte_size"`
+	CleanStatus          string    `json:"clean_status"`
+	DocGenuinenessStatus string    `json:"doc_genuineness_status"`
+	ClauseLabelStatus    string    `json:"clause_label_status"`
+	OriginalFilename     string    `json:"original_filename"`
 }
 
 type DatasetActiveVersionUpdateRequest struct {
@@ -317,212 +491,46 @@ type DatasetActiveVersionUpdateRequest struct {
 }
 
 type DatasetCleanSummary struct {
-	InputRowCount         int             `json:"input_row_count"`
-	OutputRowCount        int             `json:"output_row_count"`
-	KeptCount             int             `json:"kept_count"`
-	DroppedCount          int             `json:"dropped_count"`
-	SkippedRowCount       int             `json:"skipped_row_count,omitempty"`
-	TextColumn            string          `json:"text_column,omitempty"`
-	TextColumns           []string        `json:"text_columns,omitempty"`
-	TextJoiner            string          `json:"text_joiner,omitempty"`
-	PreprocessOptions     map[string]bool `json:"preprocess_options,omitempty"`
-	SourceInputCharCount  int             `json:"source_input_char_count,omitempty"`
-	CleanedInputCharCount int             `json:"cleaned_input_char_count,omitempty"`
-	CleanReducedCharCount int             `json:"clean_reduced_char_count,omitempty"`
-	CleanRegexRuleHits    map[string]int  `json:"clean_regex_rule_hits,omitempty"`
+	InputRowCount         int            `json:"input_row_count"`
+	OutputRowCount        int            `json:"output_row_count"`
+	KeptCount             int            `json:"kept_count"`
+	DroppedCount          int            `json:"dropped_count"`
+	SkippedRowCount       int            `json:"skipped_row_count,omitempty"`
+	TextColumn            string         `json:"text_column,omitempty"`
+	TextColumns           []string       `json:"text_columns,omitempty"`
+	TextJoiner            string         `json:"text_joiner,omitempty"`
+	SourceInputCharCount  int            `json:"source_input_char_count,omitempty"`
+	CleanedInputCharCount int            `json:"cleaned_input_char_count,omitempty"`
+	CleanReducedCharCount int            `json:"clean_reduced_char_count,omitempty"`
+	CleanRegexRuleHits    map[string]int `json:"clean_regex_rule_hits,omitempty"`
 }
 
-type DatasetPrepareSummary struct {
-	InputRowCount  int      `json:"input_row_count"`
-	OutputRowCount int      `json:"output_row_count"`
-	KeptCount      int      `json:"kept_count"`
-	ReviewCount    int      `json:"review_count"`
-	DroppedCount   int      `json:"dropped_count"`
-	TextColumn     string   `json:"text_column,omitempty"`
-	TextColumns    []string `json:"text_columns,omitempty"`
-	TextJoiner     string   `json:"text_joiner,omitempty"`
-}
+// silverone 2026-05-28 (β2 cleanup PR2) — DatasetPrepareSummary /
+// DatasetPrepareSample / DatasetSentimentSummary / DatasetSentimentSample /
+// DatasetTableColumn 5 type 제거. ADR-018 β2로 prepare/sentiment build 단계가
+// 사라져 사용처 없음.
 
-type DatasetPreparePreviewQuery struct {
-	Limit *int `json:"limit,omitempty"`
-}
-
-type DatasetPrepareSample struct {
-	SourceRowIndex     int    `json:"source_row_index"`
-	RowID              string `json:"row_id"`
-	RawText            string `json:"raw_text"`
-	NormalizedText     string `json:"normalized_text"`
-	PrepareDisposition string `json:"prepare_disposition"`
-	PrepareReason      string `json:"prepare_reason"`
-}
-
-type DatasetTableColumn struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
-	Type  string `json:"type,omitempty"`
-}
-
-type DatasetPrepareWarningPanel struct {
-	ReviewCount int                    `json:"review_count"`
-	Samples     []DatasetPrepareSample `json:"samples"`
-}
-
-type DatasetPreparePreviewResponse struct {
-	ProjectID          string                      `json:"project_id"`
-	DatasetID          string                      `json:"dataset_id"`
-	DatasetVersionID   string                      `json:"dataset_version_id"`
-	PrepareStatus      string                      `json:"prepare_status"`
-	PreparedAt         *time.Time                  `json:"prepared_at,omitempty"`
-	PreparedRef        string                      `json:"prepared_ref"`
-	PrepareFormat      string                      `json:"prepare_format"`
-	RawTextColumn      string                      `json:"raw_text_column"`
-	RawTextColumns     []string                    `json:"raw_text_columns,omitempty"`
-	TextJoiner         string                      `json:"text_joiner,omitempty"`
-	PreparedTextColumn string                      `json:"prepared_text_column"`
-	RowIDColumn        string                      `json:"row_id_column"`
-	Summary            *DatasetPrepareSummary      `json:"summary,omitempty"`
-	SampleLimit        int                         `json:"sample_limit"`
-	Columns            []DatasetTableColumn        `json:"columns"`
-	Samples            []DatasetPrepareSample      `json:"samples"`
-	WarningPanel       *DatasetPrepareWarningPanel `json:"warning_panel,omitempty"`
-}
-
-type DatasetSentimentPreviewQuery struct {
-	Limit *int `json:"limit,omitempty"`
-}
-
-type DatasetSentimentSummary struct {
-	InputRowCount      int            `json:"input_row_count"`
-	LabeledRowCount    int            `json:"labeled_row_count"`
-	TextColumn         string         `json:"text_column"`
-	TextColumns        []string       `json:"text_columns,omitempty"`
-	TextJoiner         string         `json:"text_joiner,omitempty"`
-	SentimentBatchSize int            `json:"sentiment_batch_size"`
-	LabelCounts        map[string]int `json:"label_counts,omitempty"`
-}
-
-type DatasetSentimentSample struct {
-	SourceRowIndex      int     `json:"source_row_index"`
-	RowID               string  `json:"row_id"`
-	SentimentLabel      string  `json:"sentiment_label"`
-	SentimentConfidence float64 `json:"sentiment_confidence"`
-	SentimentReason     string  `json:"sentiment_reason"`
-}
-
-type DatasetSentimentPreviewResponse struct {
-	ProjectID                 string                   `json:"project_id"`
-	DatasetID                 string                   `json:"dataset_id"`
-	DatasetVersionID          string                   `json:"dataset_version_id"`
-	SentimentStatus           string                   `json:"sentiment_status"`
-	SentimentLabeledAt        *time.Time               `json:"sentiment_labeled_at,omitempty"`
-	SentimentRef              string                   `json:"sentiment_ref"`
-	SentimentFormat           string                   `json:"sentiment_format"`
-	SentimentTextColumn       string                   `json:"sentiment_text_column"`
-	SentimentTextColumns      []string                 `json:"sentiment_text_columns,omitempty"`
-	TextJoiner                string                   `json:"text_joiner,omitempty"`
-	SentimentLabelColumn      string                   `json:"sentiment_label_column"`
-	SentimentConfidenceColumn string                   `json:"sentiment_confidence_column"`
-	SentimentReasonColumn     string                   `json:"sentiment_reason_column"`
-	RowIDColumn               string                   `json:"row_id_column"`
-	Summary                   *DatasetSentimentSummary `json:"summary,omitempty"`
-	SampleLimit               int                      `json:"sample_limit"`
-	Columns                   []DatasetTableColumn     `json:"columns"`
-	Samples                   []DatasetSentimentSample `json:"samples"`
-}
-
-type DatasetClusterMembersQuery struct {
-	Limit       *int  `json:"limit,omitempty"`
-	SamplesOnly *bool `json:"samples_only,omitempty"`
-}
-
-type ClusterMember struct {
-	ClusterID            string `json:"cluster_id"`
-	ClusterRank          int    `json:"cluster_rank"`
-	ClusterDocumentCount int    `json:"cluster_document_count"`
-	SourceIndex          int    `json:"source_index"`
-	RowID                string `json:"row_id"`
-	ChunkID              string `json:"chunk_id"`
-	ChunkIndex           int    `json:"chunk_index"`
-	Text                 string `json:"text"`
-	IsSample             bool   `json:"is_sample"`
-}
-
-type DatasetClusterMembersResponse struct {
-	ProjectID            string          `json:"project_id"`
-	DatasetID            string          `json:"dataset_id"`
-	DatasetVersionID     string          `json:"dataset_version_id"`
-	ClusterID            string          `json:"cluster_id"`
-	ClusterSummaryRef    string          `json:"cluster_summary_ref"`
-	ClusterMembershipRef string          `json:"cluster_membership_ref"`
-	Limit                int             `json:"limit"`
-	SamplesOnly          bool            `json:"samples_only"`
-	TotalCount           int             `json:"total_count"`
-	SampleCount          int             `json:"sample_count"`
-	Cluster              map[string]any  `json:"cluster,omitempty"`
-	Items                []ClusterMember `json:"items"`
-}
-
-type DatasetPrepareRequest struct {
-	TextColumns []string `json:"text_columns,omitempty"`
-	OutputPath  *string  `json:"output_path,omitempty"`
-	Model       *string  `json:"model,omitempty"`
-	MaxRows     *int     `json:"max_rows,omitempty"`
-	BatchSize   *int     `json:"batch_size,omitempty"`
-	Force       *bool    `json:"force,omitempty"`
-}
-
+// 2026-05-21 — output_path / force 두 필드 제거. text_columns만 유지.
+// output_path는 운영자가 디스크 경로를 직접 결정할 일이 없어 내부 derive
+// (`s.deriveCleanURI(version)`)만 쓰면 충분. force는 같은 dataset_version
+// 재정제 시나리오 자체가 흔치 않고, 필요해지면 새 dataset_version으로 다시
+// upload하는 게 운영상 더 안전.
+// silverone 2026-05-28 (clean 정식화) — date_column optional 추가.
+// 명시되면 해당 source 컬럼을 created_at ISO 8601 string으로 변환.
+// parse 실패 / Invalid date / 빈 값은 null. 없으면 created_at 컬럼 자체
+// 빈 column으로 출력 (executor가 NULL 허용).
 type DatasetCleanRequest struct {
-	TextColumns       []string                       `json:"text_columns,omitempty"`
-	OutputPath        *string                        `json:"output_path,omitempty"`
-	PreprocessOptions *DatasetCleanPreprocessOptions `json:"preprocess_options,omitempty"`
-	Force             *bool                          `json:"force,omitempty"`
-}
-
-type DatasetCleanPreprocessOptions struct {
-	RemoveEnglish       bool `json:"remove_english,omitempty"`
-	RemoveNumbers       bool `json:"remove_numbers,omitempty"`
-	RemoveSpecial       bool `json:"remove_special,omitempty"`
-	RemoveMonosyllables bool `json:"remove_monosyllables,omitempty"`
-}
-
-type DatasetPrepareSampleResponse struct {
-	ProjectID        string                 `json:"project_id"`
-	DatasetID        string                 `json:"dataset_id"`
-	DatasetVersionID string                 `json:"dataset_version_id"`
-	PreparedRef      string                 `json:"prepared_ref"`
-	PrepareFormat    string                 `json:"prepare_format"`
-	SampleLimit      int                    `json:"sample_limit"`
-	Summary          *DatasetPrepareSummary `json:"summary,omitempty"`
-	Columns          []DatasetTableColumn   `json:"columns"`
-	Samples          []DatasetPrepareSample `json:"samples"`
-}
-
-type DatasetSentimentSampleRequest struct {
 	TextColumns []string `json:"text_columns,omitempty"`
-	Model       *string  `json:"model,omitempty"`
-	MaxRows     *int     `json:"max_rows,omitempty"`
-	BatchSize   *int     `json:"batch_size,omitempty"`
+	DateColumn  *string  `json:"date_column,omitempty"`
 }
 
-type DatasetSentimentSampleResponse struct {
-	ProjectID        string                   `json:"project_id"`
-	DatasetID        string                   `json:"dataset_id"`
-	DatasetVersionID string                   `json:"dataset_version_id"`
-	SentimentRef     string                   `json:"sentiment_ref"`
-	SentimentFormat  string                   `json:"sentiment_format"`
-	SampleLimit      int                      `json:"sample_limit"`
-	Summary          *DatasetSentimentSummary `json:"summary,omitempty"`
-	Columns          []DatasetTableColumn     `json:"columns"`
-	Samples          []DatasetSentimentSample `json:"samples"`
-}
+// silverone 2026-05-28 (β2 cleanup PR2) — DatasetPrepareSampleResponse /
+// DatasetSentimentSampleRequest / DatasetSentimentSampleResponse 3 DTO 제거.
+// β2로 sample endpoint 자체가 사라져 사용처 0.
 
-type DatasetEmbeddingBuildRequest struct {
-	TextColumn       *string `json:"text_column,omitempty"`
-	EmbeddingModel   *string `json:"embedding_model,omitempty"`
-	DebugExportJSONL *bool   `json:"debug_export_jsonl,omitempty"`
-	Force            *bool   `json:"force,omitempty"`
-}
-
+// DatasetClusterBuildRequest는 retrieve layer plan skill (embedding_cluster)와
+// `cluster_materialization.go`가 plan-driven cluster 파라미터를 정규화하는 용도로
+// 계속 사용한다. dataset_build로서의 "cluster" task 자체는 (β2) 결정으로 제거.
 type DatasetClusterBuildRequest struct {
 	EmbeddingIndexSourceRef *string  `json:"embedding_index_source_ref,omitempty"`
 	ChunkRef                *string  `json:"chunk_ref,omitempty"`
@@ -533,137 +541,136 @@ type DatasetClusterBuildRequest struct {
 	Force                   *bool    `json:"force,omitempty"`
 }
 
-type DatasetSentimentBuildRequest struct {
-	TextColumns []string `json:"text_columns,omitempty"`
-	OutputPath  *string  `json:"output_path,omitempty"`
-	Model       *string  `json:"model,omitempty"`
-	Force       *bool    `json:"force,omitempty"`
+// ADR-017 / 5/19 결정 — clean 직후 doc-level 3-tier 진성 분류 build request.
+// 5/20 결정 — request body 단순화. output_path / max_tokens / batch_size /
+// aspect_taxonomy_version 같은 worker 내부 default가 derive하는 필드는 제거.
+type DatasetDocGenuinenessBuildRequest struct {
+	DocGenuinenessPromptVer *string `json:"doc_genuineness_prompt_version,omitempty"`
+	Force                   *bool   `json:"force,omitempty"`
+}
+
+type DatasetClauseLabelBuildRequest struct {
+	ClauseLabelPromptVer *string `json:"clause_label_prompt_version,omitempty"`
+	// 5/20 결정 — doc_genuineness 결과로 필터링. nil이면 default
+	// ["genuine_review", "mixed"]로 자동 ON. explicit empty list ``[]``로 opt-out.
+	IncludeGenuineness []string `json:"include_genuineness,omitempty"`
+	Force              *bool    `json:"force,omitempty"`
 }
 
 type DatasetBuildJob struct {
-	JobID                 string               `json:"job_id"`
-	ProjectID             string               `json:"project_id"`
-	DatasetID             string               `json:"dataset_id"`
-	DatasetVersionID      string               `json:"dataset_version_id"`
-	BuildType             string               `json:"build_type"`
-	Status                string               `json:"status"`
-	Request               map[string]any       `json:"request,omitempty"`
-	TriggeredBy           string               `json:"triggered_by,omitempty"`
-	WorkflowID            *string              `json:"workflow_id,omitempty"`
-	WorkflowRunID         *string              `json:"workflow_run_id,omitempty"`
-	Attempt               int                  `json:"attempt"`
-	LastErrorType         *string              `json:"last_error_type,omitempty"`
-	ResumedExecutionCount int                  `json:"resumed_execution_count"`
-	CreatedAt             time.Time            `json:"created_at"`
-	StartedAt             *time.Time           `json:"started_at,omitempty"`
-	CompletedAt           *time.Time           `json:"completed_at,omitempty"`
-	ErrorMessage          *string              `json:"error_message,omitempty"`
-	Diagnostics           *BuildJobDiagnostics `json:"diagnostics,omitempty"`
+	JobID            string         `json:"job_id"`
+	ProjectID        string         `json:"project_id"`
+	DatasetID        string         `json:"dataset_id"`
+	DatasetVersionID string         `json:"dataset_version_id"`
+	BuildType        string         `json:"build_type"`
+	Status           string         `json:"status"`
+	Request          map[string]any `json:"request,omitempty"`
+	TriggeredBy      string         `json:"triggered_by,omitempty"`
+	WorkflowID       *string        `json:"workflow_id,omitempty"`
+	WorkflowRunID    *string        `json:"workflow_run_id,omitempty"`
+	Attempt          int            `json:"attempt"`
+	LastErrorType    *string        `json:"last_error_type,omitempty"`
+	// 2026-05-21 — ResumedExecutionCount 제거. δ-3에서 executions 테이블 drop
+	// 으로 증가시킬 path 자체가 사라졌다. 항상 0이라 응답 noise.
+	CreatedAt    time.Time            `json:"created_at"`
+	StartedAt    *time.Time           `json:"started_at,omitempty"`
+	CompletedAt  *time.Time           `json:"completed_at,omitempty"`
+	ErrorMessage *string              `json:"error_message,omitempty"`
+	Diagnostics  *BuildJobDiagnostics `json:"diagnostics,omitempty"`
 }
 
 type DatasetBuildJobListResponse struct {
 	Items []DatasetBuildJob `json:"items"`
 }
 
-type PromptTemplateMetadata struct {
-	Version       string   `json:"version"`
-	Title         string   `json:"title,omitempty"`
-	Operation     string   `json:"operation,omitempty"`
-	Status        string   `json:"status,omitempty"`
-	Summary       string   `json:"summary,omitempty"`
-	DefaultGroups []string `json:"default_groups,omitempty"`
+// DatasetBuildJobAccepted — POST /clean / /doc_genuineness / /clause_label
+// 응답 slim shape. 2026-05-21 결정: project_id/dataset_id/dataset_version_id는
+// URL path에 이미 있고 attempt/triggered_by/workflow_*/diagnostics 같은 상세
+// 필드는 GET /dataset_build_jobs/{job_id} 또는 /versions/{version_id}/build_jobs
+// 로 위임. POST 응답은 "큐에 들어갔다" 알림 + polling key + 상태 4 필드만.
+type DatasetBuildJobAccepted struct {
+	JobID     string    `json:"job_id"`
+	BuildType string    `json:"build_type"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
-type SkillPolicyMetadata struct {
-	Version       string   `json:"version"`
-	SkillName     string   `json:"skill_name,omitempty"`
-	Status        string   `json:"status,omitempty"`
-	Summary       string   `json:"summary,omitempty"`
-	DefaultGroups []string `json:"default_groups,omitempty"`
-	PolicyHash    string   `json:"policy_hash,omitempty"`
-}
-
-type DatasetProfileRuleCatalog struct {
-	AvailablePrepareRegexRuleNames []string `json:"available_prepare_regex_rule_names,omitempty"`
-	DefaultPrepareRegexRuleNames   []string `json:"default_prepare_regex_rule_names,omitempty"`
-	AvailableGarbageRuleNames      []string `json:"available_garbage_rule_names,omitempty"`
-	DefaultGarbageRuleNames        []string `json:"default_garbage_rule_names,omitempty"`
-}
-
-type DatasetProfileRegistryView struct {
-	SourcePath              string                     `json:"source_path,omitempty"`
-	PromptTemplatesDir      string                     `json:"prompt_templates_dir,omitempty"`
-	Defaults                map[string]string          `json:"defaults,omitempty"`
-	Profiles                map[string]DatasetProfile  `json:"profiles,omitempty"`
-	AvailablePromptVersions []string                   `json:"available_prompt_versions,omitempty"`
-	PromptCatalog           []PromptTemplateMetadata   `json:"prompt_catalog,omitempty"`
-	RuleCatalog             *DatasetProfileRuleCatalog `json:"rule_catalog,omitempty"`
-}
-
-type DatasetProfileValidationIssue struct {
-	Severity    string `json:"severity"`
-	Code        string `json:"code"`
-	Message     string `json:"message"`
-	Scope       string `json:"scope,omitempty"`
-	ResourceRef string `json:"resource_ref,omitempty"`
-}
-
-type DatasetProfileValidationResponse struct {
-	Registry DatasetProfileRegistryView      `json:"registry"`
-	Valid    bool                            `json:"valid"`
-	Issues   []DatasetProfileValidationIssue `json:"issues,omitempty"`
-}
-
-type PromptCatalogResponse struct {
-	SourcePath string                   `json:"source_path,omitempty"`
-	Items      []PromptTemplateMetadata `json:"items"`
-}
-
-type SkillPolicyValidationIssue struct {
-	Severity    string `json:"severity"`
-	Code        string `json:"code"`
-	Message     string `json:"message"`
-	Scope       string `json:"scope,omitempty"`
-	ResourceRef string `json:"resource_ref,omitempty"`
-}
-
-type SkillPolicyCatalogResponse struct {
-	Available bool                  `json:"available"`
-	Source    string                `json:"source,omitempty"`
-	Items     []SkillPolicyMetadata `json:"items,omitempty"`
-	Warning   string                `json:"warning,omitempty"`
-}
-
-type SkillPolicyValidationResponse struct {
-	Available bool                         `json:"available"`
-	Source    string                       `json:"source,omitempty"`
-	Valid     bool                         `json:"valid"`
-	Issues    []SkillPolicyValidationIssue `json:"issues,omitempty"`
-	Catalog   []SkillPolicyMetadata        `json:"catalog,omitempty"`
-	Warning   string                       `json:"warning,omitempty"`
-}
-
-type RuleCatalogResponse struct {
-	Available bool                       `json:"available"`
-	Source    string                     `json:"source,omitempty"`
-	Catalog   *DatasetProfileRuleCatalog `json:"catalog,omitempty"`
-	Warning   string                     `json:"warning,omitempty"`
+// AsAccepted — DatasetBuildJob → slim accepted 응답으로 변환.
+func (j DatasetBuildJob) AsAccepted() DatasetBuildJobAccepted {
+	return DatasetBuildJobAccepted{
+		JobID:     j.JobID,
+		BuildType: j.BuildType,
+		Status:    j.Status,
+		CreatedAt: j.CreatedAt,
+	}
 }
 
 type BuildJobDiagnostics struct {
-	RetryCount            int               `json:"retry_count"`
-	LastErrorType         *string           `json:"last_error_type,omitempty"`
-	LastErrorMessage      *string           `json:"last_error_message,omitempty"`
-	WorkflowID            *string           `json:"workflow_id,omitempty"`
-	WorkflowRunID         *string           `json:"workflow_run_id,omitempty"`
-	ResumedExecutionCount int               `json:"resumed_execution_count"`
-	Progress              *BuildJobProgress `json:"progress,omitempty"`
-	LLMFallback           bool              `json:"llm_fallback,omitempty"`
-	LLMFallbackReason     *string           `json:"llm_fallback_reason,omitempty"`
-	LLMFallbackCount      int               `json:"llm_fallback_count,omitempty"`
-	LLMProvider           *string           `json:"llm_provider,omitempty"`
-	LLMModel              *string           `json:"llm_model,omitempty"`
-	Warnings              []string          `json:"warnings,omitempty"`
+	RetryCount        int               `json:"retry_count"`
+	LastErrorType     *string           `json:"last_error_type,omitempty"`
+	LastErrorMessage  *string           `json:"last_error_message,omitempty"`
+	WorkflowID        *string           `json:"workflow_id,omitempty"`
+	WorkflowRunID     *string           `json:"workflow_run_id,omitempty"`
+	Progress          *BuildJobProgress `json:"progress,omitempty"`
+	LLMFallback       bool              `json:"llm_fallback,omitempty"`
+	LLMFallbackReason *string           `json:"llm_fallback_reason,omitempty"`
+	LLMFallbackCount  int               `json:"llm_fallback_count,omitempty"`
+	LLMProvider       *string           `json:"llm_provider,omitempty"`
+	LLMModel          *string           `json:"llm_model,omitempty"`
+	Warnings          []string          `json:"warnings,omitempty"`
+}
+
+// DatasetArtifactView — 화면 polling용 GET 응답.
+// /versions/{vid}/clean, /doc_genuineness, /clause_label 3 endpoint가 공유.
+// 화면은 이 view만 polling하면 build job 진행/실패/완료를 단일 진입점으로
+// 추적할 수 있다 (/dataset_build_jobs/{job_id} 직접 호출 불필요).
+//
+// status enum:
+//   - not_started: artifact 없음 + 같은 build_type의 job 없음
+//   - queued / running / failed: 최근 같은 build_type job의 status
+//   - completed: artifact ref가 ready이고 최근 job이 completed
+//
+// 공통 필드(status/job_id/started_at/completed_at/error_message/progress)는
+// 모든 build_type에서 채워진다. summary/items/pagination은 단계별로 다르고,
+// clean은 status="completed"일 때 summary만, doc_genuineness/clause_label은
+// summary + items + pagination + applied를 모두 채운다.
+type DatasetArtifactView struct {
+	BuildType    string              `json:"build_type"`
+	Status       string              `json:"status"`
+	JobID        *string             `json:"job_id"`
+	StartedAt    *time.Time          `json:"started_at"`
+	CompletedAt  *time.Time          `json:"completed_at"`
+	// DurationSeconds — 작업 경과 시간(초). silverone 2026-05-26.
+	//   - completed/failed (completed_at != nil): completed_at - started_at (확정값)
+	//   - queued/running (completed_at == nil): now - started_at (진행 중 실시간)
+	//   - started_at == nil → null
+	// 화면이 started_at/completed_at를 직접 계산하지 않아도 되게 서버가 채운다.
+	DurationSeconds *float64            `json:"duration_seconds"`
+	ErrorMessage    *string             `json:"error_message"`
+	Progress        *ArtifactProgress   `json:"progress,omitempty"`
+	Applied         map[string]any      `json:"applied,omitempty"`
+	Summary         map[string]any      `json:"summary,omitempty"`
+	Items           []map[string]any    `json:"items,omitempty"`
+	Pagination      *ArtifactPagination `json:"pagination,omitempty"`
+}
+
+// ArtifactProgress — build job 진행률. worker가 progress 파일에 percent /
+// processed_rows / total_rows를 기록하면 service가 읽어서 화면에 노출.
+type ArtifactProgress struct {
+	Percent       float64    `json:"percent"`
+	ProcessedRows int        `json:"processed_rows,omitempty"`
+	TotalRows     int        `json:"total_rows,omitempty"`
+	ETASeconds    *float64   `json:"eta_seconds,omitempty"`
+	Message       string     `json:"message,omitempty"`
+	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
+}
+
+// ArtifactPagination — DatasetArtifactView pagination 정보. doc_genuineness /
+// clause_label view에서만 사용. clean view에는 items가 없어서 미사용.
+type ArtifactPagination struct {
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+	Total  int `json:"total"`
 }
 
 type BuildJobProgress struct {
@@ -687,371 +694,6 @@ type EmbeddingIndexChunk struct {
 	VectorDim        int            `json:"vector_dim"`
 	Embedding        []float32      `json:"embedding"`
 	Metadata         map[string]any `json:"metadata,omitempty"`
-}
-
-type SkillPlanStep struct {
-	StepID      string         `json:"step_id"`
-	SkillName   string         `json:"skill_name"`
-	DatasetName string         `json:"dataset_name"`
-	Inputs      map[string]any `json:"inputs"`
-}
-
-type SkillPlan struct {
-	PlanID    string          `json:"plan_id"`
-	Steps     []SkillPlanStep `json:"steps"`
-	Notes     *string         `json:"notes,omitempty"`
-	CreatedAt time.Time       `json:"created_at"`
-}
-
-type AnalysisRequest struct {
-	RequestID        string         `json:"request_id"`
-	ProjectID        string         `json:"project_id"`
-	DatasetName      *string        `json:"dataset_name,omitempty"`
-	DatasetVersionID *string        `json:"dataset_version_id,omitempty"`
-	Goal             string         `json:"goal"`
-	Constraints      []string       `json:"constraints"`
-	Context          map[string]any `json:"context"`
-	RequestedPlan    *SkillPlan     `json:"requested_plan,omitempty"`
-	CreatedAt        time.Time      `json:"created_at"`
-}
-
-type AnalysisSubmitRequest struct {
-	DatasetID        *string        `json:"dataset_id,omitempty"`
-	DatasetName      *string        `json:"dataset_name,omitempty"`
-	DatasetVersionID *string        `json:"dataset_version_id,omitempty"`
-	DataType         *string        `json:"data_type,omitempty"`
-	Goal             string         `json:"goal"`
-	Constraints      []string       `json:"constraints"`
-	Context          map[string]any `json:"context"`
-	RequestedPlan    *SkillPlan     `json:"requested_plan,omitempty"`
-}
-
-type PlanRecord struct {
-	PlanID               string    `json:"plan_id"`
-	RequestID            string    `json:"request_id"`
-	ProjectID            string    `json:"project_id"`
-	DatasetName          string    `json:"dataset_name"`
-	DatasetVersionID     *string   `json:"dataset_version_id,omitempty"`
-	Plan                 SkillPlan `json:"plan"`
-	Status               string    `json:"status"`
-	PlannerType          *string   `json:"planner_type,omitempty"`
-	PlannerModel         *string   `json:"planner_model,omitempty"`
-	PlannerPromptVersion *string   `json:"planner_prompt_version,omitempty"`
-	PlanHash             *string   `json:"plan_hash,omitempty"`
-	CreatedAt            time.Time `json:"created_at"`
-}
-
-type AnalysisPlanResponse struct {
-	Request AnalysisRequest `json:"request"`
-	Plan    PlanRecord      `json:"plan"`
-}
-
-type AnalysisExecuteResponse struct {
-	Request   AnalysisRequest  `json:"request"`
-	Plan      PlanRecord       `json:"plan"`
-	Execution ExecutionSummary `json:"execution"`
-	JobID     *string          `json:"job_id,omitempty"`
-}
-
-type ExecutionEvent struct {
-	ExecutionID string         `json:"execution_id"`
-	TS          time.Time      `json:"ts"`
-	Level       string         `json:"level"`
-	EventType   string         `json:"event_type"`
-	Message     string         `json:"message"`
-	Payload     map[string]any `json:"payload,omitempty"`
-}
-
-type ExecutionSummary struct {
-	ExecutionID              string                `json:"execution_id"`
-	ProjectID                string                `json:"project_id"`
-	RequestID                string                `json:"request_id"`
-	Plan                     SkillPlan             `json:"plan"`
-	Status                   string                `json:"status"`
-	CreatedAt                time.Time             `json:"created_at"`
-	EndedAt                  *time.Time            `json:"ended_at,omitempty"`
-	RequiredHashes           []string              `json:"required_hashes"`
-	EmbeddingModel           *string               `json:"embedding_model_version,omitempty"`
-	Artifacts                map[string]string     `json:"artifacts"`
-	DatasetVersionID         *string               `json:"dataset_version_id,omitempty"`
-	CodeVersion              *string               `json:"code_version,omitempty"`
-	ParamsHash               *string               `json:"params_hash,omitempty"`
-	SkillBundleVersion       *string               `json:"skill_bundle_version,omitempty"`
-	ProfileSnapshot          *DatasetProfile       `json:"profile_snapshot,omitempty"`
-	Events                   []ExecutionEvent      `json:"events"`
-	ResultV1Snapshot         *ExecutionResultV1    `json:"-"`
-	FinalAnswerSnapshot      *ExecutionFinalAnswer `json:"-"`
-	FinalAnswerPromptVersion *string               `json:"-"`
-	FinalAnswerError         *string               `json:"-"`
-	Diagnostics              *ExecutionDiagnostics `json:"diagnostics,omitempty"`
-}
-
-type ExecutionListItem struct {
-	ExecutionID      string                 `json:"execution_id"`
-	Status           string                 `json:"status"`
-	CreatedAt        time.Time              `json:"created_at"`
-	EndedAt          *time.Time             `json:"ended_at,omitempty"`
-	DatasetVersionID *string                `json:"dataset_version_id,omitempty"`
-	PrimarySkillName *string                `json:"primary_skill_name,omitempty"`
-	AnswerPreview    *string                `json:"answer_preview,omitempty"`
-	WarningCount     int                    `json:"warning_count"`
-	Waiting          *ExecutionWaitingState `json:"waiting,omitempty"`
-	Diagnostics      *ExecutionDiagnostics  `json:"diagnostics,omitempty"`
-}
-
-type ExecutionListResponse struct {
-	Items []ExecutionListItem `json:"items"`
-}
-
-type PlanExecuteResponse struct {
-	Plan      PlanRecord       `json:"plan"`
-	Execution ExecutionSummary `json:"execution"`
-	JobID     *string          `json:"job_id,omitempty"`
-}
-
-type ExecutionRerunRequest struct {
-	Mode        *string `json:"mode,omitempty"`
-	TriggeredBy *string `json:"triggered_by,omitempty"`
-}
-
-type ExecutionResumeRequest struct {
-	Reason      *string `json:"reason,omitempty"`
-	TriggeredBy *string `json:"triggered_by,omitempty"`
-}
-
-type ExecutionRerunResponse struct {
-	Execution ExecutionSummary `json:"execution"`
-	JobID     *string          `json:"job_id,omitempty"`
-}
-
-type ExecutionResultResponse struct {
-	ExecutionID string                `json:"execution_id"`
-	Artifacts   map[string]string     `json:"artifacts"`
-	Contract    map[string]any        `json:"contract"`
-	ResultV1    ExecutionResultV1     `json:"result_v1"`
-	FinalAnswer *ExecutionFinalAnswer `json:"final_answer,omitempty"`
-	Diagnostics *ExecutionDiagnostics `json:"diagnostics,omitempty"`
-}
-
-type ExecutionEventsResponse struct {
-	ExecutionID string                `json:"execution_id"`
-	Status      string                `json:"status"`
-	EventCount  int                   `json:"event_count"`
-	Events      []ExecutionEvent      `json:"events"`
-	Diagnostics *ExecutionDiagnostics `json:"diagnostics,omitempty"`
-}
-
-type ExecutionStepProgress struct {
-	StepID        string     `json:"step_id"`
-	SkillName     string     `json:"skill_name"`
-	Status        string     `json:"status"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	CompletedAt   *time.Time `json:"completed_at,omitempty"`
-	ArtifactKey   *string    `json:"artifact_key,omitempty"`
-	Summary       string     `json:"summary,omitempty"`
-	Warnings      []string   `json:"warnings,omitempty"`
-	SelectionMode string     `json:"selection_mode,omitempty"`
-}
-
-type ExecutionBuildDependency struct {
-	BuildType  string           `json:"build_type"`
-	Status     string           `json:"status"`
-	Ready      bool             `json:"ready"`
-	WaitingFor bool             `json:"waiting_for,omitempty"`
-	LatestJob  *DatasetBuildJob `json:"latest_job,omitempty"`
-}
-
-type ExecutionProgressResponse struct {
-	ExecutionID        string                     `json:"execution_id"`
-	Status             string                     `json:"status"`
-	TotalSteps         int                        `json:"total_steps"`
-	CompletedSteps     int                        `json:"completed_steps"`
-	FailedSteps        int                        `json:"failed_steps"`
-	LastEventAt        *time.Time                 `json:"last_event_at,omitempty"`
-	RunningStep        *ExecutionStepProgress     `json:"running_step,omitempty"`
-	Waiting            *ExecutionWaitingState     `json:"waiting,omitempty"`
-	BuildDependencies  []ExecutionBuildDependency `json:"build_dependencies,omitempty"`
-	Steps              []ExecutionStepProgress    `json:"steps"`
-	AvailableArtifacts []string                   `json:"available_artifacts,omitempty"`
-	ResultPreview      *ExecutionResultAnswer     `json:"result_preview,omitempty"`
-	Diagnostics        *ExecutionDiagnostics      `json:"diagnostics,omitempty"`
-}
-
-type ExecutionStepPreviewResponse struct {
-	ExecutionID   string                `json:"execution_id"`
-	StepID        string                `json:"step_id"`
-	SkillName     string                `json:"skill_name"`
-	Status        string                `json:"status"`
-	StartedAt     *time.Time            `json:"started_at,omitempty"`
-	CompletedAt   *time.Time            `json:"completed_at,omitempty"`
-	ArtifactKey   *string               `json:"artifact_key,omitempty"`
-	ArtifactRef   *string               `json:"artifact_ref,omitempty"`
-	Summary       string                `json:"summary,omitempty"`
-	Warnings      []string              `json:"warnings,omitempty"`
-	SelectionMode string                `json:"selection_mode,omitempty"`
-	Usage         map[string]any        `json:"usage,omitempty"`
-	Preview       map[string]any        `json:"preview,omitempty"`
-	EventCount    int                   `json:"event_count"`
-	Events        []ExecutionEvent      `json:"events,omitempty"`
-	Diagnostics   *ExecutionDiagnostics `json:"diagnostics,omitempty"`
-}
-
-type ReportDraftCreateRequest struct {
-	Title        *string  `json:"title,omitempty"`
-	ExecutionIDs []string `json:"execution_ids"`
-}
-
-type ReportDraft struct {
-	DraftID      string        `json:"draft_id"`
-	ProjectID    string        `json:"project_id"`
-	Title        string        `json:"title"`
-	ExecutionIDs []string      `json:"execution_ids"`
-	Content      ReportDraftV1 `json:"content"`
-	CreatedAt    time.Time     `json:"created_at"`
-}
-
-type ReportDraftV1 struct {
-	SchemaVersion     string               `json:"schema_version"`
-	Title             string               `json:"title"`
-	Overview          string               `json:"overview"`
-	ExecutionCount    int                  `json:"execution_count"`
-	Sections          []ReportDraftSection `json:"sections,omitempty"`
-	KeyFindings       []string             `json:"key_findings,omitempty"`
-	Evidence          []map[string]any     `json:"evidence,omitempty"`
-	FollowUpQuestions []string             `json:"follow_up_questions,omitempty"`
-	UsageSummary      map[string]any       `json:"usage_summary,omitempty"`
-	Warnings          []string             `json:"warnings,omitempty"`
-}
-
-type ReportDraftSection struct {
-	ExecutionID      string           `json:"execution_id"`
-	Status           string           `json:"status"`
-	CreatedAt        time.Time        `json:"created_at"`
-	PrimarySkillName *string          `json:"primary_skill_name,omitempty"`
-	Summary          string           `json:"summary"`
-	KeyFindings      []string         `json:"key_findings,omitempty"`
-	Evidence         []map[string]any `json:"evidence,omitempty"`
-	WarningCount     int              `json:"warning_count"`
-}
-
-type ExecutionResultV1 struct {
-	SchemaVersion      string                  `json:"schema_version"`
-	Status             string                  `json:"status"`
-	PrimaryArtifactKey *string                 `json:"primary_artifact_key,omitempty"`
-	PrimarySkillName   *string                 `json:"primary_skill_name,omitempty"`
-	Answer             *ExecutionResultAnswer  `json:"answer,omitempty"`
-	StepResults        []ExecutionStepResultV1 `json:"step_results,omitempty"`
-	UsageSummary       map[string]any          `json:"usage_summary,omitempty"`
-	Profile            *DatasetProfile         `json:"profile,omitempty"`
-	Warnings           []string                `json:"warnings,omitempty"`
-	Waiting            *ExecutionWaitingState  `json:"waiting,omitempty"`
-}
-
-type ExecutionFinalAnswer struct {
-	SchemaVersion     string           `json:"schema_version"`
-	Status            string           `json:"status"`
-	GenerationMode    string           `json:"generation_mode,omitempty"`
-	Headline          string           `json:"headline,omitempty"`
-	AnswerText        string           `json:"answer_text"`
-	KeyPoints         []string         `json:"key_points,omitempty"`
-	Caveats           []string         `json:"caveats,omitempty"`
-	Evidence          []map[string]any `json:"evidence,omitempty"`
-	FollowUpQuestions []string         `json:"follow_up_questions,omitempty"`
-	PromptVersion     *string          `json:"prompt_version,omitempty"`
-	Model             *string          `json:"model,omitempty"`
-	Usage             map[string]any   `json:"usage,omitempty"`
-	GeneratedAt       *time.Time       `json:"generated_at,omitempty"`
-}
-
-type ExecutionResultAnswer struct {
-	Summary           string           `json:"summary"`
-	KeyFindings       []string         `json:"key_findings,omitempty"`
-	Evidence          []map[string]any `json:"evidence,omitempty"`
-	FollowUpQuestions []string         `json:"follow_up_questions,omitempty"`
-	SelectionSource   string           `json:"selection_source,omitempty"`
-	CitationMode      string           `json:"citation_mode,omitempty"`
-}
-
-type ExecutionStepResultV1 struct {
-	StepID        string         `json:"step_id"`
-	SkillName     string         `json:"skill_name"`
-	Status        string         `json:"status"`
-	ArtifactKey   *string        `json:"artifact_key,omitempty"`
-	Summary       string         `json:"summary,omitempty"`
-	Usage         map[string]any `json:"usage,omitempty"`
-	ArtifactRef   *string        `json:"artifact_ref,omitempty"`
-	Warnings      []string       `json:"warnings,omitempty"`
-	SelectionMode string         `json:"selection_mode,omitempty"`
-}
-
-type ExecutionWaitingState struct {
-	WaitingFor string `json:"waiting_for"`
-	Reason     string `json:"reason,omitempty"`
-}
-
-type ExecutionDiagnostics struct {
-	EventCount           int                    `json:"event_count"`
-	LatestEventType      string                 `json:"latest_event_type,omitempty"`
-	LatestEventMessage   string                 `json:"latest_event_message,omitempty"`
-	FailureReason        string                 `json:"failure_reason,omitempty"`
-	Waiting              *ExecutionWaitingState `json:"waiting,omitempty"`
-	FinalAnswerStatus    string                 `json:"final_answer_status,omitempty"`
-	FinalAnswerError     string                 `json:"final_answer_error,omitempty"`
-	ArtifactCount        int                    `json:"artifact_count,omitempty"`
-	ArtifactPayloadBytes int                    `json:"artifact_payload_bytes,omitempty"`
-	LargestArtifactKey   string                 `json:"largest_artifact_key,omitempty"`
-	LargestArtifactBytes int                    `json:"largest_artifact_bytes,omitempty"`
-	ArtifactStorageMode  string                 `json:"artifact_storage_mode,omitempty"`
-}
-
-type ExecutionDiffStep struct {
-	StepID    string         `json:"step_id"`
-	SkillName string         `json:"skill_name"`
-	Status    string         `json:"status"`
-	FromHash  *string        `json:"from_hash,omitempty"`
-	ToHash    *string        `json:"to_hash,omitempty"`
-	Stats     map[string]any `json:"stats,omitempty"`
-}
-
-type ExecutionDiffResponse struct {
-	FromExecutionID string              `json:"from_execution_id"`
-	ToExecutionID   string              `json:"to_execution_id"`
-	TotalSteps      int                 `json:"total_steps"`
-	ChangedSteps    int                 `json:"changed_steps"`
-	Steps           []ExecutionDiffStep `json:"steps"`
-}
-
-type OperationsFailureItem struct {
-	ID          string     `json:"id"`
-	Status      string     `json:"status"`
-	Type        string     `json:"type,omitempty"`
-	Message     string     `json:"message,omitempty"`
-	OccurredAt  *time.Time `json:"occurred_at,omitempty"`
-	RetryCount  int        `json:"retry_count,omitempty"`
-	ResourceRef string     `json:"resource_ref,omitempty"`
-}
-
-type OperationsExecutionSummary struct {
-	Total               int                     `json:"total"`
-	ByStatus            map[string]int          `json:"by_status,omitempty"`
-	WaitingByDependency map[string]int          `json:"waiting_by_dependency,omitempty"`
-	FinalAnswerByStatus map[string]int          `json:"final_answer_by_status,omitempty"`
-	RecentFailures      []OperationsFailureItem `json:"recent_failures,omitempty"`
-}
-
-type OperationsBuildJobSummary struct {
-	Total          int                       `json:"total"`
-	ByStatus       map[string]int            `json:"by_status,omitempty"`
-	ByType         map[string]map[string]int `json:"by_type,omitempty"`
-	RetryingJobs   int                       `json:"retrying_jobs"`
-	RecentFailures []OperationsFailureItem   `json:"recent_failures,omitempty"`
-}
-
-type OperationsSummaryResponse struct {
-	ProjectID   string                     `json:"project_id"`
-	GeneratedAt time.Time                  `json:"generated_at"`
-	Executions  OperationsExecutionSummary `json:"executions"`
-	BuildJobs   OperationsBuildJobSummary  `json:"build_jobs"`
 }
 
 type RuntimeStatusTemporal struct {
