@@ -41,6 +41,8 @@ export type TaxonomyStatus =
 // 알려진 값만 좁히고 그 외는 "unknown"으로 떨어뜨려 table fallback한다.
 export type RecommendedView = "table" | "bar" | "line" | "unknown";
 
+export type RunStatus = "running" | "completed" | "failed";
+
 export interface ChatMessage {
   id: string;
   role: ChatRole;
@@ -55,6 +57,10 @@ export interface ChatMessage {
   // 생성하지 못한 경우에 fallback 안내를 띄우기 위한 플래그.
   chartFallbackReason?: "insufficient_data";
   recommendedView?: RecommendedView;
+  // run 정보 — POST 응답에만 존재. 이력 메시지(thread detail)에는 없어
+  // 표시되지 않는다 (사용자 정책).
+  runStatus?: RunStatus;
+  runError?: string;
 }
 
 export interface ChatThread {

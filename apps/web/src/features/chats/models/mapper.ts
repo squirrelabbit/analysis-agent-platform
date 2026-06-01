@@ -16,6 +16,7 @@ import type {
   ChatThread,
   ChatThreadDetail,
   RecommendedView,
+  RunStatus,
   TaxonomyStatus,
 } from "./model";
 
@@ -95,6 +96,13 @@ const mapRecommendedView = (
   return "unknown";
 };
 
+const mapRunStatus = (status: string | undefined): RunStatus | undefined => {
+  if (status === "running" || status === "completed" || status === "failed") {
+    return status;
+  }
+  return undefined;
+};
+
 const mapTaxonomyStatus = (
   dto: TaxonomyCheckDto | undefined,
 ): TaxonomyStatus | undefined => {
@@ -135,6 +143,8 @@ export const mapAnalyzeResponse = (
           plan: mapPlan(dto.result?.plan),
           recommendedView,
           chartFallbackReason,
+          runStatus: mapRunStatus(dto.run?.status),
+          runError: dto.run?.error_message?.trim() || undefined,
         }
       : undefined;
 

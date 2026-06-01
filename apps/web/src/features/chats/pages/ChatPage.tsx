@@ -55,18 +55,32 @@ export function ChatPage() {
   // server messages를 source of truth로 두고, 분석 중인 turn만 pending으로 덧붙인다.
   // pending의 user는 처음엔 client uuid → 응답 받으면 server id로 교체되므로
   // refetch가 도착하면 baseIds.has로 자동 dedupe 된다.
+  // 단 thread detail에는 run.status/error_message가 보존되지 않으므로
+  // pendingTurn.assistant의 run 정보를 server message에 머지해 refetch 후에도
+  // 같은 turn의 상태/에러가 사라지지 않게 한다 (백엔드 projection 추가 시
+  // 머지 코드 제거 예정).
   const messages = useMemo(() => {
     if (!pendingTurn) return serverMessages;
     const baseIds = new Set(serverMessages.map((m) => m.id));
+    const pendingAsst = pendingTurn.assistant;
+    const hasPendingRun = !!pendingAsst && (pendingAsst.runStatus || pendingAsst.runError);
+    const merged = hasPendingRun
+      ? serverMessages.map((m) =>
+          m.id === pendingAsst!.id
+            ? {
+                ...m,
+                runStatus: m.runStatus ?? pendingAsst!.runStatus,
+                runError: m.runError ?? pendingAsst!.runError,
+              }
+            : m,
+        )
+      : serverMessages;
     const extras: ChatMessage[] = [];
     if (!baseIds.has(pendingTurn.user.id)) extras.push(pendingTurn.user);
-    if (
-      pendingTurn.assistant &&
-      !baseIds.has(pendingTurn.assistant.id)
-    ) {
-      extras.push(pendingTurn.assistant);
+    if (pendingAsst && !baseIds.has(pendingAsst.id)) {
+      extras.push(pendingAsst);
     }
-    return extras.length ? [...serverMessages, ...extras] : serverMessages;
+    return extras.length ? [...merged, ...extras] : merged;
   }, [serverMessages, pendingTurn]);
 
   // 사용자 액션(send / thread select / new thread / dataset change)은 force로
