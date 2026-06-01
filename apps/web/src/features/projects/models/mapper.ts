@@ -8,5 +8,6 @@ export const mapProject = (dto: ProjectResponse): Project => ({
   datasetCount: dto.dataset_version_count,
   promptCount: dto.prompt_count,
   scenarioCount: dto.scenario_count,
+  chatCount: dto.analysis_thread_count,
   createdAt: dto.created_at
 })

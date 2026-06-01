@@ -25,7 +25,7 @@ export default function Sidebar({ project }: { project: Project }) {
       name: "채팅",
       path: `${basePath}/chats`,
       icon: MessageCircle,
-      badge: 0,
+      badge: project.chatCount,
     },
   ];
 
