@@ -8,10 +8,11 @@ export default function DatasetContainer() {
   const { projectId } = useProjectParams();
   const { data: project } = useProjectDetail(projectId);
   const { data: datasets = [] } = useDatasets();
-  
+
+  if (!project) return null;
   return (
     <div className="p-8 flex flex-col gap-4">
-      <DatasetHeader {...project!} />
+      <DatasetHeader {...project} />
       <div className="grid grid-cols-2 gap-3">
         {datasets.map((dataset) => <DatasetItem key={dataset.id} {...dataset} />)}
       </div>

@@ -1,6 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import AppLayout from "./layout/AppLayout";
-import { ChatPage } from "./pages/ChatPage";
+import { ChatPage } from "./features/chats/pages/ChatPage";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ProjectLayout from "./layout/ProjectLayout";
 import ProjectPage from "./pages/ProjectPage";
@@ -8,8 +8,9 @@ import DatasetDetail from "./features/datasets/pages/DatasetDetail";
 import DatasetContainer from "./features/datasets/pages/DatasetContainer";
 import VersionDetailPage from "./features/versions/pages/VersionDetailPage";
 
+const queryClient = new QueryClient();
+
 function App() {
-  const queryClient = new QueryClient();
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>

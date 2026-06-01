@@ -5,7 +5,7 @@ import CreateDatasetDialog from "./CreateDatasetDialog";
 export default function DatasetHeader(project: Project) {
   return (
     <div>
-      <HeadBreadcrumb project={project!} />
+      <HeadBreadcrumb project={project} />
       <header className="flex justify-between py-4">
         <div>
           <h2 className="text-xl font-bold">데이터셋</h2>

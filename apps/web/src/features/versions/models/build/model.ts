@@ -45,6 +45,7 @@ export interface GenuinenessItem {
   genuineness: string;
   reason: string;
   source: string;
+  cleanedText: string;
 }
 
 export interface GenuinenessSummary  {

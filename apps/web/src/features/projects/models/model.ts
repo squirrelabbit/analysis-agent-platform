@@ -5,6 +5,7 @@ export interface Project {
   datasetCount: number,
   scenarioCount: number,
   promptCount: number,
+  chatCount: number,
   createdAt: string,
 }
 

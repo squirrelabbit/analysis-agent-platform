@@ -54,6 +54,7 @@ const mapGenuinenessItem = (dto: GenuinenessItemDto): GenuinenessItem => ({
   genuineness: dto.genuineness,
   reason: dto.reason,
   source: dto.source,
+  cleanedText: dto.cleaned_text,
 });
 
 export const mapGenuinenessSummary = (
@@ -63,10 +64,10 @@ export const mapGenuinenessSummary = (
   // pagination:{},
   // applied: { promptVersion: dto.applied.prompt_version ?? "" },
   genuineness: {
-    genuineReview: dto.genuineness.genuine_review ?? 0,
-    nonReview: dto.genuineness.non_review ?? 0,
-    mixed: dto.genuineness.mixed ?? 0,
-    uncertain: dto.genuineness.uncertain ?? 0,
+    genuineReview: dto.genuineness?.genuine_review ?? 0,
+    nonReview: dto.genuineness?.non_review ?? 0,
+    mixed: dto.genuineness?.mixed ?? 0,
+    uncertain: dto.genuineness?.uncertain ?? 0,
   },
   total: dto.total ?? 0,
 });
@@ -82,20 +83,20 @@ const mapClauseItem = (dto: ClauseItemDto): ClauseItem => ({
 
 export const mapClauseSummary = (dto: ClauseSummaryDto): ClauseSummary => ({
   aspect: {
-    showProgram: dto.aspect.show_program ?? 0,
-    experienceBooth: dto.aspect.experience_booth ?? 0,
-    ambianceScenery: dto.aspect.ambiance_scenery ?? 0,
-    food: dto.aspect.food ?? 0,
-    priceCost: dto.aspect.price_cost ?? 0,
-    facilityCrowd: dto.aspect.facility_crowd ?? 0,
-    accessTraffic: dto.aspect.access_traffic ?? 0,
-    operationService: dto.aspect.operation_service ?? 0,
-    etc: dto.aspect.etc ?? 0,
+    showProgram: dto.aspect?.show_program ?? 0,
+    experienceBooth: dto.aspect?.experience_booth ?? 0,
+    ambianceScenery: dto.aspect?.ambiance_scenery ?? 0,
+    food: dto.aspect?.food ?? 0,
+    priceCost: dto.aspect?.price_cost ?? 0,
+    facilityCrowd: dto.aspect?.facility_crowd ?? 0,
+    accessTraffic: dto.aspect?.access_traffic ?? 0,
+    operationService: dto.aspect?.operation_service ?? 0,
+    etc: dto.aspect?.etc ?? 0,
   },
   sentiment: {
-    positive: dto.sentiment.positive ?? 0,
-    negative: dto.sentiment.negative ?? 0,
-    neutral: dto.sentiment.neutral ?? 0,
+    positive: dto.sentiment?.positive ?? 0,
+    negative: dto.sentiment?.negative ?? 0,
+    neutral: dto.sentiment?.neutral ?? 0,
   },
   total: dto.total ?? 0,
 });
@@ -125,8 +126,8 @@ export const mapGenuinenessBuild = (
   progress: dto.progress ? mapProgress(dto.progress) : undefined,
   summary: dto.summary ? mapGenuinenessSummary(dto.summary) : undefined,
   pagination: dto.pagination,
-  applied: { promptVersion: dto.applied.prompt_version ?? "" },
-  items: dto.items.map(mapGenuinenessItem),
+  applied: { promptVersion: dto.applied?.prompt_version ?? "" },
+  items: dto.items?.map(mapGenuinenessItem) ?? [],
 });
 
 export const mapClauseLabelBuild = (
@@ -142,8 +143,8 @@ export const mapClauseLabelBuild = (
   progress: dto.progress ? mapProgress(dto.progress) : undefined,
   summary: dto.summary ? mapClauseSummary(dto.summary) : undefined,
   pagination: dto.pagination,
-  applied: { promptVersion: dto.applied.prompt_version ?? "" },
-  items: dto.items.map(mapClauseItem),
+  applied: { promptVersion: dto.applied?.prompt_version ?? "" },
+  items: dto.items?.map(mapClauseItem) ?? [],
 });
 
 export const mapBuild = (dto: BuildResponse): Build => {

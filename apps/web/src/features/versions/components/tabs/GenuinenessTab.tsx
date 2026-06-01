@@ -30,7 +30,6 @@ const chartConfig = {
 const FILTER_OPTIONS: { label: string; value: string }[] = [
   { label: "전체", value: "" },
   { label: "진성", value: "genuine_review" },
-  { label: "혼합", value: "mixed" },
   { label: "비진성", value: "non_review" },
   { label: "불확실", value: "uncertain" },
 ];
@@ -56,6 +55,10 @@ export default function GenuinenessTab() {
     data: GenuinenessBuild | undefined;
   };
   const { summary, applied, items } = data || {};
+  const [filter, setFilter] = useState<string>("");
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+
   if (!summary) {
     return (
       <p className="text-sm text-zinc-500">
@@ -66,10 +69,6 @@ export default function GenuinenessTab() {
 
   const { genuineness, total } = summary;
   const { genuineReview, mixed, nonReview, uncertain } = genuineness;
-
-  const [filter, setFilter] = useState<string>("");
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
 
   const pieData = [
     {
@@ -105,7 +104,7 @@ export default function GenuinenessTab() {
     (page - 1) * pageSize,
     page * pageSize,
   );
-  const totalPages = Math.ceil(filtered?.length ?? 0 / pageSize);
+  const totalPages = Math.ceil((filtered?.length ?? 0) / pageSize);
   return (
     <div className="space-y-5">
       {/* Metrics */}
@@ -133,11 +132,6 @@ export default function GenuinenessTab() {
                 label="진성"
                 value={genuineReview}
                 valueColor="text-emerald-600"
-              />
-              <MetricCard
-                label="혼합"
-                value={mixed}
-                valueColor="text-amber-600"
               />
               <MetricCard
                 label="비진성"
@@ -210,6 +204,9 @@ export default function GenuinenessTab() {
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide w-48">
                   문서 ID
                 </th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide">
+                  정제 텍스트
+                </th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide w-36">
                   판별 결과
                 </th>
@@ -222,7 +219,7 @@ export default function GenuinenessTab() {
               {filtered?.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={3}
+                    colSpan={4}
                     className="text-center py-8 text-sm text-zinc-400"
                   >
                     해당 항목이 없습니다
@@ -236,6 +233,9 @@ export default function GenuinenessTab() {
                   >
                     <td className="px-4 py-3 font-mono text-xs text-zinc-400 max-w-45 truncate">
                       {item.docId}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-zinc-500 leading-relaxed max-w-sm">
+                      {item.cleanedText}
                     </td>
                     <td className="px-4 py-3">
                       {/* <p>{item.genuineness}</p> */}

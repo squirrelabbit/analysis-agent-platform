@@ -5,6 +5,7 @@ export interface ProjectResponse {
   dataset_version_count: number,
   scenario_count: number,
   prompt_count: number,
+  analysis_thread_count: number,
   created_at: string,
 }
 

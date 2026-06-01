@@ -83,7 +83,7 @@ export default function BuildDialog({
                   type: "clean",
                   req: {
                     text_columns:
-                      data.textColumns?.map((item: any) => item.value) ?? [],
+                      data.textColumns?.map((item) => item.value) ?? [],
                   },
                 });
               }}

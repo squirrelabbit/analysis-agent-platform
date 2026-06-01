@@ -9,11 +9,19 @@ import {
   PieChart,
   Pie,
   Cell,
+  LabelList,
 } from "recharts";
 import { MetricCard } from "@/components/common/cards/MetricCard";
 import type { ClauseBuild } from "../../models/build";
 import { Badge } from "@/components/ui/badge";
 import { useBuildVersion } from "../../hooks/build.query";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const SENTIMENT_COLORS: Record<string, string> = {
   positive: "#10b981",
@@ -44,7 +52,12 @@ function SentimentBadge({ value }: { value: string }) {
 
 export function ClauseTab() {
   const { data } = useBuildVersion("clause_label") as { data: ClauseBuild | undefined };
-  const { summary, items, applied, durationSeconds } = data || {};
+  const { summary, items, applied, durationSeconds, pagination } = data || {};
+  const [filter, setFilter] = useState<string | "">("");
+  const [aspectFilter, setAspectFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+
   if (!summary) {
     return <p className="text-sm text-zinc-500">표시할 분류 요약이 없습니다.</p>;
   }
@@ -52,9 +65,6 @@ export function ClauseTab() {
   const {
     sentiment: { positive, neutral, negative },
   } = summary;
-  const [filter, setFilter] = useState<string | "">("");
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
 
   const aspectData = Object.entries(summary.aspect)
     .sort(([, a], [, b]) => b - a)
@@ -67,9 +77,25 @@ export function ClauseTab() {
     { name: "negative", value: negative, fill: SENTIMENT_COLORS.negative },
   ];
 
-  const filtered = filter ? items?.filter((i) => i.sentiment === filter) : items;
+  const aspectOptions = [...new Set(items?.map((i) => i.aspect) ?? [])];
+
+  const filtered = items?.filter(
+    (i) =>
+      (!filter || i.sentiment === filter) &&
+      (aspectFilter === "all" || i.aspect === aspectFilter),
+  );
   const paginatedItems = filtered?.slice((page - 1) * pageSize, page * pageSize);
-  const totalPages = Math.ceil(filtered?.length ?? 0 / pageSize);
+  const totalPages = Math.ceil((filtered?.length ?? 0) / pageSize);
+
+  const loadedStart = (pagination?.offset ?? 0) + 1;
+  const loadedEnd = (pagination?.offset ?? 0) + (items?.length ?? 0);
+  const totalCount = pagination?.total ?? items?.length ?? 0;
+
+  const totalSec = Math.round(durationSeconds ?? 0);
+  const durationLabel =
+    totalSec >= 60
+      ? `${Math.floor(totalSec / 60)}분 ${totalSec % 60}초`
+      : `${totalSec}초`;
 
   return (
     <div className="space-y-5">
@@ -109,7 +135,7 @@ export function ClauseTab() {
             <BarChart
               data={aspectData}
               layout="vertical"
-              margin={{ top: 0, right: 16, bottom: 0, left: 10 }}
+              margin={{ top: 0, right: 40, bottom: 0, left: 10 }}
             >
               <XAxis
                 type="number"
@@ -120,6 +146,7 @@ export function ClauseTab() {
               <YAxis
                 type="category"
                 dataKey="name"
+                interval={0}
                 tick={{ fontSize: 11, fill: "#71717a" }}
                 axisLine={false}
                 tickLine={false}
@@ -134,7 +161,14 @@ export function ClauseTab() {
                 fill="#3b82f6"
                 radius={[0, 3, 3, 0]}
                 barSize={10}
-              />
+              >
+                <LabelList
+                  dataKey="value"
+                  position="right"
+                  fontSize={11}
+                  fill="#71717a"
+                />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -200,10 +234,7 @@ export function ClauseTab() {
               },
               {
                 label: "소요 시간",
-                value:
-                  durationSeconds ?? 0 > 0
-                    ? `${Math.floor(durationSeconds ?? 0 / 60)}분 ${durationSeconds ?? 0 % 60}초`
-                    : `${durationSeconds ?? 0}초`,
+                value: durationLabel,
               },
             ].map(({ label, value }) => (
               <div
@@ -222,13 +253,35 @@ export function ClauseTab() {
       <div className="rounded-xl border border-zinc-100 bg-white overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-50 flex items-center justify-between flex-wrap gap-2">
           <span className="text-xs font-medium text-zinc-500">
-            조항 결과 상세 ({items?.length ?? 0}건)
+            총 {totalCount}건 중 {loadedStart}–{loadedEnd}건 표시
           </span>
-          <div className="flex gap-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Select
+              value={aspectFilter}
+              onValueChange={(v) => {
+                setAspectFilter(v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-7 w-40 text-xs">
+                <SelectValue placeholder="Aspect" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">전체 Aspect</SelectItem>
+                {aspectOptions.map((a) => (
+                  <SelectItem key={a} value={a}>
+                    {a}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {SENTIMENT_FILTER_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
-                onClick={() => setFilter(opt.value)}
+                onClick={() => {
+                  setFilter(opt.value);
+                  setPage(1);
+                }}
                 className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                   filter === opt.value
                     ? "bg-zinc-800 text-white border-zinc-800"
@@ -271,7 +324,7 @@ export function ClauseTab() {
               ) : (
                 paginatedItems?.map((item) => (
                   <tr
-                    key={item.docId}
+                    key={item.clauseId}
                     className="hover:bg-zinc-50/60 transition-colors"
                   >
                     <td className="px-4 py-3 font-mono text-xs text-zinc-400 max-w-40 truncate">

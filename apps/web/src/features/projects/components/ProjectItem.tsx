@@ -33,6 +33,7 @@ export function ProjectItem({
 
   const BADGES = [
     { label: "데이터셋", count: project.datasetCount },
+    { label: "채팅", count: project.chatCount },
     { label: "시나리오", count: project.scenarioCount },
     { label: "프롬프트", count: project.promptCount },
   ];
