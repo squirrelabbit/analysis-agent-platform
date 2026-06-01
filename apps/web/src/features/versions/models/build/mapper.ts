@@ -126,8 +126,8 @@ export const mapGenuinenessBuild = (
   progress: dto.progress ? mapProgress(dto.progress) : undefined,
   summary: dto.summary ? mapGenuinenessSummary(dto.summary) : undefined,
   pagination: dto.pagination,
-  applied: { promptVersion: dto.applied.prompt_version ?? "" },
-  items: dto.items.map(mapGenuinenessItem),
+  applied: { promptVersion: dto.applied?.prompt_version ?? "" },
+  items: dto.items?.map(mapGenuinenessItem) ?? [],
 });
 
 export const mapClauseLabelBuild = (
@@ -143,8 +143,8 @@ export const mapClauseLabelBuild = (
   progress: dto.progress ? mapProgress(dto.progress) : undefined,
   summary: dto.summary ? mapClauseSummary(dto.summary) : undefined,
   pagination: dto.pagination,
-  applied: { promptVersion: dto.applied.prompt_version ?? "" },
-  items: dto.items.map(mapClauseItem),
+  applied: { promptVersion: dto.applied?.prompt_version ?? "" },
+  items: dto.items?.map(mapClauseItem) ?? [],
 });
 
 export const mapBuild = (dto: BuildResponse): Build => {
