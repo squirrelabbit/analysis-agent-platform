@@ -32,6 +32,7 @@ export interface AnalysisThreadMessageResponseDto {
       display?: ComposerDisplayDto;
     };
     plan?: AnalysisPlanDto;
+    taxonomy_check?: TaxonomyCheckDto;
   };
 }
 
@@ -44,6 +45,12 @@ export interface AnalysisPlanStepDto {
 export interface AnalysisPlanDto {
   plan_version: string;
   steps: AnalysisPlanStepDto[];
+}
+
+// silverone Phase 3-B: clause_label artifact taxonomy 정합성 4-branch status.
+export interface TaxonomyCheckDto {
+  status?: "ok" | "legacy_missing" | "hash_mismatch" | "id_mismatch";
+  [key: string]: unknown;
 }
 
 // silverone 2026-06-01 chart-ready metadata v1.

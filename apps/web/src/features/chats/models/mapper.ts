@@ -5,14 +5,17 @@ import type {
   AnalysisThreadDto,
   AnalysisThreadMessageResponseDto,
   ComposerDisplayDto,
+  TaxonomyCheckDto,
 } from "./dto";
 import type {
   AnalyzeResult,
+  ChatChart,
   ChatDisplay,
   ChatMessage,
   ChatPlan,
   ChatThread,
   ChatThreadDetail,
+  TaxonomyStatus,
 } from "./model";
 
 const mapPlan = (dto: AnalysisPlanDto | undefined): ChatPlan | undefined => {
@@ -40,6 +43,38 @@ const mapDisplay = (dto: ComposerDisplayDto | undefined): ChatDisplay | undefine
   };
 };
 
+// recommended_view가 bar/line이고 chart_spec/rows가 유효할 때만 chart로 노출한다.
+// y가 array면 첫 값을 사용해 단일 series로 좁힌다 (사용자 명시 1차 정책).
+const mapChart = (dto: ComposerDisplayDto | undefined): ChatChart | undefined => {
+  if (!dto) return undefined;
+  const view = dto.recommended_view;
+  const spec = dto.chart_spec;
+  if (view !== "bar" && view !== "line") return undefined;
+  if (!spec || (spec.kind !== "bar" && spec.kind !== "line")) return undefined;
+  const rows = dto.rows ?? [];
+  if (rows.length === 0) return undefined;
+  const x = spec.x;
+  const yKey = Array.isArray(spec.y) ? spec.y[0] : spec.y;
+  if (!x || !yKey) return undefined;
+  return {
+    kind: spec.kind,
+    x,
+    y: yKey,
+    title: dto.title ?? undefined,
+    rows,
+  };
+};
+
+const mapTaxonomyStatus = (
+  dto: TaxonomyCheckDto | undefined,
+): TaxonomyStatus | undefined => {
+  const s = dto?.status;
+  if (s === "ok" || s === "legacy_missing" || s === "hash_mismatch" || s === "id_mismatch") {
+    return s;
+  }
+  return undefined;
+};
+
 export const mapAnalyzeResponse = (
   dto: AnalysisThreadMessageResponseDto,
 ): AnalyzeResult => {
@@ -48,6 +83,7 @@ export const mapAnalyzeResponse = (
   const content =
     dto.result?.composer?.assistant_content ?? dto.assistant_message?.content;
 
+  const display = dto.result?.composer?.display;
   const assistantMessage: ChatMessage | undefined =
     content !== undefined && dto.assistant_message
       ? {
@@ -55,7 +91,10 @@ export const mapAnalyzeResponse = (
           role: "assistant",
           content,
           createdAt: dto.assistant_message.created_at,
-          display: mapDisplay(dto.result?.composer?.display),
+          display: mapDisplay(display),
+          chart: mapChart(display),
+          warnings: display?.warnings?.length ? display.warnings : undefined,
+          taxonomyStatus: mapTaxonomyStatus(dto.result?.taxonomy_check),
           plan: mapPlan(dto.result?.plan),
         }
       : undefined;
@@ -84,13 +123,16 @@ export const mapThread = (dto: AnalysisThreadDto): ChatThread => ({
 });
 
 // thread detail의 assistant messages에는 composer.display projection이
-// 동봉되므로 POST 응답과 동일하게 mapDisplay로 매핑한다.
+// 동봉되므로 POST 응답과 동일하게 mapDisplay/mapChart/warnings로 매핑한다.
+// taxonomy_check은 이력에 보존되지 않아 표시 안 함.
 const mapStoredMessage = (dto: AnalysisMessageDto): ChatMessage => ({
   id: dto.message_id,
   role: dto.role,
   content: dto.content,
   createdAt: dto.created_at,
   display: mapDisplay(dto.display),
+  chart: mapChart(dto.display),
+  warnings: dto.display?.warnings?.length ? dto.display.warnings : undefined,
 });
 
 export const mapThreadDetail = (dto: AnalysisThreadDetailDto): ChatThreadDetail => ({
