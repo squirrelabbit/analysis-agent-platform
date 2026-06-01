@@ -179,6 +179,7 @@ const mapStoredMessage = (dto: AnalysisMessageDto): ChatMessage => {
     warnings: dto.display?.warnings?.length ? dto.display.warnings : undefined,
     recommendedView,
     chartFallbackReason,
+    plan: mapPlan(dto.plan),
   };
 };
 

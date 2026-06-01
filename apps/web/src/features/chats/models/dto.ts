@@ -111,6 +111,7 @@ export interface AnalysisMessageDto {
   run_id?: string | null;
   created_at: string;
   display?: ComposerDisplayDto;
+  plan?: AnalysisPlanDto;
 }
 
 export interface AnalysisThreadDetailDto extends AnalysisThreadDto {
