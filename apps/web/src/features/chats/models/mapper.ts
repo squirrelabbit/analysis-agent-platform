@@ -1,5 +1,18 @@
-import type { AnalysisThreadMessageResponseDto } from "./dto";
-import type { AnalyzeResult, ChatMessage } from "./model";
+import type { AnalysisThreadMessageResponseDto, ComposerDisplayDto } from "./dto";
+import type { AnalyzeResult, ChatDisplay, ChatMessage } from "./model";
+
+const mapDisplay = (dto: ComposerDisplayDto | undefined): ChatDisplay | undefined => {
+  if (!dto || dto.type !== "table") return undefined;
+  const columns = dto.columns ?? [];
+  const rows = dto.rows ?? [];
+  if (columns.length === 0) return undefined;
+  return {
+    type: "table",
+    title: dto.title ?? undefined,
+    columns,
+    rows,
+  };
+};
 
 export const mapAnalyzeResponse = (
   dto: AnalysisThreadMessageResponseDto,
@@ -16,6 +29,7 @@ export const mapAnalyzeResponse = (
           role: "assistant",
           content,
           createdAt: dto.assistant_message.created_at,
+          display: mapDisplay(dto.result?.composer?.display),
         }
       : undefined;
 

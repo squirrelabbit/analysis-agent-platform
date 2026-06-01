@@ -29,8 +29,21 @@ export interface AnalysisThreadMessageResponseDto {
   result?: {
     composer?: {
       assistant_content: string;
+      display?: ComposerDisplayDto;
     };
   };
+}
+
+export interface ComposerDisplayDto {
+  type: "table" | "chart" | "json";
+  title?: string | null;
+  columns?: string[];
+  rows?: Record<string, unknown>[];
+  total_rows?: number;
+  returned_rows?: number;
+  max_rows?: number;
+  truncated?: boolean;
+  warnings?: string[];
 }
 
 export interface AnalyzeUserQuestionRequest {
