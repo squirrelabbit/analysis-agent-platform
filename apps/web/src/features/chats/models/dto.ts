@@ -71,13 +71,15 @@ export interface AnalysisThreadListResponseDto {
 }
 
 // AnalysisMessage(상세)는 frontend-safe view가 아니라 raw schema이므로 추가 필드를
-// 가질 수 있다. 우리가 화면에 쓰는 키만 좁혀 둔다.
+// 가질 수 있다. 우리가 화면에 쓰는 키만 좁혀 둔다. assistant message에는
+// run.result_json.composer.display projection이 동봉된다 (silverone 2026-06-01).
 export interface AnalysisMessageDto {
   message_id: string;
   role: ChatRole;
   content: string;
   run_id?: string | null;
   created_at: string;
+  display?: ComposerDisplayDto;
 }
 
 export interface AnalysisThreadDetailDto extends AnalysisThreadDto {

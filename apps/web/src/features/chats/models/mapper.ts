@@ -68,13 +68,14 @@ export const mapThread = (dto: AnalysisThreadDto): ChatThread => ({
   updatedAt: dto.updated_at,
 });
 
-// thread detail의 messages는 display를 포함하지 않는다 (백엔드는 텍스트만 보존).
-// → 이력 메시지는 텍스트만 렌더된다.
+// thread detail의 assistant messages에는 composer.display projection이
+// 동봉되므로 POST 응답과 동일하게 mapDisplay로 매핑한다.
 const mapStoredMessage = (dto: AnalysisMessageDto): ChatMessage => ({
   id: dto.message_id,
   role: dto.role,
   content: dto.content,
   createdAt: dto.created_at,
+  display: mapDisplay(dto.display),
 });
 
 export const mapThreadDetail = (dto: AnalysisThreadDetailDto): ChatThreadDetail => ({
