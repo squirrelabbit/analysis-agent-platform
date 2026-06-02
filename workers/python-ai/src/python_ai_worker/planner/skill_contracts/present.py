@@ -72,6 +72,56 @@ class PresentSkillContract:
                         ),
                     )
 
+        # silverone 2026-06-02 — present.columns hard constraint. columns가 명시되면
+        # input의 출력 컬럼에 모두 존재해야 한다. 없으면 repair 대상(issue)으로 표면화.
+        # input이 RESERVED 테이블이면 TABLE_SCHEMAS로, prior step이면
+        # _infer_step_output_columns로 컬럼 집합을 구해 검사한다. 추론 불가(None)면
+        # 정적 검증을 건너뛴다 (executor 런타임이 DuckDB Binder Error로 잡는다).
+        self._validate_columns(params, ctx)
+
+    def _validate_columns(self, params: dict[str, Any], ctx: "_StepContext") -> None:
+        if "columns" not in params or params.get("columns") is None:
+            return
+        columns = params.get("columns")
+        if not isinstance(columns, list):
+            ctx.issue(
+                code="params.columns_not_list",
+                message="present.columns must be a string array or null",
+            )
+            return
+        names: list[str] = []
+        for col in columns:
+            text = str(col).strip() if isinstance(col, str) else ""
+            if not text:
+                ctx.issue(
+                    code="params.columns_invalid",
+                    message="present.columns entries must be non-empty strings",
+                )
+                return
+            names.append(text)
+        if not names:
+            return
+
+        from ..schema import TABLE_SCHEMAS
+        from ..validator import _check_columns_on_table, _infer_step_output_columns
+
+        input_ref = str(params.get("input") or "").strip()
+        if input_ref in TABLE_SCHEMAS:
+            _check_columns_on_table(input_ref, names, "columns", ctx)
+            return
+        inferred = _infer_step_output_columns(input_ref, ctx.step_lookup, visiting=set())
+        if inferred is None:
+            return  # 추론 불가 — executor 런타임 검증에 위임.
+        missing = [c for c in names if c not in inferred]
+        if missing:
+            ctx.issue(
+                code="params.columns_unknown",
+                message=(
+                    f"present.columns {missing} not in input '{input_ref}' output columns "
+                    f"{sorted(inferred)}"
+                ),
+            )
+
     def infer_output_columns(
         self,
         params: dict[str, Any],

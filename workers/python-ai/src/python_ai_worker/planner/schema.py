@@ -195,6 +195,7 @@ SKILL_CATALOG: dict[str, SkillSpec] = {
             "input": "table_or_step_id",
             "format": "table|chart|json",
             "title": "string|null",
+            "columns": "string[]|null — 사용자에게 보여줄 컬럼. 질문에 답하는 핵심 컬럼을 포함해야 한다.",
             "limit": "integer|null — 반환 row 한도. null이면 default 1000. 1~10000 허용. (SQL-4)",
         },
     ),

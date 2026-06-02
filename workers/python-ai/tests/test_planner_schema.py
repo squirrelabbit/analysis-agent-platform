@@ -124,7 +124,8 @@ class PlanV2SkillCatalogTests(unittest.TestCase):
 
     def test_present_params_and_output(self) -> None:
         params = SKILL_CATALOG["present"].params_schema
-        self.assertEqual(set(params.keys()), {"input", "format", "title", "limit"})
+        # silverone 2026-06-02 — columns 추가 (present.columns hard constraint).
+        self.assertEqual(set(params.keys()), {"input", "format", "title", "columns", "limit"})
         self.assertEqual(SKILL_CATALOG["present"].output_type, "presentation")
 
     def test_summarize_params_and_output(self) -> None:
