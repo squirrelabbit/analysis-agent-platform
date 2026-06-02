@@ -24,6 +24,7 @@ from typing import Any
 from .. import runtime as rt
 from ..config import load_config
 from ..config_paths import resolve_config_dir
+from ..prompt_options import load_prompt_body
 from ..clients.lloa import LloaClient, LloaConfig, LloaResponseParseError
 from ..obs import get, skill_handler
 from ..taxonomies import load_taxonomy, render_aspect_taxonomy_block
@@ -31,7 +32,10 @@ from ._common import write_progress
 
 LOGGER = get(__name__)
 
-_DEFAULT_PROMPT_NAME = "dataset-clause-label-v3.md"
+# silverone 2026-06-02 — prompt는 task-folder(config/prompts/clause_label/)에서
+# resolve. default version은 그 폴더의 index.yaml. _PROMPT_VERSION_DEFAULT는
+# artifact 저장 라벨로 기존 계약 유지(파일 stem 'v3'과 별개).
+_PROMPT_TASK = "clause_label"
 _PROMPT_VERSION_DEFAULT = "dataset-clause-label-v3"
 _ALLOWED_SENTIMENT = {"positive", "negative", "neutral"}
 
@@ -166,13 +170,10 @@ def _load_prompt_template(payload: dict[str, Any]) -> tuple[str, str]:
     if isinstance(inline, str) and inline.strip():
         version = str(payload.get("clause_label_prompt_version") or "request_inline").strip()
         return _inject_taxonomy(inline), version
-    prompt_path = _find_prompt_path(_DEFAULT_PROMPT_NAME)
-    if prompt_path is None:
-        raise ValueError(
-            f"dataset_clause_label prompt template not found: {_DEFAULT_PROMPT_NAME}"
-        )
-    raw = prompt_path.read_text(encoding="utf-8")
-    body = _strip_front_matter(raw)
+    # silverone 2026-06-02 — task-folder prompt resolver로 전환. 기본 version은
+    # config/prompts/clause_label/index.yaml의 default. artifact 저장용
+    # prompt_version 라벨(_PROMPT_VERSION_DEFAULT)은 기존 계약 유지.
+    body, _stem = load_prompt_body(_PROMPT_TASK)
     return _inject_taxonomy(body), _PROMPT_VERSION_DEFAULT
 
 
