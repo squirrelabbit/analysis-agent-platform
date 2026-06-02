@@ -20,6 +20,13 @@ function coerceNumber(value: unknown): number | null {
   return null;
 }
 
+// ISO datetime (YYYY-MM-DDTHH:MM:SSZ 등)으로 보이면 날짜 부분만 잘라 표시.
+// 그 외(임의 문자열/숫자 등)는 그대로 — 도메인 모를 때 임의 가공 금지.
+const ISO_DATETIME_PREFIX = /^\d{4}-\d{2}-\d{2}T/;
+function formatXTick(value: string): string {
+  return ISO_DATETIME_PREFIX.test(value) ? value.slice(0, 10) : value;
+}
+
 export default function ChartView({ chart }: { chart: ChatChart }) {
   // numeric만 통과시키고 null/문자열은 건너뛴다 — recharts가 깨지지 않게.
   const data = chart.rows
@@ -48,6 +55,7 @@ export default function ChartView({ chart }: { chart: ChatChart }) {
               <XAxis
                 dataKey="_x"
                 tick={{ fontSize: 11, fill: "#71717a" }}
+                tickFormatter={formatXTick}
                 axisLine={false}
                 tickLine={false}
               />
@@ -71,6 +79,7 @@ export default function ChartView({ chart }: { chart: ChatChart }) {
               <XAxis
                 dataKey="_x"
                 tick={{ fontSize: 11, fill: "#71717a" }}
+                tickFormatter={formatXTick}
                 axisLine={false}
                 tickLine={false}
               />
