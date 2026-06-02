@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useProjectParams } from "@/shared/hooks/useRouteParams";
+import { createClientId } from "@/shared/utils/id";
 import { useDatasets } from "@/features/datasets/hooks/dataset.query";
 import { useAnalysisChat, useDeleteChatThread } from "../hooks/chat.mutation";
 import { useChatThread, useChatThreads } from "../hooks/chat.query";
@@ -172,7 +173,7 @@ export function ChatPage() {
 
     setErrorMsg(null);
     const localUser: ChatMessage = {
-      id: crypto.randomUUID(),
+      id: createClientId(),
       role: "user",
       content: text,
       createdAt: new Date().toISOString(),
