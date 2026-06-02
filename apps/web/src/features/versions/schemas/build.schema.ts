@@ -41,11 +41,11 @@ export const BuildCleanSchema = z.object({
 });
 
 export const BuildGenuinenessSchema = z.object({
-  promptVersion: z.string().optional(),
+  promptVersion: z.string().min(1, "프롬프트 버전을 선택하세요"),
 });
 
 export const BuildClauseSchema = z.object({
-  promptVersion: z.string().optional(),
+  promptVersion: z.string().min(1, "프롬프트 버전을 선택하세요"),
   includeGenuineness: z.array(z.string()).optional(), // doc_genuineness ready 필요
 });
 
