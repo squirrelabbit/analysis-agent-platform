@@ -7,6 +7,7 @@ import {
   mapMetadataRequest,
 } from "../models/mapper";
 import { datasetKeys } from "../api/dataset.key";
+import { projectKeys } from "@/features/projects/api/project.keys";
 
 export const useCreateDataset = () => {
   const { projectId } = useProjectParams();
@@ -17,6 +18,8 @@ export const useCreateDataset = () => {
       datasetApi.createDataset(projectId, mapDatasetFormToRequest(req)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: datasetKeys.all });
+      // 프로젝트 카드의 dataset_count 갱신
+      queryClient.invalidateQueries({ queryKey: projectKeys.lists() });
     },
   });
 };
@@ -50,6 +53,8 @@ export const useDeleteDataset = () => {
       queryClient.invalidateQueries({
         queryKey: datasetKeys.lists(),
       });
+      // 프로젝트 카드의 dataset_count 갱신
+      queryClient.invalidateQueries({ queryKey: projectKeys.lists() });
     },
   });
 };
