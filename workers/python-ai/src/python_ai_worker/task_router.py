@@ -32,6 +32,7 @@ from .planner import (
     PlanValidationError,
     PlannerCallError,
 )
+from .prompt_options import list_prompt_options
 from .taxonomies import (
     TaxonomyMismatchError,
     check_taxonomy_compatibility,
@@ -86,6 +87,7 @@ def supported_capabilities() -> list[TaskCapability]:
         TaskCapability(name="dataset_clause_label", description="LLOA-based clause split + sentiment + aspect labelling."),
         TaskCapability(name=_PLAN_TASK_NAME, description="plan_v2 LLM planner — generate plan from user_question (debug entrypoint)."),
         TaskCapability(name=_ANALYZE_TASK_NAME, description="plan_v2 executor — plan or user_question + artifact_paths → result."),
+        TaskCapability(name="prompt_options", description="List prompt versions/default/label for a task-folder prompt (read-only)."),
     ]
 
 
@@ -94,7 +96,21 @@ def task_handlers() -> dict[str, Any]:
         "dataset_clean": run_dataset_clean,
         "dataset_doc_genuineness": run_dataset_doc_genuineness,
         "dataset_clause_label": run_dataset_clause_label,
+        "prompt_options": _run_prompt_options,
     }
+
+
+def _run_prompt_options(payload: dict[str, Any]) -> dict[str, Any]:
+    """prompt_options task — task별 prompt 선택지(version/default/label) 반환.
+
+    Go control-plane이 ``GET /prompt_options?task=<task>``를 이 task로 proxy한다.
+    Go는 파일을 직접 읽지 않는다. invalid task / index.yaml 오류는
+    PromptOptionsError(ValueError) → main.py에서 HTTP 400.
+    """
+    task = str(payload.get("task") or "").strip()
+    if not task:
+        raise ValueError("prompt_options requires 'task'")
+    return list_prompt_options(task)
 
 
 def run_task(name: str, payload: dict[str, Any]) -> dict[str, Any]:

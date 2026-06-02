@@ -223,12 +223,11 @@ class DocGenuinenessRenderTests(unittest.TestCase):
         from python_ai_worker.dataset_build.doc_genuineness import (
             _extract_doc_genuineness_config,
             _render_prompt,
-            _find_prompt_path,
-            _DEFAULT_PROMPT_NAME,
             _strip_front_matter,
         )
+        from python_ai_worker.prompt_options import resolve_prompt_path
 
-        prompt_path = _find_prompt_path(_DEFAULT_PROMPT_NAME)
+        prompt_path = resolve_prompt_path("doc_genuineness")
         self.assertIsNotNone(prompt_path)
         template = _strip_front_matter(prompt_path.read_text(encoding="utf-8"))
 
@@ -272,12 +271,11 @@ class DocGenuinenessRenderTests(unittest.TestCase):
         from python_ai_worker.dataset_build.doc_genuineness import (
             _extract_doc_genuineness_config,
             _render_prompt,
-            _find_prompt_path,
-            _DEFAULT_PROMPT_NAME,
             _strip_front_matter,
         )
+        from python_ai_worker.prompt_options import resolve_prompt_path
 
-        template = _strip_front_matter(_find_prompt_path(_DEFAULT_PROMPT_NAME).read_text(encoding="utf-8"))
+        template = _strip_front_matter(resolve_prompt_path("doc_genuineness").read_text(encoding="utf-8"))
 
         config = _extract_doc_genuineness_config({
             "doc_genuineness": {

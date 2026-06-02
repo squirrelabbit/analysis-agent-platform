@@ -14,9 +14,12 @@ from __future__ import annotations
 
 옛 helper(``render_execution_final_answer_prompt`` /
 ``render_issue_summary_view_prompt`` / ``render_issue_evidence_summary_prompt`` /
-``render_planner_prompt`` 등)는 모두 제거됐다. 옛 prompt 파일도 마찬가지로
-config/prompts/에서 사라졌다 — 현재는 planner-v2-anthropic-v1.md /
-dataset-doc-genuineness-v1.md / dataset-clause-label-v3.md 3종만 잔존.
+``render_planner_prompt`` 등)는 모두 제거됐다.
+
+이 모듈은 **flat 구조 prompt**(planner-v2-anthropic-v1.md 등 config/prompts
+바로 아래 ``*.md``)만 다룬다. dataset_build의 doc_genuineness / clause_label은
+silverone 2026-06-02부터 task-folder 구조(``config/prompts/<task>/<version>.md``
++ index.yaml)로 이관됐고 ``python_ai_worker.prompt_options``가 해석한다.
 """
 
 import re

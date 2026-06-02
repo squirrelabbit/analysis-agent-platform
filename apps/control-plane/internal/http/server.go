@@ -71,6 +71,9 @@ func (s *Server) routes() {
 		})
 	})
 	s.mux.HandleFunc("GET /runtime_status", s.handleRuntimeStatus)
+	// 전역 read-only prompt 선택지. task-folder prompt(doc_genuineness /
+	// clause_label)의 version/default/label을 Python worker로 proxy해 반환.
+	s.mux.HandleFunc("GET /prompt_options", s.handlePromptOptions)
 	s.mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPI)
 	s.mux.HandleFunc("GET /openapi.frontend.yaml", s.handleFrontendOpenAPI)
 	s.mux.HandleFunc("GET /swagger", s.handleSwaggerUI)
@@ -232,6 +235,21 @@ func (s *Server) handleRuntimeStatus(w stdhttp.ResponseWriter, _ *stdhttp.Reques
 		}
 	}
 	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+// handlePromptOptions — GET /prompt_options?task=<task>. task-folder prompt의
+// version/default/label을 Python worker proxy로 반환한다. worker 응답 JSON을
+// 그대로 전달 (Go는 파일 미접근). invalid task는 ErrInvalidArgument → 400.
+func (s *Server) handlePromptOptions(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	task := strings.TrimSpace(r.URL.Query().Get("task"))
+	raw, err := s.datasetService.GetPromptOptions(r.Context(), task)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(stdhttp.StatusOK)
+	_, _ = w.Write(raw)
 }
 
 func (s *Server) handleCreateProject(w stdhttp.ResponseWriter, r *stdhttp.Request) {

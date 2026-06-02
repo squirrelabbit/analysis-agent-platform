@@ -15,15 +15,14 @@ import unittest
 class ClauseLabelSubjectRenderTests(unittest.TestCase):
     def test_subject_metadata_injected(self) -> None:
         from python_ai_worker.dataset_build.clause_label import (
-            _DEFAULT_PROMPT_NAME,
             _extract_subject_config,
-            _find_prompt_path,
             _inject_taxonomy,
             _render_subject_prompt,
             _strip_front_matter,
         )
+        from python_ai_worker.prompt_options import resolve_prompt_path
 
-        prompt_path = _find_prompt_path(_DEFAULT_PROMPT_NAME)
+        prompt_path = resolve_prompt_path("clause_label")
         self.assertIsNotNone(prompt_path)
         template = _inject_taxonomy(_strip_front_matter(prompt_path.read_text(encoding="utf-8")))
 
@@ -63,15 +62,14 @@ class ClauseLabelSubjectRenderTests(unittest.TestCase):
 
     def test_missing_subject_falls_back_to_festival_default(self) -> None:
         from python_ai_worker.dataset_build.clause_label import (
-            _DEFAULT_PROMPT_NAME,
             _extract_subject_config,
-            _find_prompt_path,
             _inject_taxonomy,
             _render_subject_prompt,
             _strip_front_matter,
         )
+        from python_ai_worker.prompt_options import resolve_prompt_path
 
-        prompt_path = _find_prompt_path(_DEFAULT_PROMPT_NAME)
+        prompt_path = resolve_prompt_path("clause_label")
         template = _inject_taxonomy(_strip_front_matter(prompt_path.read_text(encoding="utf-8")))
 
         # payload에 doc_genuineness 키 자체가 없는 옛 dataset 호환 경로
