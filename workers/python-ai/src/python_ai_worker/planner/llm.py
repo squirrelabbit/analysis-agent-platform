@@ -10,6 +10,7 @@ silverone 2026-05-21 6단계 결정:
 - usage는 응답 metadata에만 누적. control plane 통합은 후속.
 """
 
+import copy
 import json
 import time
 from dataclasses import dataclass, field
@@ -219,13 +220,36 @@ def generate_plan(
             "prompt_version": resolved_version,
         })
         if issues_b:
-            raise PlannerValidationError(
-                f"planner self-correct retry still produced validator issues: "
-                f"{[i.code for i in issues_b]}",
-                attempts=attempts,
-                issues=issues_b,
-            )
-        plan_a = plan_b
+            # silverone 2026-06-02 — self-correct 후에도 남은 issue가 present.columns
+            # 관련뿐이면 결정론적으로 columns를 떼고 재검증한다. present는 columns
+            # 누락 시 SELECT * (전체 컬럼) fallback이므로, 비율 질문에 건수라도
+            # 보여주는 게 전체 분석을 500으로 떨구는 것보다 낫다. columns 외 issue가
+            # 하나라도 있으면 기존대로 raise (자동 복구 불가).
+            repaired_plan = _repair_present_columns(plan_b, issues_b)
+            if repaired_plan is not None:
+                attempts.append({
+                    "phase": "columns_repair",
+                    "parsed": True,
+                    "repaired_codes": sorted({i.code for i in issues_b}),
+                    "prompt_version": resolved_version,
+                })
+                get(__name__).warning(
+                    "planner.columns_repair",
+                    extra={
+                        "event": "planner.columns_repair",
+                        "repaired_codes": sorted({i.code for i in issues_b}),
+                    },
+                )
+                plan_a = repaired_plan
+            else:
+                raise PlannerValidationError(
+                    f"planner self-correct retry still produced validator issues: "
+                    f"{[i.code for i in issues_b]}",
+                    attempts=attempts,
+                    issues=issues_b,
+                )
+        else:
+            plan_a = plan_b
 
     return PlannerResult(
         plan=plan_a,
@@ -236,6 +260,56 @@ def generate_plan(
 
 
 # ===== internals =====
+
+
+# silverone 2026-06-02 — 결정론적으로 자동 복구 가능한 present.columns issue code.
+# 이 집합에 속한 issue만 남았을 때 present.columns를 떼고 재검증한다.
+# - columns_unknown/not_list/invalid: present 전용 contract (prior-step input 경로)
+# - column_unknown(단수): 공유 helper(_check_columns_on_table)가 RESERVED 테이블
+#   input present.columns에 쓰는 코드. filter/aggregate 등도 같은 코드를 쓰므로,
+#   columns drop 후 재검증이 완전히 깨끗할 때만 복구가 commit된다(아래 함수). 즉
+#   present 외 출처의 column_unknown은 재검증에서 다시 걸려 raise된다.
+_COLUMNS_REPAIRABLE_CODES = frozenset(
+    {
+        "params.columns_unknown",
+        "params.columns_not_list",
+        "params.columns_invalid",
+        "params.column_unknown",
+    }
+)
+
+
+def _repair_present_columns(
+    plan: dict[str, Any], issues: list[ValidationIssue]
+) -> "dict[str, Any] | None":
+    """남은 issue가 present.columns 관련뿐이면 present step에서 columns를 떼고
+    재검증한 plan을 반환. 그 외 issue가 하나라도 있거나 재검증이 여전히 실패하면
+    None (자동 복구 불가 → caller가 raise)."""
+
+    if not issues:
+        return None
+    if any(i.code not in _COLUMNS_REPAIRABLE_CODES for i in issues):
+        return None
+
+    repaired = copy.deepcopy(plan)
+    steps = repaired.get("steps")
+    if not isinstance(steps, list):
+        return None
+    dropped = False
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if str(step.get("skill") or "").strip() != "present":
+            continue
+        params = step.get("params")
+        if isinstance(params, dict) and "columns" in params:
+            params.pop("columns", None)
+            dropped = True
+    if not dropped:
+        return None
+    if collect_plan_issues(repaired):
+        return None
+    return repaired
 
 
 def _call_planner(
