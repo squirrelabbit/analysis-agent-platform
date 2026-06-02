@@ -11,7 +11,7 @@ type Props = {
 export default function FileUploader({
   value,
   onChange,
-  accept = ".csv,.json,.xlsx",
+  accept = ".csv,.json,.jsonl,.xlsx",
   maxSize = 100 * 1024 * 1024,
 }: Props) {
   const handleFile = (file: File) => {
