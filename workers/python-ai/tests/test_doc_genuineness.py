@@ -210,7 +210,7 @@ class DocGenuinenessTests(unittest.TestCase):
         self.assertEqual(applied["subject_aliases"], ["문화유산야행", "문화재야행", "강릉야행"])
         self.assertEqual(applied["recruitment_keywords"], ["서포터즈", "푸드트럭"])
         self.assertEqual(applied["subject_type"], "festival")
-        self.assertEqual(applied["prompt_version"], "dataset-doc-genuineness-v1")
+        self.assertEqual(applied["prompt_version"], "v1")
 
 
 class DocGenuinenessRenderTests(unittest.TestCase):

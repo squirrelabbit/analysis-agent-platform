@@ -219,7 +219,7 @@ class ClauseArtifactShapeTests(unittest.TestCase):
                 {"clause": "야경 환상적", "sentiment": "positive", "aspect": "ambiance_scenery"},
             ],
         })
-        self.assertEqual(records[0]["prompt_version"], "dataset-clause-label-v3")
+        self.assertEqual(records[0]["prompt_version"], "v3")
 
     def test_source_marked_lloa_on_success(self) -> None:
         records = self._run({
@@ -282,7 +282,7 @@ class ClauseLabelPromptInjectionTests(unittest.TestCase):
         from python_ai_worker.dataset_build.clause_label import _load_prompt_template
 
         body, version = _load_prompt_template({})
-        self.assertEqual(version, "dataset-clause-label-v3")
+        self.assertEqual(version, "v3")
         for key in _LOCKED_ASPECT_LABELS:
             self.assertIn(key, body, f"aspect key '{key}' missing from rendered prompt")
 

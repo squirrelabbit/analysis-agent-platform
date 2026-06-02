@@ -33,10 +33,9 @@ from ._common import write_progress
 LOGGER = get(__name__)
 
 # silverone 2026-06-02 — prompt는 task-folder(config/prompts/clause_label/)에서
-# resolve. default version은 그 폴더의 index.yaml. _PROMPT_VERSION_DEFAULT는
-# artifact 저장 라벨로 기존 계약 유지(파일 stem 'v3'과 별개).
+# resolve. version은 payload(/prompt_options에서 고른 stem) > index.yaml default.
+# artifact prompt_version은 resolve된 stem(예 "v3")을 그대로 기록한다.
 _PROMPT_TASK = "clause_label"
-_PROMPT_VERSION_DEFAULT = "dataset-clause-label-v3"
 _ALLOWED_SENTIMENT = {"positive", "negative", "neutral"}
 
 # taxonomy-driven config Phase 2-A (2026-05-27) — _ALLOWED_ASPECT를
@@ -170,11 +169,13 @@ def _load_prompt_template(payload: dict[str, Any]) -> tuple[str, str]:
     if isinstance(inline, str) and inline.strip():
         version = str(payload.get("clause_label_prompt_version") or "request_inline").strip()
         return _inject_taxonomy(inline), version
-    # silverone 2026-06-02 — task-folder prompt resolver로 전환. 기본 version은
-    # config/prompts/clause_label/index.yaml의 default. artifact 저장용
-    # prompt_version 라벨(_PROMPT_VERSION_DEFAULT)은 기존 계약 유지.
-    body, _stem = load_prompt_body(_PROMPT_TASK)
-    return _inject_taxonomy(body), _PROMPT_VERSION_DEFAULT
+    # silverone 2026-06-02 — 카탈로그 빌드. /prompt_options에서 고른 version(stem)을
+    # payload['clause_label_prompt_version']로 받아 그 version 파일을 로드. 미지정이면
+    # index.yaml default. unknown version은 load_prompt_body가 400으로 reject.
+    # artifact prompt_version은 resolve된 stem을 기록 (감사 가능).
+    requested = str(payload.get("clause_label_prompt_version") or "").strip() or None
+    body, stem = load_prompt_body(_PROMPT_TASK, requested)
+    return _inject_taxonomy(body), stem
 
 
 def _decode_clauses_response(body: Any) -> list[dict[str, Any]]:

@@ -27,10 +27,9 @@ from ._common import write_progress
 LOGGER = get(__name__)
 
 # silverone 2026-06-02 — prompt는 task-folder(config/prompts/doc_genuineness/)에서
-# resolve. default version은 그 폴더의 index.yaml. _PROMPT_VERSION_DEFAULT는
-# artifact에 저장되는 라벨로 기존 계약 유지(파일 stem 'v1'과는 별개).
+# resolve. version은 payload(/prompt_options에서 고른 stem) > index.yaml default.
+# artifact prompt_version은 resolve된 stem(예 "v1")을 그대로 기록한다.
 _PROMPT_TASK = "doc_genuineness"
-_PROMPT_VERSION_DEFAULT = "dataset-doc-genuineness-v1"
 # silverone 2026-05-22 — prompt T/F/A 분류를 production schema에 매핑.
 # T=genuine_review, F=non_review, A=uncertain. mixed는 prompt에서 더는 생성
 # 안 되지만 enum에는 보존 — 옛 호출자 / clause_label default filter 호환.
@@ -96,11 +95,14 @@ def _load_prompt_template(payload: dict[str, Any]) -> tuple[str, str]:
         version = str(payload.get("doc_genuineness_prompt_version") or "request_inline").strip()
         return inline, version
 
-    # silverone 2026-06-02 — task-folder prompt resolver로 전환. 기본 version은
-    # config/prompts/doc_genuineness/index.yaml의 default를 따른다. artifact에
-    # 저장하는 prompt_version 라벨(_PROMPT_VERSION_DEFAULT)은 기존 계약 유지.
-    body, _stem = load_prompt_body(_PROMPT_TASK)
-    return body, _PROMPT_VERSION_DEFAULT
+    # silverone 2026-06-02 — 카탈로그 빌드. 사용자가 /prompt_options에서 고른
+    # version(stem, 예 "v1")을 payload['doc_genuineness_prompt_version']로 받아
+    # 그 version 파일을 로드한다. 미지정이면 index.yaml default. unknown version은
+    # load_prompt_body가 PromptOptionsError(ValueError) → worker 400으로 reject.
+    # artifact의 prompt_version은 실제 resolve된 stem을 기록해 감사 가능하게 한다.
+    requested = str(payload.get("doc_genuineness_prompt_version") or "").strip() or None
+    body, stem = load_prompt_body(_PROMPT_TASK, requested)
+    return body, stem
 
 
 def _strip_front_matter(template: str) -> str:

@@ -6,7 +6,7 @@
   },
   "clause_count": 5,
   "doc_count": 4,
-  "prompt_version": "dataset-clause-label-v3",
+  "prompt_version": "v3",
   "sentiment_counts": {
     "positive": 5
   },

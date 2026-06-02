@@ -270,7 +270,7 @@ func writeDocGenuinenessJSONL(t *testing.T, dir string, records []dgRecord) stri
 	for _, r := range records {
 		// reason은 JSON string escape — json.Marshal 사용.
 		lines = append(lines, fmt.Sprintf(
-			`{"doc_id":%s,"genuineness":%s,"reason":%s,"source":"lloa","prompt_version":"dataset-doc-genuineness-v1"}`,
+			`{"doc_id":%s,"genuineness":%s,"reason":%s,"source":"lloa","prompt_version":"v1"}`,
 			jsonString(r.docID), jsonString(r.genuineness), jsonString(r.reason),
 		))
 	}
@@ -286,7 +286,7 @@ func writeClauseLabelJSONL(t *testing.T, dir string, records []clRecord) string 
 	lines := make([]string, 0, len(records))
 	for _, r := range records {
 		lines = append(lines, fmt.Sprintf(
-			`{"doc_id":%s,"clause":%s,"sentiment":%s,"aspect":%s,"source":"lloa","prompt_version":"dataset-clause-label-v3"}`,
+			`{"doc_id":%s,"clause":%s,"sentiment":%s,"aspect":%s,"source":"lloa","prompt_version":"v3"}`,
 			jsonString(r.docID), jsonString(r.clause), jsonString(r.sentiment), jsonString(r.aspect),
 		))
 	}

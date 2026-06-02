@@ -45,7 +45,7 @@ export const genuinenessResult = {
         "updated_at": "2026-05-27T17:25:02.508876+09:00"
     },
     "applied": {
-        "prompt_version": "dataset-doc-genuineness-v1"
+        "prompt_version": "v1"
     },
     "summary": {
         "genuineness": {
@@ -679,7 +679,7 @@ export const clauseLabelResult = {
         "updated_at": "2026-05-27T17:28:55.189783+09:00"
     },
     "applied": {
-        "prompt_version": "dataset-clause-label-v3"
+        "prompt_version": "v3"
     },
     "summary": {
         "aspect": {

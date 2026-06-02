@@ -31,7 +31,7 @@ func TestBuildClauseLabelInjectsSubjectFromDatasetMetadata(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 		requestedDocGen, _ = payload["doc_genuineness"].(map[string]any)
 		_ = json.NewEncoder(w).Encode(clauseLabelSuccessResponse(map[string]any{
-			"prompt_version":  "dataset-clause-label-v3",
+			"prompt_version":  "v3",
 			"subject_name":    "강릉 국가유산야행",
 			"subject_aliases": []any{"문화유산야행", "강릉야행"},
 			"subject_type":    "festival",
@@ -162,7 +162,7 @@ func clauseLabelSuccessResponse(applied map[string]any) map[string]any {
 		"sentiment_counts":    map[string]any{"positive": 100, "negative": 40, "neutral": 40},
 		"aspect_counts":       map[string]any{},
 		"parse_failures":      0,
-		"prompt_version":      "dataset-clause-label-v3",
+		"prompt_version":      "v3",
 		"model":               "wisenut/wise-lloa-max-v1.2.1",
 		"concurrency":         8,
 		"taxonomy_id":         "festival-v2",
@@ -178,7 +178,7 @@ func clauseLabelSuccessResponse(applied map[string]any) map[string]any {
 			"clause_label_uri":          "/tmp/festival.clause_label.jsonl",
 			"clause_label_ref":          "/tmp/festival.clause_label.jsonl",
 			"clause_label_input_source": "clean",
-			"prompt_version":            "dataset-clause-label-v3",
+			"prompt_version":            "v3",
 			"summary":                   summary,
 		},
 	}

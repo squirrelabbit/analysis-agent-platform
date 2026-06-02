@@ -26,7 +26,7 @@ func TestNormalizeDocGenuinenessSummaryHappyPath(t *testing.T) {
 		"input_row_count":         float64(2121),
 		"parse_failures":          float64(0),
 		"model":                   "wisenut/wise-lloa-max-v1.2.1",
-		"prompt_version":          "dataset-doc-genuineness-v1",
+		"prompt_version":          "v1",
 		"total_prompt_tokens":     float64(8758881),
 		"total_completion_tokens": float64(241666),
 		"applied": map[string]any{
@@ -131,7 +131,7 @@ func TestNormalizeClauseLabelSummaryHappyPath(t *testing.T) {
 		"concurrency":             float64(8),
 		"include_genuineness":     []any{"genuine_review", "mixed"},
 		"model":                   "wisenut/wise-lloa-max-v1.2.1",
-		"prompt_version":          "dataset-clause-label-v3",
+		"prompt_version":          "v3",
 		"total_prompt_tokens":     float64(123456),
 		"total_completion_tokens": float64(7890),
 	}
