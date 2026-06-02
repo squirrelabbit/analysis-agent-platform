@@ -26,6 +26,9 @@ export const useDeleteProjectMutation = () => {
       queryClient.removeQueries({
         queryKey: projectKeys.detail(projectId)
       })
+      queryClient.invalidateQueries({
+        queryKey: projectKeys.lists(),
+      })
     }
   })
 }
