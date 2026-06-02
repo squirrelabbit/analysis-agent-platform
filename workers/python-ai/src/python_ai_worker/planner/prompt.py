@@ -187,11 +187,20 @@ def render_conversation_context(items: list[dict[str, Any]]) -> str:
         title = str(item.get("present_title") or "").strip()
         row_count = item.get("row_count")
         columns = item.get("columns")
+        pending = bool(item.get("pending_clarification"))
         lines.append(f"{index}.")
         if question:
             lines.append(f"   - question: {question}")
         if answer:
             lines.append(f"   - answer_summary: {answer}")
+        if pending:
+            # silverone 2026-06-02 — 직전 turn이 분석에 필요한 값을 user에게 요청한
+            # 상태. 현재 짧은 답변은 이 질문(original intent)의 답일 가능성이 높다.
+            lines.append(
+                "   - pending_clarification: true "
+                "(직전 turn이 위 question 분석에 필요한 값을 요청함 — "
+                "현재 사용자 입력을 그 답으로 해석)"
+            )
         if title:
             lines.append(f"   - present_title: {title}")
         if row_count is not None:

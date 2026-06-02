@@ -372,7 +372,7 @@ func (s *DatasetService) buildConversationContext(projectID, threadID string) ([
 }
 
 func compactConversationContextItem(summary map[string]any) map[string]any {
-	keys := []string{"question", "answer_summary", "present_title", "row_count", "columns", "key_filters", "key_dimensions"}
+	keys := []string{"question", "answer_summary", "present_title", "row_count", "columns", "key_filters", "key_dimensions", "pending_clarification"}
 	item := make(map[string]any, len(keys))
 	for _, key := range keys {
 		value, ok := summary[key]

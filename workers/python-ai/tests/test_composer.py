@@ -154,6 +154,38 @@ class ContextSummaryTests(unittest.TestCase):
         self.assertNotIn("key_dimensions", summary)
 
 
+class RejectClarifyContextTests(unittest.TestCase):
+    """silverone 2026-06-02 — 멀티턴 clarify. reason=missing_data_or_artifact
+    거절은 다음 턴이 후속 답을 이어받도록 pending_clarification + answer_summary를
+    context_summary에 남긴다. 다른 reason은 남기지 않는다."""
+
+    def _reject(self, reason: str, message: str = "축제 날짜(기준일)가 필요합니다."):
+        return compose_answer(
+            user_question="축제 전후 일주일 문서발생량",
+            present=None,
+            plan={"answerable": False, "reason": reason, "message": message, "steps": []},
+        )
+
+    def test_missing_data_sets_pending_clarification(self) -> None:
+        out = self._reject("missing_data_or_artifact")
+        summary = out["context_summary"]
+        self.assertTrue(summary.get("pending_clarification"))
+        self.assertEqual(summary["question"], "축제 전후 일주일 문서발생량")
+        self.assertEqual(summary["answer_summary"], "축제 날짜(기준일)가 필요합니다.")
+        self.assertEqual(out["metadata"]["reason"], "missing_data_or_artifact")
+
+    def test_out_of_dataset_scope_has_no_pending_clarification(self) -> None:
+        out = self._reject("out_of_dataset_scope", message="데이터셋과 무관한 질문입니다.")
+        summary = out["context_summary"]
+        self.assertNotIn("pending_clarification", summary)
+        self.assertNotIn("answer_summary", summary)
+        self.assertEqual(summary["question"], "축제 전후 일주일 문서발생량")
+
+    def test_unsupported_skill_has_no_pending_clarification(self) -> None:
+        out = self._reject("unsupported_skill", message="클러스터링은 아직 지원하지 않습니다.")
+        self.assertNotIn("pending_clarification", out["context_summary"])
+
+
 class DisplayTests(unittest.TestCase):
     def test_display_mirrors_present_payload(self) -> None:
         present = _present(total=10, returned=5, truncated=True)

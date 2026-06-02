@@ -192,6 +192,32 @@ class PromptRenderTests(unittest.TestCase):
         rendered = render_conversation_context([])
         self.assertIn("이전 대화 context 없음", rendered)
 
+    def test_pending_clarification_rendered(self) -> None:
+        # silverone 2026-06-02 — clarify 후속 답 이어받기. pending_clarification이
+        # 있으면 planner가 직전 질문의 답으로 해석하도록 마커가 노출돼야 한다.
+        rendered = render_conversation_context([
+            {
+                "question": "축제 전후 일주일 문서발생량",
+                "answer_summary": "축제 날짜(기준일)가 필요합니다.",
+                "pending_clarification": True,
+            }
+        ])
+        self.assertIn("pending_clarification: true", rendered)
+        self.assertIn("축제 전후 일주일 문서발생량", rendered)
+
+    def test_pending_clarification_absent_when_not_set(self) -> None:
+        rendered = render_conversation_context([
+            {"question": "q", "answer_summary": "a"}
+        ])
+        self.assertNotIn("pending_clarification", rendered)
+
+    def test_multiturn_clarify_rule_in_system_prompt(self) -> None:
+        # 규칙 문구가 사라지면(회귀) 곧장 깨지도록 잠근다. 규칙은 cache 가능한
+        # system 영역(정적 본문)에 있어야 한다.
+        _, system, _ = render_planner_prompt(user_question="dummy")
+        self.assertIn("멀티턴 clarify", system)
+        self.assertIn("pending_clarification", system)
+
     def test_dataset_specific_columns_only_in_user_prompt(self) -> None:
         # silverone 2026-05-26 (cost-opt) — 가장 중요한 cache 잠금. dataset-specific
         # 컬럼은 dataset마다 다르므로 user prompt에만 등장해야 한다. 만약 system에

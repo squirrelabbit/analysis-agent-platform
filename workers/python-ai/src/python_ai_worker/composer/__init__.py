@@ -616,10 +616,25 @@ def _reject_payload(*, user_question: str | None, plan: dict[str, Any]) -> dict[
     if isinstance(capability_gap, dict) and capability_gap:
         metadata["capability_gap"] = capability_gap
 
+    # silverone 2026-06-02 — 멀티턴 clarify. reason=missing_data_or_artifact는
+    # "분석은 가능하나 값(예: 축제 기준일)이 필요"한 clarify 요청이다. 이때 다음
+    # 턴 planner가 짧은 후속 답("2024-08-15 야")을 직전 질문의 답으로 이어붙이도록
+    # context_summary에 pending_clarification 신호 + 요청 문구(answer_summary)를
+    # 남긴다. out_of_dataset_scope / unsupported_skill은 값 입력으로 풀리지 않으므로
+    # 신호를 남기지 않는다 (후속 메시지를 잘못 끌어다 붙이지 않게).
+    context_summary: dict[str, Any] = {}
+    question_text = (user_question or "").strip()
+    if question_text:
+        context_summary["question"] = question_text
+    if reason == "missing_data_or_artifact":
+        context_summary["pending_clarification"] = True
+        if message:
+            context_summary["answer_summary"] = message
+
     return {
         "assistant_content": message,
         "display": None,
-        "context_summary": {"question": (user_question or "").strip()} if user_question else {},
+        "context_summary": context_summary,
         "metadata": metadata,
     }
 
