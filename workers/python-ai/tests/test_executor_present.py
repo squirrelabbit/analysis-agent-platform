@@ -139,3 +139,25 @@ class BuildResponsePresentPayloadTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# silverone 2026-06-02 — present.columns projection (hard constraint).
+class PresentColumnsProjectionTests(unittest.TestCase):
+    def _sql(self, params: dict) -> str:
+        return present.build_sql({"input": "agg", "format": "table", **params}, None)[0]
+
+    def test_columns_projection_selects_only_given(self) -> None:
+        sql = self._sql({"columns": ["sentiment", "count"]})
+        self.assertIn("sentiment", sql)
+        self.assertIn("count", sql)
+        self.assertNotIn("*", sql)
+
+    def test_no_columns_selects_all(self) -> None:
+        self.assertIn("SELECT * FROM", self._sql({}))
+
+    def test_empty_columns_falls_back_to_all(self) -> None:
+        self.assertIn("SELECT * FROM", self._sql({"columns": []}))
+
+    def test_invalid_columns_entry_falls_back_to_all(self) -> None:
+        # 빈 문자열/비문자열 entry는 무시하고 * (validator가 별도로 잡음).
+        self.assertIn("SELECT * FROM", self._sql({"columns": ["sentiment", ""]}))

@@ -29,9 +29,26 @@ def resolve_max_rows(params: dict[str, Any]) -> int:
     return min(raw, PRESENT_HARD_CAP_ROWS)
 
 
+def _projection(params: dict[str, Any]) -> str:
+    """present.columns가 있으면 그 컬럼만 SELECT (projection), 없으면 ``*``.
+
+    silverone 2026-06-02 — present.columns hard constraint. 컬럼이 input에 없으면
+    DuckDB Binder Error로 execution이 실패한다 (validator가 추론 가능한 input은
+    미리 repair 대상으로 잡고, 추론 불가 input은 여기서 런타임 검증된다)."""
+    columns = params.get("columns")
+    if not isinstance(columns, list) or not columns:
+        return "*"
+    names: list[str] = []
+    for col in columns:
+        if not isinstance(col, str) or not col.strip():
+            return "*"  # 비정상 columns는 무시하고 전체 — validator가 별도로 잡는다.
+        names.append(safe_identifier(col.strip()))
+    return ", ".join(names)
+
+
 def build_sql(params: dict[str, Any], context: "ExecutorContext") -> tuple[str, dict[str, Any]]:
     input_ref = safe_identifier(params["input"])
-    sql = f"SELECT * FROM {input_ref}"
+    sql = f"SELECT {_projection(params)} FROM {input_ref}"
     extra = {
         "format": params.get("format"),
         "title": params.get("title"),

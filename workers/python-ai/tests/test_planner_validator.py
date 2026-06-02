@@ -1185,3 +1185,46 @@ class SqlContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# silverone 2026-06-02 — present.columns hard constraint validation.
+def _agg_present_plan(present_columns: Any) -> dict[str, Any]:
+    agg = {
+        "id": "by_sentiment",
+        "skill": "aggregate",
+        "params": {
+            "input": "clauses",
+            "group_by": ["sentiment"],
+            "metrics": [{"name": "count", "function": "count", "column": "clause_id"}],
+        },
+    }
+    present_params: dict[str, Any] = {"input": "by_sentiment", "format": "table"}
+    if present_columns is not _OMIT:
+        present_params["columns"] = present_columns
+    present = {"id": "out", "skill": "present", "params": present_params}
+    return _wrap([agg, present])
+
+
+_OMIT = object()
+
+
+class PresentColumnsValidatorTests(unittest.TestCase):
+    def test_columns_in_input_output_valid(self) -> None:
+        # aggregate 출력 = {sentiment, count} → 둘 다 존재 → issue 없음.
+        self.assertEqual(collect_plan_issues(_agg_present_plan(["sentiment", "count"])), [])
+
+    def test_columns_missing_from_input_rejected(self) -> None:
+        # ratio는 aggregate 출력에 없음 → repair 대상.
+        self.assertIn("params.columns_unknown", _codes(_agg_present_plan(["sentiment", "ratio"])))
+
+    def test_columns_not_list_rejected(self) -> None:
+        self.assertIn("params.columns_not_list", _codes(_agg_present_plan("sentiment")))
+
+    def test_columns_empty_string_entry_rejected(self) -> None:
+        self.assertIn("params.columns_invalid", _codes(_agg_present_plan(["sentiment", ""])))
+
+    def test_columns_omitted_is_valid(self) -> None:
+        self.assertEqual(collect_plan_issues(_agg_present_plan(_OMIT)), [])
+
+    def test_columns_null_is_valid(self) -> None:
+        self.assertEqual(collect_plan_issues(_agg_present_plan(None)), [])
