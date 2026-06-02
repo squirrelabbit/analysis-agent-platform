@@ -8,6 +8,15 @@ from __future__ import annotations
 import unittest
 
 from python_ai_worker.composer import FAILED_RUN_FALLBACK_CONTENT, compose_answer
+from python_ai_worker.composer import _sort_rows_by_x
+
+
+def _ts_present(rows):
+    return {
+        "step_id": "out", "format": "chart", "title": "축제 전후 발생량",
+        "row_count": len(rows), "total_rows": len(rows), "returned_rows": len(rows),
+        "max_rows": 1000, "truncated": False, "rows": rows,
+    }
 
 
 def _present(*, total=3, returned=3, truncated=False, fmt="table", title="작년 대비 aspect", rows=None):
@@ -184,6 +193,54 @@ class RejectClarifyContextTests(unittest.TestCase):
     def test_unsupported_skill_has_no_pending_clarification(self) -> None:
         out = self._reject("unsupported_skill", message="클러스터링은 아직 지원하지 않습니다.")
         self.assertNotIn("pending_clarification", out["context_summary"])
+
+
+class LineChartSortTests(unittest.TestCase):
+    """silverone 2026-06-02 — line 차트는 x(시계열) 기준 정렬돼야 한다. planner가
+    sort step을 안 넣어 행이 임의 순서로 와도 composer가 보정."""
+
+    def test_line_rows_sorted_by_x_ascending(self) -> None:
+        rows = [
+            {"created_at": "2024-08-18T00:00:00Z", "count": 44},
+            {"created_at": "2024-08-16T00:00:00Z", "count": 38},
+            {"created_at": "2024-08-17T00:00:00Z", "count": 28},
+        ]
+        out = compose_answer(user_question="축제 전후 일주일 발생량", present=_ts_present(rows))
+        display = out["display"]
+        self.assertEqual(display["recommended_view"], "line")
+        dates = [r["created_at"] for r in display["rows"]]
+        self.assertEqual(dates, sorted(dates), "line 차트 행이 x(날짜) 오름차순이어야 함")
+        self.assertEqual(dates[0], "2024-08-16T00:00:00Z")
+
+    def test_bar_rows_not_reordered(self) -> None:
+        # 비-시계열 categorical x(aspect) → bar. planner 정렬 의도 보존(재정렬 X).
+        rows = [
+            {"aspect": "food", "count": 5},
+            {"aspect": "ambiance_scenery", "count": 9},
+            {"aspect": "show_program", "count": 1},
+        ]
+        out = compose_answer(user_question="aspect별 건수", present=_ts_present(rows))
+        display = out["display"]
+        self.assertEqual(display["recommended_view"], "bar")
+        self.assertEqual([r["aspect"] for r in display["rows"]], ["food", "ambiance_scenery", "show_program"])
+
+
+class SortRowsByXTests(unittest.TestCase):
+    def test_nulls_pushed_to_end(self) -> None:
+        rows = [{"x": "b"}, {"x": None}, {"x": "a"}]
+        self.assertEqual(_sort_rows_by_x(rows, "x"), [{"x": "a"}, {"x": "b"}, {"x": None}])
+
+    def test_single_row_passthrough(self) -> None:
+        rows = [{"x": "a"}]
+        self.assertEqual(_sort_rows_by_x(rows, "x"), rows)
+
+    def test_mixed_types_fallback_preserves_order(self) -> None:
+        rows = [{"x": "a"}, {"x": 3}]  # str vs int 비교 불가 → 원순서 보존
+        self.assertEqual(_sort_rows_by_x(rows, "x"), rows)
+
+    def test_numeric_sorted(self) -> None:
+        rows = [{"x": 2023}, {"x": 2021}, {"x": 2022}]
+        self.assertEqual([r["x"] for r in _sort_rows_by_x(rows, "x")], [2021, 2022, 2023])
 
 
 class DisplayTests(unittest.TestCase):

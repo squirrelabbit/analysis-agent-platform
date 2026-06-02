@@ -193,6 +193,12 @@ def _build_display(
     # table로 내린다 — recommended_view와 chart_spec이 항상 일관되도록.
     if recommended_view in ("bar", "line") and chart_spec is None:
         recommended_view = "table"
+    # silverone 2026-06-02 — line 차트는 x축이 시계열이라 행이 x 기준 정렬돼 있어야
+    # 선이 올바르다. planner가 sort step을 넣었는지에 의존하지 않고(예: compare만
+    # 쓴 plan은 행이 임의 순서) composer가 x 오름차순으로 보정한다. table/bar는
+    # planner 의도(값 정렬 등)를 보존하기 위해 건드리지 않는다.
+    if recommended_view == "line" and isinstance(chart_spec, dict):
+        rows = _sort_rows_by_x(rows, str(chart_spec.get("x") or ""))
     return {
         "type": fmt,
         "title": present.get("title"),
@@ -330,6 +336,27 @@ def _recommended_view(
     if _looks_like_time_column(x_col):
         return "line"
     return "bar"
+
+
+def _sort_rows_by_x(rows: list[Any], x_col: str) -> list[Any]:
+    """line 차트용 — x_col 기준 오름차순 정렬. x가 없는/None인 행은 끝으로.
+
+    ISO 날짜 문자열은 문자열 정렬이 곧 시간순. 숫자(연/월)는 수치 정렬. 한 컬럼
+    안 타입이 섞여 비교 불가하면(TypeError) 원래 순서를 보존(안전 fallback)."""
+    if not x_col or not isinstance(rows, list) or len(rows) < 2:
+        return rows
+    with_x: list[Any] = []
+    without_x: list[Any] = []
+    for row in rows:
+        if isinstance(row, dict) and row.get(x_col) is not None:
+            with_x.append(row)
+        else:
+            without_x.append(row)
+    try:
+        with_x.sort(key=lambda r: r.get(x_col))
+    except TypeError:
+        return rows
+    return with_x + without_x
 
 
 def _build_chart_spec(
