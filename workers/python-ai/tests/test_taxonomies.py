@@ -372,7 +372,7 @@ class PlanV2SmokeFixtureSidecarTests(unittest.TestCase):
             self.assertNotIn(key, deprecated)
 
     def test_sidecar_prompt_version_locked(self) -> None:
-        self.assertEqual(self.sidecar["prompt_version"], "dataset-clause-label-v3")
+        self.assertEqual(self.sidecar["prompt_version"], "v3")
 
     def test_fixture_clauses_use_taxonomy_aspects(self) -> None:
         # clause_label.jsonl의 모든 aspect 값이 taxonomy.aspect_keys_set에 있어야

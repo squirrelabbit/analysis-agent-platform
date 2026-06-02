@@ -21,8 +21,8 @@ func TestLoadDocGenuinenessArtifactWithCleanedTextJoin(t *testing.T) {
 	if total != 2 {
 		t.Errorf("total: want 2, got %d", total)
 	}
-	if prompt != "dataset-doc-genuineness-v1" {
-		t.Errorf("prompt: want dataset-doc-genuineness-v1, got %q", prompt)
+	if prompt != "v1" {
+		t.Errorf("prompt: want v1, got %q", prompt)
 	}
 	if _, ok := summary["genuineness"]; !ok {
 		t.Errorf("summary.genuineness missing")
@@ -121,7 +121,7 @@ func setupDocGenuinenessFixture(t *testing.T, jsonlIDs, parquetIDs []string) (st
 			reason = "ad post"
 		}
 		lines = append(lines, fmt.Sprintf(
-			`{"doc_id":"%s","genuineness":"%s","reason":"%s","source":"lloa","prompt_version":"dataset-doc-genuineness-v1"}`,
+			`{"doc_id":"%s","genuineness":"%s","reason":"%s","source":"lloa","prompt_version":"v1"}`,
 			id, genuineness, reason,
 		))
 	}
