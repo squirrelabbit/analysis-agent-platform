@@ -217,7 +217,7 @@ def _build_display(
 # silverone 2026-05-27 (display-warnings v1) — 사용자 화면 노출 가능한 짧은
 # 경고 문자열 list. context_summary와 다름 — warnings는 화면 표시, context_
 # summary는 LLM 다음 turn용으로 노출 금지.
-_NULL_RATIO_OPERATIONS = frozenset({"ratio", "percent_change"})
+_NULL_RATIO_OPERATIONS = frozenset({"ratio", "percent_change", "share_of_total"})
 _NULL_RATIO_WARNING = "일부 비율 값은 기준값이 없어 계산되지 않았습니다."
 
 

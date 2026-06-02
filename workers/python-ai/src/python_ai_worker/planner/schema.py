@@ -166,12 +166,19 @@ SKILL_CATALOG: dict[str, SkillSpec] = {
     ),
     "calculate": SkillSpec(
         name="calculate",
-        description="파생 컬럼을 추가한다. 사칙연산 + percent_change + ratio.",
+        description="파생 컬럼을 추가한다. 사칙연산 + percent_change + ratio + share_of_total.",
         input_type="table",
         output_type="table",
         params_schema={
             "input": "table_or_step_id",
-            "expressions": "calculation[] — {name, operation: add|subtract|multiply|divide|percent_change|ratio, ...}",
+            "expressions": (
+                "calculation[] — {name, operation, ...}. operation별 키: "
+                "add|subtract|multiply|divide={left,right}, percent_change={base,current}, "
+                "ratio={numerator,denominator} (같은 행 두 컬럼 나눗셈, 0~1), "
+                "share_of_total={value, partition_by?} — value 컬럼의 전체 합 대비 비중(0~1). "
+                "비율/구성비/비중/전체 대비 질문은 ratio가 아니라 share_of_total을 쓴다. "
+                "partition_by(선택 string[])가 있으면 그 그룹 내 합 대비 비중."
+            ),
         },
     ),
     "sort": SkillSpec(
@@ -231,7 +238,7 @@ FILTER_OPERATORS: frozenset[str] = frozenset(
 JOIN_HOWS: frozenset[str] = frozenset({"inner", "left", "right", "outer"})
 AGGREGATE_FUNCTIONS: frozenset[str] = frozenset({"count", "sum", "avg", "min", "max"})
 CALCULATE_OPERATIONS: frozenset[str] = frozenset(
-    {"add", "subtract", "multiply", "divide", "percent_change", "ratio"}
+    {"add", "subtract", "multiply", "divide", "percent_change", "ratio", "share_of_total"}
 )
 SORT_ORDERS: frozenset[str] = frozenset({"asc", "desc"})
 PRESENT_FORMATS: frozenset[str] = frozenset({"table", "chart", "json"})

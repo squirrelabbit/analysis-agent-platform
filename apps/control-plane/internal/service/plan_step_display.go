@@ -218,6 +218,19 @@ func displayCalculate(p map[string]any) map[string]any {
 				expr = name + " = " + expr
 			}
 			exprs = append(exprs, expr)
+		case "share_of_total":
+			// silverone 2026-06-02 — 전체(또는 partition 그룹) 합 대비 비중.
+			label = "비중 계산"
+			value := stringParam(e, "value")
+			denom := "전체 합계"
+			if parts := stringListParam(e, "partition_by"); len(parts) > 0 {
+				denom = strings.Join(parts, ", ") + "별 합계"
+			}
+			expr := fmt.Sprintf("%s / %s * 100", nonEmpty(value, "value"), denom)
+			if name != "" {
+				expr = name + " = " + expr
+			}
+			exprs = append(exprs, expr)
 		case "add", "subtract", "multiply", "divide":
 			symbol := map[string]string{
 				"add": "+", "subtract": "-", "multiply": "*", "divide": "/",

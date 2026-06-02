@@ -334,6 +334,60 @@ class CompareAndCalculateTests(unittest.TestCase):
                 self.assertEqual(top["delta_count"], 2)
 
 
+class ShareOfTotalTests(unittest.TestCase):
+    """silverone 2026-06-02 — sentiment별 전체 대비 구성비(share_of_total).
+
+    fixture clauses: positive 3 / neutral 1 / negative 1 (총 5).
+    기대 share: positive 0.6 / neutral 0.2 / negative 0.2 (합 1.0)."""
+
+    def test_sentiment_share_of_total(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            paths = _fixture_paths(tmpdir)
+            plan = {
+                "plan_version": "v2",
+                "steps": [
+                    {
+                        "id": "sentiment_counts",
+                        "skill": "aggregate",
+                        "params": {
+                            "input": "clauses",
+                            "group_by": ["sentiment"],
+                            "metrics": [{"name": "count", "function": "count", "column": "*"}],
+                        },
+                    },
+                    {
+                        "id": "sentiment_share",
+                        "skill": "calculate",
+                        "params": {
+                            "input": "sentiment_counts",
+                            "expressions": [
+                                {"name": "ratio", "operation": "share_of_total", "value": "count"}
+                            ],
+                        },
+                    },
+                    {
+                        "id": "out",
+                        "skill": "present",
+                        "params": {
+                            "input": "sentiment_share",
+                            "format": "table",
+                            "columns": ["sentiment", "count", "ratio"],
+                        },
+                    },
+                ],
+            }
+            with ExecutorContext(paths) as ctx:
+                execute_plan(ctx, plan)
+                shares = {row["sentiment"]: row["ratio"] for row in ctx.fetch_rows("sentiment_share")}
+                self.assertAlmostEqual(shares["positive"], 0.6)
+                self.assertAlmostEqual(shares["neutral"], 0.2)
+                self.assertAlmostEqual(shares["negative"], 0.2)
+                # denominator가 group count가 아닌 전체 합이므로 1이 아니어야 한다.
+                self.assertNotAlmostEqual(shares["positive"], 1.0)
+                self.assertAlmostEqual(sum(shares.values()), 1.0)
+
+
 class GuardrailTests(unittest.TestCase):
     def test_invalid_plan_raises_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

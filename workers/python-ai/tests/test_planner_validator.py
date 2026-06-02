@@ -354,6 +354,79 @@ class CalculateRuleTests(unittest.TestCase):
         self.assertIn("params.expression_operation_invalid", _codes(plan))
 
 
+class ShareOfTotalRuleTests(unittest.TestCase):
+    """silverone 2026-06-02 — calculate.share_of_total 계약 검증."""
+
+    def _share_plan(self, expr: dict[str, Any]) -> dict[str, Any]:
+        return _wrap(
+            [
+                {
+                    "id": "counts",
+                    "skill": "aggregate",
+                    "params": {
+                        "input": "clauses",
+                        "group_by": ["sentiment"],
+                        "metrics": [{"name": "count", "function": "count", "column": "*"}],
+                    },
+                },
+                {
+                    "id": "share",
+                    "skill": "calculate",
+                    "params": {"input": "counts", "expressions": [expr]},
+                },
+            ]
+        )
+
+    def test_valid_global_share(self) -> None:
+        plan = self._share_plan(
+            {"name": "ratio", "operation": "share_of_total", "value": "count"}
+        )
+        self.assertEqual(collect_plan_issues(plan), [])
+
+    def test_valid_partitioned_share(self) -> None:
+        plan = self._share_plan(
+            {
+                "name": "ratio",
+                "operation": "share_of_total",
+                "value": "count",
+                "partition_by": ["sentiment"],
+            }
+        )
+        self.assertEqual(collect_plan_issues(plan), [])
+
+    def test_missing_value_key(self) -> None:
+        plan = self._share_plan({"name": "ratio", "operation": "share_of_total"})
+        self.assertIn("params.expression_keys_missing", _codes(plan))
+
+    def test_value_column_unknown(self) -> None:
+        plan = self._share_plan(
+            {"name": "ratio", "operation": "share_of_total", "value": "nope"}
+        )
+        self.assertIn("params.expression_column_unknown", _codes(plan))
+
+    def test_partition_by_not_list(self) -> None:
+        plan = self._share_plan(
+            {
+                "name": "ratio",
+                "operation": "share_of_total",
+                "value": "count",
+                "partition_by": "sentiment",
+            }
+        )
+        self.assertIn("params.expression_partition_by_not_list", _codes(plan))
+
+    def test_partition_by_column_unknown(self) -> None:
+        plan = self._share_plan(
+            {
+                "name": "ratio",
+                "operation": "share_of_total",
+                "value": "count",
+                "partition_by": ["nope"],
+            }
+        )
+        self.assertIn("params.expression_column_unknown", _codes(plan))
+
+
 class PrefixContractTests(unittest.TestCase):
     """silverone 2026-05-26 (B안) — aggregate metric name에 비교 label prefix가
     들어가면 compare가 prefix를 다시 붙여 중복 prefix(`last_last_count`)가 발생.

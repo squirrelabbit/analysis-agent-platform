@@ -2572,6 +2572,7 @@ components:
             - aggregate: `{label: "aspect별 집계", expression: "GROUP BY aspect · COUNT(*) AS count"}`
             - sort: `{label: "정렬", expression: "ORDER BY count DESC"}`
             - calculate(ratio): `{label: "비율 계산", expression: "negative_ratio = negative_count / total_count * 100"}`
+            - calculate(share_of_total): `{label: "비중 계산", expression: "ratio = count / 전체 합계 * 100"}`
             - present: `{label: "결과 표시", expression: "TABLE: 아스펙트별 건수"}`
 
             expression은 SQL-like 직관 표현이며 실제 executor SQL과는 무관
@@ -2709,9 +2710,10 @@ components:
             display-warnings v1). v1 후보 3종:
             (1) empty result — "조건에 맞는 결과가 없습니다."
             (2) truncated — "전체 {total_rows}건 중 {returned_rows}건만 표시했습니다."
-            (3) null ratio/percent_change — "일부 비율 값은 기준값이 없어
-            계산되지 않았습니다." (plan.calculate.ratio / percent_change
-            expression의 결과 column에 null row가 있을 때).
+            (3) null ratio/percent_change/share_of_total — "일부 비율 값은
+            기준값이 없어 계산되지 않았습니다." (plan.calculate.ratio /
+            percent_change / share_of_total expression의 결과 column에 null
+            row가 있을 때).
             warnings는 사용자에게 노출. context_summary는 노출 금지.
             normal result는 `[]`.
         recommended_view:
