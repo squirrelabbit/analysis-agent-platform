@@ -153,7 +153,10 @@ class PlanV2SkillParamEnumTests(unittest.TestCase):
         self.assertEqual(AGGREGATE_FUNCTIONS, frozenset({"count", "sum", "avg", "min", "max"}))
         self.assertEqual(
             CALCULATE_OPERATIONS,
-            frozenset({"add", "subtract", "multiply", "divide", "percent_change", "ratio"}),
+            # silverone 2026-06-02 — share_of_total 추가 (그룹별 전체 대비 비중).
+            frozenset(
+                {"add", "subtract", "multiply", "divide", "percent_change", "ratio", "share_of_total"}
+            ),
         )
         self.assertEqual(SORT_ORDERS, frozenset({"asc", "desc"}))
         self.assertEqual(PRESENT_FORMATS, frozenset({"table", "chart", "json"}))

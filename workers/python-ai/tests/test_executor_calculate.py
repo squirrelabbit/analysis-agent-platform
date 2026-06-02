@@ -54,5 +54,40 @@ class CalculateDivideZeroGuardTests(unittest.TestCase):
         self.assertIn("CASE WHEN d IS NULL OR d = 0 THEN NULL", sql)
 
 
+class CalculateShareOfTotalTests(unittest.TestCase):
+    """silverone 2026-06-02 — share_of_total: 전체(또는 group) 합 대비 비중(0~1)."""
+
+    def test_global_share_uses_window_over_empty(self) -> None:
+        sql = _build("share_of_total", value="count")
+        self.assertIn("count * 1.0 / NULLIF(SUM(count) OVER (), 0)", sql)
+
+    def test_partitioned_share_uses_partition_by(self) -> None:
+        expression = {
+            "name": "result",
+            "operation": "share_of_total",
+            "value": "count",
+            "partition_by": ["sentiment"],
+        }
+        sql, _ = calculate.build_sql(
+            {"input": "agg", "expressions": [expression]},
+            None,  # type: ignore[arg-type]
+        )
+        self.assertIn("SUM(count) OVER (PARTITION BY sentiment)", sql)
+
+    def test_empty_partition_by_falls_back_to_global(self) -> None:
+        expression = {
+            "name": "result",
+            "operation": "share_of_total",
+            "value": "count",
+            "partition_by": [],
+        }
+        sql, _ = calculate.build_sql(
+            {"input": "agg", "expressions": [expression]},
+            None,  # type: ignore[arg-type]
+        )
+        self.assertIn("SUM(count) OVER ()", sql)
+        self.assertNotIn("PARTITION BY", sql)
+
+
 if __name__ == "__main__":
     unittest.main()

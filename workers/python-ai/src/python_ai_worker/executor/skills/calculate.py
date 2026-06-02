@@ -20,6 +20,9 @@ def build_sql(params: dict[str, Any], context: "ExecutorContext") -> tuple[str, 
         ratio와 동일한 패턴. integer ZeroDivisionError / INF 노출 방지.
       - percent_change  : base NULL/0 → NULL, current NULL → 0으로 본다.
       - ratio           : denominator NULL/0 → NULL, numerator NULL은 보존.
+      - share_of_total  : value의 전체 합 대비 비중(0~1). window SUM OVER로 전체
+        (또는 partition_by 그룹) 합을 구해 row별 value를 나눈다. SQL-2와 동일하게
+        합이 NULL/0이면 NULL (NULLIF). silverone 2026-06-02.
     """
 
     input_ref = safe_identifier(params["input"])
@@ -60,6 +63,17 @@ def build_sql(params: dict[str, Any], context: "ExecutorContext") -> tuple[str, 
                 f"(CASE WHEN {denominator} IS NULL OR {denominator} = 0 THEN NULL "
                 f"ELSE {numerator} * 1.0 / {denominator} END) AS {name}"
             )
+        elif operation == "share_of_total":
+            # silverone 2026-06-02 — value의 전체(또는 partition) 합 대비 비중(0~1).
+            # window SUM OVER (PARTITION BY ...) 로 합을 broadcast해 row별로 나눈다.
+            value = safe_identifier(expression["value"])
+            partition_by = expression.get("partition_by") or []
+            if partition_by:
+                cols = ", ".join(safe_identifier(c) for c in partition_by)
+                window = f"SUM({value}) OVER (PARTITION BY {cols})"
+            else:
+                window = f"SUM({value}) OVER ()"
+            pieces.append(f"({value} * 1.0 / NULLIF({window}, 0)) AS {name}")
         else:
             raise ExecutorError(f"calculate.operation unsupported: {operation}")
     sql = f"SELECT {', '.join(pieces)} FROM {input_ref}"

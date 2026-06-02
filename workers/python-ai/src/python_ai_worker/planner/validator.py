@@ -79,6 +79,7 @@ _CALCULATE_OP_REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
     "multiply": ("left", "right"),
     "divide": ("left", "right"),
     "percent_change": ("base", "current"),
+    "share_of_total": ("value",),
 }
 
 # silverone 2026-05-26 (prefix contract B안) — aggregate metric name에 비교
@@ -925,7 +926,7 @@ def _validate_calculate(params: dict[str, Any], ctx: _StepContext) -> None:
         # 경우, expression이 참조하는 column이 input output에 있는지 정적으로
         # 검증한다. input_output이 None이면 추론 불가 → skip (false positive 방지).
         if input_output is not None:
-            for key in ("left", "right", "base", "current", "numerator", "denominator"):
+            for key in ("left", "right", "base", "current", "numerator", "denominator", "value"):
                 col_name = str(expression.get(key) or "").strip()
                 if not col_name:
                     continue
@@ -940,6 +941,31 @@ def _validate_calculate(params: dict[str, Any], ctx: _StepContext) -> None:
                             "`{right_label}_{metric_name}` 형태이다."
                         ),
                     )
+            # silverone 2026-06-02 — share_of_total.partition_by(선택)도 input
+            # output에 있어야 한다. list 형식 검증 + 각 컬럼 존재 검증.
+            partition_by = expression.get("partition_by")
+            if partition_by is not None:
+                if not isinstance(partition_by, list):
+                    ctx.issue(
+                        code="params.expression_partition_by_not_list",
+                        message=(
+                            f"calculate.expressions[{idx}].partition_by must be a "
+                            "string array of column names or null"
+                        ),
+                    )
+                else:
+                    for col in partition_by:
+                        col_name = str(col or "").strip()
+                        if col_name and col_name not in input_output:
+                            ctx.issue(
+                                code="params.expression_column_unknown",
+                                message=(
+                                    f"calculate.expressions[{idx}] partition_by references "
+                                    f"column '{col_name}', but input step '{input_ref}' output "
+                                    f"schema does not include it. Available columns: "
+                                    f"{sorted(input_output)}."
+                                ),
+                            )
 
         # silverone 2026-05-26 (SQL-2.3, audit M8) — input이 RESERVED 테이블이면
         # 수치 expression이 string column을 참조하지 않는지 검증. RESERVED를 거친
@@ -948,7 +974,7 @@ def _validate_calculate(params: dict[str, Any], ctx: _StepContext) -> None:
         # timestamp와 subtract 가능성이 있어 reject하지 않음.
         reserved_strings = RESERVED_STRING_COLUMNS.get(input_ref)
         if reserved_strings:
-            for key in ("left", "right", "base", "current", "numerator", "denominator"):
+            for key in ("left", "right", "base", "current", "numerator", "denominator", "value"):
                 col_name = str(expression.get(key) or "").strip()
                 if col_name and col_name in reserved_strings:
                     ctx.issue(

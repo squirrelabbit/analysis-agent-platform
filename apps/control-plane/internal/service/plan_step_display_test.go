@@ -166,6 +166,44 @@ func TestDisplayCalculateRatio(t *testing.T) {
 	}
 }
 
+func TestDisplayCalculateShareOfTotalGlobal(t *testing.T) {
+	got := buildStepDisplay(rawStep("calculate", map[string]any{
+		"input": "sentiment_counts",
+		"expressions": []any{
+			map[string]any{
+				"name":      "ratio",
+				"operation": "share_of_total",
+				"value":     "count",
+			},
+		},
+	}))
+	if got["label"] != "비중 계산" {
+		t.Errorf("label: %v", got["label"])
+	}
+	want := "ratio = count / 전체 합계 * 100"
+	if got["expression"] != want {
+		t.Errorf("share_of_total expr: want %q, got %q", want, got["expression"])
+	}
+}
+
+func TestDisplayCalculateShareOfTotalPartitioned(t *testing.T) {
+	got := buildStepDisplay(rawStep("calculate", map[string]any{
+		"input": "aspect_counts",
+		"expressions": []any{
+			map[string]any{
+				"name":         "ratio",
+				"operation":    "share_of_total",
+				"value":        "count",
+				"partition_by": []any{"sentiment"},
+			},
+		},
+	}))
+	want := "ratio = count / sentiment별 합계 * 100"
+	if got["expression"] != want {
+		t.Errorf("share_of_total partitioned expr: want %q, got %q", want, got["expression"])
+	}
+}
+
 func TestDisplayCalculatePercentChange(t *testing.T) {
 	got := buildStepDisplay(rawStep("calculate", map[string]any{
 		"expressions": []any{
