@@ -302,6 +302,58 @@ class ValidatorRetryTests(unittest.TestCase):
             generate_plan(user_question="dummy", anthropic_client=client)
 
 
+def _bad_plan_unknown_columns() -> dict[str, Any]:
+    """present.columns가 input(clauses) 출력 컬럼에 없어 columns_unknown을 내는 plan.
+
+    self-correct 후에도 동일하게 남으면 결정론적 columns repair가 발동해야 한다."""
+    return {
+        "plan_version": "v2",
+        "steps": [
+            {
+                "id": "out",
+                "skill": "present",
+                "params": {
+                    "input": "clauses",
+                    "format": "table",
+                    "title": "반응",
+                    "columns": ["definitely_not_a_real_column"],
+                },
+            },
+        ],
+    }
+
+
+class ColumnsGracefulRepairTests(unittest.TestCase):
+    def test_residual_columns_issue_repaired_not_raised(self) -> None:
+        # silverone 2026-06-02 — self-correct 후에도 present.columns_unknown만 남으면
+        # columns를 떼고 진행해야 한다 (500 회귀 방지). 두 응답 모두 같은 bad plan.
+        client = _FakeClient(
+            [
+                _plan_body(_bad_plan_unknown_columns()),
+                _plan_body(_bad_plan_unknown_columns()),
+            ]
+        )
+        result = generate_plan(user_question="반응 비율", anthropic_client=client)
+        # columns가 떨어진 plan으로 성공해야 한다 (raise X).
+        present = result.plan["steps"][-1]
+        self.assertEqual(present["skill"], "present")
+        self.assertNotIn("columns", present["params"])
+        # columns_repair attempt가 기록돼야 한다.
+        phases = [a["phase"] for a in result.attempts]
+        self.assertIn("columns_repair", phases)
+
+    def test_non_columns_issue_still_raises(self) -> None:
+        # columns 외 issue(skill_unknown)가 섞이면 자동 복구하지 않고 raise.
+        client = _FakeClient(
+            [
+                _plan_body(_bad_plan_invalid_skill()),
+                _plan_body(_bad_plan_invalid_skill()),
+            ]
+        )
+        with self.assertRaises(PlannerValidationError):
+            generate_plan(user_question="dummy", anthropic_client=client)
+
+
 class GuardrailTests(unittest.TestCase):
     def test_empty_user_question_raises(self) -> None:
         client = _FakeClient([])
