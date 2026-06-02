@@ -101,6 +101,37 @@ docker compose -f compose.dev.yml up -d --build
 
 분석/빌드에 LLM이 필요하면 `.env`에 `ANTHROPIC_API_KEY`, `WISENUT_LLOA_MAX_V1_2_1_API_KEY`를 설정한다 (`.env.example` 참고). 로컬 API 호출 예시는 [docs/api/local.http](docs/api/local.http).
 
+## 배포 (staging / 내부 서버)
+
+내부 서버 `/srv/analysis-agent-platform`에서 운영한다. dev compose는 loopback
+바인딩 그대로 두고, `compose.staging.yml` overlay를 얹어 web(`:5173`)과
+control-plane(`:18080`)을 `0.0.0.0`으로 노출한다.
+
+```bash
+# 1) 최초 1회 — clone (사내 GitLab self-signed 인증서 → SSL 검증 비활성)
+cd /srv
+GIT_SSL_NO_VERIFY=true git clone https://gitlab.wisenut.kr/data/analysis-agent-platform.git
+cd /srv/analysis-agent-platform
+
+# 2) .env 작성 (시크릿 — .env.example 복사 후 키 채우기). 최초 1회.
+cp .env.example .env && $EDITOR .env
+
+# 3) 최신 코드로 갱신
+GIT_SSL_NO_VERIFY=true git pull origin main
+
+# 4) staging overlay로 기동/재배포
+docker compose -f compose.dev.yml -f compose.staging.yml up -d --build
+```
+
+이후 재배포는 3)~4)만 반복한다. 노출 주소(서버 IP 기준):
+
+- web(앱): `http://<서버IP>:5173`
+- control plane(API 직접): `http://<서버IP>:18080`
+- python-ai worker / postgres / temporal 은 내부 네트워크 전용(미노출)
+
+> control-plane은 무인증이다. 외부 노출이므로 **신뢰된 사내망 + 방화벽(5173 /
+> 18080 inbound 제한)** 전제에서만 운영한다.
+
 ## 검증
 
 ```bash

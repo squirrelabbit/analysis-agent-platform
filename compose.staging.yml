@@ -1,20 +1,28 @@
-# 스테이징/내부 서버 배포 override (silverone 2026-06-01).
+# 스테이징/내부 서버 배포 override (silverone 2026-06-01, 2026-06-02 갱신).
 # dev compose(compose.dev.yml)는 127.0.0.1 loopback 바인딩 그대로 두고, 이 파일을
-# 얹어 web만 외부로 노출한다.
+# 얹어 외부로 노출할 서비스만 0.0.0.0으로 교체한다.
 #
 # 사용:
 #   1) 같은 디렉터리에 .env 작성 (시크릿 — .env.example 복사 후 키 채우기)
 #   2) docker compose -f compose.dev.yml -f compose.staging.yml up -d --build
 #
-# web(SPA + /api reverse-proxy)만 외부로 연다. control-plane / python-ai-worker /
-# postgres / temporal 은 docker 내부 네트워크로만 통신하므로 외부 포트를 열지
-# 않는다(공격면 최소화). 흐름: 브라우저 → web(:5173) → nginx /api 프록시 →
-# control-plane:8080(내부). 그래서 control-plane host 포트는 SPA 동작에 불필요.
+# 노출 대상:
+#   - web(:5173)  — SPA + /api reverse-proxy. 브라우저로 앱을 직접 쓰는 경로.
+#   - control-plane(:18080) — 동료가 자기 프론트/도구를 silverone PC 백엔드에
+#     직접 붙이는 경로 (2026-06-02 추가). web의 /api 프록시만으로 충분하면 이 줄은
+#     빼도 된다.
+# python-ai-worker / postgres / temporal 은 내부 네트워크 전용(노출 안 함).
+#
+# ⚠️ 보안: control-plane은 무인증이다. 외부 노출 시 접근 가능한 누구나 분석 API를
+#   호출할 수 있다(LLOA/Anthropic 비용·데이터). 신뢰된 사내망 + 방화벽(해당 포트
+#   inbound 제한) 전제에서만 사용하고, 작업이 끝나면 overlay 없이 재기동한다.
 #
 # !override 는 dev의 ports 리스트를 병합하지 않고 통째로 교체한다 (Compose 2.24+).
-# 서버 compose가 구버전이면: 이 파일 대신 compose.dev.yml 의 web 포트
-# `127.0.0.1:5173:80` → `5173:80` 로 직접 바꿔도 된다.
+# 서버 compose가 구버전이면 compose.dev.yml 의 해당 host 포트를 직접 바꿔도 된다.
 services:
   web:
     ports: !override
       - "5173:80"   # 0.0.0.0:5173. 도메인 80 직결하려면 "80:80" 으로.
+  control-plane:
+    ports: !override
+      - "18080:8080"   # 0.0.0.0:18080 → container 8080
