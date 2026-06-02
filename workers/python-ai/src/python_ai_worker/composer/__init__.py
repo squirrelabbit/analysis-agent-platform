@@ -84,14 +84,8 @@ def _compose_safely(
     truncated = bool(present.get("truncated", False))
     fmt = str(present.get("format") or "table").strip() or "table"
 
-    template, content = _select_template(
-        total_rows=total_rows,
-        returned_rows=returned_rows,
-        truncated=truncated,
-        fmt=fmt,
-        reuse_metadata=reuse_metadata,
-    )
-
+    # display를 먼저 만들어 최종 recommended_view(차트 다운그레이드 반영 후)를 얻고,
+    # 그 값으로 본문 메시지를 만든다 — 영문 fmt(chart/json) 대신 한국어 view 표현 사용.
     display = _build_display(
         present=present,
         fmt=fmt,
@@ -99,6 +93,14 @@ def _compose_safely(
         returned_rows=returned_rows,
         truncated=truncated,
         plan=plan,
+    )
+
+    template, content = _select_template(
+        total_rows=total_rows,
+        returned_rows=returned_rows,
+        truncated=truncated,
+        recommended_view=str(display.get("recommended_view") or ""),
+        reuse_metadata=reuse_metadata,
     )
     context_summary = _build_context_summary(
         user_question=user_question,
@@ -120,12 +122,26 @@ def _compose_safely(
     }
 
 
+# recommended_view enum → 한국어 표현 (silverone 2026-06-02). assistant_content에
+# 영문 view/format 키워드(chart / table / line)가 한국어 문장에 박히지 않게 한다.
+# unknown/기타는 form 표현을 생략해 일반 문장으로 둔다 (새 view 추가에도 안전).
+_VIEW_LABEL_KO: dict[str, str] = {
+    "table": "표로",
+    "bar": "막대그래프로",
+    "line": "선그래프로",
+}
+
+
+def _view_label_ko(recommended_view: str) -> str:
+    return _VIEW_LABEL_KO.get(str(recommended_view or "").strip(), "")
+
+
 def _select_template(
     *,
     total_rows: int,
     returned_rows: int,
     truncated: bool,
-    fmt: str,
+    recommended_view: str,
     reuse_metadata: dict[str, Any] | None,
 ) -> tuple[str, str]:
     """ADR-020 §5 우선순위 — empty → reuse → truncated → normal."""
@@ -139,10 +155,10 @@ def _select_template(
             "table_truncated",
             f"전체 {total_rows}건 중 {returned_rows}건만 표시했습니다.",
         )
-    return (
-        "table_normal",
-        f"분석 결과 {returned_rows}건을 {fmt} 형식으로 정리했습니다.",
-    )
+    label = _view_label_ko(recommended_view)
+    if label:
+        return ("table_normal", f"분석 결과 {returned_rows}건을 {label} 정리했습니다.")
+    return ("table_normal", f"분석 결과 {returned_rows}건을 정리했습니다.")
 
 
 def _build_display(

@@ -29,23 +29,51 @@ def _present(*, total=3, returned=3, truncated=False, fmt="table", title="작년
     }
 
 
+# silverone 2026-06-02 — assistant_content는 recommended_view를 한국어로 표현하고
+# 영문 view/format 키워드(chart/table/line/bar/json)를 넣지 않는다.
+_ENGLISH_VIEW_WORDS = ("chart", "table", "line", "bar", "json")
+
+
 class NormalTemplateTests(unittest.TestCase):
-    def test_normal_table_result(self) -> None:
+    def _assert_no_english_view_word(self, content: str) -> None:
+        for word in _ENGLISH_VIEW_WORDS:
+            self.assertNotIn(word, content.lower(), f"본문에 영문 view 키워드 '{word}' 노출")
+
+    def test_normal_table_view_korean(self) -> None:
+        # 비-chartable rows → recommended_view=table → "표로".
         out = compose_answer(
-            user_question="작년 대비 aspect 증감",
-            present=_present(total=3, returned=3, truncated=False, fmt="table"),
+            user_question="aspect 라벨 목록",
+            present=_present(total=2, returned=2, rows=[{"aspect": "food", "label": "맛"}, {"aspect": "show", "label": "공연"}]),
         )
         self.assertEqual(out["metadata"]["template"], "table_normal")
-        self.assertEqual(out["metadata"]["mode"], "deterministic")
-        self.assertIn("3건", out["assistant_content"])
-        self.assertIn("table", out["assistant_content"])
+        self.assertEqual(out["display"]["recommended_view"], "table")
+        self.assertIn("표로", out["assistant_content"])
+        self.assertIn("2건", out["assistant_content"])
+        self._assert_no_english_view_word(out["assistant_content"])
 
-    def test_normal_chart_format_used(self) -> None:
+    def test_normal_bar_view_korean(self) -> None:
         out = compose_answer(
-            user_question="aspect 비율",
-            present=_present(fmt="chart"),
+            user_question="aspect별 건수",
+            present=_present(rows=[{"aspect": "food", "count": 5}, {"aspect": "show", "count": 3}, {"aspect": "stage", "count": 7}]),
         )
-        self.assertIn("chart", out["assistant_content"])
+        self.assertEqual(out["display"]["recommended_view"], "bar")
+        self.assertIn("막대그래프로", out["assistant_content"])
+        self._assert_no_english_view_word(out["assistant_content"])
+
+    def test_normal_line_view_korean(self) -> None:
+        out = compose_answer(
+            user_question="날짜별 추이",
+            present=_present(rows=[{"created_at": "2026-01", "count": 10}, {"created_at": "2026-02", "count": 15}, {"created_at": "2026-03", "count": 12}]),
+        )
+        self.assertEqual(out["display"]["recommended_view"], "line")
+        self.assertIn("선그래프로", out["assistant_content"])
+        self._assert_no_english_view_word(out["assistant_content"])
+
+    def test_normal_chart_format_no_english(self) -> None:
+        # present.format="chart"여도 본문은 한국어 view 표현만 사용 ("chart" 미노출).
+        out = compose_answer(user_question="aspect 비율", present=_present(fmt="chart"))
+        self._assert_no_english_view_word(out["assistant_content"])
+        self.assertIn("정리했습니다", out["assistant_content"])
 
 
 class TruncatedTemplateTests(unittest.TestCase):
