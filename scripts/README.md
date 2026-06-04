@@ -19,7 +19,7 @@
 direct-plan은 committed fixture의 `aspect_delta_plan.json` + 기대값 6개 lock.
 user-question은 real LLM 호출이라 plan이 매번 달라질 수 있어 `present row_count ≥ 3`만 검증.
 
-rename PR (2026-05-21) 메모: HTTP endpoint는 `/analyze`로 이전. `/analyze_v2`는 일정 기간 deprecated alias 유지. Python worker task path `/tasks/analyze_v2`는 wire contract라 유지. response body `plan_version: "v2"`도 유지.
+rename PR (2026-05-21) 메모: canonical은 HTTP endpoint `/analyze`, worker task path `/tasks/analyze`다. `/analyze_v2` / `/tasks/analyze_v2`는 **유지해야 하는 wire contract가 아니라 backward-compatible legacy alias**로, 옛 client 제거 전까지만 dispatch된다(이 smoke가 그 alias 호환을 함께 검증). 신규 호출/문서는 canonical을 쓴다. response body의 `plan_version: "v2"`만 wire version 식별자로 유지된다.
 
 ## fixture
 

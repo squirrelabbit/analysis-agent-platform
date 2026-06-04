@@ -9,7 +9,7 @@
 # - .env (또는 환경)에 ANTHROPIC_API_KEY 설정
 #
 # usage:
-#   ./scripts/smoke_analyze_v2_endpoint.sh
+#   ./scripts/smoke_analyze_endpoint.sh
 
 set -euo pipefail
 

@@ -118,13 +118,13 @@ PYTHONPATH=workers/python-ai/src python3.11 -m unittest discover -s workers/pyth
 ruby -e 'require "yaml"; YAML.load_file("docs/api/openapi.yaml"); puts "ok"'
 
 # direct-plan e2e smoke (compose dev 띄운 상태)
-./scripts/smoke_analyze_v2_e2e.sh --mode direct-plan
+./scripts/smoke_analyze_e2e.sh --mode direct-plan
 ```
 
 LLM 호출까지 검증해야 할 때 (ANTHROPIC_API_KEY 있는 환경):
 
 ```bash
-./scripts/smoke_analyze_v2_e2e.sh --mode user-question
+./scripts/smoke_analyze_e2e.sh --mode user-question
 ```
 
 ---

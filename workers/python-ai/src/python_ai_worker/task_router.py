@@ -54,6 +54,21 @@ _LEGACY_ANALYZE_TASK_NAME = "analyze_v2"
 _LEGACY_PLAN_TASK_NAME = "plan_v2"
 
 
+def canonical_task_name(name: str) -> str:
+    """legacy alias를 canonical task 이름으로 정규화 (metrics/label 일관성용).
+
+    silverone 2026-06-04 — dispatch 자체는 run_task가 alias를 그대로 받아 처리하지만
+    (그래야 legacy_alias obs warning을 남긴다), metrics label은 canonical로 모아야
+    운영 대시보드가 task="analyze_v2" / task="analyze"로 갈라지지 않는다. alias 매핑의
+    단일 source가 여기다.
+    """
+    if name == _LEGACY_ANALYZE_TASK_NAME:
+        return _ANALYZE_TASK_NAME
+    if name == _LEGACY_PLAN_TASK_NAME:
+        return _PLAN_TASK_NAME
+    return name
+
+
 # taxonomy-driven config Phase 3-B (silverone 2026-05-27) — analyze 시
 # clause_label artifact의 taxonomy_id/hash와 비교할 planner active taxonomy.
 # Phase 3-A에서 planner schema description이 이 taxonomy에서 derive되므로
