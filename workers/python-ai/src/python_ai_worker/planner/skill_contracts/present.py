@@ -13,9 +13,17 @@ R5 pilot 정책에 따라 *위치만 이동*. issue code (``params.format_invali
 from typing import TYPE_CHECKING, Any, Callable
 
 from ..schema import PRESENT_FORMATS
+from ..skill_specs import PRESENT_SPEC
 
 if TYPE_CHECKING:
     from ..validator import _StepContext
+
+# Skill Contract v2 Step 1 — required param은 PRESENT_SPEC에서 파생 (= ("input",
+# "format")). 행동 변화 0. format/limit/columns 세부 규칙은 present-specific이라
+# 본 contract에 그대로 둔다.
+_PRESENT_REQUIRED_PARAMS: tuple[str, ...] = tuple(
+    param.name for param in PRESENT_SPEC.params if param.required
+)
 
 
 # silverone 2026-05-26 (SQL-4) — present 응답 row 한도. validator는 1~10000
@@ -34,7 +42,7 @@ class PresentSkillContract:
         # cycle 회피 — validator helper는 함수 호출 시점에 lazy import.
         from ..validator import _check_input_ref, _check_required_keys
 
-        if not _check_required_keys(params, ("input", "format"), ctx):
+        if not _check_required_keys(params, _PRESENT_REQUIRED_PARAMS, ctx):
             return
         _check_input_ref(params.get("input"), "input", ctx)
         fmt = str(params.get("format") or "").strip()
