@@ -32,6 +32,7 @@ from .schema import (
     RESERVED_INPUT_NAMES,
     RESERVED_STRING_COLUMNS,
     SKILL_CATALOG,
+    SORT_ORDERS,
     TABLE_SCHEMAS,
     TEXT_COLUMN_TYPES,
     TIMESTAMP_COLUMN_TYPES,
@@ -86,6 +87,27 @@ _CALCULATE_OP_REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
 }
 _CALCULATE_RATIO_ALT_REQUIRED: tuple[tuple[str, ...], ...] = next(
     (op.alt_required for op in CALCULATE_SPEC.operations if op.name == "ratio"), ()
+)
+
+_TOP_N_FILTER_OPS: frozenset[str] = frozenset(
+    {
+        "=",
+        "==",
+        "eq",
+        "!=",
+        "neq",
+        ">",
+        "gt",
+        ">=",
+        "gte",
+        "<",
+        "lt",
+        "<=",
+        "lte",
+        "in",
+        "not_in",
+        "contains",
+    }
 )
 
 
@@ -240,11 +262,10 @@ def collect_plan_issues(plan: dict[str, Any]) -> list[ValidationIssue]:
             )
             continue
 
-        # R2a (silverone 2026-06-04) — recipe step. validator 활성 recipe(현재
-        # distribution만)는 unknown으로 거절하지 않고 recipe param을 검증한다. recipe
-        # step은 planner output에 남고, 실행 시 R1 expand_recipes가 atomic으로 lower
-        # 한다. 미활성 recipe(event_window_count/top_n)는 아래 catalog 분기로 떨어져
-        # skill_unknown으로 거절된다.
+        # Recipe step. validator 활성 recipe는 unknown으로 거절하지 않고 recipe
+        # param을 검증한다. recipe step은 planner output에 남고, 실행 시
+        # expand_recipes가 atomic으로 lower한다. 미활성 recipe(event_window_count)는
+        # 아래 catalog 분기로 떨어져 skill_unknown으로 거절된다.
         if skill_name in RUNTIME_ENABLED_RECIPES:
             params = step.get("params")
             if not isinstance(params, dict):
@@ -1078,13 +1099,19 @@ def _validate_summarize(params: dict[str, Any], ctx: _StepContext) -> None:
 #
 # recipe step은 planner output에 남고 실행 시 expand_recipes가 atomic으로 lower한다
 # (안 ii). validator는 recipe param만 검증한다 — atomic 규칙은 lower 후 atomic step에
-# 적용된다(R0 lowering 테스트가 lowered plan의 validator 통과를 잠금). 현재 distribution만.
+# 적용된다(lowering 테스트가 lowered plan의 validator 통과를 잠금).
 
 
 def _validate_recipe_params(skill_name: str, params: dict[str, Any], ctx: _StepContext) -> None:
     if skill_name == "distribution":
         _validate_distribution_recipe(params, ctx)
-    # 다른 recipe를 validator 활성화할 때 분기 추가 (RUNTIME_ENABLED_RECIPES와 동기).
+    elif skill_name == "top_n":
+        _validate_top_n_recipe(params, ctx)
+    else:
+        ctx.issue(
+            code="step.skill_unknown",
+            message=f"recipe '{skill_name}' is runtime-enabled but has no validator",
+        )
 
 
 def _validate_distribution_recipe(params: dict[str, Any], ctx: _StepContext) -> None:
@@ -1131,6 +1158,145 @@ def _validate_distribution_recipe(params: dict[str, Any], ctx: _StepContext) -> 
             code="params.recipe_title_invalid",
             message="distribution.title must be a string or null",
         )
+
+
+def _validate_top_n_recipe(params: dict[str, Any], ctx: _StepContext) -> None:
+    if not _check_required_keys(params, ("input",), ctx):
+        return
+
+    input_ref = params.get("input")
+    group_by = params.get("group_by")
+    group_columns: list[str] = []
+    if (
+        not isinstance(group_by, list)
+        or not group_by
+        or not all(isinstance(c, str) and c.strip() for c in group_by)
+    ):
+        ctx.issue(
+            code="params.recipe_group_by_invalid",
+            message="top_n.group_by must be a non-empty list of column names",
+        )
+    else:
+        group_columns = [c.strip() for c in group_by]
+
+    count_column = params.get("count_column")
+    if count_column is None:
+        count_column_name = "count"
+    elif isinstance(count_column, str) and count_column.strip():
+        count_column_name = count_column.strip()
+    else:
+        count_column_name = "count"
+        ctx.issue(
+            code="params.recipe_column_name_invalid",
+            message="top_n.count_column must be a non-empty string",
+        )
+
+    _check_input_ref(input_ref, "input", ctx, require_column=group_columns or None)
+
+    metric = params.get("metric")
+    if metric is not None and str(metric).strip() != "count":
+        ctx.issue(
+            code="params.recipe_metric_unsupported",
+            message="top_n.metric only supports 'count'",
+        )
+
+    filters = params.get("filters")
+    if filters is not None:
+        if not isinstance(filters, list):
+            ctx.issue(
+                code="params.recipe_filter_invalid",
+                message="top_n.filters must be a list",
+            )
+        else:
+            _validate_top_n_filters(input_ref, filters, ctx)
+
+    sort = params.get("sort")
+    if sort is not None:
+        if not isinstance(sort, dict):
+            ctx.issue(
+                code="params.recipe_sort_invalid",
+                message="top_n.sort must be an object",
+            )
+        else:
+            sort_column = sort.get("column")
+            if sort_column is not None:
+                if not isinstance(sort_column, str) or not sort_column.strip():
+                    ctx.issue(
+                        code="params.recipe_column_name_invalid",
+                        message="top_n.sort.column must be a non-empty string",
+                    )
+                elif group_columns and sort_column.strip() not in {*group_columns, count_column_name}:
+                    ctx.issue(
+                        code="params.recipe_sort_invalid",
+                        message=(
+                            "top_n.sort.column must be one of group_by columns or "
+                            f"count_column ({sorted([*group_columns, count_column_name])})"
+                        ),
+                    )
+            direction = sort.get("direction")
+            if direction is not None and str(direction).strip() not in SORT_ORDERS:
+                ctx.issue(
+                    code="params.recipe_sort_invalid",
+                    message="top_n.sort.direction must be asc or desc",
+                )
+
+    limit = params.get("limit")
+    if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0):
+        ctx.issue(
+            code="params.recipe_limit_invalid",
+            message="top_n.limit must be a positive integer",
+        )
+
+    title = params.get("title")
+    if title is not None and not isinstance(title, str):
+        ctx.issue(
+            code="params.recipe_title_invalid",
+            message="top_n.title must be a string or null",
+        )
+
+
+def _validate_top_n_filters(
+    input_ref: Any,
+    filters: list[Any],
+    ctx: _StepContext,
+) -> None:
+    input_name = str(input_ref or "").strip()
+    for index, item in enumerate(filters):
+        if not isinstance(item, dict):
+            ctx.issue(
+                code="params.recipe_filter_invalid",
+                message=f"top_n.filters[{index}] must be an object",
+            )
+            continue
+
+        column = item.get("column")
+        if not isinstance(column, str) or not column.strip():
+            ctx.issue(
+                code="params.recipe_filter_invalid",
+                message=f"top_n.filters[{index}].column must be a non-empty string",
+            )
+        elif input_name in TABLE_SCHEMAS:
+            _check_input_ref(input_ref, "input", ctx, require_column=column.strip())
+
+        op = item.get("op")
+        op_name = str(op or "").strip()
+        if op_name not in _TOP_N_FILTER_OPS:
+            ctx.issue(
+                code="params.recipe_filter_invalid",
+                message=(
+                    f"top_n.filters[{index}].op must be one of "
+                    f"{sorted(_TOP_N_FILTER_OPS)}"
+                ),
+            )
+            continue
+
+        if op_name in {"in", "not_in"}:
+            value = item.get("value")
+            if not isinstance(value, list) or not value:
+                ctx.issue(
+                    code="params.recipe_filter_value_invalid",
+                    message=f"top_n.filters[{index}].value must be a non-empty list for op '{op_name}'",
+                )
 
 
 # ===== schema inference (prefix-2) =====

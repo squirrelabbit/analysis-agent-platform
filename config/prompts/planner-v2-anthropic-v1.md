@@ -55,6 +55,25 @@ group_by별 count와 전체 대비 share(0~1)를 한 번에 계산한다.
   부분집합/전체집합 비율(분자가 분모의 하위 조건, 예시 3)은 atomic `calculate.ratio`.
   날짜별 추이는 atomic.
 
+### top_n
+
+조건을 적용한 뒤 그룹별 count를 내고 상위 N개를 정렬해 보여준다.
+
+- params:
+  - `input`: table_or_step_id (보통 `clauses`, 또는 join/filter 결과 step)
+  - `group_by`: string[] — 순위를 낼 차원 (예: `["aspect"]`, `["sentiment"]`)
+  - `metric`: `count` (현재 count만 지원)
+  - `filters`: [{column, op, value}] — 선택. op는 `=`, `!=`, `>`, `>=`, `<`,
+    `<=`, `in`, `not_in`, `contains`
+  - `sort`: {column, direction} — 기본 `{count_column, desc}`
+  - `limit`: int>0 — 상위 개수 (기본 10)
+  - `count_column`: string — count 결과 컬럼명 (기본 `count`)
+  - `title`: string|null
+- 쓰는 경우: "상위 N개", "가장 많은", "자주 나오는", "많이 언급된", "랭킹"처럼
+  조건을 만족하는 행을 어떤 차원별 count 순위로 묻는 질문.
+- 쓰지 않는 경우: 전체 대비 비중이 필요하면 `distribution`, 서로 다른 기간/집단
+  비교는 atomic `compare` + `calculate`.
+
 ## 규칙
 
 - 위 skill catalog의 skill **또는 위 recipe**만 사용한다 (수치 계산도 `calculate`
@@ -84,6 +103,10 @@ group_by별 count와 전체 대비 share(0~1)를 한 번에 계산한다.
     모든 비율이 1이 된다. (A)는 반드시 `share_of_total`을 쓴다.
   - *서로 다른 기간/그룹 비교*는 calculate.subtract / percent_change (예시 1).
   - ratio·share_of_total 결과 단위는 **0~1**(소수). %는 표시 단계에서 환산한다.
+- "상위 N개", "가장 많이", "자주 나오는", "많이 언급된"처럼 조건 후 그룹별
+  count 순위를 묻는 질문은 **`top_n` recipe를 사용한다**. doc-level 필터가
+  필요하면 먼저 `join`/atomic `filter`로 입력 step을 만든 뒤 그 step을 `top_n.input`
+  으로 넘긴다 (예시 2).
 - **final present는 사용자의 질문에 직접 답하는 결과 step을 input으로 해야 한다.**
   중간 aggregate/count step은 분자·분모 계산용일 뿐 final present의 input으로 쓰지
   않는다. `calculate.ratio` / `average` / `delta` 등 계산 step을 만들었다면, 그 계산
@@ -236,8 +259,9 @@ filter 분기 → aspect별 aggregate (**metric name은 generic `count`**) → c
 질문: "최근 한 달 부정 후기에서 자주 나오는 aspect는?".
 
 흐름: `clauses`(절-단위 sentiment·aspect)와 `docs`(`created_at`)를 `doc_id`로
-먼저 join한 다음에야 날짜/감성 filter를 적용할 수 있다. 한 step에서 doc-level
-컬럼과 clause-level 컬럼을 같이 쓰지 않는다.
+먼저 join한 다음 날짜 filter를 적용하고, 그 결과를 `top_n` recipe에 넘겨
+sentiment 조건 + aspect별 count 순위를 계산한다. 한 step에서 doc-level 컬럼과
+clause-level 컬럼을 같이 쓰지 않는다.
 
 ```
 {
@@ -246,17 +270,13 @@ filter 분기 → aspect별 aggregate (**metric name은 generic `count`**) → c
     {"id": "clauses_with_doc", "skill": "join",
      "params": {"left": "clauses", "right": "docs",
                 "on": [{"left": "doc_id", "right": "doc_id"}], "how": "inner"}},
-    {"id": "recent_negatives", "skill": "filter",
+    {"id": "recent_reviews", "skill": "filter",
      "params": {"input": "clauses_with_doc", "where": [
-       {"column": "sentiment", "operator": "==", "value": "negative"},
        {"column": "created_at", "operator": ">=", "value": "2026-04-22"}]}},
-    {"id": "by_aspect", "skill": "aggregate",
-     "params": {"input": "recent_negatives", "group_by": ["aspect"],
-                "metrics": [{"name": "n", "op": "count"}]}},
-    {"id": "ranked", "skill": "sort",
-     "params": {"input": "by_aspect", "order_by": [{"column": "n", "dir": "desc"}]}},
-    {"id": "present_top", "skill": "present",
-     "params": {"input": "ranked", "format": "table",
+    {"id": "negative_aspect_top", "skill": "top_n",
+     "params": {"input": "recent_reviews", "group_by": ["aspect"],
+                "filters": [{"column": "sentiment", "op": "=", "value": "negative"}],
+                "limit": 10, "count_column": "count",
                 "title": "최근 한 달 부정 후기 aspect"}}
   ]
 }

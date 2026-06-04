@@ -390,11 +390,12 @@ class ShareOfTotalTests(unittest.TestCase):
                 self.assertAlmostEqual(sum(shares.values()), 1.0)
 
 
-class DistributionRecipeExecutionTests(unittest.TestCase):
-    """Skill Contract v2 R1 — direct-plan에 distribution recipe → expand → 실행.
+class RecipeExecutionTests(unittest.TestCase):
+    """Skill Contract v2 — direct-plan recipe → expand → 실행.
 
     fixture clauses: positive 3 / neutral 1 / negative 1. expand 결과 count + ratio,
-    ratio 합 ≈ 1.0. event_window_count는 R1 미활성 → RecipeError."""
+    ratio 합 ≈ 1.0. top_n은 filter + count rank 실행. event_window_count는 미활성
+    → RecipeError."""
 
     def _plan(self, **params):
         base = {"input": "clauses", "group_by": ["sentiment"], "metric": "count",
@@ -421,6 +422,29 @@ class DistributionRecipeExecutionTests(unittest.TestCase):
             self.assertEqual(by["negative"]["count"], 1)
             self.assertAlmostEqual(sum(r["ratio"] for r in rows), 1.0)
             self.assertAlmostEqual(by["positive"]["ratio"], 0.6)
+
+    def test_top_n_recipe_expands_and_executes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _fixture_paths(Path(tmp))
+            plan = {"plan_version": "v2", "steps": [
+                {"id": "positive_aspect_top", "skill": "top_n",
+                 "params": {
+                     "input": "clauses",
+                     "group_by": ["aspect"],
+                     "filters": [{"column": "sentiment", "op": "=", "value": "positive"}],
+                     "limit": 2,
+                     "count_column": "n",
+                     "title": "긍정 aspect top",
+                 }}
+            ]}
+            resp = execute_analyze_plan("v1", plan, artifact_paths=paths)
+            self.assertEqual(
+                [s["skill"] for s in resp["plan"]["steps"]],
+                ["filter", "aggregate", "sort", "present"],
+            )
+            rows = resp["present"]["rows"]
+            by = {r["aspect"]: r["n"] for r in rows}
+            self.assertEqual(by, {"ambiance_scenery": 2, "food": 1})
 
     def test_atomic_only_plan_unaffected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

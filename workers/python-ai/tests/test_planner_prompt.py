@@ -304,6 +304,14 @@ class PromptRenderTests(unittest.TestCase):
         self.assertIn("### join", system)
         self.assertIn("### filter", system)
 
+    def test_recipe_section_exposes_runtime_enabled_recipes(self) -> None:
+        _, system, _user = render_planner_prompt(user_question="dummy")
+        self.assertIn("## recipe", system)
+        self.assertIn("### distribution", system)
+        self.assertIn("### top_n", system)
+        self.assertIn('"skill": "top_n"', system)
+        self.assertNotIn("### event_window_count", system)
+
     def test_output_format_marker_in_system(self) -> None:
         _, system, _user = render_planner_prompt(user_question="dummy")
         self.assertIn('"plan_version": "v2"', system)

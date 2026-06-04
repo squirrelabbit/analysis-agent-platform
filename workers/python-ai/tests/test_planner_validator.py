@@ -355,14 +355,28 @@ class CalculateRuleTests(unittest.TestCase):
 
 
 class RecipeValidatorTests(unittest.TestCase):
-    """R2a — validator가 distribution recipe step을 인식·검증 (unknown 거절 X).
-    event_window_count/top_n은 아직 미활성 → skill_unknown 유지."""
+    """validator가 runtime-enabled recipe step을 인식·검증 (unknown 거절 X).
+    event_window_count는 아직 미활성 → skill_unknown 유지."""
 
     def _dist(self, **params):
         base = {"input": "clauses", "group_by": ["sentiment"], "metric": "count",
                 "include_share": True, "count_column": "count", "share_column": "ratio", "title": "t"}
         base.update(params)
         return _wrap([{"id": "d", "skill": "distribution", "params": base}])
+
+    def _topn(self, **params):
+        base = {
+            "input": "clauses",
+            "group_by": ["aspect"],
+            "metric": "count",
+            "filters": [{"column": "sentiment", "op": "=", "value": "negative"}],
+            "sort": {"column": "count", "direction": "desc"},
+            "limit": 10,
+            "count_column": "count",
+            "title": "top",
+        }
+        base.update(params)
+        return _wrap([{"id": "t", "skill": "top_n", "params": base}])
 
     def test_valid_distribution_passes(self) -> None:
         self.assertEqual(collect_plan_issues(self._dist()), [])
@@ -397,9 +411,35 @@ class RecipeValidatorTests(unittest.TestCase):
         plan = _wrap([{"id": "w", "skill": "event_window_count", "params": {"input": "docs", "event_date": "2024-08-15"}}])
         self.assertIn("step.skill_unknown", _codes(plan))
 
-    def test_top_n_still_unknown(self) -> None:
+    def test_valid_top_n_passes(self) -> None:
+        self.assertEqual(collect_plan_issues(self._topn()), [])
+
+    def test_top_n_minimal_passes(self) -> None:
         plan = _wrap([{"id": "t", "skill": "top_n", "params": {"input": "clauses", "group_by": ["aspect"]}}])
-        self.assertIn("step.skill_unknown", _codes(plan))
+        self.assertEqual(collect_plan_issues(plan), [])
+
+    def test_top_n_bad_group_by(self) -> None:
+        self.assertIn("params.recipe_group_by_invalid", _codes(self._topn(group_by=[])))
+        self.assertIn("params.recipe_group_by_invalid", _codes(self._topn(group_by="aspect")))
+
+    def test_top_n_bad_filter(self) -> None:
+        self.assertIn(
+            "params.recipe_filter_invalid",
+            _codes(self._topn(filters=[{"column": "sentiment", "op": "~=", "value": "x"}])),
+        )
+        self.assertIn(
+            "params.recipe_filter_value_invalid",
+            _codes(self._topn(filters=[{"column": "sentiment", "op": "in", "value": "negative"}])),
+        )
+
+    def test_top_n_bad_sort_and_limit(self) -> None:
+        self.assertIn("params.recipe_sort_invalid", _codes(self._topn(sort={"direction": "sideways"})))
+        self.assertIn("params.recipe_sort_invalid", _codes(self._topn(sort={"column": "missing"})))
+        self.assertIn("params.recipe_limit_invalid", _codes(self._topn(limit=0)))
+
+    def test_top_n_bad_column_and_title(self) -> None:
+        self.assertIn("params.recipe_column_name_invalid", _codes(self._topn(count_column="")))
+        self.assertIn("params.recipe_title_invalid", _codes(self._topn(title=123)))
 
 
 class ShareOfTotalRuleTests(unittest.TestCase):
