@@ -43,6 +43,17 @@ _DEFAULT_CONCURRENCY = 8
 _MAX_CONCURRENCY = 32
 _DOC_GENUINENESS_CONCURRENCY_ENV = "LLOA_DOC_GENUINENESS_CONCURRENCY"
 
+# silverone 2026-06-04 — LLOA 입력 안정화 (chunking 아님).
+# 초장문 doc는 LLOA가 HTTP 400 (request too large / context_length)로 거부해
+# build 전체를 죽일 수 있다. clean output은 그대로 두고, doc_genuineness LLOA
+# 호출 직전에만 input_text를 char 기준 truncate한다. parent doc 1 row = 결과 1
+# 유지 (row 복제 없음). chunking은 후속 설계(별도 doc_chunks artifact)로 분리.
+# 우선순위: payload['max_input_chars'] > env > default 20000. invalid는 default.
+_DEFAULT_MAX_INPUT_CHARS = 20_000
+_DOC_GENUINENESS_MAX_INPUT_CHARS_ENV = "LLOA_DOC_GENUINENESS_MAX_INPUT_CHARS"
+# error_body 로깅 시 truncate 길이 (PII / 로그 폭주 방지).
+_ERROR_BODY_LOG_LIMIT = 256
+
 
 def _coerce_positive_int(raw: Any) -> int | None:
     """positive int면 반환, 아니면 None. bool은 reject (int subclass 회피)."""
@@ -68,6 +79,63 @@ def _resolve_concurrency(payload: dict[str, Any]) -> int:
     if value := _coerce_positive_int(os.environ.get(_DOC_GENUINENESS_CONCURRENCY_ENV)):
         return min(_MAX_CONCURRENCY, value)
     return _DEFAULT_CONCURRENCY
+
+
+def _resolve_max_input_chars(payload: dict[str, Any]) -> int:
+    """LLOA 입력 truncate 길이: payload > env > default 20000.
+
+    silverone 2026-06-04 — invalid / 0 / negative / non-int는 default fallback
+    하되, *값이 있는데 invalid*면 obs warning을 남긴다 (운영 실수로 build가
+    조용히 잘못된 길이로 도는 것보다 가시화가 낫다는 결정). 값 자체가 없으면
+    (정상 미지정) warning 없이 다음 우선순위로.
+    """
+    payload_raw = payload.get("max_input_chars")
+    if payload_raw is not None:
+        if value := _coerce_positive_int(payload_raw):
+            return value
+        LOGGER.warning(
+            "doc_genuineness.max_input_chars_invalid",
+            source="payload",
+            raw_value=str(payload_raw),
+            fallback="env_or_default",
+        )
+    env_raw = os.environ.get(_DOC_GENUINENESS_MAX_INPUT_CHARS_ENV)
+    if env_raw is not None and env_raw.strip():
+        if value := _coerce_positive_int(env_raw):
+            return value
+        LOGGER.warning(
+            "doc_genuineness.max_input_chars_invalid",
+            source="env",
+            raw_value=env_raw,
+            fallback=_DEFAULT_MAX_INPUT_CHARS,
+        )
+    return _DEFAULT_MAX_INPUT_CHARS
+
+
+def _truncate_text(text: str, limit: int) -> tuple[str, int, int, bool]:
+    """char 기준 truncate. 반환: (used_text, original_length, used_length, truncated)."""
+    original_length = len(text)
+    if original_length <= limit:
+        return text, original_length, original_length, False
+    return text[:limit], original_length, limit, True
+
+
+def _read_error_body(exc: BaseException) -> str:
+    """HTTPError 등 file-like 예외에서 응답 body를 안전하게 추출 (truncate).
+
+    LLOA 400 진단(어떤 doc이 왜 거부됐나)을 위해 body 앞부분만 남긴다.
+    body가 없거나 read 실패해도 build를 방해하지 않게 ''로 fallback.
+    """
+    reader = getattr(exc, "read", None)
+    if not callable(reader):
+        return ""
+    try:
+        raw = reader()
+    except Exception:  # noqa: BLE001 — 진단용 best-effort, 실패해도 무시
+        return ""
+    if isinstance(raw, (bytes, bytearray)):
+        raw = bytes(raw).decode("utf-8", "replace")
+    return str(raw)[:_ERROR_BODY_LOG_LIMIT]
 
 
 def _find_prompt_path(name: str) -> Path | None:
@@ -295,9 +363,12 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         )
 
     concurrency = _resolve_concurrency(payload)
+    max_input_chars = _resolve_max_input_chars(payload)
 
     tier_counts: dict[str, int] = {tier: 0 for tier in _ALLOWED_TIERS}
     parse_failures = 0
+    request_failures = 0
+    truncated_docs = 0
     total_prompt_tokens = 0
     total_completion_tokens = 0
 
@@ -320,39 +391,86 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
                 "reason": "본문이 비어 있어 first-person observation 없음.",
                 "prompt_version": prompt_version,
                 "source": "empty_text_shortcut",
+                "original_length": 0,
+                "used_length": 0,
+                "truncated": False,
             }
             tier_counts["non_review"] += 1
             continue
         lloa_targets.append((index, doc_id, cleaned_text))
 
     # 패스 2: 병렬 LLOA 호출.
-    def _process(item: tuple[int, str, str]) -> tuple[str, dict[str, Any] | None, Exception | None]:
+    # silverone 2026-06-04 — LLOA 호출 직전 truncate + per-doc 격리.
+    # error_kind: None(성공) / "parse"(응답 파싱 실패) / "request"(HTTP 400·413·
+    # timeout 등 호출 자체 실패). request 실패는 해당 doc만 uncertain으로 격리하고
+    # build를 계속한다 (한 doc이 전체 build를 죽이지 않게).
+    def _process(item: tuple[int, str, str]) -> dict[str, Any]:
         _, target_doc_id, doc_text = item
+        used_text, original_length, used_length, truncated = _truncate_text(
+            doc_text, max_input_chars
+        )
+        outcome: dict[str, Any] = {
+            "doc_id": target_doc_id,
+            "original_length": original_length,
+            "used_length": used_length,
+            "truncated": truncated,
+            "result": None,
+            "error": None,
+            "error_kind": None,
+            "status_code": None,
+            "error_body": "",
+        }
         try:
-            result = _classify_doc(
+            outcome["result"] = _classify_doc(
                 client,
                 system_prompt=system_prompt,
                 doc_id=target_doc_id,
-                doc_text=doc_text,
+                doc_text=used_text,
                 max_tokens=max_tokens,
             )
-            return target_doc_id, result, None
         except LloaResponseParseError as exc:
-            return target_doc_id, None, exc
+            outcome["error"] = exc
+            outcome["error_kind"] = "parse"
+        except OSError as exc:
+            # urllib HTTPError(400/413/context_length) ⊂ URLError ⊂ OSError,
+            # TimeoutError·ConnectionError도 OSError. 호출 자체 실패만 per-doc
+            # 격리하고, logic 버그(KeyError 등)는 그대로 전파시켜 fail-loud 유지.
+            outcome["error"] = exc
+            outcome["error_kind"] = "request"
+            outcome["status_code"] = getattr(exc, "code", None)
+            outcome["error_body"] = _read_error_body(exc)
+        return outcome
 
     completed = len(records_by_doc)  # empty shortcuts 이미 처리됨
     if lloa_targets:
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
             futures = {executor.submit(_process, item): item for item in lloa_targets}
             for future in as_completed(futures):
-                doc_id, result, exc = future.result()
-                if exc is not None:
+                outcome = future.result()
+                doc_id = outcome["doc_id"]
+                length_fields = {
+                    "original_length": outcome["original_length"],
+                    "used_length": outcome["used_length"],
+                    "truncated": outcome["truncated"],
+                }
+                if outcome["truncated"]:
+                    truncated_docs += 1
+                    LOGGER.warning(
+                        "doc_genuineness.truncated",
+                        doc_id=doc_id,
+                        original_length=outcome["original_length"],
+                        used_length=outcome["used_length"],
+                        max_input_chars=max_input_chars,
+                    )
+                kind = outcome["error_kind"]
+                if kind == "parse":
+                    exc = outcome["error"]
                     LOGGER.warning(
                         "doc_genuineness.parse_failed",
                         doc_id=doc_id,
                         error_category=type(exc).__name__,
                         error_message=str(exc),
-                        finish_reason=exc.finish_reason,
+                        finish_reason=getattr(exc, "finish_reason", ""),
                     )
                     parse_failures += 1
                     records_by_doc[doc_id] = {
@@ -361,15 +479,44 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
                         "reason": f"fallback: LLOA 응답 파싱 실패 ({type(exc).__name__})",
                         "prompt_version": prompt_version,
                         "source": "lloa_parse_failure",
+                        **length_fields,
                     }
                     tier_counts["non_review"] += 1
+                elif kind == "request":
+                    exc = outcome["error"]
+                    LOGGER.warning(
+                        "doc_genuineness.request_failed",
+                        doc_id=doc_id,
+                        error_category=type(exc).__name__,
+                        error_message=str(exc),
+                        status_code=outcome["status_code"],
+                        error_body=outcome["error_body"],
+                        original_length=outcome["original_length"],
+                        used_length=outcome["used_length"],
+                        truncated=outcome["truncated"],
+                    )
+                    request_failures += 1
+                    records_by_doc[doc_id] = {
+                        "doc_id": doc_id,
+                        "genuineness": "uncertain",
+                        "reason": (
+                            f"fallback: LLOA 요청 실패 ({type(exc).__name__}) — "
+                            "해당 doc 격리, build 계속"
+                        ),
+                        "prompt_version": prompt_version,
+                        "source": "lloa_request_failure",
+                        **length_fields,
+                    }
+                    tier_counts["uncertain"] += 1
                 else:
+                    result = outcome["result"]
                     records_by_doc[doc_id] = {
                         "doc_id": doc_id,
                         "genuineness": result["genuineness"],
                         "reason": result["reason"],
                         "prompt_version": prompt_version,
                         "source": "lloa",
+                        **length_fields,
                     }
                     tier_counts[result["genuineness"]] += 1
                     usage = result.get("usage") or {}
@@ -412,6 +559,9 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         "processed_row_count": processed,
         "tier_counts": tier_counts,
         "parse_failures": parse_failures,
+        "request_failures": request_failures,
+        "truncated_docs": truncated_docs,
+        "max_input_chars": max_input_chars,
         "prompt_version": prompt_version,
         "model": lloa_config.model,
         "concurrency": concurrency,
@@ -437,8 +587,11 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
             f"mixed={tier_counts['mixed']}, "
             f"non_review={tier_counts['non_review']}, "
             f"uncertain={tier_counts['uncertain']}, "
-            f"parse_failures={parse_failures})",
-            f"prompt: {prompt_version}, model: {lloa_config.model}",
+            f"parse_failures={parse_failures}, "
+            f"request_failures={request_failures}, "
+            f"truncated={truncated_docs})",
+            f"prompt: {prompt_version}, model: {lloa_config.model}, "
+            f"max_input_chars: {max_input_chars}",
         ],
         "artifact": rt._set_scope_fields(
             {
