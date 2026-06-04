@@ -114,6 +114,7 @@ func (s *ProjectService) withProjectCounts(project domain.Project) (domain.Proje
 		return domain.Project{}, err
 	}
 
+	project.DatasetCount = len(datasets)
 	project.DatasetVersionCount = datasetVersionCount
 	project.PromptCount = len(prompts)
 	project.AnalysisThreadCount = threadCount

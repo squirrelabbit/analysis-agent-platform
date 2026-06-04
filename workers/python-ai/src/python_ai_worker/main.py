@@ -14,7 +14,7 @@ from typing import Any
 from .config import load_config
 from .obs import bind_request_context, clear_request_context, get, init
 from .runtime.rule_config import rule_config_status
-from .task_router import capability_names, capability_payload, run_task
+from .task_router import canonical_task_name, capability_names, capability_payload, run_task
 
 # silverone 2026-06-04 — worker 운영 안정화 (Codex review #2).
 # 무제한 Content-Length / 무제한 동시 스레드 / readiness 미분리 / graceful
@@ -286,13 +286,15 @@ def make_handler(
                     extra_headers={"Retry-After": "1"},
                 )
                 return
-            task = self.path[len(prefix):]
+            raw_task = self.path[len(prefix):]
+            # dispatch는 raw 이름으로(legacy_alias warning 보존), metrics label만 canonical로 정규화.
+            task = canonical_task_name(raw_task)
             _WORKER_METRICS.inc_active()
             req_status = "error"  # 예기치 못한 경로 기본값. 성공/400에서 갱신.
             try:
                 raw_body = self.rfile.read(size)
                 payload = json.loads(raw_body or b"{}")
-                response = run_task(task, payload)
+                response = run_task(raw_task, payload)
                 req_status = "ok"
             except ValueError as exc:
                 req_status = "bad_request"

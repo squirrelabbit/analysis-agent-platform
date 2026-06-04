@@ -6,7 +6,7 @@
 # script를 commit해 deterministic path를 재현 가능하게 잠가둔다.
 #
 # usage:
-#   ./scripts/smoke_analyze_v2_service.sh
+#   ./scripts/smoke_analyze_service.sh
 #
 # exit code:
 #   0 — smoke 통과

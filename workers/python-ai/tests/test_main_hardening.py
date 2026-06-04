@@ -186,18 +186,23 @@ class MainHardeningHTTPTests(unittest.TestCase):
         # raw 개행 뒤 fragment가 단독 줄로 새지 않았는지.
         self.assertNotIn("\nd\"", out)
 
-    def test_metrics_task_label_is_request_path_not_canonical(self) -> None:
-        # 의도: task 라벨은 *요청 path 기준*. alias path(/tasks/analyze_v2)는 worker가
-        # canonical analyze 핸들러로 dispatch하지만 라벨은 path 그대로("analyze_v2").
+    def test_metrics_task_label_normalizes_alias_to_canonical(self) -> None:
+        # silverone 2026-06-04 — alias path(/tasks/analyze_v2) 호출 시 metrics label은
+        # canonical "analyze"로 정규화된다(운영 대시보드가 alias별로 갈라지지 않게).
+        # dispatch는 raw alias로 처리되어 legacy_alias warning은 그대로 남는다.
         server = self._start()
-        key = 'python_worker_requests_total{task="analyze_v2",status="ok"}'
+        canon = 'python_worker_requests_total{task="analyze",status="ok"}'
+        alias = 'python_worker_requests_total{task="analyze_v2",status="ok"}'
         _, base = self._get(server, "/metrics")
-        before = self._metric_value_or_zero(base, key)
+        before = self._metric_value_or_zero(base, canon)
+        alias_before = self._metric_value_or_zero(base, alias)
         with patch("python_ai_worker.main.run_task", return_value={"ok": True}):
             code, _, _ = self._post(server, "/tasks/analyze_v2", json.dumps({"a": 1}))
         self.assertEqual(code, 200)
         _, after = self._get(server, "/metrics")
-        self.assertEqual(self._metric_value(after, key), before + 1)
+        # canonical label만 증가, alias label은 생기지 않음.
+        self.assertEqual(self._metric_value(after, canon), before + 1)
+        self.assertEqual(self._metric_value_or_zero(after, alias), alias_before)
 
     def test_413_not_counted_in_requests_total(self) -> None:
         # 413은 처리 전 거절 → rejected_body_too_large만 증가, requests_total/duration은 불변.
