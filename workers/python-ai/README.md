@@ -1,77 +1,79 @@
 # Python AI Worker
 
-이 디렉터리는 현재 런타임에서 Python이 맡는 AI worker와 비정형 분석 task 구현체다.
+이 디렉터리는 현재 런타임에서 Python이 맡는 AI worker 구현체다. 자연어 분석
+요청을 plan_v2로 만들고(planner), DuckDB로 실행하고(executor), 사용자-facing
+답변을 구성하며(composer), dataset build 전처리를 수행한다. 전체 아키텍처는
+저장소 루트 [../../README.md](../../README.md)를 본다.
+
+> δ-1~δ-4 (2026-05-21) / ADR-018 β2 정리로 옛 흐름(rule-based planner /
+> preprocess·retrieve·summarize skill / prepare·sentiment·embedding·cluster
+> build / semantic search / final_answer presenter / devtools)은 모두 제거됐다.
+> 현재는 **planner(LLM) + executor(DuckDB) + composer** 3-layer다.
 
 ## 책임
 
-- planner task
-- dataset build task
-  - `dataset_prepare`
-  - `sentiment_label`
-  - `embedding`
-  - `dataset_cluster_build`
-- unstructured `preprocess / aggregate / retrieve / summarize / presentation` skill 실행
-- prompt template, rule config, embedding helper 관리
-- `final_answer` 생성 task
+- **planner** — Anthropic LLM이 사용자 질문을 8개 표준 skill plan_v2로 생성 + validator self-correct
+- **executor** — plan_v2 step을 DuckDB로 순차 실행
+- **composer** — step 결과로 답변 본문 + display(표/차트 힌트) 구성
+- **dataset build** — `clean`(deterministic) / `doc_genuineness`(LLOA) / `clause_label`(LLOA)
+- prompt template / taxonomy / rule config 로딩
+
+## HTTP task
+
+`main.py`가 `ThreadingHTTPServer`로 `/tasks/<name>` POST를 받아 `task_router`로 dispatch한다.
+
+| task | 설명 |
+| --- | --- |
+| `analyze` | plan 또는 user_question + artifact_paths → plan_v2 실행 결과 (canonical) |
+| `plan` | user_question → plan_v2 생성 (debug entrypoint) |
+| `dataset_clean` | 업로드 행 deterministic 정제 |
+| `dataset_doc_genuineness` | LLOA doc-level 3-tier 진성 분류 |
+| `dataset_clause_label` | LLOA 절 분리 + sentiment + aspect 라벨링 |
+
+옛 `analyze_v2` / `plan_v2` task 이름은 backward-compatible alias로 dispatch된다.
+GET `/healthz`(생존), `/capabilities`(task 목록)도 제공한다.
 
 ## 코드 구조
 
 | 위치 | 역할 |
 | --- | --- |
-| `src/python_ai_worker/main.py` | HTTP entrypoint |
-| `src/python_ai_worker/task_router.py` | task name -> handler routing |
-| `src/python_ai_worker/planner.py` | rule-based planner와 planner entrypoint |
-| `src/python_ai_worker/prompt_registry.py` | prompt version -> Markdown template resolver |
-| `src/python_ai_worker/skill_policy_registry.py` | skill policy version -> JSON policy resolver |
-| `src/python_ai_worker/runtime` | payload, rule, artifact, embedding, LLM helper |
-| `src/python_ai_worker/dataset_build/` | clean, prepare, sentiment, embedding, cluster, segment, clause_label, embedding_cluster, keyword_index, document_cluster_profile (전처리 build 단계 — `skills/` 와 층위 분리. 현재 `__init__.py` 단일 모듈, 후속 refactor에서 파일 분할 예정) |
-| `src/python_ai_worker/lloa_client.py` | 사내 wisenut LLOA 호출 클라이언트 (전처리 LLM 단계 전용; 다른 plan skill은 `anthropic_client` 사용) |
-| `src/python_ai_worker/skills/preprocess.py` | filter, dedup, sentence split, sample |
-| `src/python_ai_worker/skills/aggregate.py` | keyword, noun, time/group count, taxonomy tagging |
-| `src/python_ai_worker/skills/retrieve.py` | semantic search, cluster, cluster labeling |
-| `src/python_ai_worker/skills/summarize.py` | issue summary, breakdown, trend, compare, evidence |
-| `src/python_ai_worker/skills/presentation.py` | `final_answer` 후처리 task |
-| `tests` | runtime helper, task, skill regression test |
+| `src/python_ai_worker/main.py` | HTTP entrypoint (`ThreadingHTTPServer`) |
+| `src/python_ai_worker/task_router.py` | task name → handler routing (alias 포함) |
+| `src/python_ai_worker/planner/` | LLM plan 생성 — `schema.py`(SKILL_CATALOG) / `validator.py` / `prompt.py` / `llm.py` / `skill_specs.py` / `step_display.py` / `recipes.py` |
+| `src/python_ai_worker/executor/` | DuckDB plan_v2 실행 — `context.py` / `runner.py` / `service.py` / `skills/` |
+| `src/python_ai_worker/executor/skills/` | atomic skill 구현 (`join / filter / aggregate / compare / calculate / sort / present`) |
+| `src/python_ai_worker/composer/` | 답변 본문 + display projection 구성 |
+| `src/python_ai_worker/dataset_build/` | `clean.py` / `doc_genuineness.py` / `clause_label.py` (+ `_common.py`) |
+| `src/python_ai_worker/clients/` | 외부 LLM HTTP 클라이언트 — `anthropic.py` / `lloa.py` / `openai.py` |
+| `src/python_ai_worker/registries/` | `prompt.py`(prompt 템플릿) / `task_registry.py`(task 정의) |
+| `src/python_ai_worker/runtime/` | LLM wrapper, retry, obs helper |
+| `src/python_ai_worker/taxonomies.py` | aspect taxonomy 로딩 |
+| `src/python_ai_worker/prompt_options.py` | task-folder prompt version/default resolver |
+| `src/python_ai_worker/sql_identifiers.py` | plan SQL identifier 안전성 검사 |
+| `tests` | runtime / planner / executor / dataset_build regression test |
 
-참고:
-- `preprocess.py`, `aggregate.py`, `retrieve.py`, `summarize.py`가 public skill entrypoint다.
-- 실제 구현 본문은 같은 디렉터리의 private `*_impl.py` 파일로 나뉘어 있다.
+## plan_v2 / skill
 
-## 현재 runtime 그룹
+- 8개 표준 skill: `join / filter / aggregate / compare / calculate / sort / present / summarize`.
+  3개 RESERVED input table: `docs / clauses / genuineness`.
+- skill catalog는 `planner/schema.py:SKILL_CATALOG`로 잠금. 새 표준 skill은
+  `schema.py` + `executor/skills/` 핸들러 + `validator.py` 규칙 + 테스트를 함께 갱신한다.
+- recipe(`planner/recipes.py`)는 자주 쓰는 패턴(예 `distribution`)을 실행 전
+  결정론적으로 atomic step으로 lower한다.
 
-- dataset build
-  - prepare / sentiment / embedding / cluster materialization
-- preprocess
-  - filter, dedup, sentence split, sample
-- aggregate
-  - keyword, noun, time/group count, taxonomy
-- retrieve
-  - semantic search, cluster, cluster labeling
-- summarize
-  - issue summary, breakdown, trend, compare, sentiment, evidence
-- presentation
-  - grounded `final_answer`
+## prompt / taxonomy / config 연결
 
-## prompt / rule / profile 연결
-
-- global prompt template는 저장소 루트 [../../config/prompts](../../config/prompts) 아래 Markdown 파일로 관리한다.
-- prompt version 이름은 파일명과 1:1로 대응한다.
-- dataset profile 기본값은 [../../config/dataset_profiles.json](../../config/dataset_profiles.json) 에서 관리한다.
-- project prompt version은 control plane의 `POST /projects/{project_id}/prompts`로 추가하고, project 기본 prompt 선택은 `PUT /projects/{project_id}/prompt_defaults`로 관리한다.
-- 현재 project prompt override는 prepare/sentiment build payload의 inline template override로만 적용한다.
-- skill policy 기본값은 [../../config/skill_policies](../../config/skill_policies) 아래 JSON 파일로 관리한다.
+- planner prompt는 저장소 루트 [../../config/prompts](../../config/prompts)의 Markdown으로 관리한다 (version 이름 = 파일 stem).
+- dataset build prompt(doc_genuineness / clause_label)는 task-folder(`config/prompts/<task>/`)에서 resolve하며 `/prompt_options`로 선택지를 노출한다.
 - rule config는 기본 상수 위에 `PYTHON_AI_RULE_CONFIG_PATH`, `PYTHON_AI_RULE_CONFIG_JSON`, request payload override를 순서대로 덮는다.
+- LLM key: `ANTHROPIC_API_KEY`(planner/composer), `WISENUT_LLOA_MAX_V1_2_1_API_KEY`(dataset build).
 
 ## 자주 쓰는 명령
 
 ```bash
-PYTHONPATH=workers/python-ai/src python3 -m unittest discover -s workers/python-ai/tests -p 'test_*.py'
-PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.run_skill_case --validate
+# 테스트 (requires-python >= 3.11)
+PYTHONPATH=workers/python-ai/src python3.11 -m unittest discover -s workers/python-ai/tests -p 'test_*.py'
+
+# worker capability 목록
 PYTHONPATH=workers/python-ai/src python -m python_ai_worker.main --describe
-```
-
-로컬 임베딩 평가는 다음 명령을 사용한다.
-
-```bash
-PYTHONPATH=workers/python-ai/src python -m python_ai_worker.devtools.evaluate_embedding_model --model intfloat/multilingual-e5-small --format markdown
 ```
