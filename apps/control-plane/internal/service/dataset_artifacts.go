@@ -101,6 +101,13 @@ func (s *DatasetService) ResolveCleanDownload(projectID, datasetID, datasetVersi
 	if info.IsDir() {
 		return "", "", ErrInvalidArgument{Message: "clean artifact must be a file"}
 	}
+	// silverone 2026-06-04 — download/view contract (의도된 구분):
+	//   - missing clean artifact → 위 os.Stat 블록에서 404(ErrNotFound) 유지.
+	//   - 존재하지만 zero-byte / corrupt / wrong-format → 아래 검증이 400(ErrInvalidArgument).
+	// 즉 "파일 없음"과 "파일은 있는데 못 읽음"을 상태코드로 구분한다.
+	if err := validateArtifactReadable("clean", cleanedRef, artifactParquet); err != nil {
+		return "", "", err
+	}
 	exportPath, err := exportCleanCSVFromParquet(cleanedRef)
 	if err != nil {
 		return "", "", err
@@ -134,6 +141,10 @@ func (s *DatasetService) ResolveDocGenuinenessDownload(projectID, datasetID, dat
 	if ref == "" {
 		return "", "", ErrNotFound{Resource: "doc_genuineness artifact"}
 	}
+	// silverone 2026-06-04 — CSV 변환 전에 jsonl이 읽을 수 있는지 검증.
+	if err := validateArtifactReadable("doc_genuineness", ref, artifactJSONL); err != nil {
+		return "", "", err
+	}
 	cleanRef := strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
 	if cleanRef == "" {
 		cleanRef = strings.TrimSpace(metadataString(version.Metadata, "clean_uri", ""))
@@ -161,6 +172,10 @@ func (s *DatasetService) ResolveClauseLabelDownload(projectID, datasetID, datase
 	}
 	if ref == "" {
 		return "", "", ErrNotFound{Resource: "clause_label artifact"}
+	}
+	// silverone 2026-06-04 — CSV 변환 전에 jsonl이 읽을 수 있는지 검증.
+	if err := validateArtifactReadable("clause_label", ref, artifactJSONL); err != nil {
+		return "", "", err
 	}
 	cleanRef := strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
 	if cleanRef == "" {
