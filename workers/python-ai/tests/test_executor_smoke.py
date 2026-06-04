@@ -22,9 +22,11 @@ from python_ai_worker.executor import (
     ExecutorContext,
     ExecutorContextError,
     ExecutorError,
+    execute_analyze_plan,
     execute_plan,
 )
 from python_ai_worker.planner import PlanValidationError
+from python_ai_worker.planner.recipes import RecipeError
 
 
 def _write_docs_parquet(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -386,6 +388,60 @@ class ShareOfTotalTests(unittest.TestCase):
                 # denominator가 group count가 아닌 전체 합이므로 1이 아니어야 한다.
                 self.assertNotAlmostEqual(shares["positive"], 1.0)
                 self.assertAlmostEqual(sum(shares.values()), 1.0)
+
+
+class DistributionRecipeExecutionTests(unittest.TestCase):
+    """Skill Contract v2 R1 — direct-plan에 distribution recipe → expand → 실행.
+
+    fixture clauses: positive 3 / neutral 1 / negative 1. expand 결과 count + ratio,
+    ratio 합 ≈ 1.0. event_window_count는 R1 미활성 → RecipeError."""
+
+    def _plan(self, **params):
+        base = {"input": "clauses", "group_by": ["sentiment"], "metric": "count",
+                "include_share": True, "count_column": "count", "share_column": "ratio",
+                "title": "감성 분포"}
+        base.update(params)
+        return {"plan_version": "v2", "steps": [
+            {"id": "sentiment_dist", "skill": "distribution", "params": base}]}
+
+    def test_distribution_recipe_expands_and_executes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _fixture_paths(Path(tmp))
+            resp = execute_analyze_plan("v1", self._plan(), artifact_paths=paths)
+            # recipe가 atomic으로 expand되어 응답 plan에 반영
+            self.assertEqual(
+                [s["skill"] for s in resp["plan"]["steps"]],
+                ["aggregate", "calculate", "present"],
+            )
+            rows = resp["present"]["rows"]
+            self.assertIn("ratio", rows[0])
+            by = {r["sentiment"]: r for r in rows}
+            self.assertEqual(by["positive"]["count"], 3)
+            self.assertEqual(by["neutral"]["count"], 1)
+            self.assertEqual(by["negative"]["count"], 1)
+            self.assertAlmostEqual(sum(r["ratio"] for r in rows), 1.0)
+            self.assertAlmostEqual(by["positive"]["ratio"], 0.6)
+
+    def test_atomic_only_plan_unaffected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _fixture_paths(Path(tmp))
+            plan = {"plan_version": "v2", "steps": [
+                {"id": "agg", "skill": "aggregate", "params": {
+                    "input": "clauses", "group_by": ["sentiment"],
+                    "metrics": [{"name": "count", "function": "count", "column": "*"}]}},
+                {"id": "out", "skill": "present", "params": {"input": "agg", "format": "table"}},
+            ]}
+            resp = execute_analyze_plan("v1", plan, artifact_paths=paths)
+            self.assertEqual([s["skill"] for s in resp["plan"]["steps"]], ["aggregate", "present"])
+
+    def test_event_window_recipe_rejected_in_r1(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _fixture_paths(Path(tmp))
+            plan = {"plan_version": "v2", "steps": [
+                {"id": "w", "skill": "event_window_count",
+                 "params": {"input": "docs", "event_date": "2024-08-15"}}]}
+            with self.assertRaises(RecipeError):
+                execute_analyze_plan("v1", plan, artifact_paths=paths)
 
 
 class GuardrailTests(unittest.TestCase):

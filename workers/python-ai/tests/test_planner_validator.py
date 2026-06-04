@@ -354,6 +354,54 @@ class CalculateRuleTests(unittest.TestCase):
         self.assertIn("params.expression_operation_invalid", _codes(plan))
 
 
+class RecipeValidatorTests(unittest.TestCase):
+    """R2a — validator가 distribution recipe step을 인식·검증 (unknown 거절 X).
+    event_window_count/top_n은 아직 미활성 → skill_unknown 유지."""
+
+    def _dist(self, **params):
+        base = {"input": "clauses", "group_by": ["sentiment"], "metric": "count",
+                "include_share": True, "count_column": "count", "share_column": "ratio", "title": "t"}
+        base.update(params)
+        return _wrap([{"id": "d", "skill": "distribution", "params": base}])
+
+    def test_valid_distribution_passes(self) -> None:
+        self.assertEqual(collect_plan_issues(self._dist()), [])
+
+    def test_distribution_minimal_passes(self) -> None:
+        # 선택 param 생략(input/group_by만)도 통과
+        plan = _wrap([{"id": "d", "skill": "distribution", "params": {"input": "clauses", "group_by": ["aspect"]}}])
+        self.assertEqual(collect_plan_issues(plan), [])
+
+    def test_missing_input(self) -> None:
+        plan = _wrap([{"id": "d", "skill": "distribution", "params": {"group_by": ["sentiment"]}}])
+        self.assertIn("params.missing_keys", _codes(plan))
+
+    def test_bad_group_by(self) -> None:
+        self.assertIn("params.recipe_group_by_invalid", _codes(self._dist(group_by=[])))
+        self.assertIn("params.recipe_group_by_invalid", _codes(self._dist(group_by="sentiment")))
+
+    def test_bad_metric(self) -> None:
+        self.assertIn("params.recipe_metric_unsupported", _codes(self._dist(metric="sum")))
+
+    def test_bad_include_share(self) -> None:
+        self.assertIn("params.recipe_include_share_invalid", _codes(self._dist(include_share="yes")))
+
+    def test_bad_column_name(self) -> None:
+        self.assertIn("params.recipe_column_name_invalid", _codes(self._dist(count_column="")))
+        self.assertIn("params.recipe_column_name_invalid", _codes(self._dist(share_column=5)))
+
+    def test_bad_title(self) -> None:
+        self.assertIn("params.recipe_title_invalid", _codes(self._dist(title=123)))
+
+    def test_event_window_count_still_unknown(self) -> None:
+        plan = _wrap([{"id": "w", "skill": "event_window_count", "params": {"input": "docs", "event_date": "2024-08-15"}}])
+        self.assertIn("step.skill_unknown", _codes(plan))
+
+    def test_top_n_still_unknown(self) -> None:
+        plan = _wrap([{"id": "t", "skill": "top_n", "params": {"input": "clauses", "group_by": ["aspect"]}}])
+        self.assertIn("step.skill_unknown", _codes(plan))
+
+
 class ShareOfTotalRuleTests(unittest.TestCase):
     """silverone 2026-06-02 — calculate.share_of_total 계약 검증."""
 
