@@ -7,7 +7,46 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"analysis-support-platform/control-plane/internal/metrics"
 )
+
+// silverone 2026-06-04 (metrics 1차) — postPythonAITask가 worker 호출 결과를
+// control_plane_analysis_worker_call_total{status}에 기록하는지 잠금.
+func TestPostPythonAITaskRecordsMetrics(t *testing.T) {
+	metrics.ResetForTest()
+	t.Cleanup(metrics.ResetForTest)
+
+	okServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer okServer.Close()
+	errServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"boom"}`))
+	}))
+	defer errServer.Close()
+
+	okSvc := &DatasetService{pythonAIWorkerURL: okServer.URL}
+	if _, err := okSvc.analyze().postPythonAITask(context.Background(), "/tasks/analyze", map[string]any{}); err != nil {
+		t.Fatalf("ok call: %v", err)
+	}
+	errSvc := &DatasetService{pythonAIWorkerURL: errServer.URL}
+	if _, err := errSvc.analyze().postPythonAITask(context.Background(), "/tasks/analyze", map[string]any{}); err == nil {
+		t.Fatal("expected error from 500 worker")
+	}
+
+	out := metrics.Render()
+	for _, want := range []string{
+		`control_plane_analysis_worker_call_total{status="ok"} 1`,
+		`control_plane_analysis_worker_call_total{status="error"} 1`,
+		"control_plane_analysis_worker_call_duration_ms_count 2",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("metrics missing %q:\n%s", want, out)
+		}
+	}
+}
 
 // silverone 2026-06-04 — postPythonAITask가 하드코딩 120s 대신 주입된
 // pythonAITaskTimeout을 실제로 사용하는지 잠금. 회귀 시 분석 요청이 config와
