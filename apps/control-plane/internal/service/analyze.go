@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -192,18 +191,20 @@ func (a *AnalyzeService) resolveAnalyzeArtifactPaths(version domain.DatasetVersi
 		}
 	}
 
-	for label, path := range map[string]string{
-		"docs":        docs,
-		"clauses":     clauses,
-		"genuineness": genuineness,
+	// silverone 2026-06-04 — worker로 넘기기 전에 artifact가 실제로 읽을 수 있는지
+	// 검증(존재/regular file/size>0/format framing). 깨진 artifact를 worker가 읽다
+	// 실패하기 전에 운영자-친화 에러로 차단. 고정 순서(docs→clauses→genuineness).
+	for _, it := range []struct {
+		label  string
+		path   string
+		format artifactFormat
+	}{
+		{"docs", docs, artifactParquet},
+		{"clauses", clauses, artifactJSONL},
+		{"genuineness", genuineness, artifactJSONL},
 	} {
-		if _, err := os.Stat(path); err != nil {
-			if os.IsNotExist(err) {
-				return analyzeArtifactPaths{}, ErrInvalidArgument{
-					Message: fmt.Sprintf("analyze artifact missing on disk: %s (%s)", label, path),
-				}
-			}
-			return analyzeArtifactPaths{}, fmt.Errorf("analyze stat %s: %w", label, err)
+		if err := validateArtifactReadable(it.label, it.path, it.format); err != nil {
+			return analyzeArtifactPaths{}, err
 		}
 	}
 

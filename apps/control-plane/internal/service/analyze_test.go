@@ -37,8 +37,15 @@ func newAnalyzeFixture(t *testing.T, workerHandler http.HandlerFunc) *analyzeFix
 	docs := filepath.Join(tmpdir, "cleaned.parquet")
 	clauses := filepath.Join(tmpdir, "clause_label.jsonl")
 	genuineness := filepath.Join(tmpdir, "doc_genuineness.jsonl")
-	for _, p := range []string{docs, clauses, genuineness} {
-		if err := os.WriteFile(p, []byte("dummy"), 0o644); err != nil {
+	// silverone 2026-06-04 — artifact 검증(resolveAnalyzeArtifactPaths) 도입 후, fixture는
+	// format-valid한 최소 내용을 써야 통과한다. parquet은 PAR1 framing, jsonl은 valid 첫 줄.
+	artifactBody := map[string][]byte{
+		docs:        validParquetBytes(),
+		clauses:     []byte(`{"doc_id":"d1","clause":"c"}` + "\n"),
+		genuineness: []byte(`{"doc_id":"d1","genuineness":"genuine_review"}` + "\n"),
+	}
+	for p, body := range artifactBody {
+		if err := os.WriteFile(p, body, 0o644); err != nil {
 			t.Fatalf("write artifact %s: %v", p, err)
 		}
 	}
@@ -256,6 +263,65 @@ func TestExecuteAnalyze_ArtifactOnDiskMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "missing on disk") {
 		t.Fatalf("error should mention 'missing on disk': %v", err)
+	}
+}
+
+// 5b. artifact가 disk에 있지만 손상(corrupt parquet)이면 worker 호출 전에 fail.
+// silverone 2026-06-04 — artifact 검증 도입.
+func TestExecuteAnalyze_CorruptParquetArtifact(t *testing.T) {
+	fx := newAnalyzeFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("worker should not be called when docs parquet is corrupt")
+	}))
+	defer fx.close()
+	// 유효 parquet(PAR1 framing)을 PAR1 없는 garbage로 덮어써 손상 재현.
+	if err := os.WriteFile(fx.docsPath, []byte("not-a-parquet-file"), 0o644); err != nil {
+		t.Fatalf("corrupt docs: %v", err)
+	}
+
+	_, err := fx.service.ExecuteAnalyze(
+		context.Background(),
+		fx.projectID, fx.datasetID, fx.versionID,
+		AnalyzeRequest{UserQuestion: "x"},
+	)
+	if err == nil {
+		t.Fatal("expected corrupt-parquet error")
+	}
+	if _, ok := err.(ErrInvalidArgument); !ok {
+		t.Fatalf("expected ErrInvalidArgument, got %T: %v", err, err)
+	}
+	// 운영자가 바로 알 수 있게 label(docs)/format(parquet)/원인(PAR1)이 메시지에.
+	for _, want := range []string{"docs", "parquet", "PAR1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error should mention %q: %v", want, err)
+		}
+	}
+}
+
+// 5c. corrupt jsonl(clauses)도 worker 호출 전에 fail.
+func TestExecuteAnalyze_CorruptJSONLArtifact(t *testing.T) {
+	fx := newAnalyzeFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("worker should not be called when clauses jsonl is corrupt")
+	}))
+	defer fx.close()
+	if err := os.WriteFile(fx.clausePath, []byte("this is not json\n"), 0o644); err != nil {
+		t.Fatalf("corrupt clauses: %v", err)
+	}
+
+	_, err := fx.service.ExecuteAnalyze(
+		context.Background(),
+		fx.projectID, fx.datasetID, fx.versionID,
+		AnalyzeRequest{UserQuestion: "x"},
+	)
+	if err == nil {
+		t.Fatal("expected corrupt-jsonl error")
+	}
+	if _, ok := err.(ErrInvalidArgument); !ok {
+		t.Fatalf("expected ErrInvalidArgument, got %T: %v", err, err)
+	}
+	for _, want := range []string{"clauses", "jsonl"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error should mention %q: %v", want, err)
+		}
 	}
 }
 
