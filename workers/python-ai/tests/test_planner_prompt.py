@@ -105,6 +105,20 @@ class SkillCatalogRendererTests(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertIn(token, rendered)
 
+    def test_calculate_present_params_from_spec_byte_identical(self) -> None:
+        # Skill Contract v2 Step 2 — calculate/present params_schema가 skill_specs
+        # 생성값으로 바뀌었지만 prompt 렌더 출력은 byte 동일해야 한다(행동 변화 0).
+        rendered = render_skill_catalog()
+        for expected in (
+            "  - `expressions`: calculation[] — {name, operation, ...}. operation별 키: ",
+            "share_of_total={value, partition_by?} — value 컬럼의 전체 합 대비 비중(0~1). ",
+            "비율/구성비/비중/전체 대비 질문은 ratio가 아니라 share_of_total을 쓴다. ",
+            "  - `columns`: string[]|null — 사용자에게 보여줄 컬럼. 질문에 답하는 핵심 컬럼을 포함해야 한다.",
+            "  - `limit`: integer|null — 반환 row 한도. null이면 default 1000. 1~10000 허용. (SQL-4)",
+        ):
+            with self.subTest(expected=expected[:30]):
+                self.assertIn(expected, rendered)
+
 
 class PromptRenderTests(unittest.TestCase):
     """``render_planner_prompt``가 system / user 두 영역을 정확히 분리해서
