@@ -64,6 +64,12 @@ services:
       LLOA_TIMEOUT_SEC: ${LLOA_TIMEOUT_SEC:-180}
       LLOA_REASONING_EFFORT: ${LLOA_REASONING_EFFORT:-low}
       LLOA_PREPEND_NO_THINK: ${LLOA_PREPEND_NO_THINK:-true}
+      # silverone 2026-06-04 — worker 운영 안정화 (Codex review #2). 무제한
+      # Content-Length / 동시 처리 / shutdown grace를 ceiling으로 방어.
+      # <=0이면 해당 제한 해제 (max_request_bytes / max_concurrent).
+      PYTHON_AI_MAX_REQUEST_BYTES: ${PYTHON_AI_MAX_REQUEST_BYTES:-10485760}
+      PYTHON_AI_MAX_CONCURRENT_REQUESTS: ${PYTHON_AI_MAX_CONCURRENT_REQUESTS:-32}
+      PYTHON_AI_SHUTDOWN_GRACE_SEC: ${PYTHON_AI_SHUTDOWN_GRACE_SEC:-10}
     ports:
       - "127.0.0.1:18090:8090"
     volumes:

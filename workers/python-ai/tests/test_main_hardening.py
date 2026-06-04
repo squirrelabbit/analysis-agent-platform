@@ -1,0 +1,176 @@
+"""silverone 2026-06-04 — worker 운영 안정화 (Codex review #2) 잠금.
+
+Content-Length 상한(413) / 동시 처리 ceiling(503) / readiness 분리(/readyz) /
+_env_int·_readiness 단위 동작을 검증한다. 실제 ThreadingHTTPServer를 랜덤
+포트에 띄워 HTTP로 호출한다 (test_main_http.py 패턴).
+"""
+from __future__ import annotations
+
+import json
+import threading
+import unittest
+from http.client import HTTPConnection
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from python_ai_worker import main as worker_main
+
+
+def _cfg(**over) -> SimpleNamespace:
+    base = dict(
+        role="worker",
+        queue="q",
+        llm_provider="anthropic",
+        anthropic_model="claude-test",
+        openai_embedding_model="m",
+        openai_embedding_dimensions=1536,
+        local_embedding_model="",
+        host="127.0.0.1",
+        port=0,
+        anthropic_api_key="test-key",
+        lloa_api_key=None,
+    )
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+class MainHardeningHTTPTests(unittest.TestCase):
+    def _start(self, config=None, **handler_kwargs):
+        config = config or _cfg()
+        server = worker_main.ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            worker_main.make_handler(config, **handler_kwargs),
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        # cleanup은 LIFO — shutdown → server_close → join 순으로 실행.
+        self.addCleanup(thread.join, 2)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server
+
+    def _post(self, server, path, body, headers=None):
+        conn = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        conn.request("POST", path, body=body, headers=headers or {"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        data = resp.read().decode("utf-8")
+        status = resp.status
+        retry_after = resp.getheader("Retry-After")
+        conn.close()
+        return status, data, retry_after
+
+    def _get(self, server, path):
+        conn = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        conn.request("GET", path)
+        resp = conn.getresponse()
+        data = resp.read().decode("utf-8")
+        status = resp.status
+        conn.close()
+        return status, data
+
+    def test_body_over_limit_returns_413(self) -> None:
+        server = self._start(max_request_bytes=100)
+        big = json.dumps({"x": "a" * 500})
+        # run_task는 호출되면 안 됨 (413으로 먼저 거절).
+        with patch("python_ai_worker.main.run_task", side_effect=AssertionError("run_task should not run")):
+            status, data, _ = self._post(server, "/tasks/analyze", big)
+        self.assertEqual(status, 413)
+        self.assertIn("exceeds limit", data)
+
+    def test_body_under_limit_ok(self) -> None:
+        server = self._start(max_request_bytes=10_000)
+        with patch("python_ai_worker.main.run_task", return_value={"ok": True}):
+            status, data, _ = self._post(server, "/tasks/analyze", json.dumps({"a": 1}))
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(data)["ok"])
+
+    def test_concurrency_limit_returns_503(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocking_run_task(name, payload):
+            started.set()
+            release.wait(timeout=5)
+            return {"ok": True}
+
+        sem = threading.BoundedSemaphore(1)
+        server = self._start(semaphore=sem)
+
+        with patch("python_ai_worker.main.run_task", side_effect=blocking_run_task):
+            holder_result: dict = {}
+
+            def hold():
+                holder_result["status"], _, _ = self._post(
+                    server, "/tasks/analyze", json.dumps({"a": 1})
+                )
+
+            holder = threading.Thread(target=hold)
+            holder.start()
+            # 첫 요청이 permit을 잡고 run_task에 진입할 때까지 대기.
+            self.assertTrue(started.wait(timeout=5), "first request did not enter run_task")
+
+            # 두 번째 요청은 permit 없음 → 즉시 503.
+            status2, data2, retry_after = self._post(server, "/tasks/analyze", json.dumps({"a": 2}))
+            self.assertEqual(status2, 503)
+            self.assertEqual(retry_after, "1")
+            self.assertIn("max concurrency", data2)
+
+            release.set()
+            holder.join(timeout=5)
+        self.assertEqual(holder_result.get("status"), 200)
+
+    def test_readyz_ready_when_all_checks_pass(self) -> None:
+        server = self._start(_cfg(anthropic_api_key="k"))
+        with patch("python_ai_worker.registries.prompt.available_prompt_versions", return_value=["planner-v2-anthropic-v1"]), \
+             patch("python_ai_worker.taxonomies.load_taxonomy", return_value=object()):
+            status, data = self._get(server, "/readyz")
+        self.assertEqual(status, 200)
+        body = json.loads(data)
+        self.assertEqual(body["status"], "ready")
+        self.assertTrue(body["checks"]["any_llm_key"])
+
+    def test_readyz_not_ready_without_llm_key(self) -> None:
+        server = self._start(_cfg(anthropic_api_key=None, lloa_api_key=None))
+        status, data = self._get(server, "/readyz")
+        self.assertEqual(status, 503)
+        body = json.loads(data)
+        self.assertEqual(body["status"], "not_ready")
+        self.assertFalse(body["checks"]["any_llm_key"])
+
+
+class ReadinessUnitTests(unittest.TestCase):
+    def test_env_int_fallbacks(self) -> None:
+        import os
+
+        with patch.dict(os.environ, {"X_INT": "42"}):
+            self.assertEqual(worker_main._env_int("X_INT", 7), 42)
+        with patch.dict(os.environ, {"X_INT": ""}):
+            self.assertEqual(worker_main._env_int("X_INT", 7), 7)
+        with patch.dict(os.environ, {"X_INT": "abc"}):
+            self.assertEqual(worker_main._env_int("X_INT", 7), 7)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("X_INT", None)
+            self.assertEqual(worker_main._env_int("X_INT", 7), 7)
+
+    def test_readiness_requires_any_llm_key(self) -> None:
+        cfg = _cfg(anthropic_api_key=None, lloa_api_key=None)
+        with patch("python_ai_worker.registries.prompt.available_prompt_versions", return_value=["planner-v2-anthropic-v1"]), \
+             patch("python_ai_worker.taxonomies.load_taxonomy", return_value=object()):
+            ready, checks = worker_main._readiness(cfg)
+        self.assertFalse(ready)
+        self.assertFalse(checks["any_llm_key"])
+        self.assertTrue(checks["planner_prompt"])
+        self.assertTrue(checks["taxonomy"])
+
+    def test_readiness_handles_loader_failure(self) -> None:
+        cfg = _cfg(anthropic_api_key="k")
+        with patch("python_ai_worker.registries.prompt.available_prompt_versions", side_effect=RuntimeError("boom")), \
+             patch("python_ai_worker.taxonomies.load_taxonomy", side_effect=RuntimeError("boom")):
+            ready, checks = worker_main._readiness(cfg)
+        self.assertFalse(ready)
+        self.assertFalse(checks["planner_prompt"])
+        self.assertFalse(checks["taxonomy"])
+
+
+if __name__ == "__main__":
+    unittest.main()
