@@ -74,6 +74,9 @@ func (s *Server) routes() {
 	// 전역 read-only prompt 선택지. task-folder prompt(doc_genuineness /
 	// clause_label)의 version/default/label을 Python worker로 proxy해 반환.
 	s.mux.HandleFunc("GET /prompt_options", s.handlePromptOptions)
+	// 전역 read-only taxonomy 정의. aspect key→한글 label 매핑 등을 Python
+	// worker로 proxy해 반환 (프론트 표시용).
+	s.mux.HandleFunc("GET /taxonomy", s.handleTaxonomy)
 	s.mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPI)
 	s.mux.HandleFunc("GET /openapi.frontend.yaml", s.handleFrontendOpenAPI)
 	s.mux.HandleFunc("GET /swagger", s.handleSwaggerUI)
@@ -243,6 +246,22 @@ func (s *Server) handleRuntimeStatus(w stdhttp.ResponseWriter, _ *stdhttp.Reques
 func (s *Server) handlePromptOptions(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	task := strings.TrimSpace(r.URL.Query().Get("task"))
 	raw, err := s.datasetService.GetPromptOptions(r.Context(), task)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(stdhttp.StatusOK)
+	_, _ = w.Write(raw)
+}
+
+// handleTaxonomy — GET /taxonomy?taxonomy_id=<id>. aspect/sentiment taxonomy
+// 정의(key/label/description)를 Python worker proxy로 반환한다. taxonomy_id
+// 미지정 시 worker default(festival-v2). worker 응답 JSON을 그대로 전달
+// (Go는 파일 미접근). unknown id는 ErrInvalidArgument → 400.
+func (s *Server) handleTaxonomy(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	taxonomyID := strings.TrimSpace(r.URL.Query().Get("taxonomy_id"))
+	raw, err := s.datasetService.GetTaxonomy(r.Context(), taxonomyID)
 	if err != nil {
 		s.writeServiceError(w, err)
 		return

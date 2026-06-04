@@ -25,6 +25,12 @@ from .config_paths import resolve_config_dir
 # 가능 (prompts dir과 같은 패턴).
 TAXONOMIES_DIR_ENV = "PYTHON_AI_TAXONOMIES_DIR"
 
+# 현재 단일 taxonomy 고정 (silverone 2026-06-04). taxonomy endpoint 기본 id +
+# 신규 callsite의 하드코딩 격리용. artifact/version 단위 taxonomy_id 전달이
+# 생기면 이 default를 동적 lookup으로 교체한다 (후속 PR). 기존 callsite
+# (planner schema / clause_label)의 "festival-v2" 하드코딩 정리는 별도 작업.
+DEFAULT_TAXONOMY_ID = "festival-v2"
+
 
 def default_taxonomies_dir() -> Path:
     return resolve_config_dir(TAXONOMIES_DIR_ENV, __file__, "taxonomies")
@@ -271,6 +277,27 @@ def check_taxonomy_compatibility(
     }
 
 
+def taxonomy_payload(taxonomy: Taxonomy) -> dict[str, Any]:
+    """Taxonomy를 API 노출용 JSON-serializable dict로 변환.
+
+    taxonomy endpoint(``GET /taxonomy``)가 그대로 반환하는 wire shape
+    (silverone 2026-06-04). aspects는 config 정의 순서(``taxonomy.aspects``)를
+    유지해 프론트 표시 순서를 deterministic하게 둔다.
+    """
+
+    return {
+        "taxonomy_id": taxonomy.taxonomy_id,
+        "domain": taxonomy.domain,
+        "aspects": [
+            {"key": a.key, "label": a.label, "description": a.description}
+            for a in taxonomy.aspects
+        ],
+        "sentiments": list(taxonomy.sentiments),
+        "fallback_aspect": taxonomy.fallback_aspect,
+        "taxonomy_hash": taxonomy.taxonomy_hash,
+    }
+
+
 def render_aspect_taxonomy_block(taxonomy: Taxonomy) -> str:
     """taxonomy의 aspect를 prompt에 inject 가능한 markdown table로 변환.
 
@@ -307,6 +334,7 @@ def render_sentiment_taxonomy_block(taxonomy: Taxonomy) -> str:
 
 __all__ = [
     "AspectSpec",
+    "DEFAULT_TAXONOMY_ID",
     "TAXONOMIES_DIR_ENV",
     "Taxonomy",
     "TaxonomyError",
@@ -317,4 +345,5 @@ __all__ = [
     "parse_taxonomy",
     "render_aspect_taxonomy_block",
     "render_sentiment_taxonomy_block",
+    "taxonomy_payload",
 ]

@@ -34,9 +34,11 @@ from .planner import (
 )
 from .prompt_options import list_prompt_options
 from .taxonomies import (
+    DEFAULT_TAXONOMY_ID,
     TaxonomyMismatchError,
     check_taxonomy_compatibility,
     load_taxonomy,
+    taxonomy_payload,
 )
 
 _LOG = get("task_router")
@@ -56,7 +58,7 @@ _LEGACY_PLAN_TASK_NAME = "plan_v2"
 # clause_label artifact의 taxonomy_id/hash와 비교할 planner active taxonomy.
 # Phase 3-A에서 planner schema description이 이 taxonomy에서 derive되므로
 # 동일 source. Phase 3-B 후속에서 dataset_version metadata 기반 동적 lookup.
-_PLANNER_TAXONOMY = load_taxonomy("festival-v2")
+_PLANNER_TAXONOMY = load_taxonomy(DEFAULT_TAXONOMY_ID)
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,7 @@ def supported_capabilities() -> list[TaskCapability]:
         TaskCapability(name=_PLAN_TASK_NAME, description="plan_v2 LLM planner — generate plan from user_question (debug entrypoint)."),
         TaskCapability(name=_ANALYZE_TASK_NAME, description="plan_v2 executor — plan or user_question + artifact_paths → result."),
         TaskCapability(name="prompt_options", description="List prompt versions/default/label for a task-folder prompt (read-only)."),
+        TaskCapability(name="taxonomy", description="Return aspect/sentiment taxonomy definition (key/label/description) for a taxonomy_id (read-only)."),
     ]
 
 
@@ -97,6 +100,7 @@ def task_handlers() -> dict[str, Any]:
         "dataset_doc_genuineness": run_dataset_doc_genuineness,
         "dataset_clause_label": run_dataset_clause_label,
         "prompt_options": _run_prompt_options,
+        "taxonomy": _run_taxonomy,
     }
 
 
@@ -111,6 +115,18 @@ def _run_prompt_options(payload: dict[str, Any]) -> dict[str, Any]:
     if not task:
         raise ValueError("prompt_options requires 'task'")
     return list_prompt_options(task)
+
+
+def _run_taxonomy(payload: dict[str, Any]) -> dict[str, Any]:
+    """taxonomy task — aspect/sentiment taxonomy 정의(key/label/description) 반환.
+
+    Go control-plane이 ``GET /taxonomy?taxonomy_id=<id>``를 이 task로 proxy한다.
+    Go는 config 파일을 직접 읽지 않는다. taxonomy_id 미지정 시
+    ``DEFAULT_TAXONOMY_ID`` (현재 festival-v2). unknown id / parse 실패는
+    ``TaxonomyError(ValueError)`` → main.py에서 HTTP 400.
+    """
+    taxonomy_id = str(payload.get("taxonomy_id") or "").strip() or DEFAULT_TAXONOMY_ID
+    return taxonomy_payload(load_taxonomy(taxonomy_id))
 
 
 def run_task(name: str, payload: dict[str, Any]) -> dict[str, Any]:
