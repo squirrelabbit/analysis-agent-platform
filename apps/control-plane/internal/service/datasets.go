@@ -233,46 +233,12 @@ func (s *DatasetService) DeactivateDatasetVersion(projectID, datasetID string) (
 	return s.saveDatasetActiveVersion(dataset, nil)
 }
 
-func (s *DatasetService) deriveEmbeddingURI(version domain.DatasetVersion) string {
-	// silverone 2026-05-28 (β2 cleanup PR2) — struct 필드 제거. metadata fallback.
-	if ref := strings.TrimSpace(metadataString(version.Metadata, "embedding_uri", "")); ref != "" {
-		return ref
-	}
-	if path, ok := s.datasetArtifactPath(version, "embedding", "embeddings.jsonl"); ok {
-		return path
-	}
-	return datasetSourceForUnstructured(version) + ".embeddings.jsonl"
-}
-
-func (s *DatasetService) deriveEmbeddingIndexSourceURI(version domain.DatasetVersion) string {
-	if ref := strings.TrimSpace(metadataString(version.Metadata, "embedding_index_source_ref", "")); ref != "" {
-		return ref
-	}
-	if path, ok := s.datasetArtifactPath(version, "embedding", "embeddings.index.parquet"); ok {
-		return path
-	}
-	return datasetSourceForUnstructured(version) + ".embeddings.index.parquet"
-}
-
-func (s *DatasetService) deriveClusterURI(version domain.DatasetVersion) string {
-	if ref := strings.TrimSpace(metadataString(version.Metadata, "cluster_ref", "")); ref != "" {
-		return ref
-	}
-	if path, ok := s.datasetArtifactPath(version, "cluster", "clusters.json"); ok {
-		return path
-	}
-	return datasetSourceForUnstructured(version) + ".clusters.json"
-}
-
-func (s *DatasetService) deriveSentimentURI(version domain.DatasetVersion) string {
-	if ref := strings.TrimSpace(metadataString(version.Metadata, "sentiment_uri", "")); ref != "" {
-		return ref
-	}
-	if path, ok := s.datasetArtifactPath(version, "sentiment", "sentiment.parquet"); ok {
-		return path
-	}
-	return domain.ResolveDatasetSource(version).DatasetName + ".sentiment.parquet"
-}
+// silverone 2026-06-04 (ADR-018 β2 residue cleanup) — embedding / cluster /
+// sentiment / prepare URI derive helper들은 ADR-018 β2로 제거된 build 단계
+// 잔재라 호출처 0건이었다. deriveEmbeddingURI / deriveEmbeddingIndexSourceURI /
+// deriveClusterURI / deriveSentimentURI / derivePrepareURI (method + 중복 package
+// func)와 그것만 쓰던 datasetSourceForUnstructured를 제거했다. 살아 있는
+// deriveCleanURI(clean 단계)만 남긴다.
 
 func (s *DatasetService) deriveCleanURI(version domain.DatasetVersion) string {
 	if ref := cleanArtifactRef(version); ref != "" {
@@ -282,35 +248,4 @@ func (s *DatasetService) deriveCleanURI(version domain.DatasetVersion) string {
 		return path
 	}
 	return strings.TrimSpace(version.StorageURI) + ".cleaned.parquet"
-}
-
-func (s *DatasetService) derivePrepareURI(version domain.DatasetVersion) string {
-	if ref := strings.TrimSpace(metadataString(version.Metadata, "prepare_uri", "")); ref != "" {
-		return ref
-	}
-	if path, ok := s.datasetArtifactPath(version, "prepare", "prepared.parquet"); ok {
-		return path
-	}
-	return strings.TrimSpace(version.StorageURI) + ".prepared.parquet"
-}
-
-func deriveEmbeddingURI(version domain.DatasetVersion) string {
-	if ref := strings.TrimSpace(metadataString(version.Metadata, "embedding_uri", "")); ref != "" {
-		return ref
-	}
-	return datasetSourceForUnstructured(version) + ".embeddings.jsonl"
-}
-
-func deriveSentimentURI(version domain.DatasetVersion) string {
-	if ref := strings.TrimSpace(metadataString(version.Metadata, "sentiment_uri", "")); ref != "" {
-		return ref
-	}
-	return domain.ResolveDatasetSource(version).DatasetName + ".sentiment.parquet"
-}
-
-func derivePrepareURI(version domain.DatasetVersion) string {
-	if ref := strings.TrimSpace(metadataString(version.Metadata, "prepare_uri", "")); ref != "" {
-		return ref
-	}
-	return strings.TrimSpace(version.StorageURI) + ".prepared.parquet"
 }

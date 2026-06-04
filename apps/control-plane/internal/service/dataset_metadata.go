@@ -276,10 +276,8 @@ func buildCleanSummary(metadata map[string]any) *domain.DatasetCleanSummary {
 
 // silverone 2026-05-28 (β2 cleanup PR2) — buildPrepareSummary 제거. β2로
 // prepare 단계 사라져 호출처 0 + DatasetPrepareSummary type 자체 제거됨.
-
-func datasetSourceForUnstructured(version domain.DatasetVersion) string {
-	return domain.ResolveDatasetSource(version).DatasetName
-}
+// silverone 2026-06-04 (ADR-018 β2 residue cleanup) — datasetSourceForUnstructured도
+// 제거된 embedding/cluster derive helper에서만 쓰여 함께 삭제.
 
 func textSelectionMatchesRawSource(version domain.DatasetVersion, textColumn string, textColumns []string) bool {
 	if domain.DatasetSourceIsRawTextColumn(version, textColumn) {
