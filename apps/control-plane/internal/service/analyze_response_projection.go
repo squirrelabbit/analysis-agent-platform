@@ -107,7 +107,14 @@ func projectAnalyzePlan(value any) map[string]any {
 		// 사용자 화면용 label / expression을 합성해서 내려준다. 프론트는 raw
 		// params를 직접 해석하지 않고 display.label / display.expression을 우선
 		// 표시. display 합성 실패 시 omit — 프론트가 params JSON으로 fallback.
-		if display := buildStepDisplay(step); display != nil {
+		//
+		// silverone 2026-06-04 (Skill Contract v2 Step 3) — display source of truth가
+		// worker(Python planner.step_display)로 이동. worker가 plan.steps[].display를
+		// 채워 내려보내면 그대로 pass-through하고, 없으면(옛 worker / 미지원 skill)
+		// 기존 Go buildStepDisplay로 fallback (이번 PR에서 Go builder 유지).
+		if display, ok := step["display"].(map[string]any); ok && len(display) > 0 {
+			stepView["display"] = display
+		} else if display := buildStepDisplay(step); display != nil {
 			stepView["display"] = display
 		}
 		steps = append(steps, stepView)
