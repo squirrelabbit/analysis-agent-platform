@@ -55,6 +55,24 @@ group_by별 count와 전체 대비 share(0~1)를 한 번에 계산한다.
   부분집합/전체집합 비율(분자가 분모의 하위 조건, 예시 3)은 atomic `calculate.ratio`.
   날짜별 추이는 atomic.
 
+### event_window_count
+
+기준일 전후 N일 동안의 문서 발생량을 일자별로 계산한다.
+
+- params:
+  - `input`: table_or_step_id (보통 `docs`, 또는 doc-level filter 결과 step)
+  - `event_date`: YYYY-MM-DD 기준일
+  - `date_column`: string — 날짜 컬럼 (기본 `created_at`)
+  - `before_days`: int>=0 — 기준일 이전 일수 (기본 7)
+  - `after_days`: int>=0 — 기준일 이후 일수 (기본 7)
+  - `grain`: `day` (현재 day만 지원)
+  - `count_column`: string — count 결과 컬럼명 (기본 `count`)
+  - `title`: string|null
+- 쓰는 경우: "축제일 전후", "행사 전후 일주일", "특정 날짜 기준 전후",
+  "D-day 전후 문서 발생량"처럼 **기준일 주변의 날짜별 발생량**을 묻는 질문.
+- 쓰지 않는 경우: 기간 전체의 단순 총량은 atomic `filter`+`aggregate`; week/month
+  bucket은 현재 recipe로 만들지 말고 필요한 경우 clarify 또는 unsupported로 처리한다.
+
 ### top_n
 
 조건을 적용한 뒤 그룹별 count를 내고 상위 N개를 정렬해 보여준다.
@@ -107,6 +125,9 @@ group_by별 count와 전체 대비 share(0~1)를 한 번에 계산한다.
   count 순위를 묻는 질문은 **`top_n` recipe를 사용한다**. doc-level 필터가
   필요하면 먼저 `join`/atomic `filter`로 입력 step을 만든 뒤 그 step을 `top_n.input`
   으로 넘긴다 (예시 2).
+- "축제일/행사일/특정 날짜 전후 N일 문서 발생량"처럼 기준일 주변의 날짜별
+  발생량을 묻는 질문은 **`event_window_count` recipe를 사용한다**. 기준일이
+  없으면 멋대로 추정하지 말고 clarify한다.
 - **final present는 사용자의 질문에 직접 답하는 결과 step을 input으로 해야 한다.**
   중간 aggregate/count step은 분자·분모 계산용일 뿐 final present의 input으로 쓰지
   않는다. `calculate.ratio` / `average` / `delta` 등 계산 step을 만들었다면, 그 계산

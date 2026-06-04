@@ -356,13 +356,27 @@ class CalculateRuleTests(unittest.TestCase):
 
 class RecipeValidatorTests(unittest.TestCase):
     """validator가 runtime-enabled recipe step을 인식·검증 (unknown 거절 X).
-    event_window_count는 아직 미활성 → skill_unknown 유지."""
+    recipe step은 실행 직전 atomic step으로 deterministic lower된다."""
 
     def _dist(self, **params):
         base = {"input": "clauses", "group_by": ["sentiment"], "metric": "count",
                 "include_share": True, "count_column": "count", "share_column": "ratio", "title": "t"}
         base.update(params)
         return _wrap([{"id": "d", "skill": "distribution", "params": base}])
+
+    def _event_window(self, **params):
+        base = {
+            "input": "docs",
+            "event_date": "2026-04-20",
+            "date_column": "created_at",
+            "before_days": 7,
+            "after_days": 7,
+            "grain": "day",
+            "count_column": "count",
+            "title": "window",
+        }
+        base.update(params)
+        return _wrap([{"id": "w", "skill": "event_window_count", "params": base}])
 
     def _topn(self, **params):
         base = {
@@ -407,9 +421,30 @@ class RecipeValidatorTests(unittest.TestCase):
     def test_bad_title(self) -> None:
         self.assertIn("params.recipe_title_invalid", _codes(self._dist(title=123)))
 
-    def test_event_window_count_still_unknown(self) -> None:
-        plan = _wrap([{"id": "w", "skill": "event_window_count", "params": {"input": "docs", "event_date": "2024-08-15"}}])
-        self.assertIn("step.skill_unknown", _codes(plan))
+    def test_valid_event_window_count_passes(self) -> None:
+        self.assertEqual(collect_plan_issues(self._event_window()), [])
+
+    def test_event_window_count_minimal_passes(self) -> None:
+        plan = _wrap([{"id": "w", "skill": "event_window_count", "params": {"input": "docs", "event_date": "2026-04-20"}}])
+        self.assertEqual(collect_plan_issues(plan), [])
+
+    def test_event_window_count_bad_date(self) -> None:
+        self.assertIn("params.recipe_event_date_invalid", _codes(self._event_window(event_date="2026-99-99")))
+        self.assertIn("params.recipe_event_date_invalid", _codes(self._event_window(event_date="")))
+
+    def test_event_window_count_bad_window_and_grain(self) -> None:
+        self.assertIn("params.recipe_window_invalid", _codes(self._event_window(before_days=-1)))
+        self.assertIn("params.recipe_window_invalid", _codes(self._event_window(after_days="7")))
+        self.assertIn("params.recipe_grain_unsupported", _codes(self._event_window(grain="week")))
+
+    def test_event_window_count_bad_columns_and_title(self) -> None:
+        self.assertIn("params.recipe_date_column_invalid", _codes(self._event_window(date_column="raw_text")))
+        self.assertIn("params.recipe_column_name_invalid", _codes(self._event_window(count_column="")))
+        self.assertIn(
+            "params.recipe_column_name_invalid",
+            _codes(self._event_window(count_column="created_at")),
+        )
+        self.assertIn("params.recipe_title_invalid", _codes(self._event_window(title=123)))
 
     def test_valid_top_n_passes(self) -> None:
         self.assertEqual(collect_plan_issues(self._topn()), [])

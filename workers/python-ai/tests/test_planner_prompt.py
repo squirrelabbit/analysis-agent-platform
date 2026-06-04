@@ -308,9 +308,10 @@ class PromptRenderTests(unittest.TestCase):
         _, system, _user = render_planner_prompt(user_question="dummy")
         self.assertIn("## recipe", system)
         self.assertIn("### distribution", system)
+        self.assertIn("### event_window_count", system)
         self.assertIn("### top_n", system)
         self.assertIn('"skill": "top_n"', system)
-        self.assertNotIn("### event_window_count", system)
+        self.assertIn("event_window_count", system)
 
     def test_output_format_marker_in_system(self) -> None:
         _, system, _user = render_planner_prompt(user_question="dummy")

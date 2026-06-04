@@ -26,7 +26,6 @@ from python_ai_worker.executor import (
     execute_plan,
 )
 from python_ai_worker.planner import PlanValidationError
-from python_ai_worker.planner.recipes import RecipeError
 
 
 def _write_docs_parquet(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -394,8 +393,8 @@ class RecipeExecutionTests(unittest.TestCase):
     """Skill Contract v2 — direct-plan recipe → expand → 실행.
 
     fixture clauses: positive 3 / neutral 1 / negative 1. expand 결과 count + ratio,
-    ratio 합 ≈ 1.0. top_n은 filter + count rank 실행. event_window_count는 미활성
-    → RecipeError."""
+    ratio 합 ≈ 1.0. top_n은 filter + count rank 실행, event_window_count는 기준일
+    전후 발생량을 실행한다."""
 
     def _plan(self, **params):
         base = {"input": "clauses", "group_by": ["sentiment"], "metric": "count",
@@ -458,14 +457,29 @@ class RecipeExecutionTests(unittest.TestCase):
             resp = execute_analyze_plan("v1", plan, artifact_paths=paths)
             self.assertEqual([s["skill"] for s in resp["plan"]["steps"]], ["aggregate", "present"])
 
-    def test_event_window_recipe_rejected_in_r1(self) -> None:
+    def test_event_window_recipe_expands_and_executes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             paths = _fixture_paths(Path(tmp))
             plan = {"plan_version": "v2", "steps": [
                 {"id": "w", "skill": "event_window_count",
-                 "params": {"input": "docs", "event_date": "2024-08-15"}}]}
-            with self.assertRaises(RecipeError):
-                execute_analyze_plan("v1", plan, artifact_paths=paths)
+                 "params": {
+                     "input": "docs",
+                     "event_date": "2026-04-20",
+                     "before_days": 10,
+                     "after_days": 15,
+                     "count_column": "n",
+                     "title": "행사 전후 문서 발생량",
+                 }}]}
+            resp = execute_analyze_plan("v1", plan, artifact_paths=paths)
+            self.assertEqual(
+                [s["skill"] for s in resp["plan"]["steps"]],
+                ["filter", "aggregate", "sort", "present"],
+            )
+            rows = resp["present"]["rows"]
+            self.assertEqual(
+                [(r["created_at"], r["n"]) for r in rows],
+                [("2026-04-15T19:30:00", 1), ("2026-05-01T09:00:00", 1)],
+            )
 
 
 class GuardrailTests(unittest.TestCase):

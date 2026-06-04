@@ -157,7 +157,7 @@ HTTP_STATUS="$(curl -sS -o "${TMP_RESP}" -w '%{http_code}' \
   -d "${BODY}")"
 
 if [[ "${HTTP_STATUS}" != "200" ]]; then
-  red "analyze_v2 failed: HTTP ${HTTP_STATUS}"
+  red "analyze failed: HTTP ${HTTP_STATUS}"
   cat "${TMP_RESP}"
   exit 1
 fi

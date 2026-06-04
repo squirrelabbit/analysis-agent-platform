@@ -38,8 +38,8 @@ LLM planner (6단계)를 붙이기 전 executor_v2의 계산 경로가 결정적
 ## 사용처
 
 - `workers/python-ai/tests/test_smoke_5a_aspect_delta.py` — 5-A unit smoke
-- `scripts/smoke_analyze_v2_service.sh` — 동일 fixture로 Python service 직접 호출
-- (후속) `scripts/smoke_analyze_v2_endpoint.sh` — compose/dev curl smoke
+- `scripts/smoke_analyze_service.sh` — 동일 fixture로 Python service 직접 호출
+- `scripts/smoke_analyze_endpoint.sh` — compose/dev curl smoke
 
 ## 갱신 규칙
 

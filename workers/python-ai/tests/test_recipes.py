@@ -14,6 +14,7 @@ from python_ai_worker.planner.recipes import (
     EVENT_WINDOW_COUNT_SPEC,
     RECIPE_SPECS,
     RecipeError,
+    RUNTIME_ENABLED_RECIPES,
     TOP_N_SPEC,
     expand_recipes,
     lower_distribution,
@@ -349,7 +350,7 @@ class TopNLoweringTests(unittest.TestCase):
 
 
 class ExpandRecipesTests(unittest.TestCase):
-    """expand_recipes: runtime 활성 recipe 치환, 미활성 recipe 거절, atomic no-op."""
+    """expand_recipes: runtime 활성 recipe 치환, atomic no-op."""
 
     def test_distribution_recipe_expanded_and_valid(self) -> None:
         plan = {"plan_version": "v2", "steps": [_distribution_step()]}
@@ -385,10 +386,12 @@ class ExpandRecipesTests(unittest.TestCase):
         self.assertEqual(collect_plan_issues(out), [])
         self.assertEqual(plan["steps"][0]["skill"], "top_n")
 
-    def test_event_window_count_rejected_when_disabled(self) -> None:
+    def test_event_window_count_recipe_expanded_and_valid(self) -> None:
         plan = {"plan_version": "v2", "steps": [_event_window_step()]}
-        with self.assertRaises(RecipeError):
-            expand_recipes(plan)
+        out = expand_recipes(plan)
+        self.assertEqual([s["skill"] for s in out["steps"]], ["filter", "aggregate", "sort", "present"])
+        self.assertEqual(collect_plan_issues(out), [])
+        self.assertEqual(plan["steps"][0]["skill"], "event_window_count")
 
     def test_bad_distribution_params_raises(self) -> None:
         plan = {"plan_version": "v2", "steps": [_distribution_step(group_by=[])]}
@@ -400,15 +403,23 @@ class ExpandRecipesTests(unittest.TestCase):
         with self.assertRaises(RecipeError):
             expand_recipes(plan)
 
+    def test_bad_event_window_count_params_raises(self) -> None:
+        plan = {"plan_version": "v2", "steps": [_event_window_step(event_date="2026-99-99")]}
+        with self.assertRaises(RecipeError):
+            expand_recipes(plan)
+
 
 class RecipeRegistryTests(unittest.TestCase):
     def test_specs_present(self) -> None:
         self.assertEqual(set(RECIPE_SPECS), {"distribution", "event_window_count", "top_n"})
 
-    def test_all_r0_recipes_implemented(self) -> None:
+    def test_all_recipes_implemented(self) -> None:
         self.assertTrue(DISTRIBUTION_SPEC.implemented)
         self.assertTrue(EVENT_WINDOW_COUNT_SPEC.implemented)
         self.assertTrue(TOP_N_SPEC.implemented)
+
+    def test_all_recipes_runtime_enabled(self) -> None:
+        self.assertEqual(RUNTIME_ENABLED_RECIPES, frozenset(RECIPE_SPECS))
 
     def test_unknown_recipe_raises(self) -> None:
         with self.assertRaises(RecipeError):
