@@ -23,12 +23,13 @@ import (
 
 // threadServiceDeps — AnalysisThreadService가 의존하는 외부 기능의 최소 집합.
 // DatasetService가 이를 구현한다(GetDataset/GetDatasetVersion은 core,
-// ExecuteAnalyze*는 AnalyzeService facade).
+// ExecuteAnalyze는 AnalyzeService facade). thread 흐름은 항상 version-specific
+// ExecuteAnalyze만 호출하므로 ExecuteAnalyzeOnActiveVersion은 포함하지 않는다
+// (최소 인터페이스 — 미사용 메서드 제외).
 type threadServiceDeps interface {
 	GetDataset(projectID, datasetID string) (domain.Dataset, error)
 	GetDatasetVersion(projectID, datasetID, versionID string) (domain.DatasetVersion, error)
 	ExecuteAnalyze(ctx context.Context, projectID, datasetID, versionID string, req AnalyzeRequest) (AnalyzeResponse, error)
-	ExecuteAnalyzeOnActiveVersion(ctx context.Context, projectID, datasetID string, req AnalyzeRequest) (AnalyzeResponse, error)
 }
 
 type AnalysisThreadService struct {
