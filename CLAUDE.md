@@ -122,9 +122,6 @@ POST /projects/{pid}/datasets/{did}/versions/{vid}/analyze_v2    ← explicit ve
 # Python 테스트 (requires-python >= 3.11 — macOS 기본 python3가 3.9면 datetime.UTC 등에서 실패)
 PYTHONPATH=workers/python-ai/src python3.11 -m unittest discover -s workers/python-ai/tests -p 'test_*.py'
 
-# Python skill contract 검증
-PYTHONPATH=workers/python-ai/src python3 -m python_ai_worker.devtools.run_skill_case --validate
-
 # OpenAPI YAML 구문 검증 (ruby 필요)
 ruby -e 'require "yaml"; YAML.load_file("docs/api/openapi.yaml"); puts "ok"'
 ```
