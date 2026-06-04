@@ -81,15 +81,20 @@ ruby -e 'require "yaml"; YAML.load_file("docs/api/openapi.yaml"); YAML.load_file
 ok "openapi parse"
 
 stage "6. boot-time destructive SQL guard (grep)"
-# postgres_legacy_preserve_test가 동일 검사를 go test로 수행하지만, 다른 store
-# 파일/migration script까지 한 번 더 grep해 이중 잠금.
-if grep -rnE 'DROP TABLE IF EXISTS (report_drafts|executions|skill_plans|analysis_requests)' \
+# silverone 2026-06-04 (Codex review #4) — 특정 legacy 4종이 아니라 boot path의
+# *모든* DROP TABLE 문을 차단하도록 강화. postgres_legacy_preserve_test가 동일
+# 검사를 go test로 수행하지만, 다른 store/cmd/service 파일까지 한 번 더 grep해
+# 이중 잠금. 패턴 'DROP TABLE ' (trailing space)는 SQL 문만 잡고 한국어 주석
+# ("DROP TABLE로 제거")은 잡지 않는다. _test.go는 제외(가드 패턴 문자열 보유).
+if grep -rnE 'DROP TABLE ' \
+    --include='*.go' \
     apps/control-plane/internal/store/ \
     apps/control-plane/cmd/ \
-    apps/control-plane/internal/service/ 2>/dev/null; then
-  fail "legacy table DROP found in boot path. Move destructive cleanup to operator-run migration."
+    apps/control-plane/internal/service/ 2>/dev/null \
+    | grep -v '_test.go'; then
+  fail "DROP TABLE found in boot path. Move destructive cleanup to scripts/migrations/ (operator-run)."
 fi
-ok "no legacy DROP in boot path"
+ok "no DROP TABLE in boot path"
 
 if [[ $RUN_SMOKE -eq 1 ]]; then
   stage "7. analyze_endpoint smoke (direct-plan + user-question)"

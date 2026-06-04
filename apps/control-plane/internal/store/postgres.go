@@ -2158,12 +2158,12 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			END IF;
 		END
 		$$`,
-		// β2 (5/19) — document_cluster_profile 제거. 기존 staging 테이블
-		// (dataset_version_cluster_profile_builds + dataset_version_cluster_confirmations)을
-		// 정리한다. staging only, festival smoke 결과는 vault에 별도 기록 +
-		// 재 smoke로 재현 가능.
-		`DROP TABLE IF EXISTS dataset_version_cluster_confirmations CASCADE`,
-		`DROP TABLE IF EXISTS dataset_version_cluster_profile_builds CASCADE`,
+		// β2 (5/19) document_cluster_profile 제거 후 남는 staging 테이블
+		// (dataset_version_cluster_profile_builds / dataset_version_cluster_confirmations)
+		// 정리는 boot path에서 제거됐다 (silverone 2026-06-04, Codex review #4).
+		// 운영 코드는 destructive cleanup을 자동 실행하지 않는다 — 운영 데이터
+		// 삭제가 발생할 수 있으므로 필요 시 operator가
+		// scripts/migrations/0001_drop_legacy_cluster_tables.sql 을 1회 수동 실행한다.
 	}
 	for _, statement := range statements {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {

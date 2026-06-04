@@ -123,7 +123,20 @@ GIT_SSL_NO_VERIFY=true git pull origin main
 docker compose -f compose.dev.yml -f compose.staging.yml up -d --build
 ```
 
-이후 재배포는 3)~4)만 반복한다. 노출 주소(서버 IP 기준):
+이후 재배포는 3)~4)만 반복한다.
+
+> **DB cleanup (필요 시 1회, 수동)** — control-plane은 부팅 시 legacy 테이블을
+> 자동 DROP하지 않는다 (silverone 2026-06-04, Codex review #4). ADR-018 β2 이전
+> 스키마에서 올라온 서버라면 staging 테이블 정리를 operator가 한 번 직접 실행한다.
+> compose up/부팅에 묶지 않는다. ⚠️ 운영 데이터 삭제가 발생할 수 있으므로 사전
+> 확인 SELECT 후 실행:
+>
+> ```bash
+> docker compose -f compose.dev.yml exec -T postgres \
+>   psql -U platform -d analysis_support -f - < scripts/migrations/0001_drop_legacy_cluster_tables.sql
+> ```
+
+노출 주소(서버 IP 기준):
 
 - web(앱): `http://<서버IP>:5173`
 - control plane(API 직접): `http://<서버IP>:18080`
