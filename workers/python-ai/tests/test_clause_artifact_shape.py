@@ -349,5 +349,49 @@ class ClauseLabelTaxonomyMetadataTests(unittest.TestCase):
         self.assertEqual(cl._TAXONOMY.taxonomy_hash, expected.taxonomy_hash)
 
 
+class ClauseLabelGenuinenessFilterTests(unittest.TestCase):
+    """silverone 2026-06-04 — doc_genuineness LLOA 입력 안정화 후속 잠금.
+
+    request 실패로 격리된 doc(genuineness=uncertain, source=lloa_request_failure)
+    이 clause_label default 필터에서 제외되는지 확인한다. 안 그러면 같은 초장문이
+    다음 단계(clause_label LLOA)에서 또 터질 수 있다.
+    """
+
+    def test_default_filter_excludes_uncertain_and_non_review(self) -> None:
+        from python_ai_worker.dataset_build.clause_label import _DEFAULT_INCLUDE_GENUINENESS
+
+        self.assertEqual(set(_DEFAULT_INCLUDE_GENUINENESS), {"genuine_review", "mixed"})
+        self.assertNotIn("uncertain", _DEFAULT_INCLUDE_GENUINENESS)
+        self.assertNotIn("non_review", _DEFAULT_INCLUDE_GENUINENESS)
+
+    def test_request_failure_doc_skipped_by_default_filter(self) -> None:
+        from python_ai_worker.dataset_build.clause_label import _load_genuineness_filter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ref = Path(tmp) / "doc_genuineness.jsonl"
+            records = [
+                {"doc_id": "doc:ok", "genuineness": "genuine_review", "source": "lloa"},
+                {
+                    "doc_id": "doc:fail",
+                    "genuineness": "uncertain",
+                    "source": "lloa_request_failure",
+                },
+            ]
+            with ref.open("w", encoding="utf-8") as f:
+                for rec in records:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+            # include_genuineness 미지정 → default {genuine_review, mixed}
+            include_tiers, tier_by_doc = _load_genuineness_filter(
+                {"doc_genuineness_ref": str(ref)}
+            )
+
+        self.assertEqual(include_tiers, {"genuine_review", "mixed"})
+        self.assertEqual(tier_by_doc["doc:fail"], "uncertain")
+        # 격리 doc의 tier가 include set에 없으므로 clause_label에서 skip된다.
+        self.assertNotIn(tier_by_doc["doc:fail"], include_tiers)
+        self.assertIn(tier_by_doc["doc:ok"], include_tiers)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,9 +6,11 @@ non_review / empty).
 """
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -86,7 +88,7 @@ class DocGenuinenessTests(unittest.TestCase):
         payload.update(overrides)
         return payload
 
-    def _patch_config_and_run(self, urlopen_fn):
+    def _patch_config_and_run(self, urlopen_fn, payload=None):
         from python_ai_worker.dataset_build import doc_genuineness
         from python_ai_worker.config import WorkerConfig
 
@@ -107,7 +109,7 @@ class DocGenuinenessTests(unittest.TestCase):
 
         with patch.object(doc_genuineness, "load_config", return_value=fake_config), \
              patch.object(doc_genuineness.LloaClient, "__init__", _init_with_fake):
-            return doc_genuineness.run_dataset_doc_genuineness(self._payload())
+            return doc_genuineness.run_dataset_doc_genuineness(payload or self._payload())
 
     def test_three_tier_classification_success(self) -> None:
         # silverone 2026-05-22 — T/F/A prompt 채택 후 mixed 대신 uncertain 분기
@@ -211,6 +213,155 @@ class DocGenuinenessTests(unittest.TestCase):
         self.assertEqual(applied["recruitment_keywords"], ["서포터즈", "푸드트럭"])
         self.assertEqual(applied["subject_type"], "festival")
         self.assertEqual(applied["prompt_version"], "v1")
+
+
+def _fake_urlopen_with_failures(responses_by_doc: dict[str, dict], fail_doc_ids: set[str]):
+    """fail_doc_ids에 든 doc은 LLOA HTTP 400을 raise, 나머지는 정상 응답.
+
+    silverone 2026-06-04 — per-doc 격리 잠금용. urllib HTTPError(400)을 던져
+    초장문 LLOA 거부(request too large / context_length) 상황을 재현한다.
+    """
+    call_log: list[dict] = []
+
+    class _Resp:
+        def __init__(self, payload: dict) -> None:
+            self._payload = payload
+
+        def read(self) -> bytes:
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+    def _fake(req, timeout=None):  # type: ignore[no-untyped-def]
+        body = json.loads(req.data.decode("utf-8"))
+        user_obj = json.loads(body["messages"][1]["content"])
+        doc_id = user_obj["doc_id"]
+        call_log.append({"doc_id": doc_id, "doc_text": user_obj["doc_text"]})
+        if doc_id in fail_doc_ids:
+            raise urllib.error.HTTPError(
+                req.full_url,
+                400,
+                "Bad Request",
+                {},
+                io.BytesIO(b'{"error":"request too large"}'),
+            )
+        return _Resp(responses_by_doc[doc_id])
+
+    return _fake, call_log
+
+
+class DocGenuinenessTruncateIsolateTests(DocGenuinenessTests):
+    """silverone 2026-06-04 — LLOA 입력 안정화 (truncate + per-doc 격리).
+
+    DocGenuinenessTests의 fixture(row:1~4) + helper 재사용. chunking 아님:
+    clean row 1 = 결과 1 유지, 호출 직전 input_text만 truncate.
+    """
+
+    def test_long_doc_truncated_before_lloa(self) -> None:
+        # max_input_chars를 작게 줘서 비어 있지 않은 3 doc 모두 truncate되게 한다.
+        responses = {
+            "row:1": _llm_completion('{"doc_id":"row:1","genuineness":"genuine_review","reason":"후기."}'),
+            "row:2": _llm_completion('{"doc_id":"row:2","genuineness":"non_review","reason":"안내."}'),
+            "row:3": _llm_completion('{"doc_id":"row:3","genuineness":"uncertain","reason":"불명."}'),
+        }
+        fake_urlopen, log = _fake_urlopen_with_failures(responses, set())
+        result = self._patch_config_and_run(
+            fake_urlopen, payload=self._payload(max_input_chars=10)
+        )
+
+        # LLOA에 실제 보낸 doc_text는 10자로 잘려야 한다.
+        for entry in log:
+            self.assertLessEqual(len(entry["doc_text"]), 10)
+
+        summary = result["artifact"]["summary"]
+        self.assertEqual(summary["max_input_chars"], 10)
+        self.assertEqual(summary["truncated_docs"], 3)
+        self.assertEqual(summary["request_failures"], 0)
+
+        records = {
+            json.loads(line)["doc_id"]: json.loads(line)
+            for line in self.output_path.read_text(encoding="utf-8").strip().splitlines()
+        }
+        self.assertTrue(records["row:1"]["truncated"])
+        self.assertEqual(records["row:1"]["used_length"], 10)
+        self.assertGreater(records["row:1"]["original_length"], 10)
+        # empty shortcut(row:4)은 truncate 대상 아님.
+        self.assertFalse(records["row:4"]["truncated"])
+        self.assertEqual(records["row:4"]["original_length"], 0)
+
+    def test_no_truncation_under_default_limit(self) -> None:
+        responses = {
+            "row:1": _llm_completion('{"doc_id":"row:1","genuineness":"genuine_review","reason":"후기."}'),
+            "row:2": _llm_completion('{"doc_id":"row:2","genuineness":"non_review","reason":"안내."}'),
+            "row:3": _llm_completion('{"doc_id":"row:3","genuineness":"uncertain","reason":"불명."}'),
+        }
+        fake_urlopen, _ = _fake_urlopen_with_failures(responses, set())
+        result = self._patch_config_and_run(fake_urlopen)  # default payload
+
+        summary = result["artifact"]["summary"]
+        self.assertEqual(summary["max_input_chars"], 20_000)
+        self.assertEqual(summary["truncated_docs"], 0)
+
+        record = next(
+            json.loads(line)
+            for line in self.output_path.read_text(encoding="utf-8").strip().splitlines()
+            if json.loads(line)["doc_id"] == "row:1"
+        )
+        self.assertFalse(record["truncated"])
+        self.assertEqual(record["original_length"], record["used_length"])
+        self.assertGreater(record["original_length"], 0)
+
+    def test_request_failure_isolated_build_continues(self) -> None:
+        # row:1이 LLOA 400으로 실패해도 build는 죽지 않고, 해당 doc만 uncertain 격리.
+        responses = {
+            "row:2": _llm_completion('{"doc_id":"row:2","genuineness":"non_review","reason":"안내."}'),
+            "row:3": _llm_completion('{"doc_id":"row:3","genuineness":"uncertain","reason":"불명."}'),
+        }
+        fake_urlopen, _ = _fake_urlopen_with_failures(responses, {"row:1"})
+        result = self._patch_config_and_run(fake_urlopen)  # build가 raise하지 않아야 함
+
+        summary = result["artifact"]["summary"]
+        self.assertEqual(summary["request_failures"], 1)
+        self.assertEqual(summary["parse_failures"], 0)
+        # row:1(격리 uncertain) + row:3(uncertain) = 2
+        self.assertEqual(summary["tier_counts"]["uncertain"], 2)
+        # row:2(non_review) + row:4(empty) = 2
+        self.assertEqual(summary["tier_counts"]["non_review"], 2)
+        self.assertEqual(summary["processed_row_count"], 4)
+
+        records = {
+            json.loads(line)["doc_id"]: json.loads(line)
+            for line in self.output_path.read_text(encoding="utf-8").strip().splitlines()
+        }
+        self.assertEqual(records["row:1"]["genuineness"], "uncertain")
+        self.assertEqual(records["row:1"]["source"], "lloa_request_failure")
+        self.assertGreater(records["row:1"]["original_length"], 0)
+
+    def test_resolve_max_input_chars_priority(self) -> None:
+        import os
+        from python_ai_worker.dataset_build.doc_genuineness import (
+            _resolve_max_input_chars,
+            _DEFAULT_MAX_INPUT_CHARS,
+            _DOC_GENUINENESS_MAX_INPUT_CHARS_ENV,
+        )
+
+        # payload > env > default
+        with patch.dict(os.environ, {_DOC_GENUINENESS_MAX_INPUT_CHARS_ENV: "5000"}):
+            self.assertEqual(_resolve_max_input_chars({"max_input_chars": 123}), 123)
+            self.assertEqual(_resolve_max_input_chars({}), 5000)
+            # invalid env → default
+        with patch.dict(os.environ, {_DOC_GENUINENESS_MAX_INPUT_CHARS_ENV: "0"}):
+            self.assertEqual(_resolve_max_input_chars({}), _DEFAULT_MAX_INPUT_CHARS)
+        # invalid payload → default (env 없음)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(_DOC_GENUINENESS_MAX_INPUT_CHARS_ENV, None)
+            self.assertEqual(
+                _resolve_max_input_chars({"max_input_chars": -5}), _DEFAULT_MAX_INPUT_CHARS
+            )
 
 
 class DocGenuinenessRenderTests(unittest.TestCase):
