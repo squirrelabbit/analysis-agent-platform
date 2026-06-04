@@ -15,6 +15,7 @@ from python_ai_worker.planner.recipes import (
     RECIPE_SPECS,
     RecipeError,
     TOP_N_SPEC,
+    expand_recipes,
     lower_distribution,
     lower_event_window_count,
     lower_recipe,
@@ -345,6 +346,52 @@ class TopNLoweringTests(unittest.TestCase):
     def test_title_optional(self) -> None:
         steps = lower_top_n(_top_n_step(title=None))
         self.assertNotIn("title", steps[-1]["params"])
+
+
+class ExpandRecipesTests(unittest.TestCase):
+    """R1 — expand_recipes: distribution만 runtime 활성, 나머지는 거절, atomic no-op."""
+
+    def test_distribution_recipe_expanded_and_valid(self) -> None:
+        plan = {"plan_version": "v2", "steps": [_distribution_step()]}
+        out = expand_recipes(plan)
+        self.assertEqual([s["skill"] for s in out["steps"]], ["aggregate", "calculate", "present"])
+        self.assertEqual(collect_plan_issues(out), [])
+        # 원본 plan 비파괴
+        self.assertEqual(plan["steps"][0]["skill"], "distribution")
+
+    def test_atomic_only_plan_is_noop(self) -> None:
+        plan = {
+            "plan_version": "v2",
+            "steps": [
+                {"id": "f", "skill": "filter", "params": {"input": "clauses", "column": "sentiment", "operator": "eq", "value": "positive"}},
+                {"id": "out", "skill": "present", "params": {"input": "f", "format": "table"}},
+            ],
+        }
+        out = expand_recipes(plan)
+        self.assertIs(out, plan)  # recipe 없음 → 동일 객체(완전 no-op)
+
+    def test_mixed_recipe_and_atomic_preserves_order(self) -> None:
+        plan = {"plan_version": "v2", "steps": [
+            _distribution_step(),
+            {"id": "tail", "skill": "summarize", "params": {"input": "x", "focus": "y"}},
+        ]}
+        out = expand_recipes(plan)
+        self.assertEqual([s["skill"] for s in out["steps"]], ["aggregate", "calculate", "present", "summarize"])
+
+    def test_event_window_count_rejected_in_r1(self) -> None:
+        plan = {"plan_version": "v2", "steps": [_event_window_step()]}
+        with self.assertRaises(RecipeError):
+            expand_recipes(plan)
+
+    def test_top_n_rejected_in_r1(self) -> None:
+        plan = {"plan_version": "v2", "steps": [_top_n_step()]}
+        with self.assertRaises(RecipeError):
+            expand_recipes(plan)
+
+    def test_bad_distribution_params_raises(self) -> None:
+        plan = {"plan_version": "v2", "steps": [_distribution_step(group_by=[])]}
+        with self.assertRaises(RecipeError):
+            expand_recipes(plan)
 
 
 class RecipeRegistryTests(unittest.TestCase):

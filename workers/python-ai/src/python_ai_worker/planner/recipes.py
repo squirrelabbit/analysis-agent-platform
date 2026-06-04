@@ -414,6 +414,44 @@ _LOWERERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
 }
 
 
+# R1 (silverone 2026-06-04) — runtime 실행이 허용된 recipe. R1은 distribution만.
+# event_window_count / top_n은 R0 lowering·테스트는 유지하되 실행 wiring은 후속이라,
+# plan에 들어오면 expand_recipes가 RecipeError로 거절한다(조용히 통과 금지).
+_RUNTIME_ENABLED_RECIPES: frozenset[str] = frozenset({"distribution"})
+
+
+def expand_recipes(plan: dict[str, Any]) -> dict[str, Any]:
+    """plan의 recipe step을 실행 전 atomic step으로 expand한다 (R1 wiring).
+
+    - recipe step이 없으면 **완전 no-op** (원본 plan 그대로 반환).
+    - runtime 허용 recipe(distribution)는 lower_recipe로 atomic 치환.
+    - 허용 안 된 recipe(event_window_count/top_n)는 RecipeError (R1 미활성).
+    - non-recipe(atomic) step은 그대로. invalid recipe params는 RecipeError.
+
+    expand 결과는 호출부(execute_analyze_plan)에서 기존 validator(execute_plan)로
+    재검증된다 — recipe step은 여기서 사라지므로 validator는 atomic만 본다."""
+    if not isinstance(plan, dict):
+        return plan
+    steps = plan.get("steps")
+    if not isinstance(steps, list):
+        return plan
+    if not any(isinstance(s, dict) and s.get("skill") in RECIPE_SPECS for s in steps):
+        return plan  # recipe 없음 → no-op
+
+    new_steps: list[Any] = []
+    for step in steps:
+        skill = step.get("skill") if isinstance(step, dict) else None
+        if skill in RECIPE_SPECS:
+            if skill not in _RUNTIME_ENABLED_RECIPES:
+                raise RecipeError(
+                    f"recipe '{skill}' is not enabled for execution yet (R1: distribution only)"
+                )
+            new_steps.extend(lower_recipe(step))
+        else:
+            new_steps.append(step)
+    return {**plan, "steps": new_steps}
+
+
 __all__ = [
     "RecipeError",
     "RecipeParamSpec",
@@ -426,4 +464,5 @@ __all__ = [
     "lower_distribution",
     "lower_event_window_count",
     "lower_top_n",
+    "expand_recipes",
 ]
