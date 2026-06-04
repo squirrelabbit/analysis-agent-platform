@@ -129,6 +129,48 @@ class MainHardeningHTTPTests(unittest.TestCase):
         self.assertEqual(body["status"], "ready")
         self.assertTrue(body["checks"]["any_llm_key"])
 
+    @classmethod
+    def _metric_value_or_zero(cls, metrics_text: str, name: str) -> int:
+        try:
+            return cls._metric_value(metrics_text, name)
+        except AssertionError:
+            return 0
+
+    def test_metrics_request_counters_by_task_status(self) -> None:
+        server = self._start()
+        ok_key = 'python_worker_requests_total{task="analyze",status="ok"}'
+        bad_key = 'python_worker_requests_total{task="analyze",status="bad_request"}'
+        err_key = 'python_worker_requests_total{task="analyze",status="error"}'
+        dur_key = 'python_worker_request_duration_ms_count{task="analyze"}'
+
+        _, base = self._get(server, "/metrics")
+        ok0 = self._metric_value_or_zero(base, ok_key)
+        bad0 = self._metric_value_or_zero(base, bad_key)
+        err0 = self._metric_value_or_zero(base, err_key)
+        dur0 = self._metric_value_or_zero(base, dur_key)
+
+        # 성공 → ok + duration count.
+        with patch("python_ai_worker.main.run_task", return_value={"ok": True}):
+            code, _, _ = self._post(server, "/tasks/analyze", json.dumps({"a": 1}))
+        self.assertEqual(code, 200)
+        # ValueError → 400 bad_request.
+        with patch("python_ai_worker.main.run_task", side_effect=ValueError("bad input")):
+            code, _, _ = self._post(server, "/tasks/analyze", json.dumps({"a": 1}))
+        self.assertEqual(code, 400)
+        # Exception → 500 error.
+        with patch("python_ai_worker.main.run_task", side_effect=RuntimeError("boom")):
+            code, _, _ = self._post(server, "/tasks/analyze", json.dumps({"a": 1}))
+        self.assertEqual(code, 500)
+
+        _, after = self._get(server, "/metrics")
+        self.assertEqual(self._metric_value(after, ok_key), ok0 + 1)
+        self.assertEqual(self._metric_value(after, bad_key), bad0 + 1)
+        self.assertEqual(self._metric_value(after, err_key), err0 + 1)
+        # duration count는 처리된 3건 모두 증가.
+        self.assertEqual(self._metric_value(after, dur_key), dur0 + 3)
+        # duration sum 라인도 노출돼야 한다(값은 가변).
+        self.assertIn('python_worker_request_duration_ms_sum{task="analyze"}', after)
+
     def test_readyz_not_ready_without_llm_key(self) -> None:
         server = self._start(_cfg(anthropic_api_key=None, lloa_api_key=None))
         status, data = self._get(server, "/readyz")
