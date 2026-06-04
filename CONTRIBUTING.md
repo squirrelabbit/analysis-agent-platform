@@ -3,7 +3,7 @@
 > 이 문서는 **PR 보내기 직전** 5분 안에 훑어보는 체크리스트다.
 > 저장소 공통 규칙·트랙 메모는 [`CLAUDE.md`](./CLAUDE.md), 의사결정 기록은 Obsidian vault `01-Projects/분석지원시스템/검토-raw/`에 둔다.
 
-δ-1~δ-4 (2026-05-21)로 옛 plan layer(SkillPlan / executions / report_drafts / 13 hardcoded skill)는 모두 삭제됐다. 현재 분석은 LLM-driven **planner_v2** + 결정론적 **executor_v2**의 2-계층 구조다. 본 체크리스트도 그 기준으로 정리돼 있다.
+δ-1~δ-4 (2026-05-21)로 옛 plan layer(SkillPlan / executions / report_drafts / 13 hardcoded skill)는 모두 삭제됐다. 현재 분석은 LLM-driven **planner** + 결정론적 **executor**의 2-계층 구조다. 본 체크리스트도 그 기준으로 정리돼 있다.
 
 ---
 
@@ -15,13 +15,13 @@ plan_v2 skill 카탈로그는 **코드로 잠금**돼 있다 (`config/skill_bund
 
 | # | 위치 | 검증 명령 |
 |---|---|---|
-| 1 | `workers/python-ai/src/python_ai_worker/planner_v2/schema.py:SKILL_CATALOG` entry | `grep -n "^SKILL_CATALOG" workers/python-ai/src/python_ai_worker/planner_v2/schema.py` |
-| 2 | `workers/python-ai/src/python_ai_worker/planner_v2/validator.py` skill-specific 검사 규칙 | `grep -n "_<NAME>_REQUIRED_KEYS\|def _validate_<name>" workers/python-ai/src/python_ai_worker/planner_v2/validator.py` |
-| 3 | `workers/python-ai/src/python_ai_worker/executor_v2/skills/<name>.py` 빌더 | `ls workers/python-ai/src/python_ai_worker/executor_v2/skills/` |
-| 4 | `workers/python-ai/src/python_ai_worker/executor_v2/runner.py:SKILL_BUILDERS` dispatch | `grep -n "SKILL_BUILDERS" workers/python-ai/src/python_ai_worker/executor_v2/runner.py` |
-| 5 | `workers/python-ai/tests/test_planner_v2_*.py` + `test_executor_v2_*.py` 잠금 테스트 | `PYTHONPATH=workers/python-ai/src python3.11 -m unittest discover -s workers/python-ai/tests -p 'test_planner_v2_*.py' -p 'test_executor_v2_*.py'` |
+| 1 | `workers/python-ai/src/python_ai_worker/planner/schema.py:SKILL_CATALOG` entry | `grep -n "^SKILL_CATALOG" workers/python-ai/src/python_ai_worker/planner/schema.py` |
+| 2 | `workers/python-ai/src/python_ai_worker/planner/validator.py` skill-specific 검사 규칙 | `grep -n "_<NAME>_REQUIRED_KEYS\|def _validate_<name>" workers/python-ai/src/python_ai_worker/planner/validator.py` |
+| 3 | `workers/python-ai/src/python_ai_worker/executor/skills/<name>.py` 빌더 | `ls workers/python-ai/src/python_ai_worker/executor/skills/` |
+| 4 | `workers/python-ai/src/python_ai_worker/executor/runner.py:SKILL_BUILDERS` dispatch | `grep -n "SKILL_BUILDERS" workers/python-ai/src/python_ai_worker/executor/runner.py` |
+| 5 | `workers/python-ai/tests/test_planner_*.py` + `test_executor_*.py` 잠금 테스트 | `PYTHONPATH=workers/python-ai/src python3.11 -m unittest discover -s workers/python-ai/tests -p 'test_planner_*.py' -p 'test_executor_*.py'` |
 
-원칙: planner_v2 prompt가 새 skill을 출력할 수 있도록 prompt 본문도 함께 갱신 (`config/prompts/planner-v2-anthropic-v1.md`). 새 skill이 prompt에 안 보이면 LLM은 사용하지 않는다.
+원칙: planner prompt가 새 skill을 출력할 수 있도록 prompt 본문도 함께 갱신 (`config/prompts/planner-v2-anthropic-v1.md`). 새 skill이 prompt에 안 보이면 LLM은 사용하지 않는다.
 
 ### 1-B. dataset_build internal task 추가/변경
 
@@ -46,13 +46,13 @@ dataset_build·관리·평가성 *내부 실행 task*는 `config/task_registry.j
 
 ### 2-1. plan_v2 validator는 skill 카탈로그 밖을 silent drop하지 않는다
 
-- 위치: `workers/python-ai/src/python_ai_worker/planner_v2/validator.py`
-- 잠금 테스트: `test_planner_v2_validator.py`
+- 위치: `workers/python-ai/src/python_ai_worker/planner/validator.py`
+- 잠금 테스트: `test_planner_validator.py`
 - **금지**: SKILL_CATALOG에 없는 skill_name을 plan에 넣으면 `PlannerValidationError`로 fail-loud. silently 통과시키지 마라.
 
 ### 2-2. DuckDB SQL identifier 안전성
 
-- 위치: `executor_v2/context.py` + `executor_v2/skills/*.py` (column / alias 검사)
+- 위치: `executor/context.py` + `executor/skills/*.py` (column / alias 검사)
 - 잠금: identifier가 `^[a-zA-Z_][a-zA-Z0-9_]*$` regex 통과해야 함. LLM이 임의 표현식을 넣어도 SQL injection 안 됨.
 - **금지**: 새 skill 빌더에서 `f"SELECT {column}"` 식으로 검증 없이 string interpolation 하지 마라.
 
@@ -68,9 +68,9 @@ dataset_build·관리·평가성 *내부 실행 task*는 `config/task_registry.j
 - 잠금: 모든 nested object에 `additionalProperties:false` 자동 강제. Anthropic structured-output strict mode가 missing/`true`면 HTTP 400 거부.
 - **금지**: schema를 직접 만들어 `create_json_response`에 넘기지 마라 — helper를 통하지 않으면 missing 검증으로 prod 400 실패.
 
-### 2-5. planner_v2 prompt에 `{{today}}` placeholder 주입
+### 2-5. planner prompt에 `{{today}}` placeholder 주입
 
-- 위치: `planner_v2/prompt.py:render_planner_v2_prompt`
+- 위치: `planner/prompt.py:render_planner_prompt`
 - 잠금: today가 비어 있으면 자동으로 `datetime.utcnow().date()` 사용.
 - **금지**: prompt 본문에서 `{{today}}` placeholder 제거 금지. LLM 학습 cutoff과 운영 시점이 달라 "작년/올해" 같은 상대 시간 해석이 깨진다.
 
@@ -148,4 +148,4 @@ PR 메시지에 다음 명시 권장:
 | `docs/api/openapi.yaml` | API 계약 변경 시 |
 | `docs/skill/skill_registry.md` / `skill_implementation_status.md` | plan_v2 skill / dataset_build task 추가·변경 시 |
 | `config/task_registry.json` | dataset_build·internal task 추가/변경 시 (ADR-017) |
-| `workers/python-ai/src/python_ai_worker/planner_v2/schema.py` | plan_v2 skill 카탈로그 변경 시 |
+| `workers/python-ai/src/python_ai_worker/planner/schema.py` | plan_v2 skill 카탈로그 변경 시 |
