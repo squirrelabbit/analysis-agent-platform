@@ -17,6 +17,7 @@ step output schema 추적은 v2 후속 작업 (executor 통합 시).
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Callable
 
 from ..sql_identifiers import SAFE_SQL_IDENTIFIER_RE
@@ -264,8 +265,8 @@ def collect_plan_issues(plan: dict[str, Any]) -> list[ValidationIssue]:
 
         # Recipe step. validator 활성 recipe는 unknown으로 거절하지 않고 recipe
         # param을 검증한다. recipe step은 planner output에 남고, 실행 시
-        # expand_recipes가 atomic으로 lower한다. 미활성 recipe(event_window_count)는
-        # 아래 catalog 분기로 떨어져 skill_unknown으로 거절된다.
+        # expand_recipes가 atomic으로 lower한다. 미활성 recipe는 아래 catalog 분기로
+        # 떨어져 skill_unknown으로 거절된다.
         if skill_name in RUNTIME_ENABLED_RECIPES:
             params = step.get("params")
             if not isinstance(params, dict):
@@ -1105,6 +1106,8 @@ def _validate_summarize(params: dict[str, Any], ctx: _StepContext) -> None:
 def _validate_recipe_params(skill_name: str, params: dict[str, Any], ctx: _StepContext) -> None:
     if skill_name == "distribution":
         _validate_distribution_recipe(params, ctx)
+    elif skill_name == "event_window_count":
+        _validate_event_window_count_recipe(params, ctx)
     elif skill_name == "top_n":
         _validate_top_n_recipe(params, ctx)
     else:
@@ -1157,6 +1160,85 @@ def _validate_distribution_recipe(params: dict[str, Any], ctx: _StepContext) -> 
         ctx.issue(
             code="params.recipe_title_invalid",
             message="distribution.title must be a string or null",
+        )
+
+
+def _validate_event_window_count_recipe(params: dict[str, Any], ctx: _StepContext) -> None:
+    if not _check_required_keys(params, ("input", "event_date"), ctx):
+        return
+
+    input_ref = params.get("input")
+    date_column = params.get("date_column")
+    if date_column is None:
+        date_column_name = "created_at"
+    elif isinstance(date_column, str) and date_column.strip():
+        date_column_name = date_column.strip()
+    else:
+        date_column_name = "created_at"
+        ctx.issue(
+            code="params.recipe_date_column_invalid",
+            message="event_window_count.date_column must be a non-empty string",
+        )
+
+    _check_input_ref(input_ref, "input", ctx, require_column=date_column_name)
+    input_name = str(input_ref or "").strip()
+    column_type = RESERVED_COLUMN_TYPES.get(input_name, {}).get(date_column_name)
+    if column_type and column_type not in TIMESTAMP_COLUMN_TYPES:
+        ctx.issue(
+            code="params.recipe_date_column_invalid",
+            message=(
+                "event_window_count.date_column must reference a timestamp/date column "
+                f"(got {date_column_name}: {column_type})"
+            ),
+        )
+
+    event_date = params.get("event_date")
+    if not isinstance(event_date, str) or not event_date.strip():
+        ctx.issue(
+            code="params.recipe_event_date_invalid",
+            message="event_window_count.event_date must be YYYY-MM-DD",
+        )
+    else:
+        try:
+            date.fromisoformat(event_date.strip())
+        except ValueError:
+            ctx.issue(
+                code="params.recipe_event_date_invalid",
+                message="event_window_count.event_date must be YYYY-MM-DD",
+            )
+
+    for key in ("before_days", "after_days"):
+        value = params.get(key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+            ctx.issue(
+                code="params.recipe_window_invalid",
+                message=f"event_window_count.{key} must be a non-negative integer",
+            )
+
+    grain = params.get("grain")
+    if grain is not None and str(grain).strip() != "day":
+        ctx.issue(
+            code="params.recipe_grain_unsupported",
+            message="event_window_count.grain only supports 'day'",
+        )
+
+    count_column = params.get("count_column")
+    if count_column is not None and (not isinstance(count_column, str) or not count_column.strip()):
+        ctx.issue(
+            code="params.recipe_column_name_invalid",
+            message="event_window_count.count_column must be a non-empty string",
+        )
+    elif isinstance(count_column, str) and count_column.strip() == date_column_name:
+        ctx.issue(
+            code="params.recipe_column_name_invalid",
+            message="event_window_count.count_column must not collide with date_column",
+        )
+
+    title = params.get("title")
+    if title is not None and not isinstance(title, str):
+        ctx.issue(
+            code="params.recipe_title_invalid",
+            message="event_window_count.title must be a string or null",
         )
 
 

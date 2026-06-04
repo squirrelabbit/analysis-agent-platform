@@ -76,10 +76,10 @@ def execute_analyze_plan(
             reuse_metadata=reuse_metadata,
         )
 
-    # Skill Contract v2 — runtime-enabled recipe(distribution/top_n)를
+    # Skill Contract v2 — runtime-enabled recipe(distribution/event_window_count/top_n)를
     # 실행 직전 deterministic 하게 atomic step으로 expand. recipe가 없으면 no-op
-    # (기존 atomic plan 무영향). 미활성 recipe(event_window_count)는 RecipeError
-    # → 400. expand 후 execute_plan의 기존 validator가 atomic plan을 재검증한다.
+    # (기존 atomic plan 무영향). 미활성 recipe는 RecipeError → 400. expand 후
+    # execute_plan의 기존 validator가 atomic plan을 재검증한다.
     plan = expand_recipes(plan)
 
     if artifact_paths is None:

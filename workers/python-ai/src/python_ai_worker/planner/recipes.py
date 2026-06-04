@@ -14,7 +14,7 @@ keyword_summary는 키워드 atomic 부재로 제외.
 event_window_count 전제 / 정책 (silverone 2026-06-04):
   - **grain=day만 지원.** 현재 atomic skill에는 date_trunc/date_bucket이 없다.
     clean 단계 산출 ``created_at``이 day-granular(자정)라 ``group_by [created_at]``이
-    곧 일자 집계로 동작한다. week/month는 date_trunc가 필요해 R0에서 제외(지연).
+    곧 일자 집계로 동작한다. week/month는 date_trunc가 필요해 제외(지연).
   - **window 경계는 inclusive 양끝**: ``filter.between [event-before_days,
     event+after_days]`` (DuckDB BETWEEN inclusive). 즉 before=after=7이면 기준일
     포함 총 15일(08-08 .. 08-22). 결과 row 수는 그 구간에서 *데이터가 있는 날 수*라
@@ -413,18 +413,19 @@ _LOWERERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
 }
 
 
-# Runtime 실행 + validator 허용 recipe. event_window_count는 lowering·테스트는 유지하되
-# 아직 실행하지 않는다. validator/executor가 같은 이 집합을 참조해
+# Runtime 실행 + validator 허용 recipe. validator/executor가 같은 이 집합을 참조해
 # "validator 허용 == runtime 실행 가능"을 단일 source로 보장한다.
-RUNTIME_ENABLED_RECIPES: frozenset[str] = frozenset({"distribution", "top_n"})
+RUNTIME_ENABLED_RECIPES: frozenset[str] = frozenset(
+    {"distribution", "event_window_count", "top_n"}
+)
 
 
 def expand_recipes(plan: dict[str, Any]) -> dict[str, Any]:
     """plan의 recipe step을 실행 전 atomic step으로 expand한다.
 
     - recipe step이 없으면 **완전 no-op** (원본 plan 그대로 반환).
-    - runtime 허용 recipe(distribution/top_n)는 lower_recipe로 atomic 치환.
-    - 허용 안 된 recipe(event_window_count)는 RecipeError.
+    - runtime 허용 recipe(distribution/event_window_count/top_n)는 lower_recipe로 atomic 치환.
+    - 허용 안 된 recipe는 RecipeError.
     - non-recipe(atomic) step은 그대로. invalid recipe params는 RecipeError.
 
     expand 결과는 호출부(execute_analyze_plan)에서 기존 validator(execute_plan)로
