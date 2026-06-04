@@ -14,6 +14,11 @@ import (
 	"analysis-support-platform/control-plane/internal/domain"
 )
 
+// defaultPythonAITaskTimeout — SetPythonAITaskTimeout 미주입 시 fallback.
+// config default(PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC=120)와 동일하게 둬서
+// wiring을 안 거치는 test 경로도 기존과 같은 동작을 갖게 한다.
+const defaultPythonAITaskTimeout = 120 * time.Second
+
 // analysis API 모델 (silverone 2026-05-26, vault: analysis_api_model_2026-05-26)
 //
 // 중심 객체는 `/analyze` endpoint가 아니라 analysis_thread + analysis_message +
@@ -266,7 +271,11 @@ func (s *DatasetService) postPythonAITask(ctx context.Context, path string, payl
 		return nil, fmt.Errorf("analyze request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 120 * time.Second}
+	timeout := s.pythonAITaskTimeout
+	if timeout <= 0 {
+		timeout = defaultPythonAITaskTimeout
+	}
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("analyze worker call: %w", err)

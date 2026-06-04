@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"analysis-support-platform/control-plane/internal/config"
 	"analysis-support-platform/control-plane/internal/displaytime"
@@ -48,6 +49,7 @@ func NewServer(cfg config.Config) *Server {
 	}
 	server.datasetService.SetPromptTemplatesDir(cfg.PromptTemplatesDir)
 	server.datasetService.SetBuildJobStarter(starter)
+	server.datasetService.SetPythonAITaskTimeout(time.Duration(cfg.PythonAIWorkerHTTPTimeoutSec) * time.Second)
 	server.routes()
 	return server
 }
