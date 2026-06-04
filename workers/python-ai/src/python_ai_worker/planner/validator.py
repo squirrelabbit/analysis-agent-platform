@@ -37,6 +37,7 @@ from .schema import (
     TIMESTAMP_COLUMN_TYPES,
 )
 from .skill_specs import CALCULATE_SPEC
+from .recipes import RUNTIME_ENABLED_RECIPES
 
 
 # step id는 executor에서 DuckDB temp view 이름으로 직접 사용된다.
@@ -237,6 +238,33 @@ def collect_plan_issues(plan: dict[str, Any]) -> list[ValidationIssue]:
                     step_index=index,
                 )
             )
+            continue
+
+        # R2a (silverone 2026-06-04) — recipe step. validator 활성 recipe(현재
+        # distribution만)는 unknown으로 거절하지 않고 recipe param을 검증한다. recipe
+        # step은 planner output에 남고, 실행 시 R1 expand_recipes가 atomic으로 lower
+        # 한다. 미활성 recipe(event_window_count/top_n)는 아래 catalog 분기로 떨어져
+        # skill_unknown으로 거절된다.
+        if skill_name in RUNTIME_ENABLED_RECIPES:
+            params = step.get("params")
+            if not isinstance(params, dict):
+                issues.append(
+                    ValidationIssue(
+                        code="step.params_not_object",
+                        message="step params must be a JSON object",
+                        step_id=step_id,
+                        step_index=index,
+                    )
+                )
+                continue
+            recipe_ctx = _StepContext(
+                step_id=step_id,
+                step_index=index,
+                seen_ids=seen_ids,
+                step_lookup=step_lookup,
+                issues=issues,
+            )
+            _validate_recipe_params(skill_name, params, recipe_ctx)
             continue
 
         spec = SKILL_CATALOG.get(skill_name)
@@ -1037,6 +1065,65 @@ def _validate_summarize(params: dict[str, Any], ctx: _StepContext) -> None:
     focus = str(params.get("focus") or "").strip()
     if not focus:
         ctx.issue(code="params.focus_empty", message="summarize.focus must not be empty")
+
+
+# ===== recipe param validation (R2a, silverone 2026-06-04) =====
+#
+# recipe step은 planner output에 남고 실행 시 expand_recipes가 atomic으로 lower한다
+# (안 ii). validator는 recipe param만 검증한다 — atomic 규칙은 lower 후 atomic step에
+# 적용된다(R0 lowering 테스트가 lowered plan의 validator 통과를 잠금). 현재 distribution만.
+
+
+def _validate_recipe_params(skill_name: str, params: dict[str, Any], ctx: _StepContext) -> None:
+    if skill_name == "distribution":
+        _validate_distribution_recipe(params, ctx)
+    # 다른 recipe를 validator 활성화할 때 분기 추가 (RUNTIME_ENABLED_RECIPES와 동기).
+
+
+def _validate_distribution_recipe(params: dict[str, Any], ctx: _StepContext) -> None:
+    if not _check_required_keys(params, ("input",), ctx):
+        return
+    _check_input_ref(params.get("input"), "input", ctx)
+
+    group_by = params.get("group_by")
+    if (
+        not isinstance(group_by, list)
+        or not group_by
+        or not all(isinstance(c, str) and c.strip() for c in group_by)
+    ):
+        ctx.issue(
+            code="params.recipe_group_by_invalid",
+            message="distribution.group_by must be a non-empty list of column names",
+        )
+
+    metric = params.get("metric")
+    if metric is not None and str(metric).strip() != "count":
+        ctx.issue(
+            code="params.recipe_metric_unsupported",
+            message="distribution.metric only supports 'count'",
+        )
+
+    include_share = params.get("include_share")
+    if include_share is not None and not isinstance(include_share, bool):
+        ctx.issue(
+            code="params.recipe_include_share_invalid",
+            message="distribution.include_share must be a boolean",
+        )
+
+    for key in ("count_column", "share_column"):
+        value = params.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            ctx.issue(
+                code="params.recipe_column_name_invalid",
+                message=f"distribution.{key} must be a non-empty string",
+            )
+
+    title = params.get("title")
+    if title is not None and not isinstance(title, str):
+        ctx.issue(
+            code="params.recipe_title_invalid",
+            message="distribution.title must be a string or null",
+        )
 
 
 # ===== schema inference (prefix-2) =====

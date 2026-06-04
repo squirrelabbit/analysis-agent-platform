@@ -414,10 +414,12 @@ _LOWERERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
 }
 
 
-# R1 (silverone 2026-06-04) — runtime 실행이 허용된 recipe. R1은 distribution만.
-# event_window_count / top_n은 R0 lowering·테스트는 유지하되 실행 wiring은 후속이라,
-# plan에 들어오면 expand_recipes가 RecipeError로 거절한다(조용히 통과 금지).
-_RUNTIME_ENABLED_RECIPES: frozenset[str] = frozenset({"distribution"})
+# R1/R2 (silverone 2026-06-04) — runtime 실행 + validator 허용 recipe. 현재
+# distribution만. event_window_count / top_n은 R0 lowering·테스트는 유지하되 실행·
+# validator wiring은 후속 — plan에 들어오면 expand_recipes는 RecipeError, validator는
+# skill_unknown으로 거절한다(조용히 통과 금지). validator/executor가 같은 이 집합을
+# 참조해 "validator 허용 == runtime 실행 가능"을 단일 source로 보장한다.
+RUNTIME_ENABLED_RECIPES: frozenset[str] = frozenset({"distribution"})
 
 
 def expand_recipes(plan: dict[str, Any]) -> dict[str, Any]:
@@ -442,7 +444,7 @@ def expand_recipes(plan: dict[str, Any]) -> dict[str, Any]:
     for step in steps:
         skill = step.get("skill") if isinstance(step, dict) else None
         if skill in RECIPE_SPECS:
-            if skill not in _RUNTIME_ENABLED_RECIPES:
+            if skill not in RUNTIME_ENABLED_RECIPES:
                 raise RecipeError(
                     f"recipe '{skill}' is not enabled for execution yet (R1: distribution only)"
                 )
@@ -465,4 +467,5 @@ __all__ = [
     "lower_event_window_count",
     "lower_top_n",
     "expand_recipes",
+    "RUNTIME_ENABLED_RECIPES",
 ]
