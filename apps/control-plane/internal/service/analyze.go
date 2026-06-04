@@ -34,53 +34,8 @@ import (
 // 응답을 passthrough하되 (project_id, dataset_id, version_id, mode) wrapper로
 // 감싼다. wire contract `plan_version: "v2"`는 유지.
 
-// AnalyzeRequest — 서비스 내부에서 두 모드 합쳐 처리하는 unified request.
-// HTTP 진입점은 path별로 모드 1개씩 분리 (K-안, 2026-05-22).
-type AnalyzeRequest struct {
-	Plan                json.RawMessage  `json:"plan,omitempty"`
-	UserQuestion        string           `json:"user_question,omitempty"`
-	ConversationContext []map[string]any `json:"conversation_context,omitempty"`
-	// silverone 2026-05-26 (ADR-020 PR-A) — reuse 분기에서 worker composer가
-	// reuse_applied 템플릿을 선택할 수 있도록 hint를 전달. 외부 caller는 채울 일
-	// 없음. tryReusePlan만 사용.
-	ReuseMetadata map[string]any `json:"-"`
-}
-
-// AnalyzeUserQuestionRequest — 화면 분석 path(/datasets/{did}/analyze)
-// request body. user_question만 받는다. plan 필드는 받지 않음.
-type AnalyzeUserQuestionRequest struct {
-	UserQuestion string `json:"user_question"`
-}
-
-// AnalyzeDebugRequest — version-specific path(/versions/{vid}/analyze) request
-// body. plan만 받는다 (debug/replay 전용). user_question 필드는 받지 않음.
-type AnalyzeDebugRequest struct {
-	Plan json.RawMessage `json:"plan"`
-}
-
-// AnalyzeResponse — Python worker 응답을 그대로 passthrough + 최소 metadata.
-type AnalyzeResponse struct {
-	ProjectID string          `json:"project_id"`
-	DatasetID string          `json:"dataset_id"`
-	VersionID string          `json:"version_id"`
-	Mode      string          `json:"mode"`
-	Result    json.RawMessage `json:"result"`
-}
-
-// AnalyzeArtifactPaths — Python worker에 inject되는 path map.
-type analyzeArtifactPaths struct {
-	Docs        string
-	Clauses     string
-	Genuineness string
-}
-
-func (p analyzeArtifactPaths) asPayload() map[string]string {
-	return map[string]string{
-		"docs":        p.Docs,
-		"clauses":     p.Clauses,
-		"genuineness": p.Genuineness,
-	}
-}
+// analyze 데이터 계약 타입(AnalyzeRequest / AnalyzeResponse / analyzeArtifactPaths 등)은
+// analyze_types.go로 분리했다 (silverone 2026-06-04, 구조 정리). 이 파일은 로직만 담는다.
 
 // ExecuteAnalyzeOnActiveVersion — analysis_thread 흐름의 첫 turn 내부 진입점.
 // dataset의 active version을 1회 resolve해 ExecuteAnalyze에 위임한다. caller는
