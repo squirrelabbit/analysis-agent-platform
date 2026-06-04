@@ -36,6 +36,10 @@ type DatasetService struct {
 	profileRegistry     *datasetProfileRegistry
 	buildJobStarter     workflows.Starter
 	httpClient          *http.Client
+	// silverone 2026-06-04 — analyze_v2 worker 호출 timeout. config의
+	// PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC를 SetPythonAITaskTimeout으로 주입한다.
+	// 미설정(0 이하)이면 postPythonAITask가 defaultPythonAITaskTimeout으로 fallback.
+	pythonAITaskTimeout time.Duration
 	// 5/11 (silverone): dataset_build HTTP 호출은 PythonBuildClient로 분리.
 	// 기존 `runWorkerTask` generic helper는 dataset_build_*.go가 직접
 	// 호출하지 않고 client method를 호출하도록 점진 마이그레이션 중.
@@ -86,6 +90,15 @@ func (s *DatasetService) SetDatasetProfilesPath(path string) error {
 
 func (s *DatasetService) SetBuildJobStarter(starter workflows.Starter) {
 	s.buildJobStarter = starter
+}
+
+// SetPythonAITaskTimeout — analyze worker 호출 HTTP timeout 주입.
+// config의 PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC를 wiring 시점에 넘긴다.
+// 0 이하면 무시(postPythonAITask가 default로 fallback).
+func (s *DatasetService) SetPythonAITaskTimeout(d time.Duration) {
+	if d > 0 {
+		s.pythonAITaskTimeout = d
+	}
 }
 
 func (s *DatasetService) CreateDataset(projectID string, input domain.DatasetCreateRequest) (domain.Dataset, error) {

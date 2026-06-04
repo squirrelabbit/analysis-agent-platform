@@ -7,8 +7,12 @@ import type {
   AnalyzeUserQuestionRequest,
 } from "../models";
 
-// 분석은 sync 실행이라 기본 10s를 넘길 수 있어 별도 긴 타임아웃을 둔다.
-const ANALYSIS_TIMEOUT_MS = 120_000;
+// 분석은 sync 실행이라 전역 10s를 넘긴다 → 별도 per-request 타임아웃.
+// 백엔드 worker 호출 timeout(PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC, default 120s)
+// 보다 약간 크게 둬서, 한도 초과 시 프론트가 먼저 끊지 않고 백엔드가 구조화된
+// 에러를 반환하도록 한다. 운영에서 backend timeout을 크게 올리면 이 값도 함께
+// 올려야 한다. (silverone 2026-06-04)
+const ANALYSIS_TIMEOUT_MS = 130_000;
 
 export const chatApi = {
   listThreads: (projectId: string, datasetId: string) =>
