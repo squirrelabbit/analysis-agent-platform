@@ -309,6 +309,45 @@ func TestProjectAnalyzePlanAttachesDisplayToEachStep(t *testing.T) {
 	}
 }
 
+// silverone 2026-06-04 (Skill Contract v2 Step 3) — worker(Python)가 채운
+// step.display는 Go가 재계산하지 않고 그대로 pass-through한다.
+func TestProjectAnalyzePlanPassesThroughWorkerDisplay(t *testing.T) {
+	workerDisplay := map[string]any{"label": "워커 합성", "expression": "FROM-WORKER"}
+	plan := map[string]any{
+		"plan_version": "v2",
+		"steps": []any{
+			// Go라면 "조건 필터"를 만들겠지만, worker display가 있으면 그게 우선.
+			map[string]any{
+				"id":      "f",
+				"skill":   "filter",
+				"params":  map[string]any{"column": "c", "operator": "eq", "value": "x"},
+				"display": workerDisplay,
+			},
+		},
+	}
+	got := projectAnalyzePlan(plan)
+	steps := got["steps"].([]map[string]any)
+	display := steps[0]["display"].(map[string]any)
+	if display["label"] != "워커 합성" || display["expression"] != "FROM-WORKER" {
+		t.Errorf("worker display must pass through, got %v", display)
+	}
+}
+
+// worker display가 없으면 기존 Go builder로 fallback한다 (이번 PR에서 유지).
+func TestProjectAnalyzePlanFallsBackToGoBuilderWhenNoWorkerDisplay(t *testing.T) {
+	plan := map[string]any{
+		"steps": []any{
+			rawStep("filter", map[string]any{"column": "c", "operator": "eq", "value": "x"}),
+		},
+	}
+	got := projectAnalyzePlan(plan)
+	steps := got["steps"].([]map[string]any)
+	display := steps[0]["display"].(map[string]any)
+	if display["expression"] != "WHERE c = 'x'" {
+		t.Errorf("fallback Go builder expected, got %v", display)
+	}
+}
+
 func TestProjectAnalyzePlanOmitsDisplayForUnknownSkill(t *testing.T) {
 	plan := map[string]any{
 		"plan_version": "v2",

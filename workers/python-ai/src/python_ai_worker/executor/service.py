@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ..composer import compose_answer
+from ..planner.step_display import plan_with_step_display
 from ..planner import (
     DatasetSpecificColumn,
     PlanValidationError,
@@ -170,7 +171,7 @@ def _build_response(
         # 본문이 응답에 명시적으로 노출돼야 한다. planner.attempts[].raw는
         # 디버그용이라 안정 path가 아니다. caller(Go control plane)는 run.result_json.plan
         # 경로로 plan을 조회한다.
-        "plan": plan,
+        "plan": plan_with_step_display(plan),
         "artifact_paths": {
             "docs": str(artifact_paths.docs),
             "clauses": str(artifact_paths.clauses),
@@ -206,7 +207,7 @@ def _build_reject_response(
     return {
         "dataset_version_id": dataset_version_id,
         "plan_version": str(plan.get("plan_version") or "").strip(),
-        "plan": plan,
+        "plan": plan_with_step_display(plan),
         "artifact_paths": None,
         "steps": [],
         "present": None,
@@ -306,7 +307,7 @@ def _build_plan_response(
     return {
         "dataset_version_id": dataset_version_id,
         "plan_version": str(planner_result.plan.get("plan_version") or "").strip(),
-        "plan": planner_result.plan,
+        "plan": plan_with_step_display(planner_result.plan),
         "planner": {
             "prompt_version": planner_result.prompt_version,
             "attempts": planner_result.attempts,
