@@ -8,13 +8,24 @@ recipe = 자주 쓰는 분석 패턴의 high-level skill. planner가 atomic skil
 step들로 *lowering* 된다 (LLM 없음). atomic skill은 그대로 유지한다.
 
 **R0 범위 (runtime behavior 변화 0)**: spec 정의(distribution / event_window_count
-/ top_n) + **distribution lowering 함수 + 테스트**까지만. planner prompt /
-executor / Go / OpenAPI wiring 없음 — 아직 아무도 recipe를 내보내거나 실행하지
-않는다. event_window_count / top_n은 spec 골격만 두고 lowering은 미구현
-(``lower_recipe`` 호출 시 RecipeError).
+/ top_n) + **distribution / event_window_count lowering 함수 + 테스트**까지. planner
+prompt / executor / Go / OpenAPI wiring 없음 — 아직 아무도 recipe를 내보내거나
+실행하지 않는다. top_n은 spec 골격만 두고 lowering은 미구현(``lower_recipe`` 호출 시
+RecipeError).
+
+event_window_count R0 전제 / 정책 (silverone 2026-06-04):
+  - **grain=day만 지원.** 현재 atomic skill에는 date_trunc/date_bucket이 없다.
+    clean 단계 산출 ``created_at``이 day-granular(자정)라 ``group_by [created_at]``이
+    곧 일자 집계로 동작한다. week/month는 date_trunc가 필요해 R0에서 제외(지연).
+  - **window 경계는 inclusive 양끝**: ``filter.between [event-before_days,
+    event+after_days]`` (DuckDB BETWEEN inclusive). 즉 before=after=7이면 기준일
+    포함 총 15일(08-08 .. 08-22). 결과 row 수는 그 구간에서 *데이터가 있는 날 수*라
+    질문/데이터에 따라 13~15 등으로 달라진다(옛 13/14건은 planner가 경계를 매번 다르게
+    조립한 탓 — recipe가 경계를 결정적으로 고정한다).
 """
 
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Any, Callable
 
 
@@ -64,13 +75,14 @@ EVENT_WINDOW_COUNT_SPEC = RecipeSpec(
         RecipeParamSpec("input", required=True, desc="table_or_step_id"),
         RecipeParamSpec("event_date", required=True, desc="YYYY-MM-DD 기준일"),
         RecipeParamSpec("date_column", desc="string — 날짜 컬럼 (기본 created_at)"),
-        RecipeParamSpec("before_days", desc="int — 기준일 이전 일수"),
-        RecipeParamSpec("after_days", desc="int — 기준일 이후 일수"),
-        RecipeParamSpec("grain", desc="day|week (기본 day)"),
+        RecipeParamSpec("before_days", desc="int>=0 — 기준일 이전 일수 (기본 7)"),
+        RecipeParamSpec("after_days", desc="int>=0 — 기준일 이후 일수 (기본 7)"),
+        RecipeParamSpec("grain", desc="day (R0는 day만)"),
+        RecipeParamSpec("count_column", desc="string — count 결과 컬럼명 (기본 count)"),
         RecipeParamSpec("title", desc="string|null"),
     ),
     lowered_skills=("filter", "aggregate", "sort", "present"),
-    implemented=False,  # R0 미구현
+    implemented=True,
 )
 
 TOP_N_SPEC = RecipeSpec(
@@ -124,6 +136,15 @@ def _opt_str(params: dict[str, Any], key: str, default: str) -> str:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return default
+
+
+def _opt_nonneg_int(params: dict[str, Any], recipe: str, key: str, default: int) -> int:
+    value = params.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RecipeError(f"{recipe}.{key} must be a non-negative integer")
+    if value < 0:
+        raise RecipeError(f"{recipe}.{key} must be >= 0")
+    return value
 
 
 def lower_distribution(step: dict[str, Any]) -> list[dict[str, Any]]:
@@ -199,8 +220,83 @@ def lower_distribution(step: dict[str, Any]) -> list[dict[str, Any]]:
     return steps
 
 
+def lower_event_window_count(step: dict[str, Any]) -> list[dict[str, Any]]:
+    """event_window_count recipe → [filter(between), aggregate(by date), sort(asc), present].
+
+    grain=day만 지원(모듈 docstring 정책 참조). window 경계는 inclusive 양끝.
+    event_date ± days를 결정적으로 계산해 between 경계로 넣는다 — planner가 매번
+    틀리던 날짜 경계를 고정한다. step id는 recipe id에서 파생."""
+    params = step.get("params") or {}
+    if not isinstance(params, dict):
+        raise RecipeError("event_window_count.params must be an object")
+    base = str(step.get("id") or "event_window_count").strip() or "event_window_count"
+
+    input_ref = _required_str(params, "event_window_count", "input")
+    date_column = _opt_str(params, "date_column", "created_at")
+    count_col = _opt_str(params, "count_column", "count")
+
+    grain = _opt_str(params, "grain", "day")
+    if grain != "day":
+        raise RecipeError(f"event_window_count.grain '{grain}' not supported in R0 (day only)")
+
+    event_date = _required_str(params, "event_window_count", "event_date")
+    try:
+        event = date.fromisoformat(event_date)
+    except ValueError as exc:
+        raise RecipeError(
+            f"event_window_count.event_date must be YYYY-MM-DD; got {event_date!r}"
+        ) from exc
+
+    before_days = _opt_nonneg_int(params, "event_window_count", "before_days", 7)
+    after_days = _opt_nonneg_int(params, "event_window_count", "after_days", 7)
+    lower_bound = (event - timedelta(days=before_days)).isoformat()
+    upper_bound = (event + timedelta(days=after_days)).isoformat()
+
+    title = params.get("title")
+
+    window_id = f"{base}_window"
+    by_date_id = f"{base}_by_date"
+    sorted_id = f"{base}_sorted"
+    steps: list[dict[str, Any]] = [
+        {
+            "id": window_id,
+            "skill": "filter",
+            "params": {
+                "input": input_ref,
+                "column": date_column,
+                "operator": "between",
+                "value": [lower_bound, upper_bound],
+            },
+        },
+        {
+            "id": by_date_id,
+            "skill": "aggregate",
+            "params": {
+                "input": window_id,
+                "group_by": [date_column],
+                "metrics": [{"name": count_col, "function": "count", "column": "*"}],
+            },
+        },
+        {
+            "id": sorted_id,
+            "skill": "sort",
+            "params": {"input": by_date_id, "by": [date_column], "order": "asc"},
+        },
+    ]
+    present_params: dict[str, Any] = {
+        "input": sorted_id,
+        "format": "table",
+        "columns": [date_column, count_col],
+    }
+    if isinstance(title, str) and title.strip():
+        present_params["title"] = title.strip()
+    steps.append({"id": f"{base}_present", "skill": "present", "params": present_params})
+    return steps
+
+
 _LOWERERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "distribution": lower_distribution,
+    "event_window_count": lower_event_window_count,
 }
 
 
@@ -214,4 +310,5 @@ __all__ = [
     "TOP_N_SPEC",
     "lower_recipe",
     "lower_distribution",
+    "lower_event_window_count",
 ]

@@ -16,6 +16,7 @@ from python_ai_worker.planner.recipes import (
     RecipeError,
     TOP_N_SPEC,
     lower_distribution,
+    lower_event_window_count,
     lower_recipe,
 )
 from python_ai_worker.planner.validator import collect_plan_issues
@@ -125,20 +126,122 @@ class DistributionErrorTests(unittest.TestCase):
             lower_recipe(_distribution_step(metric="sum"))
 
 
+def _event_window_step(**param_overrides):
+    params = {
+        "input": "docs",
+        "date_column": "created_at",
+        "event_date": "2024-08-15",
+        "before_days": 7,
+        "after_days": 7,
+        "grain": "day",
+        "count_column": "count",
+        "title": "축제일 기준 전후 일주일 문서 발생량",
+    }
+    params.update(param_overrides)
+    return {"id": "festival_window_count", "skill": "event_window_count", "params": params}
+
+
+class EventWindowCountLoweringTests(unittest.TestCase):
+    def test_lowers_to_expected_atomic_steps(self) -> None:
+        steps = lower_recipe(_event_window_step())
+        self.assertEqual(steps, [
+            {
+                "id": "festival_window_count_window",
+                "skill": "filter",
+                "params": {
+                    "input": "docs",
+                    "column": "created_at",
+                    "operator": "between",
+                    "value": ["2024-08-08", "2024-08-22"],
+                },
+            },
+            {
+                "id": "festival_window_count_by_date",
+                "skill": "aggregate",
+                "params": {
+                    "input": "festival_window_count_window",
+                    "group_by": ["created_at"],
+                    "metrics": [{"name": "count", "function": "count", "column": "*"}],
+                },
+            },
+            {
+                "id": "festival_window_count_sorted",
+                "skill": "sort",
+                "params": {"input": "festival_window_count_by_date", "by": ["created_at"], "order": "asc"},
+            },
+            {
+                "id": "festival_window_count_present",
+                "skill": "present",
+                "params": {
+                    "input": "festival_window_count_sorted",
+                    "format": "table",
+                    "columns": ["created_at", "count"],
+                    "title": "축제일 기준 전후 일주일 문서 발생량",
+                },
+            },
+        ])
+
+    def test_inclusive_boundary_15_days(self) -> None:
+        # before=after=7 → [event-7, event+7] inclusive = 08-08 .. 08-22 (기준일 포함 15일)
+        steps = lower_recipe(_event_window_step())
+        self.assertEqual(steps[0]["params"]["value"], ["2024-08-08", "2024-08-22"])
+
+    def test_asymmetric_window(self) -> None:
+        steps = lower_recipe(_event_window_step(before_days=3, after_days=1))
+        self.assertEqual(steps[0]["params"]["value"], ["2024-08-12", "2024-08-16"])
+
+    def test_lowered_plan_passes_validator(self) -> None:
+        steps = lower_recipe(_event_window_step())
+        self.assertEqual(collect_plan_issues({"plan_version": "v2", "steps": steps}), [])
+
+    def test_deterministic(self) -> None:
+        self.assertEqual(lower_recipe(_event_window_step()), lower_recipe(_event_window_step()))
+
+    def test_defaults_before_after_7(self) -> None:
+        step = _event_window_step()
+        del step["params"]["before_days"]
+        del step["params"]["after_days"]
+        steps = lower_recipe(step)
+        self.assertEqual(steps[0]["params"]["value"], ["2024-08-08", "2024-08-22"])
+
+    def test_title_optional(self) -> None:
+        steps = lower_event_window_count(_event_window_step(title=None))
+        self.assertNotIn("title", steps[-1]["params"])
+
+    def test_invalid_event_date(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_recipe(_event_window_step(event_date="2024-13-40"))
+
+    def test_missing_event_date(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_recipe(_event_window_step(event_date=""))
+
+    def test_negative_days_error(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_recipe(_event_window_step(before_days=-1))
+
+    def test_non_int_days_error(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_recipe(_event_window_step(after_days="7"))
+
+    def test_grain_week_not_supported_in_r0(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_recipe(_event_window_step(grain="week"))
+
+
 class RecipeRegistryTests(unittest.TestCase):
     def test_specs_present(self) -> None:
         self.assertEqual(set(RECIPE_SPECS), {"distribution", "event_window_count", "top_n"})
 
-    def test_only_distribution_implemented_in_r0(self) -> None:
+    def test_r0_implemented_recipes(self) -> None:
+        # R0: distribution + event_window_count 구현, top_n은 spec 골격만.
         self.assertTrue(DISTRIBUTION_SPEC.implemented)
-        self.assertFalse(EVENT_WINDOW_COUNT_SPEC.implemented)
+        self.assertTrue(EVENT_WINDOW_COUNT_SPEC.implemented)
         self.assertFalse(TOP_N_SPEC.implemented)
 
     def test_unimplemented_recipe_lowering_raises(self) -> None:
-        for skill in ("event_window_count", "top_n"):
-            with self.subTest(skill=skill):
-                with self.assertRaises(RecipeError):
-                    lower_recipe({"id": "x", "skill": skill, "params": {}})
+        with self.assertRaises(RecipeError):
+            lower_recipe({"id": "x", "skill": "top_n", "params": {}})
 
     def test_unknown_recipe_raises(self) -> None:
         with self.assertRaises(RecipeError):
