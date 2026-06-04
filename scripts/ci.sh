@@ -32,6 +32,11 @@ if [[ "${1:-}" == "--no-smoke" ]]; then
   RUN_SMOKE=0
 fi
 
+# silverone 2026-06-04 — Python 검증은 requires-python >= 3.11 기준.
+# macOS 기본 python3가 3.9면 datetime.UTC 등에서 실패하므로 default python3.11.
+# CI 등 python3가 이미 3.11인 환경은 `PYTHON=python3 ./scripts/ci.sh`로 override.
+PYTHON="${PYTHON:-python3.11}"
+
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
@@ -54,14 +59,14 @@ stage "1. go test ./..."
 (cd apps/control-plane && go test ./...) && ok "go test"
 
 stage "2. Python planner validator"
-PYTHONPATH=workers/python-ai/src python3 -m unittest workers.python-ai.tests.test_planner_validator \
+PYTHONPATH=workers/python-ai/src "$PYTHON" -m unittest workers.python-ai.tests.test_planner_validator \
   || fail "test_planner_validator"
 ok "test_planner_validator"
 
 stage "3. Python executor regression"
 (
   cd workers/python-ai/tests
-  PYTHONPATH="$REPO_ROOT/workers/python-ai/src" python3 -m unittest \
+  PYTHONPATH="$REPO_ROOT/workers/python-ai/src" "$PYTHON" -m unittest \
     test_executor_calculate \
     test_executor_present \
     test_sql_regression
@@ -71,7 +76,7 @@ ok "executor regression (calculate / present / sql_regression)"
 stage "4. Python composer"
 (
   cd workers/python-ai/tests
-  PYTHONPATH="$REPO_ROOT/workers/python-ai/src" python3 -m unittest test_composer
+  PYTHONPATH="$REPO_ROOT/workers/python-ai/src" "$PYTHON" -m unittest test_composer
 )
 ok "test_composer"
 

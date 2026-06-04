@@ -13,6 +13,9 @@
 #   1 — smoke 실패 (plan validation / executor / 결과 불일치 등)
 set -euo pipefail
 
+# silverone 2026-06-04 — requires-python >= 3.11. default python3.11, override 가능.
+PYTHON="${PYTHON:-python3.11}"
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FIXTURES="${REPO_ROOT}/workers/python-ai/tests/fixtures/plan_v2_smoke"
 
@@ -23,7 +26,7 @@ fi
 
 cd "${REPO_ROOT}"
 
-PYTHONPATH="workers/python-ai/src" python3 - "${FIXTURES}" <<'PYEOF'
+PYTHONPATH="workers/python-ai/src" "$PYTHON" - "${FIXTURES}" <<'PYEOF'
 import json
 import sys
 from pathlib import Path

@@ -19,7 +19,7 @@ plan_v2 skill 카탈로그는 **코드로 잠금**돼 있다 (`config/skill_bund
 | 2 | `workers/python-ai/src/python_ai_worker/planner_v2/validator.py` skill-specific 검사 규칙 | `grep -n "_<NAME>_REQUIRED_KEYS\|def _validate_<name>" workers/python-ai/src/python_ai_worker/planner_v2/validator.py` |
 | 3 | `workers/python-ai/src/python_ai_worker/executor_v2/skills/<name>.py` 빌더 | `ls workers/python-ai/src/python_ai_worker/executor_v2/skills/` |
 | 4 | `workers/python-ai/src/python_ai_worker/executor_v2/runner.py:SKILL_BUILDERS` dispatch | `grep -n "SKILL_BUILDERS" workers/python-ai/src/python_ai_worker/executor_v2/runner.py` |
-| 5 | `workers/python-ai/tests/test_planner_v2_*.py` + `test_executor_v2_*.py` 잠금 테스트 | `PYTHONPATH=workers/python-ai/src python3 -m unittest discover -s workers/python-ai/tests -p 'test_planner_v2_*.py' -p 'test_executor_v2_*.py'` |
+| 5 | `workers/python-ai/tests/test_planner_v2_*.py` + `test_executor_v2_*.py` 잠금 테스트 | `PYTHONPATH=workers/python-ai/src python3.11 -m unittest discover -s workers/python-ai/tests -p 'test_planner_v2_*.py' -p 'test_executor_v2_*.py'` |
 
 원칙: planner_v2 prompt가 새 skill을 출력할 수 있도록 prompt 본문도 함께 갱신 (`config/prompts/planner-v2-anthropic-v1.md`). 새 skill이 prompt에 안 보이면 LLM은 사용하지 않는다.
 
@@ -108,8 +108,8 @@ PR에 `try/except` 또는 `return []`/`return None` 추가 시 **반드시 obs w
 PR 직전 일괄 실행:
 
 ```bash
-# Python (v2 layer 중심)
-PYTHONPATH=workers/python-ai/src python3 -m unittest discover -s workers/python-ai/tests -p 'test_*.py'
+# Python (v2 layer 중심, requires-python >= 3.11)
+PYTHONPATH=workers/python-ai/src python3.11 -m unittest discover -s workers/python-ai/tests -p 'test_*.py'
 
 # Go 전체
 (cd apps/control-plane && go test ./...)
