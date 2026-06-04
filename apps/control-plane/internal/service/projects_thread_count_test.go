@@ -106,6 +106,44 @@ func TestProjectServiceGetProjectIncludesAnalysisThreadCount(t *testing.T) {
 	}
 }
 
+func TestProjectServiceCountsDatasetsSeparatelyFromVersions(t *testing.T) {
+	memStore := store.NewMemoryStore()
+	svc := NewProjectService(memStore, "", "")
+	now := time.Now().UTC()
+	if err := memStore.SaveProject(domain.Project{
+		ProjectID: "p-counts", Name: "counts", CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("SaveProject: %v", err)
+	}
+	for _, datasetID := range []string{"d1", "d2"} {
+		if err := memStore.SaveDataset(domain.Dataset{
+			ProjectID: "p-counts", DatasetID: datasetID, Name: datasetID, DataType: "unstructured", CreatedAt: now,
+		}); err != nil {
+			t.Fatalf("SaveDataset %s: %v", datasetID, err)
+		}
+	}
+	for _, version := range []domain.DatasetVersion{
+		{ProjectID: "p-counts", DatasetID: "d1", DatasetVersionID: "v1", StorageURI: "v1.csv", CreatedAt: now},
+		{ProjectID: "p-counts", DatasetID: "d1", DatasetVersionID: "v2", StorageURI: "v2.csv", CreatedAt: now},
+		{ProjectID: "p-counts", DatasetID: "d2", DatasetVersionID: "v3", StorageURI: "v3.csv", CreatedAt: now},
+	} {
+		if err := memStore.SaveDatasetVersion(version); err != nil {
+			t.Fatalf("SaveDatasetVersion %s: %v", version.DatasetVersionID, err)
+		}
+	}
+
+	proj, err := svc.GetProject("p-counts")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+	if proj.DatasetCount != 2 {
+		t.Errorf("DatasetCount: want 2, got %d", proj.DatasetCount)
+	}
+	if proj.DatasetVersionCount != 3 {
+		t.Errorf("DatasetVersionCount: want 3, got %d", proj.DatasetVersionCount)
+	}
+}
+
 func TestProjectServiceListProjectsIncludesAnalysisThreadCount(t *testing.T) {
 	memStore := store.NewMemoryStore()
 	svc := NewProjectService(memStore, "", "")

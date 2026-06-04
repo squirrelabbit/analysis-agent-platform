@@ -513,13 +513,15 @@ components:
         created_at:
           type: string
           format: date-time
+        dataset_count:
+          type: integer
         dataset_version_count:
           type: integer
         scenario_count:
           type: integer
         prompt_count:
           type: integer
-      required: [project_id, name, created_at, dataset_version_count, scenario_count, prompt_count]
+      required: [project_id, name, created_at, dataset_count, dataset_version_count, scenario_count, prompt_count]
     ProjectCreateRequest:
       type: object
       properties:

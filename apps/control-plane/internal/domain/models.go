@@ -10,6 +10,7 @@ type Project struct {
 	Name                string    `json:"name"`
 	Description         *string   `json:"description,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
+	DatasetCount        int       `json:"dataset_count"`
 	DatasetVersionCount int       `json:"dataset_version_count"`
 	ScenarioCount       int       `json:"scenario_count"`
 	PromptCount         int       `json:"prompt_count"`
@@ -348,23 +349,23 @@ type DatasetProfile struct {
 }
 
 type DatasetVersion struct {
-	DatasetVersionID   string                         `json:"dataset_version_id"`
-	DatasetID          string                         `json:"dataset_id"`
-	ProjectID          string                         `json:"project_id"`
-	StorageURI         string                         `json:"storage_uri"`
-	DataType           string                         `json:"data_type"`
-	RecordCount        *int                           `json:"record_count,omitempty"`
-	Metadata           map[string]any                 `json:"metadata"`
-	SourceSummary      *DatasetSourceSummary          `json:"source_summary,omitempty"`
-	BuildJobs          []DatasetVersionBuildJobStatus `json:"build_jobs,omitempty"`
-	BuildStages        []DatasetVersionBuildStage     `json:"build_stages,omitempty"`
-	Artifacts          []DatasetVersionArtifact       `json:"artifacts,omitempty"`
-	Profile            *DatasetProfile                `json:"profile,omitempty"`
-	CleanStatus        string                         `json:"clean_status"`
-	CleanURI           *string                        `json:"clean_uri,omitempty"`
-	CleanedRef         *string                        `json:"cleaned_ref,omitempty"`
-	CleanedAt          *time.Time                     `json:"cleaned_at,omitempty"`
-	CleanSummary       *DatasetCleanSummary           `json:"clean_summary,omitempty"`
+	DatasetVersionID string                         `json:"dataset_version_id"`
+	DatasetID        string                         `json:"dataset_id"`
+	ProjectID        string                         `json:"project_id"`
+	StorageURI       string                         `json:"storage_uri"`
+	DataType         string                         `json:"data_type"`
+	RecordCount      *int                           `json:"record_count,omitempty"`
+	Metadata         map[string]any                 `json:"metadata"`
+	SourceSummary    *DatasetSourceSummary          `json:"source_summary,omitempty"`
+	BuildJobs        []DatasetVersionBuildJobStatus `json:"build_jobs,omitempty"`
+	BuildStages      []DatasetVersionBuildStage     `json:"build_stages,omitempty"`
+	Artifacts        []DatasetVersionArtifact       `json:"artifacts,omitempty"`
+	Profile          *DatasetProfile                `json:"profile,omitempty"`
+	CleanStatus      string                         `json:"clean_status"`
+	CleanURI         *string                        `json:"clean_uri,omitempty"`
+	CleanedRef       *string                        `json:"cleaned_ref,omitempty"`
+	CleanedAt        *time.Time                     `json:"cleaned_at,omitempty"`
+	CleanSummary     *DatasetCleanSummary           `json:"clean_summary,omitempty"`
 	// silverone 2026-05-28 (β2 cleanup PR2) — prepare/sentiment/embedding 15
 	// 필드 제거. ADR-018 β2로 단계 자체가 사라졌고 row에 NULL/default만 채워져
 	// 있었음. DB 컬럼은 그대로 두고(PR5 마이그레이션) Go side read/write만 정리.
@@ -652,11 +653,11 @@ type BuildJobDiagnostics struct {
 // clean은 status="completed"일 때 summary만, doc_genuineness/clause_label은
 // summary + items + pagination + applied를 모두 채운다.
 type DatasetArtifactView struct {
-	BuildType    string              `json:"build_type"`
-	Status       string              `json:"status"`
-	JobID        *string             `json:"job_id"`
-	StartedAt    *time.Time          `json:"started_at"`
-	CompletedAt  *time.Time          `json:"completed_at"`
+	BuildType   string     `json:"build_type"`
+	Status      string     `json:"status"`
+	JobID       *string    `json:"job_id"`
+	StartedAt   *time.Time `json:"started_at"`
+	CompletedAt *time.Time `json:"completed_at"`
 	// DurationSeconds — 작업 경과 시간(초). silverone 2026-05-26.
 	//   - completed/failed (completed_at != nil): completed_at - started_at (확정값)
 	//   - queued/running (completed_at == nil): now - started_at (진행 중 실시간)

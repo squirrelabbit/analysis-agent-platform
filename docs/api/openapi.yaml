@@ -1468,6 +1468,8 @@ components:
         created_at:
           type: string
           format: date-time
+        dataset_count:
+          type: integer
         dataset_version_count:
           type: integer
         scenario_count:
@@ -1482,7 +1484,7 @@ components:
             (`GET /projects/{pid}/datasets/{did}/analysis_threads`)는 그대로 유지.
             프론트가 dataset별 N+1 호출 안 하도록 server-side 단일 COUNT 합산.
             thread 0건이면 0.
-      required: [project_id, name, created_at, dataset_version_count, scenario_count, prompt_count, analysis_thread_count]
+      required: [project_id, name, created_at, dataset_count, dataset_version_count, scenario_count, prompt_count, analysis_thread_count]
     ProjectCreateRequest:
       type: object
       properties:

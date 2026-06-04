@@ -3,9 +3,7 @@ export interface Project {
   name: string,
   description: string,
   datasetCount: number,
-  scenarioCount: number,
   promptCount: number,
   chatCount: number,
   createdAt: string,
 }
-
