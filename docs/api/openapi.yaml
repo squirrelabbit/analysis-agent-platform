@@ -128,6 +128,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /taxonomy:
+    get:
+      tags: [System]
+      summary: aspect/sentiment taxonomy 정의 (key/label/description)
+      description: |
+        clause_label aspect/sentiment taxonomy의 정의를 반환한다. 각 aspect의
+        `key`(영문 식별자, artifact에 저장되는 값) → `label`(한글 표시명) →
+        `description` 매핑을 담아 프론트가 aspect를 한글로 표시할 수 있게 한다.
+
+        control-plane은 `config/taxonomies/<id>.json`을 직접 읽지 않고 Python
+        worker로 proxy한다. `taxonomy_id` 미지정 시 default(현재 `festival-v2`).
+        aspects 순서는 config 정의 순서를 그대로 유지한다.
+      operationId: getTaxonomy
+      parameters:
+        - name: taxonomy_id
+          in: query
+          required: false
+          schema:
+            type: string
+            example: festival-v2
+          description: taxonomy 식별자. 미지정 시 worker default. 알 수 없는 id는 400.
+      responses:
+        "200":
+          description: taxonomy 정의
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxonomyResponse"
+        "400":
+          description: 알 수 없는 taxonomy_id 또는 config 파싱 오류
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /projects:
     get:
       tags: [Projects]
@@ -1358,6 +1392,53 @@ components:
           items:
             $ref: "#/components/schemas/PromptOptionVersion"
       required: [task, default, versions]
+    TaxonomyAspect:
+      type: object
+      description: 단일 aspect 정의. key는 artifact에 저장되는 영문 식별자, label은 표시용 한글.
+      properties:
+        key:
+          type: string
+          description: aspect 영문 식별자 (clause artifact의 aspect 값).
+          example: food
+        label:
+          type: string
+          description: 표시용 한글 라벨.
+          example: 음식/음료
+        description:
+          type: string
+          description: aspect 판정 기준 설명.
+      required: [key, label, description]
+    TaxonomyResponse:
+      type: object
+      description: GET /taxonomy 응답. aspect/sentiment taxonomy 정의.
+      properties:
+        taxonomy_id:
+          type: string
+          description: taxonomy 식별자.
+          example: festival-v2
+        domain:
+          type: string
+          description: taxonomy 도메인.
+          example: festival
+        aspects:
+          type: array
+          description: aspect 정의 목록 (config 정의 순서 유지).
+          items:
+            $ref: "#/components/schemas/TaxonomyAspect"
+        sentiments:
+          type: array
+          description: 허용 sentiment enum.
+          items:
+            type: string
+          example: [positive, negative, neutral]
+        fallback_aspect:
+          type: string
+          description: 분류 실패 시 사용하는 fallback aspect key (aspects 중 하나).
+          example: etc
+        taxonomy_hash:
+          type: string
+          description: taxonomy 내용 기반 sha256 hash (변경 감지용).
+      required: [taxonomy_id, domain, aspects, sentiments, fallback_aspect, taxonomy_hash]
     StringList:
       type: array
       items:
