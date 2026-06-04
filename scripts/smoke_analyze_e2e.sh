@@ -175,12 +175,12 @@ if [[ "${MODE}" == "direct-plan" ]]; then
   ASSERT="$(echo "${RESULT_JSON}" | jq '
     .result.present.rows as $rows
     | {
-        atmosphere: ($rows | map(select(.aspect=="atmosphere"))[0]),
-        food:       ($rows | map(select(.aspect=="food"))[0]),
-        contents:   ($rows | map(select(.aspect=="contents"))[0])
+        ambiance_scenery: ($rows | map(select(.aspect=="ambiance_scenery"))[0]),
+        food:             ($rows | map(select(.aspect=="food"))[0]),
+        show_program:     ($rows | map(select(.aspect=="show_program"))[0])
       }
-    | [.atmosphere.delta_count == 1, .food.delta_count == -1, .contents.delta_count == 1,
-       .atmosphere.delta_rate == 100.0, .food.delta_rate == -100.0, .contents.delta_rate == null]
+    | [.ambiance_scenery.delta_count == 1, .food.delta_count == -1, .show_program.delta_count == 1,
+       .ambiance_scenery.delta_rate == 100.0, .food.delta_rate == -100.0, .show_program.delta_rate == null]
     | all
   ')"
   if [[ "${ASSERT}" == "true" ]]; then

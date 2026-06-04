@@ -57,10 +57,10 @@ print(f"present.row_count:  {result['present']['row_count']}")
 print()
 print("=== aspect_delta (present rows) ===")
 by_aspect = {row["aspect"]: row for row in result["present"]["rows"]}
-for aspect in ("atmosphere", "food", "contents"):
+for aspect in ("ambiance_scenery", "food", "show_program"):
     row = by_aspect.get(aspect, {})
     print(
-        f"  {aspect:10s}  last={row.get('last_year_count')!s:>5}  "
+        f"  {aspect:16s}  last={row.get('last_year_count')!s:>5}  "
         f"this={row.get('this_year_count')!s:>5}  "
         f"delta_count={row.get('delta_count')!s:>5}  "
         f"delta_rate={row.get('delta_rate')!s}"
@@ -68,10 +68,11 @@ for aspect in ("atmosphere", "food", "contents"):
 print()
 
 # 기대값 잠금 — committed fixture 형태가 흔들리면 smoke가 실패해야 함.
+# silverone 2026-06-04 — taxonomy drift 반영: atmosphere→ambiance_scenery, contents→show_program.
 expected = {
-    "atmosphere": {"last_year_count": 1, "this_year_count": 2, "delta_count": 1, "delta_rate": 100.0},
-    "food":       {"last_year_count": 1, "this_year_count": None, "delta_count": -1, "delta_rate": -100.0},
-    "contents":   {"last_year_count": None, "this_year_count": 1, "delta_count": 1, "delta_rate": None},
+    "ambiance_scenery": {"last_year_count": 1, "this_year_count": 2, "delta_count": 1, "delta_rate": 100.0},
+    "food":             {"last_year_count": 1, "this_year_count": None, "delta_count": -1, "delta_rate": -100.0},
+    "show_program":     {"last_year_count": None, "this_year_count": 1, "delta_count": 1, "delta_rate": None},
 }
 mismatches: list[str] = []
 for aspect, want in expected.items():

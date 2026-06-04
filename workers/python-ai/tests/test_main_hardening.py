@@ -129,6 +129,105 @@ class MainHardeningHTTPTests(unittest.TestCase):
         self.assertEqual(body["status"], "ready")
         self.assertTrue(body["checks"]["any_llm_key"])
 
+    @classmethod
+    def _metric_value_or_zero(cls, metrics_text: str, name: str) -> int:
+        try:
+            return cls._metric_value(metrics_text, name)
+        except AssertionError:
+            return 0
+
+    def test_metrics_request_counters_by_task_status(self) -> None:
+        server = self._start()
+        ok_key = 'python_worker_requests_total{task="analyze",status="ok"}'
+        bad_key = 'python_worker_requests_total{task="analyze",status="bad_request"}'
+        err_key = 'python_worker_requests_total{task="analyze",status="error"}'
+        dur_key = 'python_worker_request_duration_ms_count{task="analyze"}'
+
+        _, base = self._get(server, "/metrics")
+        ok0 = self._metric_value_or_zero(base, ok_key)
+        bad0 = self._metric_value_or_zero(base, bad_key)
+        err0 = self._metric_value_or_zero(base, err_key)
+        dur0 = self._metric_value_or_zero(base, dur_key)
+
+        # 성공 → ok + duration count.
+        with patch("python_ai_worker.main.run_task", return_value={"ok": True}):
+            code, _, _ = self._post(server, "/tasks/analyze", json.dumps({"a": 1}))
+        self.assertEqual(code, 200)
+        # ValueError → 400 bad_request.
+        with patch("python_ai_worker.main.run_task", side_effect=ValueError("bad input")):
+            code, _, _ = self._post(server, "/tasks/analyze", json.dumps({"a": 1}))
+        self.assertEqual(code, 400)
+        # Exception → 500 error.
+        with patch("python_ai_worker.main.run_task", side_effect=RuntimeError("boom")):
+            code, _, _ = self._post(server, "/tasks/analyze", json.dumps({"a": 1}))
+        self.assertEqual(code, 500)
+
+        _, after = self._get(server, "/metrics")
+        self.assertEqual(self._metric_value(after, ok_key), ok0 + 1)
+        self.assertEqual(self._metric_value(after, bad_key), bad0 + 1)
+        self.assertEqual(self._metric_value(after, err_key), err0 + 1)
+        # duration count는 처리된 3건 모두 증가.
+        self.assertEqual(self._metric_value(after, dur_key), dur0 + 3)
+        # duration sum 라인도 노출돼야 한다(값은 가변).
+        self.assertIn('python_worker_request_duration_ms_sum{task="analyze"}', after)
+
+    def test_metrics_label_escaping_is_stable_for_special_task(self) -> None:
+        # task 라벨은 요청 path에서 오므로 특수문자(따옴표/백슬래시/개행)가 들어와도
+        # exposition 포맷이 깨지면 안 된다. fresh 인스턴스로 격리 검증.
+        m = worker_main.WorkerMetrics()
+        task = 'a"b\\c\nd'  # quote, backslash, raw newline
+        m.record_request(task, "ok", 5.0)
+        out = m.render()
+        total_lines = [l for l in out.splitlines() if l.startswith("python_worker_requests_total{")]
+        # 주입된 raw 개행이 metric 줄을 쪼개지 않아야 한다(정확히 1줄).
+        self.assertEqual(len(total_lines), 1, total_lines)
+        expected = f'python_worker_requests_total{{task="{worker_main._label(task)}",status="ok"}} 1'
+        self.assertEqual(total_lines[0], expected)
+        # raw 개행 뒤 fragment가 단독 줄로 새지 않았는지.
+        self.assertNotIn("\nd\"", out)
+
+    def test_metrics_task_label_is_request_path_not_canonical(self) -> None:
+        # 의도: task 라벨은 *요청 path 기준*. alias path(/tasks/analyze_v2)는 worker가
+        # canonical analyze 핸들러로 dispatch하지만 라벨은 path 그대로("analyze_v2").
+        server = self._start()
+        key = 'python_worker_requests_total{task="analyze_v2",status="ok"}'
+        _, base = self._get(server, "/metrics")
+        before = self._metric_value_or_zero(base, key)
+        with patch("python_ai_worker.main.run_task", return_value={"ok": True}):
+            code, _, _ = self._post(server, "/tasks/analyze_v2", json.dumps({"a": 1}))
+        self.assertEqual(code, 200)
+        _, after = self._get(server, "/metrics")
+        self.assertEqual(self._metric_value(after, key), before + 1)
+
+    def test_413_not_counted_in_requests_total(self) -> None:
+        # 413은 처리 전 거절 → rejected_body_too_large만 증가, requests_total/duration은 불변.
+        server = self._start(max_request_bytes=100)
+        _, base = self._get(server, "/metrics")
+        body0 = self._metric_value(base, "python_worker_rejected_body_too_large_total")
+        durcnt0 = self._metric_value_or_zero(base, 'python_worker_request_duration_ms_count{task="analyze"}')
+
+        code, _, _ = self._post(server, "/tasks/analyze", "a" * 200)  # >100 → 413
+        self.assertEqual(code, 413)
+
+        _, after = self._get(server, "/metrics")
+        self.assertEqual(self._metric_value(after, "python_worker_rejected_body_too_large_total"), body0 + 1)
+        # 413은 처리되지 않았으므로 duration count 불변.
+        self.assertEqual(
+            self._metric_value_or_zero(after, 'python_worker_request_duration_ms_count{task="analyze"}'),
+            durcnt0,
+        )
+
+    def test_metrics_retains_original_three(self) -> None:
+        # 보완 후에도 기존 3 metric이 그대로 노출되는지.
+        server = self._start()
+        _, body = self._get(server, "/metrics")
+        for name in (
+            "python_worker_active_requests",
+            "python_worker_rejected_body_too_large_total",
+            "python_worker_rejected_concurrency_total",
+        ):
+            self.assertIn(name, body)
+
     def test_readyz_not_ready_without_llm_key(self) -> None:
         server = self._start(_cfg(anthropic_api_key=None, lloa_api_key=None))
         status, data = self._get(server, "/readyz")

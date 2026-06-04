@@ -96,6 +96,12 @@ def describe() -> None:
     print(json.dumps(payload, ensure_ascii=False))
 
 
+def _label(value: str) -> str:
+    """Prometheus label value escaping (\\ " 개행). task는 보통 안전하지만 URL에서
+    오므로 방어적으로 escape."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
 class WorkerMetrics:
     """worker 최소 메트릭 (silverone 2026-06-04, metrics 1차). ThreadingHTTPServer는
     요청마다 스레드라 Lock으로 보호한다. Prometheus client 의존 없이 text exposition."""
@@ -105,6 +111,11 @@ class WorkerMetrics:
         self._active = 0
         self._rejected_body_too_large = 0
         self._rejected_concurrency = 0
+        # 처리 완료(ok/error/bad_request) 요청 — (task, status) -> count.
+        self._requests_total: dict[tuple[str, str], int] = {}
+        # task -> duration sum(ms) / count.
+        self._duration_sum: dict[str, float] = {}
+        self._duration_count: dict[str, int] = {}
 
     def inc_active(self) -> None:
         with self._lock:
@@ -122,22 +133,54 @@ class WorkerMetrics:
         with self._lock:
             self._rejected_concurrency += 1
 
+    # record_request — acquire 후 실제 처리한 요청의 결과를 기록한다.
+    # status: "ok"(200) / "bad_request"(ValueError→400) / "error"(Exception→500).
+    # 413/503은 처리 전 거절이라 여기 포함하지 않고 별도 rejected_* 카운터로 센다.
+    def record_request(self, task: str, status: str, duration_ms: float) -> None:
+        if duration_ms < 0:
+            duration_ms = 0.0
+        with self._lock:
+            key = (task, status)
+            self._requests_total[key] = self._requests_total.get(key, 0) + 1
+            self._duration_sum[task] = self._duration_sum.get(task, 0.0) + duration_ms
+            self._duration_count[task] = self._duration_count.get(task, 0) + 1
+
     def render(self) -> str:
         with self._lock:
-            active, body, conc = self._active, self._rejected_body_too_large, self._rejected_concurrency
-        return "\n".join(
-            [
-                "# HELP python_worker_active_requests In-flight /tasks/ requests being processed.",
-                "# TYPE python_worker_active_requests gauge",
-                f"python_worker_active_requests {active}",
-                "# HELP python_worker_rejected_body_too_large_total Requests rejected with 413 (Content-Length over limit).",
-                "# TYPE python_worker_rejected_body_too_large_total counter",
-                f"python_worker_rejected_body_too_large_total {body}",
-                "# HELP python_worker_rejected_concurrency_total Requests rejected with 503 (max concurrency).",
-                "# TYPE python_worker_rejected_concurrency_total counter",
-                f"python_worker_rejected_concurrency_total {conc}",
-            ]
-        ) + "\n"
+            active = self._active
+            body = self._rejected_body_too_large
+            conc = self._rejected_concurrency
+            requests_total = dict(self._requests_total)
+            duration_sum = dict(self._duration_sum)
+            duration_count = dict(self._duration_count)
+
+        lines = [
+            "# HELP python_worker_active_requests In-flight /tasks/ requests being processed.",
+            "# TYPE python_worker_active_requests gauge",
+            f"python_worker_active_requests {active}",
+            "# HELP python_worker_rejected_body_too_large_total Requests rejected with 413 (Content-Length over limit).",
+            "# TYPE python_worker_rejected_body_too_large_total counter",
+            f"python_worker_rejected_body_too_large_total {body}",
+            "# HELP python_worker_rejected_concurrency_total Requests rejected with 503 (max concurrency).",
+            "# TYPE python_worker_rejected_concurrency_total counter",
+            f"python_worker_rejected_concurrency_total {conc}",
+            "# HELP python_worker_requests_total Processed /tasks/ requests by task and status.",
+            "# TYPE python_worker_requests_total counter",
+        ]
+        for (task, status) in sorted(requests_total):
+            lines.append(
+                f'python_worker_requests_total{{task="{_label(task)}",status="{_label(status)}"}} '
+                f"{requests_total[(task, status)]}"
+            )
+        lines.append("# HELP python_worker_request_duration_ms_sum Sum of processed request durations (ms) by task.")
+        lines.append("# TYPE python_worker_request_duration_ms_sum counter")
+        for task in sorted(duration_sum):
+            lines.append(f'python_worker_request_duration_ms_sum{{task="{_label(task)}"}} {duration_sum[task]:.3f}')
+        lines.append("# HELP python_worker_request_duration_ms_count Count of processed requests by task.")
+        lines.append("# TYPE python_worker_request_duration_ms_count counter")
+        for task in sorted(duration_count):
+            lines.append(f'python_worker_request_duration_ms_count{{task="{_label(task)}"}} {duration_count[task]}')
+        return "\n".join(lines) + "\n"
 
 
 # 프로세스 전역 singleton — make_handler가 매 요청 새 Handler를 만들어도 카운터는 공유.
@@ -243,19 +286,25 @@ def make_handler(
                     extra_headers={"Retry-After": "1"},
                 )
                 return
+            task = self.path[len(prefix):]
             _WORKER_METRICS.inc_active()
+            req_status = "error"  # 예기치 못한 경로 기본값. 성공/400에서 갱신.
             try:
                 raw_body = self.rfile.read(size)
                 payload = json.loads(raw_body or b"{}")
-                response = run_task(self.path[len(prefix):], payload)
+                response = run_task(task, payload)
+                req_status = "ok"
             except ValueError as exc:
+                req_status = "bad_request"
                 self._write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)}, request_id=request_id, started_at=started_at)
                 return
             except Exception as exc:  # pragma: no cover
+                req_status = "error"
                 self._write_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)}, request_id=request_id, started_at=started_at)
                 return
             finally:
                 _WORKER_METRICS.dec_active()
+                _WORKER_METRICS.record_request(task, req_status, (time.monotonic() - started_at) * 1000)
                 if semaphore is not None and acquired:
                     semaphore.release()
 
