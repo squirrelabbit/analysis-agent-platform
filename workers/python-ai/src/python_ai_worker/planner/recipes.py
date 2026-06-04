@@ -7,11 +7,10 @@ recipe = 자주 쓰는 분석 패턴의 high-level skill. planner가 atomic skil
 1개를 선택하게 해 **재현성**을 높인다. recipe는 실행 전 deterministic 하게 atomic
 step들로 *lowering* 된다 (LLM 없음). atomic skill은 그대로 유지한다.
 
-**R0 범위 (runtime behavior 변화 0)**: spec 정의(distribution / event_window_count
-/ top_n) + **distribution / event_window_count lowering 함수 + 테스트**까지. planner
-prompt / executor / Go / OpenAPI wiring 없음 — 아직 아무도 recipe를 내보내거나
-실행하지 않는다. top_n은 spec 골격만 두고 lowering은 미구현(``lower_recipe`` 호출 시
-RecipeError).
+**R0 범위 (runtime behavior 변화 0)**: 3 recipe(distribution / event_window_count /
+top_n)의 spec + lowering 함수 + 테스트. planner prompt / executor / Go / OpenAPI
+wiring 없음 — 아직 아무도 recipe를 내보내거나 실행하지 않는다(아무 import도 runtime
+경로에 없음). keyword_summary는 키워드 atomic 부재로 제외.
 
 event_window_count R0 전제 / 정책 (silverone 2026-06-04):
   - **grain=day만 지원.** 현재 atomic skill에는 date_trunc/date_bucket이 없다.
@@ -87,17 +86,19 @@ EVENT_WINDOW_COUNT_SPEC = RecipeSpec(
 
 TOP_N_SPEC = RecipeSpec(
     name="top_n",
-    description="group_by + metric 상위 N개. 부정 후기 많은 aspect, 많이 언급된 항목 순위.",
+    description="(filters) + group_by + count → 상위 N개. 부정 후기 많은 aspect, 많이 언급된 항목 순위.",
     params=(
         RecipeParamSpec("input", required=True, desc="table_or_step_id"),
         RecipeParamSpec("group_by", required=True, desc="string[]"),
-        RecipeParamSpec("metric", desc="count (R0 spec only)"),
-        RecipeParamSpec("n", desc="int — 상위 개수 (기본 10)"),
-        RecipeParamSpec("order", desc="asc|desc (기본 desc)"),
+        RecipeParamSpec("metric", desc="count (R0는 count만)"),
+        RecipeParamSpec("filters", desc="[{column, op, value}] — 선택. op는 =,!=,>,>=,<,<=,in,contains"),
+        RecipeParamSpec("sort", desc="{column, direction} — 기본 {count_column, desc}"),
+        RecipeParamSpec("limit", desc="int>0 — 상위 개수 (기본 10)"),
+        RecipeParamSpec("count_column", desc="string — count 결과 컬럼명 (기본 count)"),
         RecipeParamSpec("title", desc="string|null"),
     ),
-    lowered_skills=("aggregate", "sort", "present"),
-    implemented=False,  # R0 미구현
+    lowered_skills=("filter", "aggregate", "sort", "present"),
+    implemented=True,
 )
 
 RECIPE_SPECS: dict[str, RecipeSpec] = {
@@ -294,9 +295,122 @@ def lower_event_window_count(step: dict[str, Any]) -> list[dict[str, Any]]:
     return steps
 
 
+# recipe filter op(기호/별칭) → atomic filter operator. R0 최소 집합.
+_FILTER_OP_MAP = {
+    "=": "eq", "==": "eq", "eq": "eq",
+    "!=": "neq", "neq": "neq",
+    ">": "gt", "gt": "gt",
+    ">=": "gte", "gte": "gte",
+    "<": "lt", "lt": "lt",
+    "<=": "lte", "lte": "lte",
+    "in": "in", "not_in": "not_in",
+    "contains": "contains",
+}
+
+
+def lower_top_n(step: dict[str, Any]) -> list[dict[str, Any]]:
+    """top_n recipe → [(filter…), aggregate, sort(limit), present].
+
+    limit은 atomic sort.limit에 둔다(present.limit는 row-cap이라 별개). filters는
+    각각 atomic filter step으로 체인. share 계산 없음. deterministic."""
+    params = step.get("params") or {}
+    if not isinstance(params, dict):
+        raise RecipeError("top_n.params must be an object")
+    base = str(step.get("id") or "top_n").strip() or "top_n"
+
+    input_ref = _required_str(params, "top_n", "input")
+
+    group_by_raw = params.get("group_by")
+    if (
+        not isinstance(group_by_raw, list)
+        or not group_by_raw
+        or not all(isinstance(c, str) and c.strip() for c in group_by_raw)
+    ):
+        raise RecipeError("top_n.group_by must be a non-empty string list")
+    group_by = [c.strip() for c in group_by_raw]
+
+    metric = _opt_str(params, "metric", "count")
+    if metric != "count":
+        raise RecipeError(f"top_n.metric '{metric}' not supported in R0 (count only)")
+    count_col = _opt_str(params, "count_column", "count")
+
+    limit = params.get("limit", 10)
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        raise RecipeError("top_n.limit must be a positive integer")
+
+    sort_spec = params.get("sort") or {}
+    if not isinstance(sort_spec, dict):
+        raise RecipeError("top_n.sort must be an object {column, direction}")
+    sort_col = _opt_str(sort_spec, "column", count_col)
+    direction = _opt_str(sort_spec, "direction", "desc")
+    if direction not in ("asc", "desc"):
+        raise RecipeError(f"top_n.sort.direction must be asc|desc; got {direction!r}")
+
+    steps: list[dict[str, Any]] = []
+    chain_input = input_ref
+
+    filters = params.get("filters") or []
+    if not isinstance(filters, list):
+        raise RecipeError("top_n.filters must be a list")
+    for idx, flt in enumerate(filters, start=1):
+        if not isinstance(flt, dict):
+            raise RecipeError(f"top_n.filters[{idx - 1}] must be an object")
+        column = _required_str(flt, "top_n.filters", "column")
+        op_raw = _required_str(flt, "top_n.filters", "op")
+        operator = _FILTER_OP_MAP.get(op_raw)
+        if operator is None:
+            raise RecipeError(f"top_n.filters op '{op_raw}' not supported in R0")
+        filter_id = f"{base}_filter{idx}"
+        steps.append(
+            {
+                "id": filter_id,
+                "skill": "filter",
+                "params": {
+                    "input": chain_input,
+                    "column": column,
+                    "operator": operator,
+                    "value": flt.get("value"),
+                },
+            }
+        )
+        chain_input = filter_id
+
+    agg_id = f"{base}_agg"
+    sorted_id = f"{base}_sorted"
+    steps.append(
+        {
+            "id": agg_id,
+            "skill": "aggregate",
+            "params": {
+                "input": chain_input,
+                "group_by": group_by,
+                "metrics": [{"name": count_col, "function": "count", "column": "*"}],
+            },
+        }
+    )
+    steps.append(
+        {
+            "id": sorted_id,
+            "skill": "sort",
+            "params": {"input": agg_id, "by": [sort_col], "order": direction, "limit": limit},
+        }
+    )
+    present_params: dict[str, Any] = {
+        "input": sorted_id,
+        "format": "table",
+        "columns": [*group_by, count_col],
+    }
+    title = params.get("title")
+    if isinstance(title, str) and title.strip():
+        present_params["title"] = title.strip()
+    steps.append({"id": f"{base}_present", "skill": "present", "params": present_params})
+    return steps
+
+
 _LOWERERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "distribution": lower_distribution,
     "event_window_count": lower_event_window_count,
+    "top_n": lower_top_n,
 }
 
 
@@ -311,4 +425,5 @@ __all__ = [
     "lower_recipe",
     "lower_distribution",
     "lower_event_window_count",
+    "lower_top_n",
 ]

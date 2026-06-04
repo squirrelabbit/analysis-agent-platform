@@ -18,6 +18,7 @@ from python_ai_worker.planner.recipes import (
     lower_distribution,
     lower_event_window_count,
     lower_recipe,
+    lower_top_n,
 )
 from python_ai_worker.planner.validator import collect_plan_issues
 
@@ -229,19 +230,131 @@ class EventWindowCountLoweringTests(unittest.TestCase):
             lower_recipe(_event_window_step(grain="week"))
 
 
+def _top_n_step(**param_overrides):
+    params = {
+        "input": "clauses",
+        "group_by": ["aspect"],
+        "metric": "count",
+        "filters": [{"column": "sentiment", "op": "=", "value": "negative"}],
+        "sort": {"column": "count", "direction": "desc"},
+        "limit": 10,
+        "title": "부정 후기가 많은 aspect",
+    }
+    params.update(param_overrides)
+    return {"id": "negative_aspect_top_n", "skill": "top_n", "params": params}
+
+
+class TopNLoweringTests(unittest.TestCase):
+    def test_lowers_to_expected_atomic_steps(self) -> None:
+        steps = lower_recipe(_top_n_step())
+        self.assertEqual(steps, [
+            {
+                "id": "negative_aspect_top_n_filter1",
+                "skill": "filter",
+                "params": {"input": "clauses", "column": "sentiment", "operator": "eq", "value": "negative"},
+            },
+            {
+                "id": "negative_aspect_top_n_agg",
+                "skill": "aggregate",
+                "params": {
+                    "input": "negative_aspect_top_n_filter1",
+                    "group_by": ["aspect"],
+                    "metrics": [{"name": "count", "function": "count", "column": "*"}],
+                },
+            },
+            {
+                "id": "negative_aspect_top_n_sorted",
+                "skill": "sort",
+                "params": {"input": "negative_aspect_top_n_agg", "by": ["count"], "order": "desc", "limit": 10},
+            },
+            {
+                "id": "negative_aspect_top_n_present",
+                "skill": "present",
+                "params": {
+                    "input": "negative_aspect_top_n_sorted",
+                    "format": "table",
+                    "columns": ["aspect", "count"],
+                    "title": "부정 후기가 많은 aspect",
+                },
+            },
+        ])
+
+    def test_no_filters_lowers_agg_sort_present(self) -> None:
+        steps = lower_recipe(_top_n_step(filters=[]))
+        self.assertEqual([s["skill"] for s in steps], ["aggregate", "sort", "present"])
+        self.assertEqual(steps[0]["params"]["input"], "clauses")  # aggregate가 input 직접
+
+    def test_limit_on_sort_step(self) -> None:
+        steps = lower_recipe(_top_n_step(limit=5))
+        sort_step = next(s for s in steps if s["skill"] == "sort")
+        self.assertEqual(sort_step["params"]["limit"], 5)
+
+    def test_limit_default_10(self) -> None:
+        step = _top_n_step()
+        del step["params"]["limit"]
+        steps = lower_recipe(step)
+        sort_step = next(s for s in steps if s["skill"] == "sort")
+        self.assertEqual(sort_step["params"]["limit"], 10)
+
+    def test_sort_defaults_to_count_desc(self) -> None:
+        step = _top_n_step()
+        del step["params"]["sort"]
+        steps = lower_recipe(step)
+        sort_step = next(s for s in steps if s["skill"] == "sort")
+        self.assertEqual(sort_step["params"]["by"], ["count"])
+        self.assertEqual(sort_step["params"]["order"], "desc")
+
+    def test_deterministic(self) -> None:
+        self.assertEqual(lower_recipe(_top_n_step()), lower_recipe(_top_n_step()))
+
+    def test_lowered_plan_passes_validator(self) -> None:
+        for variant in (_top_n_step(), _top_n_step(filters=[])):
+            with self.subTest():
+                self.assertEqual(collect_plan_issues({"plan_version": "v2", "steps": lower_recipe(variant)}), [])
+
+    def test_multiple_filters_chain(self) -> None:
+        steps = lower_recipe(_top_n_step(filters=[
+            {"column": "sentiment", "op": "=", "value": "negative"},
+            {"column": "aspect", "op": "!=", "value": "etc"},
+        ]))
+        filters = [s for s in steps if s["skill"] == "filter"]
+        self.assertEqual(len(filters), 2)
+        self.assertEqual(filters[1]["params"]["input"], filters[0]["id"])
+        self.assertEqual(filters[1]["params"]["operator"], "neq")
+
+    def test_limit_zero_error(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_recipe(_top_n_step(limit=0))
+
+    def test_limit_negative_error(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_recipe(_top_n_step(limit=-3))
+
+    def test_unsupported_metric_error(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_recipe(_top_n_step(metric="sum"))
+
+    def test_missing_group_by_error(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_recipe(_top_n_step(group_by=[]))
+
+    def test_unsupported_filter_op_error(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_recipe(_top_n_step(filters=[{"column": "sentiment", "op": "~=", "value": "x"}]))
+
+    def test_title_optional(self) -> None:
+        steps = lower_top_n(_top_n_step(title=None))
+        self.assertNotIn("title", steps[-1]["params"])
+
+
 class RecipeRegistryTests(unittest.TestCase):
     def test_specs_present(self) -> None:
         self.assertEqual(set(RECIPE_SPECS), {"distribution", "event_window_count", "top_n"})
 
-    def test_r0_implemented_recipes(self) -> None:
-        # R0: distribution + event_window_count 구현, top_n은 spec 골격만.
+    def test_all_r0_recipes_implemented(self) -> None:
         self.assertTrue(DISTRIBUTION_SPEC.implemented)
         self.assertTrue(EVENT_WINDOW_COUNT_SPEC.implemented)
-        self.assertFalse(TOP_N_SPEC.implemented)
-
-    def test_unimplemented_recipe_lowering_raises(self) -> None:
-        with self.assertRaises(RecipeError):
-            lower_recipe({"id": "x", "skill": "top_n", "params": {}})
+        self.assertTrue(TOP_N_SPEC.implemented)
 
     def test_unknown_recipe_raises(self) -> None:
         with self.assertRaises(RecipeError):
