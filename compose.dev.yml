@@ -77,6 +77,10 @@ services:
     restart: unless-stopped
 
   control-plane:
+    # silverone 2026-06-04 — control-plane과 temporal-worker는 같은 Dockerfile에서
+    # server/temporal-worker 두 바이너리를 함께 빌드한 동일 산출물이라, 같은 image
+    # tag를 공유해 이미지 중복(디스크 2배)을 없앤다. 차이는 command뿐.
+    image: analysis-support-platform-control-plane:dev
     build:
       context: .
       dockerfile: apps/control-plane/Dockerfile
@@ -113,9 +117,11 @@ services:
     restart: unless-stopped
 
   temporal-worker:
-    build:
-      context: .
-      dockerfile: apps/control-plane/Dockerfile
+    # control-plane과 동일 image 공유 (위 주석 참조). command만 다르다.
+    # build 정의는 control-plane에만 두고 여기선 image만 참조한다 — 같은 tag를
+    # 두 서비스가 동시에 build하면 buildkit이 "image already exists"로 실패하기 때문.
+    # control-plane이 tag를 만들고 temporal-worker는 그 image를 재사용한다(depends_on).
+    image: analysis-support-platform-control-plane:dev
     command: ["/usr/local/bin/temporal-worker"]
     environment:
       TZ: Asia/Seoul
@@ -146,6 +152,10 @@ services:
       python-ai-worker:
         condition: service_started
       temporal:
+        condition: service_started
+      # 공유 image(analysis-support-platform-control-plane:dev)를 control-plane이
+      # 빌드하므로 그 뒤에 올라오게 한다 (image 재사용 보장).
+      control-plane:
         condition: service_started
     volumes:
       - ./data:/workspace/data
