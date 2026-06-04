@@ -47,13 +47,24 @@
 | `DatasetService` (core, 유지) | dataset/version CRUD, build orchestration, artifact 경로, store 보유 | store |
 | `AnalyzeService` (신설 후보) | ExecuteAnalyze / ExecuteAnalyzeOnActiveVersion / artifact path resolve / worker 호출 / projection | core(version lookup, artifact path), python worker client |
 | `AnalysisThreadService` (신설 후보) | thread/run CRUD + AnalyzeDatasetAsNewThread / PostAnalysisThreadMessage + plan reuse | AnalyzeService + store(thread/run) |
+| `DatasetBuildService` (신설 후보) | CreateCleanJob / CreateDocGenuinenessJob / CreateClauseLabelJob + build job 조회/dispatch | core(version lookup), worker build client, store(build_jobs) |
 | `datasetprompts.Service` (이미 존재) | project prompt CRUD/history/diff | store |
 
-권장 순서 (의존 역방향, 위험 낮은 것부터):
-1. **analyze 타입/데이터 계약을 별도 파일로 분리** (logic과 contract 분리) — 무위험, 본 트랙 3단계에서 수행.
-2. AnalyzeService 신설 + DatasetService facade 위임 (handler 시그니처 불변).
-3. AnalysisThreadService 신설 (AnalyzeService에 의존).
-4. core에서 build/version을 별도 타입으로 추가 분리(선택).
+### 분리 우선순위 (확정, silverone 2026-06-04)
+
+선행으로 **analyze 데이터 계약 타입 분리**(`analyze_types.go`)는 완료(merged). 이후 순서:
+
+1. **1순위 — AnalyzeService**: ExecuteAnalyze / ExecuteAnalyzeOnActiveVersion / artifact
+   path resolve / worker 호출 / projection을 별도 타입으로. `DatasetService`는 facade로
+   위임만(public API·handler 시그니처 불변). 의존이 단방향(아래가 위를 의존)이라 가장 먼저.
+2. **2순위 — AnalysisThreadService**: thread/run CRUD + AnalyzeDatasetAsNewThread /
+   PostAnalysisThreadMessage + plan reuse. **AnalyzeService에 의존**하므로 그 다음.
+3. **3순위 — DatasetBuildService**: clean/doc_genuineness/clause_label job 생성·조회·dispatch.
+   analyze/thread와 독립적이라 위 둘 이후 별도로.
+4. **이후 — ADR-018 β2 legacy helper 정리**: 아래 §4의 죽은 코드 후보(derive*) 정리.
+   구조 분리와 섞지 않고 독립 "ADR-018 β2 residue cleanup" PR로 진행.
+
+각 단계는 작은 MR 1개로, facade 위임 + 테스트 동반, 동작/ public API 불변을 원칙으로 한다.
 
 ## 4. Risk
 
@@ -70,8 +81,11 @@
   일부는 1건 남아 있다. **호출 경로 확인 후 별도 PR로 정리** (이번 범위 아님 — CLAUDE.md
   "호출 경로 확인 전 임의 삭제 금지").
 
-## 5. 이번 트랙에서 실제 수행한 것
+## 5. 진행 상태
 
-- 1단계(README 정합성)는 별도 MR(`docs/readme-refresh`)에서 완료.
-- 3단계(안전한 작은 이동): **analyze 데이터 계약 타입을 `analyze_types.go`로 분리**
-  (package 내 파일 이동, public API/동작 불변). AnalyzeService 신설은 위 순서 2로 후속.
+- ✅ README 정합성 (MR !79, merged)
+- ✅ 본 조사 문서 + analyze 데이터 계약 타입 `analyze_types.go` 분리 (MR !83, merged)
+- ⏭ **1순위 AnalyzeService facade 분리** (다음 MR)
+- ⏭ 2순위 AnalysisThreadService / 3순위 DatasetBuildService
+- ⏭ ADR-018 β2 residue cleanup (derive* 죽은 코드) — 별도 PR
+- 별건: Python 검증 명령 `python3` → `python3.11` 문서/스크립트 정합성 — 별도 작은 PR
