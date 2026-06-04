@@ -913,6 +913,13 @@ def _validate_calculate(params: dict[str, Any], ctx: _StepContext) -> None:
     # (false positive 방지).
     input_ref = str(params.get("input") or "").strip()
     input_output: set[str] | None = _infer_step_output_columns(input_ref, ctx.step_lookup, visiting=set())
+    # silverone 2026-06-04 — numeric operation이 string 컬럼을 참조하면 executor SQL이
+    # Binder Error(500)이 되므로, input output에서 string으로 확신되는 컬럼을 미리 추론한다.
+    # RESERVED root뿐 아니라 prior step output(aggregate group 컬럼 등)도 포함. None/빈
+    # 집합이면 차단 안 함(기존 동작 유지).
+    input_string_cols: set[str] | None = _infer_step_output_string_columns(
+        input_ref, ctx.step_lookup, visiting=set()
+    )
 
     seen_names: set[str] = set()
     for idx, expression in enumerate(expressions):
@@ -1013,25 +1020,25 @@ def _validate_calculate(params: dict[str, Any], ctx: _StepContext) -> None:
                                 ),
                             )
 
-        # silverone 2026-05-26 (SQL-2.3, audit M8) — input이 RESERVED 테이블이면
-        # 수치 expression이 string column을 참조하지 않는지 검증. RESERVED를 거친
-        # step output(aggregate/compare/join/sort 등)은 type 추적이 복잡해서 1차로
-        # input=RESERVED root case만 처리. timestamp(`docs.created_at`)는 다른
-        # timestamp와 subtract 가능성이 있어 reject하지 않음.
-        reserved_strings = RESERVED_STRING_COLUMNS.get(input_ref)
-        if reserved_strings:
+        # silverone 2026-05-26 (SQL-2.3, audit M8) / 2026-06-04 확장 — 수치
+        # expression이 string column을 참조하지 않는지 검증한다. 옛 버전은 input이
+        # RESERVED root인 case만 봤지만, 이제 prior step output(aggregate group
+        # 컬럼 등)의 string 타입도 `_infer_step_output_string_columns`로 추론해 본다.
+        # 추론 불가(None)/빈 집합/numeric/timestamp 컬럼은 통과(false positive 방지).
+        # timestamp(`docs.created_at`)는 string 집합에 없으므로 reject되지 않는다.
+        if input_string_cols:
             for key in _CALCULATE_NUMERIC_REF_KEYS:
                 col_name = str(expression.get(key) or "").strip()
-                if col_name and col_name in reserved_strings:
+                if col_name and col_name in input_string_cols:
                     ctx.issue(
                         code="params.expression_column_not_numeric",
                         message=(
                             f"calculate.expressions[{idx}] (operation='{operation}') "
                             f"references string column '{col_name}' (via key '{key}') "
-                            f"from RESERVED table '{input_ref}'. "
-                            "수치 expression(add/subtract/multiply/divide/percent_change/ratio)은 "
-                            "string column에 적용할 수 없다. 먼저 aggregate로 count/sum/avg를 "
-                            "구한 뒤 그 metric에 calculate를 적용한다."
+                            f"from input '{input_ref}'. "
+                            "수치 연산(add/subtract/multiply/divide/percent_change/ratio/"
+                            "share_of_total)은 string column에 적용할 수 없다. 먼저 aggregate로 "
+                            "count/sum/avg를 구한 뒤 그 metric에 calculate를 적용한다."
                         ),
                     )
 
@@ -1283,6 +1290,123 @@ def _infer_step_output_columns(
 
     # 그 외 (present / summarize) — 보수적으로 None 반환.
     # present는 chain 끝에서만 쓰이므로 정의 안 함.
+    return None
+
+
+def _infer_step_output_string_columns(
+    ref: str,
+    step_lookup: dict[str, dict[str, Any]],
+    *,
+    visiting: set[str],
+) -> set[str] | None:
+    """ref output에서 *string 타입으로 확신할 수 있는* 컬럼 집합을 추론한다.
+
+    silverone 2026-06-04 — calculate numeric operation이 string 컬럼을 참조하면
+    executor SQL(COALESCE/산술)이 DuckDB Binder Error → 사용자에게 500으로 노출된다.
+    이를 validator에서 사전 차단하기 위한 타입 추론.
+
+    column-name 추론(``_infer_step_output_columns``)과 차이:
+    - RESERVED root는 None이 아니라 *known string 컬럼 집합*을 반환한다. dataset별
+      dynamic 컬럼은 타입을 모르므로 집합에 넣지 않는다 (모르는 컬럼 = over-block 안 함).
+    - count/sum/avg metric은 numeric → 집합에서 제외. min/max는 source 컬럼이 string
+      이면 string. group_by 컬럼은 source 타입을 유지.
+    - join은 right_ prefix collision 판정이 복잡해 보수적으로 None(검증 skip).
+
+    Returns:
+        확신할 수 있는 string 컬럼 집합(빈 집합 가능), 또는 추론 불가 시 None.
+    """
+    ref = ref.strip()
+    if not ref:
+        return None
+    if ref in RESERVED_INPUT_NAMES:
+        # known string columns만. dynamic dataset 컬럼은 타입 불명 → 미포함.
+        return set(RESERVED_STRING_COLUMNS.get(ref, frozenset()))
+    if ref in visiting:
+        return None
+    if ref not in step_lookup:
+        return None
+
+    step = step_lookup[ref]
+    if not isinstance(step, dict):
+        return None
+    skill_name = str(step.get("skill") or "").strip()
+    params = step.get("params")
+    if not isinstance(params, dict):
+        return None
+
+    visiting = visiting | {ref}
+
+    if skill_name in ("filter", "sort"):
+        return _infer_step_output_string_columns(
+            str(params.get("input") or "").strip(), step_lookup, visiting=visiting
+        )
+
+    if skill_name == "calculate":
+        # calculate는 numeric expression 컬럼만 추가 → string 집합은 upstream 그대로.
+        return _infer_step_output_string_columns(
+            str(params.get("input") or "").strip(), step_lookup, visiting=visiting
+        )
+
+    if skill_name == "aggregate":
+        upstream = _infer_step_output_string_columns(
+            str(params.get("input") or "").strip(), step_lookup, visiting=visiting
+        )
+        if upstream is None:
+            return None
+        strings: set[str] = set()
+        group_by = params.get("group_by")
+        if isinstance(group_by, list):
+            for col in group_by:
+                name = str(col or "").strip()
+                if name and name in upstream:
+                    strings.add(name)  # group 컬럼은 source 타입 유지
+        metrics = params.get("metrics")
+        if isinstance(metrics, list):
+            for metric in metrics:
+                if not isinstance(metric, dict):
+                    continue
+                out_name = str(metric.get("name") or "").strip()
+                if not out_name:
+                    continue
+                func = str(metric.get("function") or "").strip()
+                # count/sum/avg → numeric(제외). min/max는 source 컬럼이 string이면 string.
+                if func in ("min", "max"):
+                    src = str(metric.get("column") or "").strip()
+                    if src and src in upstream:
+                        strings.add(out_name)
+        return strings
+
+    if skill_name == "compare":
+        left_label = str(params.get("left_label") or "").strip()
+        right_label = str(params.get("right_label") or "").strip()
+        if not left_label or not right_label:
+            return None
+        left_strings = _infer_step_output_string_columns(
+            str(params.get("left") or "").strip(), step_lookup, visiting=visiting
+        )
+        right_strings = _infer_step_output_string_columns(
+            str(params.get("right") or "").strip(), step_lookup, visiting=visiting
+        )
+        if left_strings is None or right_strings is None:
+            return None
+        join_key = params.get("join_key")
+        join_set: set[str] = set()
+        if isinstance(join_key, list):
+            for col in join_key:
+                name = str(col or "").strip()
+                if name:
+                    join_set.add(name)
+        result: set[str] = set()
+        for col in join_set:
+            if col in left_strings or col in right_strings:
+                result.add(col)
+        for col in left_strings - join_set:
+            result.add(f"{left_label}_{col}")
+        for col in right_strings - join_set:
+            result.add(f"{right_label}_{col}")
+        return result
+
+    # join / 그 외 — string 컬럼을 안전하게 확정하기 어려워 보수적으로 None(검증 skip).
     return None
 
 
