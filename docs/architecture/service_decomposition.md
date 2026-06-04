@@ -60,9 +60,13 @@
 2. **2순위 — AnalysisThreadService**: thread/run CRUD + AnalyzeDatasetAsNewThread /
    PostAnalysisThreadMessage + plan reuse. **AnalyzeService에 의존**하므로 그 다음.
 3. **3순위 — DatasetBuildService**: clean/doc_genuineness/clause_label job 생성·조회·dispatch.
-   analyze/thread와 독립적이라 위 둘 이후 별도로.
-4. **이후 — ADR-018 β2 legacy helper 정리**: 아래 §4의 죽은 코드 후보(derive*) 정리.
-   구조 분리와 섞지 않고 독립 "ADR-018 β2 residue cleanup" PR로 진행.
+   ⏸ **보류(prep-first)** — build 메서드가 store/version 외에 buildJobStarter(Temporal) +
+   공유 core 헬퍼(buildClient / runWorkerTask / attachDatasetVersionArtifacts /
+   datasetArtifactPathOrFallback / deriveCleanURI)에 의존하는데, 이 헬퍼들은 build 전용이
+   아니라 analyze/version/storage/worker가 함께 쓰는 core 내부라 build service로 옮길 수 없다.
+   지금 facade로 떼면 ~9 메서드 fat interface(약한 seam)가 되므로, 공유 헬퍼 경계를 먼저
+   정리하는 prep MR 후 좁은 seam으로 분리한다.
+4. **이후 — ADR-018 β2 legacy helper 정리**: §4의 죽은 코드 후보(derive*) 정리. ✅ 완료(MR !87).
 
 각 단계는 작은 MR 1개로, facade 위임 + 테스트 동반, 동작/ public API 불변을 원칙으로 한다.
 
@@ -75,17 +79,21 @@
 - **테스트 결합**: 다수 테스트가 `&DatasetService{store: ...}`를 직접 구성하고 unexported
   필드/메서드를 호출한다(같은 package). sub-service로 옮기면 테스트도 함께 이동/수정 필요 →
   한 번에 큰 이동 금지, 패키지 내 점진 이동 권장.
-- **죽은 코드 후보(별도 정리)**: `datasets.go`의 `deriveEmbeddingURI`/`deriveClusterURI`/
-  `deriveSentimentURI`/`derivePrepareURI`/`deriveEmbeddingIndexSourceURI`는 ADR-018 β2로 제거된
-  build 단계 잔재다. 일부는 호출 0건(`deriveClusterURI`, `deriveEmbeddingIndexSourceURI`),
-  일부는 1건 남아 있다. **호출 경로 확인 후 별도 PR로 정리** (이번 범위 아님 — CLAUDE.md
-  "호출 경로 확인 전 임의 삭제 금지").
+- **죽은 코드 후보**: ✅ 정리 완료(MR !87). `datasets.go`의 derive* URI helper(embedding/
+  cluster/sentiment/prepare, method+중복 func 8개)와 그것만 쓰던 `datasetSourceForUnstructured`를
+  호출 경로 0건 확인 후 제거. 살아 있는 `deriveCleanURI`만 유지.
 
-## 5. 진행 상태
+## 5. 진행 상태 (2026-06-04 갱신 — merge 반영)
 
-- ✅ README 정합성 (MR !79, merged)
-- ✅ 본 조사 문서 + analyze 데이터 계약 타입 `analyze_types.go` 분리 (MR !83, merged)
-- ⏭ **1순위 AnalyzeService facade 분리** (다음 MR)
-- ⏭ 2순위 AnalysisThreadService / 3순위 DatasetBuildService
-- ⏭ ADR-018 β2 residue cleanup (derive* 죽은 코드) — 별도 PR
-- 별건: Python 검증 명령 `python3` → `python3.11` 문서/스크립트 정합성 — 별도 작은 PR
+- ✅ README 정합성 (MR !79)
+- ✅ 조사 문서 + analyze 데이터 계약 타입 `analyze_types.go` 분리 (MR !83)
+- ✅ **1순위 AnalyzeService facade 분리** (MR !85)
+- ✅ **2순위 AnalysisThreadService facade 분리** (MR !89)
+- ✅ ADR-018 β2 residue cleanup — derive* 죽은 코드 제거 (MR !87)
+- ✅ Python 검증 명령 python3.11 정합 (MR !86) + stale 문서 정리 devtools/경로 (MR !88)
+- ⏸ **3순위 DatasetBuildService — 보류(prep-first)**. 사유는 §3-3. 공유 core 헬퍼 경계를
+  먼저 정리하지 않으면 fat interface(약한 seam)가 되므로 강행하지 않는다.
+
+구조 분리는 **AnalyzeService / AnalysisThreadService까지로 일단락**한다. 이후 우선순위는
+구조 리팩토링이 아니라 **운영 안정화 트랙**: worker 동시성/body 제한, 인증·노출 제어,
+boot-time schema mutation 제거, artifact 검증, metrics.
