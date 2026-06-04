@@ -31,8 +31,8 @@ const (
 // 도중에 바뀌어도 무관. 새 version으로 분석하려면 새 thread를 만든다.
 //
 // 자세한 모델은 vault `analysis_api_model_2026-05-26` §2 (thread version lock).
-func (s *DatasetService) CreateAnalysisThread(projectID, datasetID string, input domain.AnalysisThreadCreateRequest) (domain.AnalysisThread, error) {
-	dataset, err := s.GetDataset(projectID, datasetID)
+func (t *AnalysisThreadService) CreateAnalysisThread(projectID, datasetID string, input domain.AnalysisThreadCreateRequest) (domain.AnalysisThread, error) {
+	dataset, err := t.deps.GetDataset(projectID, datasetID)
 	if err != nil {
 		return domain.AnalysisThread{}, err
 	}
@@ -43,7 +43,7 @@ func (s *DatasetService) CreateAnalysisThread(projectID, datasetID string, input
 	if versionID == "" {
 		return domain.AnalysisThread{}, ErrInvalidArgument{Message: "dataset has no active version — upload and activate a dataset version before starting an analysis thread"}
 	}
-	if _, err := s.GetDatasetVersion(projectID, datasetID, versionID); err != nil {
+	if _, err := t.deps.GetDatasetVersion(projectID, datasetID, versionID); err != nil {
 		return domain.AnalysisThread{}, err
 	}
 	now := time.Now().UTC()
@@ -56,32 +56,32 @@ func (s *DatasetService) CreateAnalysisThread(projectID, datasetID string, input
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	if err := s.store.SaveAnalysisThread(thread); err != nil {
+	if err := t.store.SaveAnalysisThread(thread); err != nil {
 		return domain.AnalysisThread{}, err
 	}
-	return s.store.GetAnalysisThread(projectID, datasetID, thread.ThreadID)
+	return t.store.GetAnalysisThread(projectID, datasetID, thread.ThreadID)
 }
 
-func (s *DatasetService) ListAnalysisThreads(projectID, datasetID string) (domain.AnalysisThreadListResponse, error) {
-	if _, err := s.GetDataset(projectID, datasetID); err != nil {
+func (t *AnalysisThreadService) ListAnalysisThreads(projectID, datasetID string) (domain.AnalysisThreadListResponse, error) {
+	if _, err := t.deps.GetDataset(projectID, datasetID); err != nil {
 		return domain.AnalysisThreadListResponse{}, err
 	}
-	items, err := s.store.ListAnalysisThreads(projectID, datasetID)
+	items, err := t.store.ListAnalysisThreads(projectID, datasetID)
 	if err != nil {
 		return domain.AnalysisThreadListResponse{}, err
 	}
 	return domain.AnalysisThreadListResponse{Items: items}, nil
 }
 
-func (s *DatasetService) GetAnalysisThread(projectID, datasetID, threadID string) (domain.AnalysisThreadDetail, error) {
-	thread, err := s.store.GetAnalysisThread(projectID, datasetID, threadID)
+func (t *AnalysisThreadService) GetAnalysisThread(projectID, datasetID, threadID string) (domain.AnalysisThreadDetail, error) {
+	thread, err := t.store.GetAnalysisThread(projectID, datasetID, threadID)
 	if err != nil {
 		if err == store.ErrNotFound {
 			return domain.AnalysisThreadDetail{}, ErrNotFound{Resource: "analysis thread"}
 		}
 		return domain.AnalysisThreadDetail{}, err
 	}
-	messages, err := s.store.ListAnalysisMessages(projectID, threadID)
+	messages, err := t.store.ListAnalysisMessages(projectID, threadID)
 	if err != nil {
 		return domain.AnalysisThreadDetail{}, err
 	}
@@ -95,7 +95,7 @@ func (s *DatasetService) GetAnalysisThread(projectID, datasetID, threadID string
 		if msg.Role != "assistant" || msg.RunID == nil || strings.TrimSpace(*msg.RunID) == "" {
 			continue
 		}
-		run, runErr := s.store.GetAnalysisRun(projectID, *msg.RunID)
+		run, runErr := t.store.GetAnalysisRun(projectID, *msg.RunID)
 		if runErr != nil {
 			// run 조회 실패는 display/plan 없이 message만 반환 (best-effort).
 			continue
@@ -114,8 +114,8 @@ func (s *DatasetService) GetAnalysisThread(projectID, datasetID, threadID string
 // project_id+dataset_id+thread_id가 모두 일치하는 thread만 삭제하며, 일치 row가
 // 없거나 dataset이 다르면 404(ErrNotFound). messages/runs/rejection_events는
 // FK ON DELETE CASCADE로 함께 삭제된다.
-func (s *DatasetService) DeleteAnalysisThread(projectID, datasetID, threadID string) error {
-	if err := s.store.DeleteAnalysisThread(projectID, datasetID, threadID); err != nil {
+func (t *AnalysisThreadService) DeleteAnalysisThread(projectID, datasetID, threadID string) error {
+	if err := t.store.DeleteAnalysisThread(projectID, datasetID, threadID); err != nil {
 		if err == store.ErrNotFound {
 			return ErrNotFound{Resource: "analysis thread"}
 		}
@@ -124,8 +124,8 @@ func (s *DatasetService) DeleteAnalysisThread(projectID, datasetID, threadID str
 	return nil
 }
 
-func (s *DatasetService) GetAnalysisRun(projectID, datasetID, runID string) (domain.AnalysisRun, error) {
-	run, err := s.store.GetAnalysisRun(projectID, runID)
+func (t *AnalysisThreadService) GetAnalysisRun(projectID, datasetID, runID string) (domain.AnalysisRun, error) {
+	run, err := t.store.GetAnalysisRun(projectID, runID)
 	if err != nil {
 		if err == store.ErrNotFound {
 			return domain.AnalysisRun{}, ErrNotFound{Resource: "analysis run"}
@@ -147,18 +147,18 @@ func (s *DatasetService) GetAnalysisRun(projectID, datasetID, runID string) (dom
 //
 // 두 번째 turn부터는 화면이 /analysis_threads/{tid}/messages로 직접 보낸다.
 // 자세한 흐름은 vault `analysis_api_model_2026-05-26` §3.1.
-func (s *DatasetService) AnalyzeDatasetAsNewThread(ctx context.Context, projectID, datasetID string, req AnalyzeRequest) (domain.AnalysisThreadMessageResponse, error) {
+func (t *AnalysisThreadService) AnalyzeDatasetAsNewThread(ctx context.Context, projectID, datasetID string, req AnalyzeRequest) (domain.AnalysisThreadMessageResponse, error) {
 	question := strings.TrimSpace(req.UserQuestion)
 	if question == "" {
 		return domain.AnalysisThreadMessageResponse{}, ErrInvalidArgument{Message: "user_question is required"}
 	}
-	thread, err := s.CreateAnalysisThread(projectID, datasetID, domain.AnalysisThreadCreateRequest{
+	thread, err := t.CreateAnalysisThread(projectID, datasetID, domain.AnalysisThreadCreateRequest{
 		Title: question,
 	})
 	if err != nil {
 		return domain.AnalysisThreadMessageResponse{}, err
 	}
-	return s.PostAnalysisThreadMessage(ctx, projectID, datasetID, thread.ThreadID, domain.AnalysisThreadMessageRequest{
+	return t.PostAnalysisThreadMessage(ctx, projectID, datasetID, thread.ThreadID, domain.AnalysisThreadMessageRequest{
 		Content: question,
 	})
 }
@@ -180,7 +180,7 @@ func (s *DatasetService) AnalyzeDatasetAsNewThread(ctx context.Context, projectI
 //
 // conversation_context는 §6의 buildConversationContext가 assistant context_summary
 // 최근 3턴/2000 bytes를 모아 worker payload에 inject한다.
-func (s *DatasetService) PostAnalysisThreadMessage(
+func (t *AnalysisThreadService) PostAnalysisThreadMessage(
 	ctx context.Context,
 	projectID, datasetID, threadID string,
 	input domain.AnalysisThreadMessageRequest,
@@ -189,14 +189,14 @@ func (s *DatasetService) PostAnalysisThreadMessage(
 	if question == "" {
 		return domain.AnalysisThreadMessageResponse{}, ErrInvalidArgument{Message: "message content is required"}
 	}
-	thread, err := s.store.GetAnalysisThread(projectID, datasetID, threadID)
+	thread, err := t.store.GetAnalysisThread(projectID, datasetID, threadID)
 	if err != nil {
 		if err == store.ErrNotFound {
 			return domain.AnalysisThreadMessageResponse{}, ErrNotFound{Resource: "analysis thread"}
 		}
 		return domain.AnalysisThreadMessageResponse{}, err
 	}
-	contextItems, err := s.buildConversationContext(projectID, threadID)
+	contextItems, err := t.buildConversationContext(projectID, threadID)
 	if err != nil {
 		return domain.AnalysisThreadMessageResponse{}, err
 	}
@@ -211,7 +211,7 @@ func (s *DatasetService) PostAnalysisThreadMessage(
 		Content:   question,
 		CreatedAt: now,
 	}
-	if err := s.store.SaveAnalysisMessage(userMessage); err != nil {
+	if err := t.store.SaveAnalysisMessage(userMessage); err != nil {
 		return domain.AnalysisThreadMessageResponse{}, err
 	}
 
@@ -230,7 +230,7 @@ func (s *DatasetService) PostAnalysisThreadMessage(
 		Status:           "running",
 		CreatedAt:        now,
 	}
-	if err := s.store.SaveAnalysisRun(run); err != nil {
+	if err := t.store.SaveAnalysisRun(run); err != nil {
 		return domain.AnalysisThreadMessageResponse{}, err
 	}
 
@@ -239,12 +239,12 @@ func (s *DatasetService) PostAnalysisThreadMessage(
 	// 모든 분기 (classifier no_match / patch fail / validator fail / executor
 	// fail)에서 기존 planner LLM 흐름으로 fallback. fallback 시 reuse.applied=false +
 	// fallback_reason 로깅.
-	reuseDecision, reusedResp, reuseOK := s.tryReusePlan(ctx, projectID, datasetID, thread, question, contextItems)
+	reuseDecision, reusedResp, reuseOK := t.tryReusePlan(ctx, projectID, datasetID, thread, question, contextItems)
 	var analysisResp AnalyzeResponse
 	if reuseOK {
 		analysisResp = reusedResp
 	} else {
-		analysisResp, err = s.ExecuteAnalyze(ctx, projectID, datasetID, thread.DatasetVersionID, AnalyzeRequest{
+		analysisResp, err = t.deps.ExecuteAnalyze(ctx, projectID, datasetID, thread.DatasetVersionID, AnalyzeRequest{
 			UserQuestion:        question,
 			ConversationContext: contextItems,
 		})
@@ -255,7 +255,7 @@ func (s *DatasetService) PostAnalysisThreadMessage(
 		run.Status = "failed"
 		run.ErrorMessage = &message
 		run.CompletedAt = &completedAt
-		_ = s.store.SaveAnalysisRun(run)
+		_ = t.store.SaveAnalysisRun(run)
 
 		// silverone 2026-05-26 — failed run UX. user 발언만 남고 assistant가 비어있는
 		// 상황을 막기 위해 placeholder를 thread에 저장. caller(화면)는 HTTP error로
@@ -272,7 +272,7 @@ func (s *DatasetService) PostAnalysisThreadMessage(
 			RunID:     &runID,
 			CreatedAt: completedAt,
 		}
-		_ = s.store.SaveAnalysisMessage(placeholder)
+		_ = t.store.SaveAnalysisMessage(placeholder)
 
 		return domain.AnalysisThreadMessageResponse{}, err
 	}
@@ -286,7 +286,7 @@ func (s *DatasetService) PostAnalysisThreadMessage(
 	run.Status = "completed"
 	run.ResultJSON = append([]byte(nil), analysisResp.Result...)
 	run.CompletedAt = &completedAt
-	if err := s.store.SaveAnalysisRun(run); err != nil {
+	if err := t.store.SaveAnalysisRun(run); err != nil {
 		return domain.AnalysisThreadMessageResponse{}, err
 	}
 
@@ -302,7 +302,7 @@ func (s *DatasetService) PostAnalysisThreadMessage(
 		RunID:          &runID,
 		CreatedAt:      completedAt,
 	}
-	if err := s.store.SaveAnalysisMessage(assistantMessage); err != nil {
+	if err := t.store.SaveAnalysisMessage(assistantMessage); err != nil {
 		return domain.AnalysisThreadMessageResponse{}, err
 	}
 
@@ -313,7 +313,7 @@ func (s *DatasetService) PostAnalysisThreadMessage(
 	if event, ok := rejectionEventFromResult(
 		projectID, datasetID, thread.ThreadID, assistantMessage.MessageID, question, analysisResp.Result,
 	); ok {
-		_ = s.store.SaveRejectionEvent(event)
+		_ = t.store.SaveRejectionEvent(event)
 	}
 
 	// silverone 2026-05-28 — frontend-safe projection.
@@ -336,8 +336,8 @@ func (s *DatasetService) PostAnalysisThreadMessage(
 // 최근 assistant context_summary를 시간 역순으로 훑어 최대 3턴 / 직렬화 누적
 // 2000 bytes 한도로 수집, 시간 순으로 다시 정렬해 worker에 넘긴다.
 // context_summary가 비어있는 메시지(예: failed run placeholder §4)는 자동 skip.
-func (s *DatasetService) buildConversationContext(projectID, threadID string) ([]map[string]any, error) {
-	messages, err := s.store.ListAnalysisMessages(projectID, threadID)
+func (t *AnalysisThreadService) buildConversationContext(projectID, threadID string) ([]map[string]any, error) {
+	messages, err := t.store.ListAnalysisMessages(projectID, threadID)
 	if err != nil {
 		if err == store.ErrNotFound {
 			return nil, ErrNotFound{Resource: "analysis thread"}
@@ -588,7 +588,7 @@ func truncateRunes(value string, limit int) string {
 //   - resp: reuse 성공 시 채워진 AnalyzeResponse, 실패 시 zero value.
 //   - ok: reuse 흐름으로 resp를 사용해야 하는지. false면 호출자가 planner LLM
 //     흐름으로 fallback.
-func (s *DatasetService) tryReusePlan(
+func (t *AnalysisThreadService) tryReusePlan(
 	ctx context.Context,
 	projectID, datasetID string,
 	thread domain.AnalysisThread,
@@ -602,7 +602,7 @@ func (s *DatasetService) tryReusePlan(
 	}
 
 	// 2) 이전 successful run 로드
-	source, srcReason := s.loadReusableSourceRun(projectID, thread.ThreadID)
+	source, srcReason := t.loadReusableSourceRun(projectID, thread.ThreadID)
 	if source == nil {
 		return ReuseDecision{
 			Reused:         false,
@@ -644,7 +644,7 @@ func (s *DatasetService) tryReusePlan(
 		"action_params": params,
 		"source_run_id": source.RunID,
 	}
-	resp, err := s.ExecuteAnalyze(ctx, projectID, datasetID, thread.DatasetVersionID, AnalyzeRequest{
+	resp, err := t.deps.ExecuteAnalyze(ctx, projectID, datasetID, thread.DatasetVersionID, AnalyzeRequest{
 		Plan:          planRaw,
 		ReuseMetadata: reuseHint,
 	})

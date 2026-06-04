@@ -60,8 +60,8 @@ var (
 
 // loadReusableSourceRun — thread의 가장 최근 completed run에서 plan + present
 // 정보를 추출한다. run/plan/present 어느 하나라도 없으면 reuse 불가 (nil, "" 사유).
-func (s *DatasetService) loadReusableSourceRun(projectID, threadID string) (*reusableSourceRun, string) {
-	run, err := s.store.GetLastSuccessfulAnalysisRun(projectID, threadID)
+func (t *AnalysisThreadService) loadReusableSourceRun(projectID, threadID string) (*reusableSourceRun, string) {
+	run, err := t.store.GetLastSuccessfulAnalysisRun(projectID, threadID)
 	if err != nil {
 		return nil, "no_previous_completed_run"
 	}
