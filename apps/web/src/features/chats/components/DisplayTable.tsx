@@ -1,5 +1,8 @@
 import { cn } from "@/lib/utils";
 import type { ChatTableDisplay } from "../models";
+import { useTaxonomy } from "@/features/taxonomy/hooks/taxonomy.query";
+import { ASPECT_FIELD, aspectLabelOf } from "@/features/taxonomy/models";
+import type { Taxonomy } from "@/features/taxonomy/models";
 
 const MAX_VISIBLE_ROWS = 100;
 // 20행 이하면 max-height 없이 자연 펼침, 그 이상은 360px 박스 + 내부 스크롤.
@@ -12,8 +15,22 @@ function formatCell(value: unknown): string {
   return JSON.stringify(value);
 }
 
+// aspect 컬럼의 영문 key 셀은 taxonomy 한글 label로 표시 (미매칭/미로딩 시 key 유지).
+function renderCell(
+  col: string,
+  value: unknown,
+  taxonomy: Taxonomy | undefined,
+): string {
+  if (col === ASPECT_FIELD && typeof value === "string") {
+    return aspectLabelOf(taxonomy, value);
+  }
+  return formatCell(value);
+}
+
 export default function DisplayTable({ display }: { display: ChatTableDisplay }) {
   const { title, columns, rows } = display;
+  // 조회 실패해도 renderCell이 key로 fallback하므로 화면은 동작한다.
+  const { data: taxonomy } = useTaxonomy();
   const totalRows = rows.length;
   const visibleRows = rows.slice(0, MAX_VISIBLE_ROWS);
   const truncated = totalRows > MAX_VISIBLE_ROWS;
@@ -54,7 +71,7 @@ export default function DisplayTable({ display }: { display: ChatTableDisplay })
                       key={col}
                       className="px-3 py-2 text-zinc-700 whitespace-nowrap align-top"
                     >
-                      {formatCell(row[col])}
+                      {renderCell(col, row[col], taxonomy)}
                     </td>
                   ))}
                 </tr>
