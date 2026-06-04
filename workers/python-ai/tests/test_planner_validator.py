@@ -1115,6 +1115,137 @@ class SqlContractTests(unittest.TestCase):
         codes = _codes(plan)
         self.assertNotIn("params.expression_column_not_numeric", codes)
 
+    # ----- 2026-06-04 — calculate VARCHAR numeric-op 방어 (prior step output 타입 추론) -----
+
+    @staticmethod
+    def _agg_then_calc(expr: dict[str, Any]) -> dict[str, Any]:
+        """clauses → aggregate(group_by=[aspect], count) → calculate(expr) 플랜.
+
+        aggregate output: aspect(string, group 컬럼) / cnt(numeric, count metric).
+        """
+        return _wrap(
+            [
+                {
+                    "id": "agg",
+                    "skill": "aggregate",
+                    "params": {
+                        "input": "clauses",
+                        "group_by": ["aspect"],
+                        "metrics": [{"name": "cnt", "function": "count", "column": "*"}],
+                    },
+                },
+                {
+                    "id": "calc",
+                    "skill": "calculate",
+                    "params": {"input": "agg", "expressions": [expr]},
+                },
+            ]
+        )
+
+    def test_calc_add_on_prior_string_group_column_rejected(self) -> None:
+        # add/subtract/multiply/divide: left/right가 prior aggregate의 string group
+        # 컬럼(aspect)이면 reject.
+        for op in ("add", "subtract", "multiply", "divide"):
+            plan = self._agg_then_calc(
+                {"name": "x", "operation": op, "left": "aspect", "right": "cnt"}
+            )
+            self.assertIn(
+                "params.expression_column_not_numeric",
+                _codes(plan),
+                msg=f"{op} on string group column should be rejected",
+            )
+
+    def test_calc_ratio_on_prior_string_column_rejected(self) -> None:
+        # ratio numerator/denominator가 string group 컬럼이면 reject.
+        plan = self._agg_then_calc(
+            {"name": "r", "operation": "ratio", "numerator": "aspect", "denominator": "cnt"}
+        )
+        self.assertIn("params.expression_column_not_numeric", _codes(plan))
+
+    def test_calc_share_of_total_on_prior_string_column_rejected(self) -> None:
+        # share_of_total.value가 string group 컬럼이면 reject.
+        plan = self._agg_then_calc(
+            {"name": "s", "operation": "share_of_total", "value": "aspect"}
+        )
+        self.assertIn("params.expression_column_not_numeric", _codes(plan))
+
+    def test_calc_share_of_total_on_prior_count_metric_passes(self) -> None:
+        # 정상 케이스 — count metric(numeric)에 share_of_total은 통과해야 한다.
+        plan = self._agg_then_calc(
+            {"name": "s", "operation": "share_of_total", "value": "cnt"}
+        )
+        self.assertNotIn("params.expression_column_not_numeric", _codes(plan))
+
+    def test_calc_numeric_ops_on_prior_count_metric_pass(self) -> None:
+        for op in ("add", "subtract", "multiply", "divide"):
+            plan = self._agg_then_calc(
+                {"name": "x", "operation": op, "left": "cnt", "right": "cnt"}
+            )
+            self.assertNotIn(
+                "params.expression_column_not_numeric",
+                _codes(plan),
+                msg=f"{op} on numeric count metric should pass",
+            )
+
+    def test_calc_on_filtered_aggregate_string_column_rejected(self) -> None:
+        # filter는 pass-through라 filter(aggregate) 체인을 거쳐도 string 타입 추론 유지.
+        plan = _wrap(
+            [
+                {
+                    "id": "agg",
+                    "skill": "aggregate",
+                    "params": {
+                        "input": "clauses",
+                        "group_by": ["aspect"],
+                        "metrics": [{"name": "cnt", "function": "count", "column": "*"}],
+                    },
+                },
+                {
+                    "id": "f",
+                    "skill": "filter",
+                    "params": {"input": "agg", "column": "cnt", "operator": "gt", "value": 1},
+                },
+                {
+                    "id": "calc",
+                    "skill": "calculate",
+                    "params": {
+                        "input": "f",
+                        "expressions": [
+                            {"name": "x", "operation": "multiply", "left": "aspect", "right": "cnt"}
+                        ],
+                    },
+                },
+            ]
+        )
+        self.assertIn("params.expression_column_not_numeric", _codes(plan))
+
+    def test_calc_on_min_string_metric_rejected(self) -> None:
+        # min(string 컬럼) metric 출력은 string → 그 컬럼에 numeric op는 reject.
+        plan = _wrap(
+            [
+                {
+                    "id": "agg",
+                    "skill": "aggregate",
+                    "params": {
+                        "input": "clauses",
+                        "group_by": ["doc_id"],
+                        "metrics": [{"name": "min_aspect", "function": "min", "column": "aspect"}],
+                    },
+                },
+                {
+                    "id": "calc",
+                    "skill": "calculate",
+                    "params": {
+                        "input": "agg",
+                        "expressions": [
+                            {"name": "x", "operation": "multiply", "left": "min_aspect", "right": "min_aspect"}
+                        ],
+                    },
+                },
+            ]
+        )
+        self.assertIn("params.expression_column_not_numeric", _codes(plan))
+
     # ----- SQL-3.1 (C4) — filter type mismatch -----
 
     def test_filter_contains_on_timestamp_column_rejected(self) -> None:
