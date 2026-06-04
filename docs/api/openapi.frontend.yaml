@@ -437,7 +437,7 @@ components:
           example: food
         label:
           type: string
-          example: 음식/음료
+          example: 음식
         description:
           type: string
       required: [key, label, description]
