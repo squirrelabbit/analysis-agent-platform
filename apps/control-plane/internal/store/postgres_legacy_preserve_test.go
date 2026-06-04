@@ -62,19 +62,15 @@ var (
 // 새 mutation은 여기 없으면 테스트가 막는다. (substring 매칭 — whitespace 변화에
 // 견디도록 statement의 식별 가능한 앞부분만 기재.)
 //
-// ⚠️ TODO(후속 MR) — 이 allowlist는 *영구 허용이 아니라 migration 이전까지의 임시 예외*다.
-//   - 특히 `ALTER TABLE dataset_build_jobs DROP COLUMN IF EXISTS resumed_execution_count`는
-//     boot path에 남아 있는 destructive 스키마 변경이다. 이번 변경은 "동작 변경 금지"
-//     원칙 때문에 제거하지 않고 allowlist로 유지했다.
-//   - 후속 MR에서: (1) 이 DROP COLUMN을 scripts/migrations/ 의 operator-run migration으로
-//     분리하고, (2) ensureSchema(postgres.go)에서 해당 문을 제거하고, (3) 이 allowlist
-//     항목도 함께 지운다. UPDATE backfill 2건도 동일하게 migration 이전 후보다.
+// ⚠️ 이 allowlist는 *영구 허용이 아니라 migration 이전까지의 임시 예외*다.
+//   - resumed_execution_count DROP COLUMN은 operator-run migration으로 분리 완료
+//     (scripts/migrations/0002_drop_resumed_execution_count.sql, ensureSchema에서 제거).
+//   - 남은 UPDATE backfill 2건도 동일하게 migration 이전 후보다 — 후속 MR에서 operator
+//     migration으로 분리하고 ensureSchema와 이 allowlist에서 함께 제거한다.
 var bootMutationAllowlist = []string{
 	// 멱등 backfill (β2 cleanup) — dataset_version active/clean 메타 보정. (migration 이전 후보)
 	"UPDATE dataset_versions",
 	"UPDATE datasets d",
-	// β2로 제거된 컬럼 정리. IF EXISTS라 멱등. (migration 이전 후보 — 위 TODO 참조)
-	"ALTER TABLE dataset_build_jobs DROP COLUMN IF EXISTS resumed_execution_count",
 }
 
 // bootMutationKind — SQL literal이 추적 대상 mutation이면 그 종류를, 아니면 ""를 반환.
@@ -159,6 +155,9 @@ func TestBootMutationDetection(t *testing.T) {
 		"ALTER TABLE foo DROP COLUMN bar":   "ALTER ... DROP",
 		"ALTER TABLE foo DROP CONSTRAINT c": "ALTER ... DROP",
 		"UPDATE some_other_table SET x = 1": "UPDATE",
+		// resumed_execution_count DROP은 operator migration으로 분리·allowlist 제거됨 →
+		// 이제 boot에 재등장하면 차단되어야 한다.
+		"ALTER TABLE dataset_build_jobs DROP COLUMN IF EXISTS resumed_execution_count": "ALTER ... DROP",
 	}
 	for sql, want := range blocked {
 		if got := bootMutationKind(sql); got != want {
@@ -182,11 +181,10 @@ func TestBootMutationDetection(t *testing.T) {
 		}
 	}
 
-	// 현재 allowlist된 기존 mutation은 허용되어야 한다.
+	// 현재 allowlist된 기존 mutation은 허용되어야 한다 (UPDATE backfill 2건만 남음).
 	for _, sql := range []string{
 		"UPDATE dataset_versions SET clean_status = 'ready'",
 		"UPDATE datasets d SET active_dataset_version_id = v.id",
-		"ALTER TABLE dataset_build_jobs DROP COLUMN IF EXISTS resumed_execution_count",
 	} {
 		if bootMutationKind(sql) == "" {
 			t.Errorf("allowlist 대상 %q가 mutation으로 탐지되지 않음(분류 누락)", sql)

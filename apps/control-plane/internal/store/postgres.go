@@ -2069,9 +2069,11 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		`ALTER TABLE dataset_build_jobs ADD COLUMN IF NOT EXISTS workflow_run_id TEXT`,
 		`ALTER TABLE dataset_build_jobs ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE dataset_build_jobs ADD COLUMN IF NOT EXISTS last_error_type TEXT`,
-		// 2026-05-21 — resumed_execution_count 컬럼 제거 (δ-3 executions drop 잔재).
-		// 기존 DB row의 데이터 손실은 없음 — 카운터는 의미 없는 값(항상 0).
-		`ALTER TABLE dataset_build_jobs DROP COLUMN IF EXISTS resumed_execution_count`,
+		// 2026-05-21 — resumed_execution_count 컬럼(δ-3 executions drop 잔재)은 코드에서
+		// read/write하지 않는다. boot-time DROP COLUMN은 destructive 스키마 변경이라
+		// 제거하고(silverone 2026-06-04) operator-run migration으로 분리했다:
+		// scripts/migrations/0002_drop_resumed_execution_count.sql. 컬럼이 남아 있어도
+		// 미사용이라 무해하며, 정리는 operator가 1회 수동 실행한다.
 		`CREATE INDEX IF NOT EXISTS dataset_build_jobs_project_version_idx ON dataset_build_jobs(project_id, dataset_version_id, created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS analysis_threads (
 			thread_id TEXT PRIMARY KEY,
