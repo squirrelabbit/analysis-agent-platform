@@ -255,8 +255,9 @@ class PromptRenderTests(unittest.TestCase):
         _, system, _user = render_planner_prompt(user_question="dummy")
         # silverone 2026-05-26 (cost-opt) — Rules는 정적이므로 system 영역에 있어야 한다.
         rules = [
-            "skill catalog에 정의된 skill만 사용",
-            "수치 계산도 `calculate` skill",
+            # R2b (2026-06-04) — recipe 노출로 문구 변경 (markdown bold: **또는 위 recipe**만).
+            "또는 위 recipe",
+            "수치 계산도 `calculate`",
             "catalog의 `params` 명세를 그대로 따른",
             "존재하지 않는 table / column / step id를 만들지 않",
             "`doc_id`",
