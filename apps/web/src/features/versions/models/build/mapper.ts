@@ -82,17 +82,11 @@ const mapClauseItem = (dto: ClauseItemDto): ClauseItem => ({
 });
 
 export const mapClauseSummary = (dto: ClauseSummaryDto): ClauseSummary => ({
-  aspect: {
-    showProgram: dto.aspect?.show_program ?? 0,
-    experienceBooth: dto.aspect?.experience_booth ?? 0,
-    ambianceScenery: dto.aspect?.ambiance_scenery ?? 0,
-    food: dto.aspect?.food ?? 0,
-    priceCost: dto.aspect?.price_cost ?? 0,
-    facilityCrowd: dto.aspect?.facility_crowd ?? 0,
-    accessTraffic: dto.aspect?.access_traffic ?? 0,
-    operationService: dto.aspect?.operation_service ?? 0,
-    etc: dto.aspect?.etc ?? 0,
-  },
+  // aspect key는 taxonomy(config) 기반이므로 snake_case 그대로 보존한다.
+  // item.aspect(raw key) / taxonomy aspectLabels와 동일 기준 → 한글 label 매핑.
+  aspect: Object.fromEntries(
+    Object.entries(dto.aspect ?? {}).map(([key, value]) => [key, value ?? 0]),
+  ),
   sentiment: {
     positive: dto.sentiment?.positive ?? 0,
     negative: dto.sentiment?.negative ?? 0,

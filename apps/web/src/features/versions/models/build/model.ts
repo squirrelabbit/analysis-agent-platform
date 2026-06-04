@@ -68,17 +68,9 @@ export interface ClauseItem {
 }
 
 export interface ClauseSummary {
-  aspect: {
-    showProgram: number;
-    experienceBooth: number;
-    ambianceScenery: number;
-    food: number;
-    priceCost: number;
-    facilityCrowd: number;
-    accessTraffic: number;
-    operationService: number;
-    etc: number;
-  };
+  // aspect key(snake_case, taxonomy 기반) → 건수. key 집합은 taxonomy config에
+  // 따라 달라지므로 고정 필드가 아닌 동적 맵으로 둔다.
+  aspect: Record<string, number>;
   sentiment: {
     positive: number;
     negative: number;

@@ -1403,7 +1403,7 @@ components:
         label:
           type: string
           description: 표시용 한글 라벨.
-          example: 음식/음료
+          example: 음식
         description:
           type: string
           description: aspect 판정 기준 설명.

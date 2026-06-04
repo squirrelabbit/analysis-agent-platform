@@ -10,6 +10,8 @@ import {
   YAxis,
 } from "recharts";
 import type { ChatChart } from "../models";
+import { useTaxonomy } from "@/features/taxonomy/hooks/taxonomy.query";
+import { ASPECT_FIELD, aspectLabelOf } from "@/features/taxonomy/models";
 
 function coerceNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -28,13 +30,17 @@ function formatXTick(value: string): string {
 }
 
 export default function ChartView({ chart }: { chart: ChatChart }) {
+  // x축이 aspect면 한글 label로 변환 (미매칭/미로딩 시 key 유지).
+  const { data: taxonomy } = useTaxonomy();
+  const isAspectX = chart.x === ASPECT_FIELD;
   // numeric만 통과시키고 null/문자열은 건너뛴다 — recharts가 깨지지 않게.
   const data = chart.rows
     .map((row) => {
       const yValue = coerceNumber(row[chart.y]);
       if (yValue === null) return null;
       const xValue = row[chart.x];
-      return { _x: xValue == null ? "—" : String(xValue), _y: yValue };
+      const rawX = xValue == null ? "—" : String(xValue);
+      return { _x: isAspectX ? aspectLabelOf(taxonomy, rawX) : rawX, _y: yValue };
     })
     .filter((d): d is { _x: string; _y: number } => d !== null);
 

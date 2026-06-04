@@ -22,6 +22,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useTaxonomy } from "@/features/taxonomy/hooks/taxonomy.query";
+import { aspectLabelOf } from "@/features/taxonomy/models";
 
 const SENTIMENT_COLORS: Record<string, string> = {
   positive: "#10b981",
@@ -52,6 +54,8 @@ function SentimentBadge({ value }: { value: string }) {
 
 export function ClauseTab() {
   const { data } = useBuildVersion("clause_label") as { data: ClauseBuild | undefined };
+  // taxonomy 조회 실패해도 aspectLabelOf가 key로 fallback하므로 화면은 동작한다.
+  const { data: taxonomy } = useTaxonomy();
   const { summary, items, applied, durationSeconds, pagination } = data || {};
   const [filter, setFilter] = useState<string | "">("");
   const [aspectFilter, setAspectFilter] = useState<string>("all");
@@ -66,9 +70,10 @@ export function ClauseTab() {
     sentiment: { positive, neutral, negative },
   } = summary;
 
+  // summary.aspect는 snake_case key → 한글 label로 변환해 차트 축에 표시.
   const aspectData = Object.entries(summary.aspect)
     .sort(([, a], [, b]) => b - a)
-    .map(([name, value]) => ({ name, value }));
+    .map(([key, value]) => ({ name: aspectLabelOf(taxonomy, key), value }));
 
   // Sentiment pie data
   const sentimentData = [
@@ -150,7 +155,7 @@ export function ClauseTab() {
                 tick={{ fontSize: 11, fill: "#71717a" }}
                 axisLine={false}
                 tickLine={false}
-                width={88}
+                width={104}
               />
               {/* <Tooltip
                 formatter={(v: number) => [`${v}건`, "조항 수"]}
@@ -270,7 +275,7 @@ export function ClauseTab() {
                 <SelectItem value="all">전체 Aspect</SelectItem>
                 {aspectOptions.map((a) => (
                   <SelectItem key={a} value={a}>
-                    {a}
+                    {aspectLabelOf(taxonomy, a)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -332,7 +337,7 @@ export function ClauseTab() {
                     </td>
                     <td className="px-4 py-3">
                       <span className="text-xs text-zinc-500">
-                        {item.aspect}
+                        {aspectLabelOf(taxonomy, item.aspect)}
                       </span>
                     </td>
                     <td className="px-4 py-3">
