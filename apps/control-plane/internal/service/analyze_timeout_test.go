@@ -12,6 +12,10 @@ import (
 // silverone 2026-06-04 — postPythonAITask가 하드코딩 120s 대신 주입된
 // pythonAITaskTimeout을 실제로 사용하는지 잠금. 회귀 시 분석 요청이 config와
 // 무관하게 항상 120s로 도는 부채가 재발한다.
+//
+// postPythonAITask는 AnalyzeService로 이전됨(facade 분리, 2026-06-04). 테스트는
+// DatasetService.SetPythonAITaskTimeout → s.analyze() → AnalyzeService.workerTimeout
+// 전 경로가 살아 있는지 facade를 통해 검증한다.
 
 func TestPostPythonAITaskUsesInjectedTimeout(t *testing.T) {
 	// 서버는 200ms 지연 후 응답. timeout을 그보다 짧게 주면 client.Do가 실패해야 한다.
@@ -25,7 +29,7 @@ func TestPostPythonAITaskUsesInjectedTimeout(t *testing.T) {
 	s := &DatasetService{pythonAIWorkerURL: server.URL}
 	s.SetPythonAITaskTimeout(20 * time.Millisecond)
 
-	_, err := s.postPythonAITask(context.Background(), "/tasks/analyze", map[string]any{})
+	_, err := s.analyze().postPythonAITask(context.Background(), "/tasks/analyze", map[string]any{})
 	if err == nil {
 		t.Fatalf("expected timeout error with 20ms timeout, got nil")
 	}
@@ -45,12 +49,44 @@ func TestPostPythonAITaskInjectedTimeoutAllowsFastResponse(t *testing.T) {
 	s := &DatasetService{pythonAIWorkerURL: server.URL}
 	s.SetPythonAITaskTimeout(5 * time.Second)
 
-	raw, err := s.postPythonAITask(context.Background(), "/tasks/analyze", map[string]any{})
+	raw, err := s.analyze().postPythonAITask(context.Background(), "/tasks/analyze", map[string]any{})
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
 	}
 	if !strings.Contains(string(raw), "ok") {
 		t.Fatalf("unexpected body: %s", string(raw))
+	}
+}
+
+// AnalyzeService가 DatasetService 없이도 worker 호출 경로를 독립 수행할 수 있는지
+// (facade 분리의 decoupling) 잠금. versions resolver는 worker 호출에 필요 없으므로 nil.
+func TestAnalyzeServiceStandaloneWorkerCall(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	a := NewAnalyzeService(nil, server.URL, 5*time.Second)
+	raw, err := a.postPythonAITask(context.Background(), "/tasks/analyze", map[string]any{})
+	if err != nil {
+		t.Fatalf("standalone AnalyzeService worker call failed: %v", err)
+	}
+	if !strings.Contains(string(raw), "ok") {
+		t.Fatalf("unexpected body: %s", string(raw))
+	}
+}
+
+// facade가 DatasetService의 설정값을 AnalyzeService로 전달하는지 잠금.
+func TestDatasetServiceAnalyzeCarriesConfig(t *testing.T) {
+	s := &DatasetService{pythonAIWorkerURL: "http://worker.example:9000"}
+	s.SetPythonAITaskTimeout(7 * time.Second)
+	a := s.analyze()
+	if a.workerURL != "http://worker.example:9000" {
+		t.Fatalf("workerURL not propagated: %q", a.workerURL)
+	}
+	if a.workerTimeout != 7*time.Second {
+		t.Fatalf("workerTimeout not propagated: %v", a.workerTimeout)
 	}
 }
 

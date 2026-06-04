@@ -52,12 +52,12 @@ const defaultPythonAITaskTimeout = 120 * time.Second
 // 안에서 active version → artifact path → Python worker 호출만 담당.
 //
 // active version이 없으면 ErrInvalidArgument.
-func (s *DatasetService) ExecuteAnalyzeOnActiveVersion(
+func (a *AnalyzeService) ExecuteAnalyzeOnActiveVersion(
 	ctx context.Context,
 	projectID, datasetID string,
 	req AnalyzeRequest,
 ) (AnalyzeResponse, error) {
-	dataset, err := s.GetDataset(projectID, datasetID)
+	dataset, err := a.versions.GetDataset(projectID, datasetID)
 	if err != nil {
 		return AnalyzeResponse{}, err
 	}
@@ -70,7 +70,7 @@ func (s *DatasetService) ExecuteAnalyzeOnActiveVersion(
 			Message: "dataset has no active version — upload a dataset version first, or use the explicit /versions/{version_id}/analyze endpoint",
 		}
 	}
-	return s.ExecuteAnalyze(ctx, projectID, datasetID, versionID, req)
+	return a.ExecuteAnalyze(ctx, projectID, datasetID, versionID, req)
 }
 
 // ExecuteAnalyze — version-specific 진입점. 외부 endpoint는
@@ -81,7 +81,7 @@ func (s *DatasetService) ExecuteAnalyzeOnActiveVersion(
 //   - analysis_threads.go (stateful 흐름 — user_question 또는 reuse patched plan)
 //
 // project/dataset/version은 caller가 path에서 추출, body는 raw payload 그대로.
-func (s *DatasetService) ExecuteAnalyze(
+func (a *AnalyzeService) ExecuteAnalyze(
 	ctx context.Context,
 	projectID, datasetID, versionID string,
 	req AnalyzeRequest,
@@ -99,11 +99,11 @@ func (s *DatasetService) ExecuteAnalyze(
 		}
 	}
 
-	version, err := s.GetDatasetVersion(projectID, datasetID, versionID)
+	version, err := a.versions.GetDatasetVersion(projectID, datasetID, versionID)
 	if err != nil {
 		return AnalyzeResponse{}, err
 	}
-	paths, err := s.resolveAnalyzeArtifactPaths(version)
+	paths, err := a.resolveAnalyzeArtifactPaths(version)
 	if err != nil {
 		return AnalyzeResponse{}, err
 	}
@@ -149,7 +149,7 @@ func (s *DatasetService) ExecuteAnalyze(
 	// silverone 2026-06-01 (rename PR A) — canonical worker URL은 /tasks/analyze.
 	// 옛 /tasks/analyze_v2는 worker 측 alias로 유지되지만 새 호출은 canonical
 	// path만 쓴다.
-	rawResult, err := s.postPythonAITask(ctx, "/tasks/analyze", workerPayload)
+	rawResult, err := a.postPythonAITask(ctx, "/tasks/analyze", workerPayload)
 	if err != nil {
 		return AnalyzeResponse{}, err
 	}
@@ -165,7 +165,7 @@ func (s *DatasetService) ExecuteAnalyze(
 
 // resolveAnalyzeArtifactPaths — version metadata에서 3 artifact path를
 // 가져온다. 누락되거나 disk에 없으면 ErrInvalidArgument.
-func (s *DatasetService) resolveAnalyzeArtifactPaths(version domain.DatasetVersion) (analyzeArtifactPaths, error) {
+func (a *AnalyzeService) resolveAnalyzeArtifactPaths(version domain.DatasetVersion) (analyzeArtifactPaths, error) {
 	docs := cleanArtifactRef(version)
 	clauses := strings.TrimSpace(metadataString(version.Metadata, "clause_label_ref", ""))
 	if clauses == "" {
@@ -212,8 +212,8 @@ func (s *DatasetService) resolveAnalyzeArtifactPaths(version domain.DatasetVersi
 
 // postPythonAITask — Python worker에 task payload를 POST하고 응답 body를 raw로
 // 돌려준다. PythonAIWorkerURL이 비어 있으면 ErrInvalidArgument.
-func (s *DatasetService) postPythonAITask(ctx context.Context, path string, payload map[string]any) (json.RawMessage, error) {
-	baseURL := strings.TrimRight(strings.TrimSpace(s.pythonAIWorkerURL), "/")
+func (a *AnalyzeService) postPythonAITask(ctx context.Context, path string, payload map[string]any) (json.RawMessage, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(a.workerURL), "/")
 	if baseURL == "" {
 		return nil, ErrInvalidArgument{Message: "python-ai worker is not configured"}
 	}
@@ -226,7 +226,7 @@ func (s *DatasetService) postPythonAITask(ctx context.Context, path string, payl
 		return nil, fmt.Errorf("analyze request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	timeout := s.pythonAITaskTimeout
+	timeout := a.workerTimeout
 	if timeout <= 0 {
 		timeout = defaultPythonAITaskTimeout
 	}
