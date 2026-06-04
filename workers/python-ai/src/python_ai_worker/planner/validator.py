@@ -36,6 +36,7 @@ from .schema import (
     TEXT_COLUMN_TYPES,
     TIMESTAMP_COLUMN_TYPES,
 )
+from .skill_specs import CALCULATE_SPEC
 
 
 # step id는 executor에서 DuckDB temp view 이름으로 직접 사용된다.
@@ -71,16 +72,32 @@ class PlanValidationError(ValueError):
 # validator R4-A (2026-05-27) — enum 상수는 planner/schema.py로 이전 (단일
 # source). validator는 import해서 set membership 검증에 사용한다.
 #
-# 다만 calculate operation별 required key는 validator-specific implementation
-# detail (planner schema에 노출하지 않음) — 여기 그대로 둔다.
+# Skill Contract v2 Step 1 (silverone 2026-06-04) — calculate operation의 required
+# param / 컬럼-ref 사실은 이제 planner/skill_specs.CALCULATE_SPEC가 단일 source다.
+# 아래 lookup들은 spec에서 *파생*한다 (행동 변화 0 — 기존 값과 동일):
+#   - _CALCULATE_OP_REQUIRED_KEYS: required 키가 있는 operation만 (ratio 제외 — ratio는
+#     alt_required로 표현돼 여기 안 들어감, 기존과 동일)
+#   - _CALCULATE_RATIO_ALT_REQUIRED: ratio의 '둘 중 한 묶음' 그룹
+#   - _CALCULATE_NUMERIC_REF_KEYS: 컬럼 존재/타입 검증 대상 scalar 컬럼 param(첫 등장
+#     순서 = (left,right,base,current,numerator,denominator,value))
 _CALCULATE_OP_REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
-    "add": ("left", "right"),
-    "subtract": ("left", "right"),
-    "multiply": ("left", "right"),
-    "divide": ("left", "right"),
-    "percent_change": ("base", "current"),
-    "share_of_total": ("value",),
+    op.name: op.required for op in CALCULATE_SPEC.operations if op.required
 }
+_CALCULATE_RATIO_ALT_REQUIRED: tuple[tuple[str, ...], ...] = next(
+    (op.alt_required for op in CALCULATE_SPEC.operations if op.name == "ratio"), ()
+)
+
+
+def _ordered_calculate_numeric_ref_keys() -> tuple[str, ...]:
+    seen: list[str] = []
+    for op in CALCULATE_SPEC.operations:
+        for key in op.numeric_refs:
+            if key not in seen:
+                seen.append(key)
+    return tuple(seen)
+
+
+_CALCULATE_NUMERIC_REF_KEYS: tuple[str, ...] = _ordered_calculate_numeric_ref_keys()
 
 # silverone 2026-05-26 (prefix contract B안) — aggregate metric name에 비교
 # label prefix를 넣으면 compare가 left_label/right_label로 prefix를 다시 붙여
@@ -909,11 +926,12 @@ def _validate_calculate(params: dict[str, Any], ctx: _StepContext) -> None:
                     ),
                 )
         elif operation == "ratio":
-            has_numerator = bool(str(expression.get("numerator") or "").strip())
-            has_left = bool(str(expression.get("left") or "").strip())
-            has_denominator = bool(str(expression.get("denominator") or "").strip())
-            has_right = bool(str(expression.get("right") or "").strip())
-            if not ((has_numerator and has_denominator) or (has_left and has_right)):
+            # spec(CALCULATE_SPEC ratio.alt_required) 기반 — '둘 중 한 묶음' 충족 여부.
+            satisfied = any(
+                group and all(str(expression.get(key) or "").strip() for key in group)
+                for group in _CALCULATE_RATIO_ALT_REQUIRED
+            )
+            if not satisfied:
                 ctx.issue(
                     code="params.expression_keys_missing",
                     message=(
@@ -926,7 +944,7 @@ def _validate_calculate(params: dict[str, Any], ctx: _StepContext) -> None:
         # 경우, expression이 참조하는 column이 input output에 있는지 정적으로
         # 검증한다. input_output이 None이면 추론 불가 → skip (false positive 방지).
         if input_output is not None:
-            for key in ("left", "right", "base", "current", "numerator", "denominator", "value"):
+            for key in _CALCULATE_NUMERIC_REF_KEYS:
                 col_name = str(expression.get(key) or "").strip()
                 if not col_name:
                     continue
@@ -974,7 +992,7 @@ def _validate_calculate(params: dict[str, Any], ctx: _StepContext) -> None:
         # timestamp와 subtract 가능성이 있어 reject하지 않음.
         reserved_strings = RESERVED_STRING_COLUMNS.get(input_ref)
         if reserved_strings:
-            for key in ("left", "right", "base", "current", "numerator", "denominator", "value"):
+            for key in _CALCULATE_NUMERIC_REF_KEYS:
                 col_name = str(expression.get(key) or "").strip()
                 if col_name and col_name in reserved_strings:
                     ctx.issue(

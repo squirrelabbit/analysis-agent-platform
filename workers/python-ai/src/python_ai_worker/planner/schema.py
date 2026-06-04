@@ -15,6 +15,10 @@ silverone 2026-05-21 결정:
 from dataclasses import dataclass, field
 
 from ..taxonomies import load_taxonomy
+# Skill Contract v2 Step 2 (silverone 2026-06-04) — calculate/present의 prompt
+# params_schema는 skill_specs.py의 spec에서 생성한다 (단일 source). 생성값이 기존
+# 하드코딩과 byte 동일함은 test_skill_specs가 잠근다 → prompt 출력 불변.
+from .skill_specs import CALCULATE_SPEC, PRESENT_SPEC, render_params_schema
 
 
 PLAN_VERSION = "v2"
@@ -169,17 +173,7 @@ SKILL_CATALOG: dict[str, SkillSpec] = {
         description="파생 컬럼을 추가한다. 사칙연산 + percent_change + ratio + share_of_total.",
         input_type="table",
         output_type="table",
-        params_schema={
-            "input": "table_or_step_id",
-            "expressions": (
-                "calculation[] — {name, operation, ...}. operation별 키: "
-                "add|subtract|multiply|divide={left,right}, percent_change={base,current}, "
-                "ratio={numerator,denominator} (같은 행 두 컬럼 나눗셈, 0~1), "
-                "share_of_total={value, partition_by?} — value 컬럼의 전체 합 대비 비중(0~1). "
-                "비율/구성비/비중/전체 대비 질문은 ratio가 아니라 share_of_total을 쓴다. "
-                "partition_by(선택 string[])가 있으면 그 그룹 내 합 대비 비중."
-            ),
-        },
+        params_schema=render_params_schema(CALCULATE_SPEC),
     ),
     "sort": SkillSpec(
         name="sort",
@@ -198,13 +192,7 @@ SKILL_CATALOG: dict[str, SkillSpec] = {
         description="결과를 사용자에게 보여줄 형식 (표/차트/json)으로 변환한다. plan의 최종 결과 step에서 사용.",
         input_type="table",
         output_type="presentation",
-        params_schema={
-            "input": "table_or_step_id",
-            "format": "table|chart|json",
-            "title": "string|null",
-            "columns": "string[]|null — 사용자에게 보여줄 컬럼. 질문에 답하는 핵심 컬럼을 포함해야 한다.",
-            "limit": "integer|null — 반환 row 한도. null이면 default 1000. 1~10000 허용. (SQL-4)",
-        },
+        params_schema=render_params_schema(PRESENT_SPEC),
     ),
     "summarize": SkillSpec(
         name="summarize",
