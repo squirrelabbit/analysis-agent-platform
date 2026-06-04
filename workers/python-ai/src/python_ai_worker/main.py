@@ -96,6 +96,54 @@ def describe() -> None:
     print(json.dumps(payload, ensure_ascii=False))
 
 
+class WorkerMetrics:
+    """worker 최소 메트릭 (silverone 2026-06-04, metrics 1차). ThreadingHTTPServer는
+    요청마다 스레드라 Lock으로 보호한다. Prometheus client 의존 없이 text exposition."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active = 0
+        self._rejected_body_too_large = 0
+        self._rejected_concurrency = 0
+
+    def inc_active(self) -> None:
+        with self._lock:
+            self._active += 1
+
+    def dec_active(self) -> None:
+        with self._lock:
+            self._active -= 1
+
+    def inc_body_too_large(self) -> None:
+        with self._lock:
+            self._rejected_body_too_large += 1
+
+    def inc_concurrency(self) -> None:
+        with self._lock:
+            self._rejected_concurrency += 1
+
+    def render(self) -> str:
+        with self._lock:
+            active, body, conc = self._active, self._rejected_body_too_large, self._rejected_concurrency
+        return "\n".join(
+            [
+                "# HELP python_worker_active_requests In-flight /tasks/ requests being processed.",
+                "# TYPE python_worker_active_requests gauge",
+                f"python_worker_active_requests {active}",
+                "# HELP python_worker_rejected_body_too_large_total Requests rejected with 413 (Content-Length over limit).",
+                "# TYPE python_worker_rejected_body_too_large_total counter",
+                f"python_worker_rejected_body_too_large_total {body}",
+                "# HELP python_worker_rejected_concurrency_total Requests rejected with 503 (max concurrency).",
+                "# TYPE python_worker_rejected_concurrency_total counter",
+                f"python_worker_rejected_concurrency_total {conc}",
+            ]
+        ) + "\n"
+
+
+# 프로세스 전역 singleton — make_handler가 매 요청 새 Handler를 만들어도 카운터는 공유.
+_WORKER_METRICS = WorkerMetrics()
+
+
 def make_handler(
     config: Any,
     *,
@@ -140,6 +188,15 @@ def make_handler(
             if self.path == "/capabilities":
                 self._write_json(HTTPStatus.OK, capability_payload(), request_id=request_id, started_at=started_at)
                 return
+            if self.path == "/metrics":
+                self._write_text(
+                    HTTPStatus.OK,
+                    _WORKER_METRICS.render(),
+                    request_id=request_id,
+                    started_at=started_at,
+                    content_type="text/plain; version=0.0.4; charset=utf-8",
+                )
+                return
             self._write_json(HTTPStatus.NOT_FOUND, {"error": "not found"}, request_id=request_id, started_at=started_at)
 
         def do_POST(self) -> None:
@@ -164,6 +221,7 @@ def make_handler(
                 self._write_json(HTTPStatus.BAD_REQUEST, {"error": "invalid Content-Length"}, request_id=request_id, started_at=started_at)
                 return
             if max_request_bytes > 0 and size > max_request_bytes:
+                _WORKER_METRICS.inc_body_too_large()
                 self.close_connection = True
                 self._write_json(
                     HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
@@ -176,6 +234,7 @@ def make_handler(
             # 동시 처리 ceiling. 초과 시 load shedding(503 + Retry-After).
             acquired = semaphore.acquire(blocking=False) if semaphore is not None else True
             if not acquired:
+                _WORKER_METRICS.inc_concurrency()
                 self._write_json(
                     HTTPStatus.SERVICE_UNAVAILABLE,
                     {"error": "worker at max concurrency, retry later"},
@@ -184,6 +243,7 @@ def make_handler(
                     extra_headers={"Retry-After": "1"},
                 )
                 return
+            _WORKER_METRICS.inc_active()
             try:
                 raw_body = self.rfile.read(size)
                 payload = json.loads(raw_body or b"{}")
@@ -195,6 +255,7 @@ def make_handler(
                 self._write_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)}, request_id=request_id, started_at=started_at)
                 return
             finally:
+                _WORKER_METRICS.dec_active()
                 if semaphore is not None and acquired:
                     semaphore.release()
 
@@ -210,6 +271,33 @@ def make_handler(
                 path=self.path,
                 remote_ip=self.client_address[0] if self.client_address else "",
             )
+
+        def _write_text(
+            self,
+            status: HTTPStatus,
+            text: str,
+            *,
+            request_id: str = "",
+            started_at: float | None = None,
+            content_type: str = "text/plain; charset=utf-8",
+        ) -> None:
+            body = text.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            if request_id:
+                self.send_header("X-Request-ID", request_id)
+            self.end_headers()
+            self.wfile.write(body)
+            if started_at is not None:
+                get("http").info(
+                    "http.request.completed",
+                    method=self.command,
+                    path=self.path,
+                    status=int(status),
+                    duration_ms=int((time.monotonic() - started_at) * 1000),
+                    response_size=len(body),
+                )
 
         def _write_json(
             self,

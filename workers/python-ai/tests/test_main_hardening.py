@@ -137,6 +137,64 @@ class MainHardeningHTTPTests(unittest.TestCase):
         self.assertEqual(body["status"], "not_ready")
         self.assertFalse(body["checks"]["any_llm_key"])
 
+    @staticmethod
+    def _metric_value(metrics_text: str, name: str) -> int:
+        for line in metrics_text.splitlines():
+            if line.startswith(name + " "):
+                return int(line.rsplit(" ", 1)[1])
+        raise AssertionError(f"metric {name!r} not found in:\n{metrics_text}")
+
+    def test_metrics_endpoint_exposes_worker_counters(self) -> None:
+        # singleton 카운터는 프로세스 전역 → delta로 검증.
+        server = self._start(max_request_bytes=100)
+        status, body = self._get(server, "/metrics")
+        self.assertEqual(status, 200)
+        for name in (
+            "python_worker_active_requests",
+            "python_worker_rejected_body_too_large_total",
+            "python_worker_rejected_concurrency_total",
+        ):
+            self.assertIn(name, body)
+        self.assertIn("# TYPE python_worker_active_requests gauge", body)
+
+        before = self._metric_value(body, "python_worker_rejected_body_too_large_total")
+        code, _, _ = self._post(server, "/tasks/analyze", "a" * 200)  # >100 → 413
+        self.assertEqual(code, 413)
+        _, body2 = self._get(server, "/metrics")
+        after = self._metric_value(body2, "python_worker_rejected_body_too_large_total")
+        self.assertEqual(after, before + 1)
+
+    def test_metrics_concurrency_counter_increments_on_503(self) -> None:
+        import threading
+
+        sem = threading.BoundedSemaphore(1)
+        server = self._start(semaphore=sem)
+        _, body0 = self._get(server, "/metrics")
+        before = self._metric_value(body0, "python_worker_rejected_concurrency_total")
+
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocking_run_task(name, payload):
+            started.set()
+            release.wait(timeout=5)
+            return {"ok": True}
+
+        with patch("python_ai_worker.main.run_task", side_effect=blocking_run_task):
+            holder = threading.Thread(
+                target=lambda: self._post(server, "/tasks/analyze", json.dumps({"a": 1}))
+            )
+            holder.start()
+            self.assertTrue(started.wait(timeout=5))
+            code, _, _ = self._post(server, "/tasks/analyze", json.dumps({"a": 2}))
+            self.assertEqual(code, 503)
+            release.set()
+            holder.join(timeout=5)
+
+        _, body1 = self._get(server, "/metrics")
+        after = self._metric_value(body1, "python_worker_rejected_concurrency_total")
+        self.assertEqual(after, before + 1)
+
 
 class ReadinessUnitTests(unittest.TestCase):
     def test_env_int_fallbacks(self) -> None:

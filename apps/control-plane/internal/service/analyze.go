@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/metrics"
 )
 
 // defaultPythonAITaskTimeout — SetPythonAITaskTimeout 미주입 시 fallback.
@@ -232,6 +233,16 @@ func (a *AnalyzeService) postPythonAITask(ctx context.Context, path string, payl
 		timeout = defaultPythonAITaskTimeout
 	}
 	client := &http.Client{Timeout: timeout}
+
+	// silverone 2026-06-04 (metrics 1차) — 실제 worker 호출만 계측. timer 등록 이후의
+	// 모든 return은 status="error"가 기본이고 성공 경로에서만 "ok"로 바꾼다. URL 미설정/
+	// marshal/request build 등 호출 이전 실패는 worker call 메트릭에 포함하지 않는다.
+	start := time.Now()
+	status := "error"
+	defer func() {
+		metrics.RecordAnalysisWorkerCall(status, time.Since(start).Milliseconds())
+	}()
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("analyze worker call: %w", err)
@@ -244,6 +255,7 @@ func (a *AnalyzeService) postPythonAITask(ctx context.Context, path string, payl
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("analyze worker %s returned %d: %s", path, resp.StatusCode, buf.String())
 	}
+	status = "ok"
 	return json.RawMessage(buf.Bytes()), nil
 }
 
@@ -315,9 +327,9 @@ func deriveDocsExtraColumns(version domain.DatasetVersion) []map[string]any {
 // 변환한다.
 //
 // silverone 2026-05-27 (taxonomy-driven config Phase 3-B wire). Python worker
-// 측은 ``clause_label_metadata`` payload 필드를 받아 ``check_taxonomy_
-// compatibility``로 정합성 체크한다. 옛 artifact는 summary에 taxonomy_id가
-// 없어 nil이 반환되고, worker는 ``legacy_missing`` 분기로 떨어진다.
+// 측은 “clause_label_metadata“ payload 필드를 받아 “check_taxonomy_
+// compatibility“로 정합성 체크한다. 옛 artifact는 summary에 taxonomy_id가
+// 없어 nil이 반환되고, worker는 “legacy_missing“ 분기로 떨어진다.
 //
 // 우선순위:
 //  1. version.Metadata["clause_label_summary"]에 taxonomy_id 있으면 사용

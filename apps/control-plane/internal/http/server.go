@@ -15,6 +15,7 @@ import (
 	"analysis-support-platform/control-plane/internal/config"
 	"analysis-support-platform/control-plane/internal/displaytime"
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/metrics"
 	"analysis-support-platform/control-plane/internal/obs"
 	"analysis-support-platform/control-plane/internal/service"
 	"analysis-support-platform/control-plane/internal/store"
@@ -73,6 +74,8 @@ func (s *Server) routes() {
 		})
 	})
 	s.mux.HandleFunc("GET /runtime_status", s.handleRuntimeStatus)
+	// silverone 2026-06-04 (metrics 1차) — Prometheus text exposition. plain text.
+	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
 	// 전역 read-only prompt 선택지. task-folder prompt(doc_genuineness /
 	// clause_label)의 version/default/label을 Python worker로 proxy해 반환.
 	s.mux.HandleFunc("GET /prompt_options", s.handlePromptOptions)
@@ -218,6 +221,12 @@ func writeJSON(w stdhttp.ResponseWriter, status int, payload any) {
 	w.WriteHeader(status)
 	encoder := json.NewEncoder(w)
 	_ = encoder.Encode(displaytime.NormalizeForJSON(payload))
+}
+
+func (s *Server) handleMetrics(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.WriteHeader(stdhttp.StatusOK)
+	_, _ = io.WriteString(w, metrics.Render())
 }
 
 func (s *Server) handleRuntimeStatus(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
