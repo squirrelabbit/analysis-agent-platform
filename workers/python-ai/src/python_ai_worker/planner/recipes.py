@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-"""Composite skill / recipe — R0 (silverone 2026-06-04).
+"""Composite skill / recipe — deterministic lowering for planner recipes.
 
 recipe = 자주 쓰는 분석 패턴의 high-level skill. planner가 atomic skill
 (filter/aggregate/calculate/sort/present 등)을 매번 직접 조립하지 않고 recipe
 1개를 선택하게 해 **재현성**을 높인다. recipe는 실행 전 deterministic 하게 atomic
 step들로 *lowering* 된다 (LLM 없음). atomic skill은 그대로 유지한다.
 
-**R0 범위 (runtime behavior 변화 0)**: 3 recipe(distribution / event_window_count /
-top_n)의 spec + lowering 함수 + 테스트. planner prompt / executor / Go / OpenAPI
-wiring 없음 — 아직 아무도 recipe를 내보내거나 실행하지 않는다(아무 import도 runtime
-경로에 없음). keyword_summary는 키워드 atomic 부재로 제외.
+3 recipe(distribution / event_window_count / top_n)의 spec + lowering 함수.
+runtime 활성 recipe는 ``RUNTIME_ENABLED_RECIPES`` 하나로 validator/executor가 공유한다.
+keyword_summary는 키워드 atomic 부재로 제외.
 
-event_window_count R0 전제 / 정책 (silverone 2026-06-04):
+event_window_count 전제 / 정책 (silverone 2026-06-04):
   - **grain=day만 지원.** 현재 atomic skill에는 date_trunc/date_bucket이 없다.
     clean 단계 산출 ``created_at``이 day-granular(자정)라 ``group_by [created_at]``이
     곧 일자 집계로 동작한다. week/month는 date_trunc가 필요해 R0에서 제외(지연).
@@ -46,7 +45,7 @@ class RecipeSpec:
     params: tuple[RecipeParamSpec, ...]
     # lowering으로 확장되는 atomic skill 목록 (문서/검증용).
     lowered_skills: tuple[str, ...]
-    implemented: bool = False  # R0에서 lowering이 구현됐는지
+    implemented: bool = False  # lowering이 구현됐는지
 
 
 # ===== spec 정의 =====
@@ -57,7 +56,7 @@ DISTRIBUTION_SPEC = RecipeSpec(
     params=(
         RecipeParamSpec("input", required=True, desc="table_or_step_id"),
         RecipeParamSpec("group_by", required=True, desc="string[] — 분포 기준 컬럼"),
-        RecipeParamSpec("metric", desc="count (R0는 count만)"),
+        RecipeParamSpec("metric", desc="count (현재 count만)"),
         RecipeParamSpec("include_share", desc="bool — 전체 대비 share(0~1) 포함 (기본 true)"),
         RecipeParamSpec("count_column", desc="string — count 결과 컬럼명 (기본 count)"),
         RecipeParamSpec("share_column", desc="string — share 결과 컬럼명 (기본 ratio)"),
@@ -76,7 +75,7 @@ EVENT_WINDOW_COUNT_SPEC = RecipeSpec(
         RecipeParamSpec("date_column", desc="string — 날짜 컬럼 (기본 created_at)"),
         RecipeParamSpec("before_days", desc="int>=0 — 기준일 이전 일수 (기본 7)"),
         RecipeParamSpec("after_days", desc="int>=0 — 기준일 이후 일수 (기본 7)"),
-        RecipeParamSpec("grain", desc="day (R0는 day만)"),
+        RecipeParamSpec("grain", desc="day (현재 day만)"),
         RecipeParamSpec("count_column", desc="string — count 결과 컬럼명 (기본 count)"),
         RecipeParamSpec("title", desc="string|null"),
     ),
@@ -90,7 +89,7 @@ TOP_N_SPEC = RecipeSpec(
     params=(
         RecipeParamSpec("input", required=True, desc="table_or_step_id"),
         RecipeParamSpec("group_by", required=True, desc="string[]"),
-        RecipeParamSpec("metric", desc="count (R0는 count만)"),
+        RecipeParamSpec("metric", desc="count (현재 count만)"),
         RecipeParamSpec("filters", desc="[{column, op, value}] — 선택. op는 =,!=,>,>=,<,<=,in,contains"),
         RecipeParamSpec("sort", desc="{column, direction} — 기본 {count_column, desc}"),
         RecipeParamSpec("limit", desc="int>0 — 상위 개수 (기본 10)"),
@@ -112,7 +111,7 @@ RECIPE_SPECS: dict[str, RecipeSpec] = {
 
 
 def lower_recipe(step: dict[str, Any]) -> list[dict[str, Any]]:
-    """recipe step → atomic step 목록. R0는 distribution만 구현."""
+    """recipe step → atomic step 목록."""
     if not isinstance(step, dict):
         raise RecipeError("recipe step must be an object")
     skill = step.get("skill")
@@ -121,7 +120,7 @@ def lower_recipe(step: dict[str, Any]) -> list[dict[str, Any]]:
         raise RecipeError(f"unknown recipe: {skill!r}")
     lowerer = _LOWERERS.get(skill)  # type: ignore[arg-type]
     if lowerer is None:
-        raise RecipeError(f"recipe '{skill}' lowering not implemented in R0")
+        raise RecipeError(f"recipe '{skill}' lowering not implemented")
     return lowerer(step)
 
 
@@ -171,7 +170,7 @@ def lower_distribution(step: dict[str, Any]) -> list[dict[str, Any]]:
 
     metric = _opt_str(params, "metric", "count")
     if metric != "count":
-        raise RecipeError(f"distribution.metric '{metric}' not supported in R0 (count only)")
+        raise RecipeError(f"distribution.metric '{metric}' not supported (count only)")
 
     count_col = _opt_str(params, "count_column", "count")
     share_col = _opt_str(params, "share_column", "ratio")
@@ -238,7 +237,7 @@ def lower_event_window_count(step: dict[str, Any]) -> list[dict[str, Any]]:
 
     grain = _opt_str(params, "grain", "day")
     if grain != "day":
-        raise RecipeError(f"event_window_count.grain '{grain}' not supported in R0 (day only)")
+        raise RecipeError(f"event_window_count.grain '{grain}' not supported (day only)")
 
     event_date = _required_str(params, "event_window_count", "event_date")
     try:
@@ -295,7 +294,7 @@ def lower_event_window_count(step: dict[str, Any]) -> list[dict[str, Any]]:
     return steps
 
 
-# recipe filter op(기호/별칭) → atomic filter operator. R0 최소 집합.
+# recipe filter op(기호/별칭) → atomic filter operator.
 _FILTER_OP_MAP = {
     "=": "eq", "==": "eq", "eq": "eq",
     "!=": "neq", "neq": "neq",
@@ -331,7 +330,7 @@ def lower_top_n(step: dict[str, Any]) -> list[dict[str, Any]]:
 
     metric = _opt_str(params, "metric", "count")
     if metric != "count":
-        raise RecipeError(f"top_n.metric '{metric}' not supported in R0 (count only)")
+        raise RecipeError(f"top_n.metric '{metric}' not supported (count only)")
     count_col = _opt_str(params, "count_column", "count")
 
     limit = params.get("limit", 10)
@@ -359,7 +358,7 @@ def lower_top_n(step: dict[str, Any]) -> list[dict[str, Any]]:
         op_raw = _required_str(flt, "top_n.filters", "op")
         operator = _FILTER_OP_MAP.get(op_raw)
         if operator is None:
-            raise RecipeError(f"top_n.filters op '{op_raw}' not supported in R0")
+            raise RecipeError(f"top_n.filters op '{op_raw}' not supported")
         filter_id = f"{base}_filter{idx}"
         steps.append(
             {
@@ -414,20 +413,18 @@ _LOWERERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
 }
 
 
-# R1/R2 (silverone 2026-06-04) — runtime 실행 + validator 허용 recipe. 현재
-# distribution만. event_window_count / top_n은 R0 lowering·테스트는 유지하되 실행·
-# validator wiring은 후속 — plan에 들어오면 expand_recipes는 RecipeError, validator는
-# skill_unknown으로 거절한다(조용히 통과 금지). validator/executor가 같은 이 집합을
-# 참조해 "validator 허용 == runtime 실행 가능"을 단일 source로 보장한다.
-RUNTIME_ENABLED_RECIPES: frozenset[str] = frozenset({"distribution"})
+# Runtime 실행 + validator 허용 recipe. event_window_count는 lowering·테스트는 유지하되
+# 아직 실행하지 않는다. validator/executor가 같은 이 집합을 참조해
+# "validator 허용 == runtime 실행 가능"을 단일 source로 보장한다.
+RUNTIME_ENABLED_RECIPES: frozenset[str] = frozenset({"distribution", "top_n"})
 
 
 def expand_recipes(plan: dict[str, Any]) -> dict[str, Any]:
-    """plan의 recipe step을 실행 전 atomic step으로 expand한다 (R1 wiring).
+    """plan의 recipe step을 실행 전 atomic step으로 expand한다.
 
     - recipe step이 없으면 **완전 no-op** (원본 plan 그대로 반환).
-    - runtime 허용 recipe(distribution)는 lower_recipe로 atomic 치환.
-    - 허용 안 된 recipe(event_window_count/top_n)는 RecipeError (R1 미활성).
+    - runtime 허용 recipe(distribution/top_n)는 lower_recipe로 atomic 치환.
+    - 허용 안 된 recipe(event_window_count)는 RecipeError.
     - non-recipe(atomic) step은 그대로. invalid recipe params는 RecipeError.
 
     expand 결과는 호출부(execute_analyze_plan)에서 기존 validator(execute_plan)로
@@ -445,8 +442,9 @@ def expand_recipes(plan: dict[str, Any]) -> dict[str, Any]:
         skill = step.get("skill") if isinstance(step, dict) else None
         if skill in RECIPE_SPECS:
             if skill not in RUNTIME_ENABLED_RECIPES:
+                enabled = ", ".join(sorted(RUNTIME_ENABLED_RECIPES))
                 raise RecipeError(
-                    f"recipe '{skill}' is not enabled for execution yet (R1: distribution only)"
+                    f"recipe '{skill}' is not enabled for execution yet (enabled: {enabled})"
                 )
             new_steps.extend(lower_recipe(step))
         else:

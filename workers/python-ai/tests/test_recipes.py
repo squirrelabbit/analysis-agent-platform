@@ -1,8 +1,8 @@
-"""Composite recipe R0 — distribution lowering 잠금 (silverone 2026-06-04).
+"""Composite recipe lowering/runtime tests.
 
 검증: (1) lowering 결과가 기대 atomic steps와 동일, (2) lowered plan이 기존
-validator를 통과, (3) 같은 params → 항상 같은 lowered plan(결정성), (4) edge/
-미구현 recipe 처리. recipe는 아직 planner/executor에 연결 안 됨(runtime 변화 0).
+validator를 통과, (3) 같은 params → 항상 같은 lowered plan(결정성), (4) runtime
+활성/미활성 recipe 처리.
 """
 
 from __future__ import annotations
@@ -349,7 +349,7 @@ class TopNLoweringTests(unittest.TestCase):
 
 
 class ExpandRecipesTests(unittest.TestCase):
-    """R1 — expand_recipes: distribution만 runtime 활성, 나머지는 거절, atomic no-op."""
+    """expand_recipes: runtime 활성 recipe 치환, 미활성 recipe 거절, atomic no-op."""
 
     def test_distribution_recipe_expanded_and_valid(self) -> None:
         plan = {"plan_version": "v2", "steps": [_distribution_step()]}
@@ -378,18 +378,25 @@ class ExpandRecipesTests(unittest.TestCase):
         out = expand_recipes(plan)
         self.assertEqual([s["skill"] for s in out["steps"]], ["aggregate", "calculate", "present", "summarize"])
 
-    def test_event_window_count_rejected_in_r1(self) -> None:
-        plan = {"plan_version": "v2", "steps": [_event_window_step()]}
-        with self.assertRaises(RecipeError):
-            expand_recipes(plan)
-
-    def test_top_n_rejected_in_r1(self) -> None:
+    def test_top_n_recipe_expanded_and_valid(self) -> None:
         plan = {"plan_version": "v2", "steps": [_top_n_step()]}
+        out = expand_recipes(plan)
+        self.assertEqual([s["skill"] for s in out["steps"]], ["filter", "aggregate", "sort", "present"])
+        self.assertEqual(collect_plan_issues(out), [])
+        self.assertEqual(plan["steps"][0]["skill"], "top_n")
+
+    def test_event_window_count_rejected_when_disabled(self) -> None:
+        plan = {"plan_version": "v2", "steps": [_event_window_step()]}
         with self.assertRaises(RecipeError):
             expand_recipes(plan)
 
     def test_bad_distribution_params_raises(self) -> None:
         plan = {"plan_version": "v2", "steps": [_distribution_step(group_by=[])]}
+        with self.assertRaises(RecipeError):
+            expand_recipes(plan)
+
+    def test_bad_top_n_params_raises(self) -> None:
+        plan = {"plan_version": "v2", "steps": [_top_n_step(limit=0)]}
         with self.assertRaises(RecipeError):
             expand_recipes(plan)
 
