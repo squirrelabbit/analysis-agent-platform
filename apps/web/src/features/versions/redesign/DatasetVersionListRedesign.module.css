@@ -413,3 +413,46 @@
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius);
 }
+
+/* 하단 새 버전 업로드 추가 영역 (슬림 점선 행) */
+.addCard {
+  border: 1.5px dashed var(--line-strong);
+  background: transparent;
+  border-radius: var(--radius);
+  min-height: 64px;
+  padding: 14px 22px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.16s, color 0.16s, background 0.16s;
+}
+.addCard:hover {
+  border-color: var(--primary);
+  color: var(--primary-ink);
+  background: color-mix(in oklch, var(--primary-soft) 50%, transparent);
+}
+.addCard .plus {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: #efeff3;
+  display: grid;
+  place-items: center;
+  transition: background 0.16s;
+}
+.addCard:hover .plus {
+  background: #fff;
+}
+.addCard .plus svg {
+  width: 20px;
+  height: 20px;
+}
+.addCard span:last-child {
+  font-size: 13.5px;
+  font-weight: 600;
+}
