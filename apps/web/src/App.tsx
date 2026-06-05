@@ -6,7 +6,8 @@ import ProjectLayout from "./layout/ProjectLayout";
 import ProjectPage from "./pages/ProjectPage";
 // import DatasetDetail from "./features/datasets/pages/DatasetDetail"; // 리디자인으로 교체
 
-import DatasetContainer from "./features/datasets/pages/DatasetContainer";
+// import DatasetContainer from "./features/datasets/pages/DatasetContainer"; // 리디자인으로 교체
+import DatasetListRedesign from "./features/datasets/redesign/DatasetListRedesign";
 import VersionDetailPage from "./features/versions/pages/VersionDetailPage";
 import DatasetVersionListRedesign from "./features/versions/redesign/DatasetVersionListRedesign";
 
@@ -22,7 +23,9 @@ function App() {
             <Route path="/projects" element={<ProjectPage />} />
             <Route path="/projects/:projectId" element={<ProjectLayout />}>
               <Route index element={<Navigate to="datasets" replace />} />
-              <Route path="datasets" element={<DatasetContainer />} />
+              {/* 기존 데이터셋 목록 화면 (리디자인으로 교체, 보존) */}
+              {/* <Route path="datasets" element={<DatasetContainer />} /> */}
+              <Route path="datasets" element={<DatasetListRedesign />} />
               <Route path="datasets/:datasetId">
                 <Route path="versions/:versionId" element={<VersionDetailPage /> }/> 
                 <Route index element={<Navigate to="versions" replace />} />
