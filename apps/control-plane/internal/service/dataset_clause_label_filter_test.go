@@ -94,6 +94,73 @@ func TestLoadClauseLabelArtifact_AspectAndSentimentFilter(t *testing.T) {
 	}
 }
 
+// silverone 2026-06-05 — summary.aspect_sentiment 교차 분포(count/percent) 잠금.
+// 필터와 무관하게 항상 전체 기준. 고정 sentiment 3종은 0으로 채워진다.
+func TestLoadClauseLabelArtifact_AspectSentimentSummary(t *testing.T) {
+	path := setupClauseLabelFixture(t)
+	// 필터를 걸어도 summary.aspect_sentiment는 전체 분포여야 한다.
+	summary, _, _, _, err := loadClauseLabelArtifact(path, 10, 0, "price", "positive")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	as, ok := summary["aspect_sentiment"].(map[string]any)
+	if !ok {
+		t.Fatalf("summary.aspect_sentiment type = %T, want map[string]any", summary["aspect_sentiment"])
+	}
+
+	// price: total 2, positive 2 (100%), negative/neutral 0.
+	price, ok := as["price"].(map[string]any)
+	if !ok {
+		t.Fatalf("aspect_sentiment.price missing: %v", as)
+	}
+	if price["total"] != 2 {
+		t.Fatalf("price.total = %v, want 2", price["total"])
+	}
+	priceSent := price["sentiment"].(map[string]any)
+	if got := priceSent["positive"].(map[string]any); got["count"] != 2 || got["percent"] != 100.0 {
+		t.Fatalf("price.positive = %v, want count 2 percent 100", got)
+	}
+	// 관측 안 된 표준 sentiment도 0으로 채워져야 한다.
+	if got := priceSent["negative"].(map[string]any); got["count"] != 0 || got["percent"] != 0.0 {
+		t.Fatalf("price.negative = %v, want count 0 percent 0", got)
+	}
+	if _, ok := priceSent["neutral"]; !ok {
+		t.Fatalf("price.sentiment must zero-fill neutral, got %v", priceSent)
+	}
+
+	// service: total 1, negative 1 (100%).
+	service := as["service"].(map[string]any)
+	if service["total"] != 1 {
+		t.Fatalf("service.total = %v, want 1", service["total"])
+	}
+	if got := service["sentiment"].(map[string]any)["negative"].(map[string]any); got["count"] != 1 || got["percent"] != 100.0 {
+		t.Fatalf("service.negative = %v, want count 1 percent 100", got)
+	}
+}
+
+// silverone 2026-06-05 — applied.model 회수 잠금. build 시 clause_label_summary
+// metadata에 저장된 model명을 GET view가 노출한다. artifact per-clause record에는
+// 없으므로 metadata에서 읽는다.
+func TestClauseLabelSummaryString_Model(t *testing.T) {
+	metadata := map[string]any{
+		"clause_label_summary": map[string]any{
+			"model":          "lloa-x",
+			"prompt_version": "v3",
+		},
+	}
+	if got := summaryMetadataString(metadata, "clause_label_summary", "model"); got != "lloa-x" {
+		t.Fatalf("model = %q, want lloa-x", got)
+	}
+	// summary 없으면 "".
+	if got := summaryMetadataString(map[string]any{}, "clause_label_summary", "model"); got != "" {
+		t.Fatalf("missing summary → want empty, got %q", got)
+	}
+	// 키 없으면 "".
+	if got := summaryMetadataString(map[string]any{"clause_label_summary": map[string]any{}}, "clause_label_summary", "model"); got != "" {
+		t.Fatalf("missing key → want empty, got %q", got)
+	}
+}
+
 func TestLoadClauseLabelArtifact_Pagination(t *testing.T) {
 	path := setupClauseLabelFixture(t)
 	_, _, total, items, err := loadClauseLabelArtifact(path, 1, 1, "", "")
