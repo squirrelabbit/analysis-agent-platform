@@ -617,8 +617,15 @@ def _fallback_payload(*, user_question: str | None, reason: str) -> dict[str, An
 
 # silverone 2026-06-01 (PR1) — answerable=false 거절 plan 렌더.
 _DEFAULT_REJECT_MESSAGE = "이 질문은 현재 선택한 데이터셋으로는 답변할 수 없습니다."
+# planner_validation_error: silverone 2026-06-05 — planner가 repair 후에도 유효한
+# plan을 못 만든 경우. raw 500 대신 graceful 거절로 렌더하기 위한 structured reason.
 _REJECT_REASONS = frozenset(
-    {"out_of_dataset_scope", "unsupported_skill", "missing_data_or_artifact"}
+    {
+        "out_of_dataset_scope",
+        "unsupported_skill",
+        "missing_data_or_artifact",
+        "planner_validation_error",
+    }
 )
 
 

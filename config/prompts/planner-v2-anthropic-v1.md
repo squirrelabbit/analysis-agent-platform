@@ -97,6 +97,12 @@ group_by별 count와 전체 대비 share(0~1)를 한 번에 계산한다.
 - 위 skill catalog의 skill **또는 위 recipe**만 사용한다 (수치 계산도 `calculate`
   skill로만 표현). catalog/recipe에 없는 이름을 만들지 않는다.
 - 각 skill의 params는 위 catalog의 `params` 명세를 그대로 따른다.
+- **recipe는 terminal이다.** recipe(`distribution` / `event_window_count` / `top_n`)
+  step의 `id`를 다른 step의 `input`으로 참조하지 않는다. recipe는 실행 시 내부
+  atomic step(예: `<id>_agg` / `<id>_share` / `<id>_present`)으로 펼쳐져 그 recipe
+  `id` 자체는 사라지므로, 뒤 step이 그것을 `input`으로 쓰면 `input_unknown` 오류가
+  난다. recipe 결과를 추가로 가공(특정 row만 추출, 추가 계산 등)해야 하면 recipe를
+  쓰지 말고 atomic(`aggregate` + `calculate` + `filter` + `present`)으로 조립한다.
 - 존재하지 않는 table / column / step id를 만들지 않는다. dataset별 추가 컬럼은
   본문 뒤쪽 "이 dataset의 docs 추가 컬럼" 섹션에 명시된 컬럼만 사용한다.
 - doc-level 필드(`created_at` / `raw_text` / dataset-specific 컬럼 등)와
@@ -106,19 +112,33 @@ group_by별 count와 전체 대비 share(0~1)를 한 번에 계산한다.
 - 보통 `genuineness.genuineness == "non_review"` doc은 분석에서 제외하는 게
   안전하다. 단, 사용자가 "공식 공지", "이벤트 안내" 같이 non_review를 직접
   요구하면 그대로 둔다.
-- 비율/비중 질문은 **두 종류**로 나뉘니 반드시 구분한다:
+- 비율/비중 질문은 **세 종류**로 나뉘니 반드시 구분한다:
   - (A) *그룹별 구성비 / 전체 대비 비중* — "전반적인 반응 비율", "긍정/부정/중립
     비율", "aspect별 비중", "채널별 구성비"처럼 **각 그룹이 전체에서 차지하는
-    몫**을 묻는 경우. → **`distribution` recipe를 사용한다**(위 recipe 섹션, 예시 4).
-    recipe가 실행 시 `aggregate` + `calculate.share_of_total` + `present`로 펼쳐지므로
-    atomic을 직접 조립하지 않는다.
-  - (B) *부분집합 / 전체집합* — "분위기 후기 **중** 부정 비율"처럼 분자가 분모의
-    하위 조건인 경우. → 분자 aggregate와 분모 aggregate를 따로 만들어 `compare`로
-    한 row에 합친 뒤 `calculate.ratio(numerator=..., denominator=...)`. 두
-    aggregate의 `group_by`는 **반드시 동일**해야 한다 (다르면 compare가 DuckDB
-    Binder Error, SQL-6.1). (예시 3)
-  - ❌ 그룹별 구성비(A)를 `calculate.ratio`로 풀면 분모를 그룹 count로 잘못 배선해
-    모든 비율이 1이 된다. (A)는 반드시 `share_of_total`을 쓴다.
+    몫**을 (모든 그룹에 대해) 묻는 경우. → **`distribution` recipe를 사용한다**(위
+    recipe 섹션, 예시 4). recipe가 실행 시 `aggregate` + `calculate.share_of_total`
+    + `present`로 펼쳐지므로 atomic을 직접 조립하지 않는다.
+  - (C) *전체 대비 특정 범주 하나의 비율* — "비진성 수와 전체 대비 비율", "부정
+    문서가 전체에서 차지하는 비율"처럼 **한 범주가 전체 모집단에서 차지하는 몫**만
+    보여달라는 경우. → (A)와 같은 `share_of_total`을 쓰되 결과 row가 하나만
+    필요하므로 **atomic**으로 조립한다(distribution recipe는 terminal이라 뒤에 filter를
+    못 붙이므로 recipe 대신 atomic):
+    `aggregate(group_by=[범주컬럼], count)` → `calculate.share_of_total(ratio)` →
+    **그 다음** `filter(범주컬럼 == 값)` → `present`.
+    즉 **전체 모집단을 먼저 집계·share한 뒤, 마지막에 해당 범주 row만 남긴다.**
+    예: "비진성(non_review) 수와 전체 대비 비율" → genuineness별 aggregate(count) →
+    share_of_total → filter(genuineness == "non_review") → present.
+  - ❌ (C)에서 **filter를 먼저 걸지 마라.** 범주로 먼저 filter한 뒤 share_of_total을
+    구하면 분모가 그 부분집합이 되어 ratio가 항상 **1.0**이 된다. share는 반드시
+    **전체 모집단** 기준으로 계산하고, 특정 범주 추출은 share 계산 **뒤에** 한다.
+  - (B) *부분집합 / 전체집합 (분자가 분모의 하위 조건)* — "분위기 후기 **중** 부정
+    비율"처럼 분자가 분모를 **추가 조건으로 좁힌** 경우(분자·분모의 모집단 기준이
+    다름). → 분자 aggregate와 분모 aggregate를 따로 만들어 `compare`로 한 row에
+    합친 뒤 `calculate.ratio(numerator=..., denominator=...)`. 두 aggregate의
+    `group_by`는 **반드시 동일**해야 한다 (다르면 compare가 DuckDB Binder Error,
+    SQL-6.1). (예시 3) — 단 "전체 대비 한 범주"는 (B)가 아니라 (C)다.
+  - ❌ 그룹별 구성비(A)/단일 범주 비율(C)을 `calculate.ratio`로 풀면 분모를 그룹
+    count로 잘못 배선해 모든 비율이 1이 된다. (A)/(C)는 반드시 `share_of_total`을 쓴다.
   - *서로 다른 기간/그룹 비교*는 calculate.subtract / percent_change (예시 1).
   - ratio·share_of_total 결과 단위는 **0~1**(소수). %는 표시 단계에서 환산한다.
 - "상위 N개", "가장 많이", "자주 나오는", "많이 언급된"처럼 조건 후 그룹별
