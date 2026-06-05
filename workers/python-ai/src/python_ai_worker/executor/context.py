@@ -185,8 +185,31 @@ class ExecutorContext:
         return name
 
 
+def read_docs_columns(artifact_paths: ArtifactPaths) -> list[str]:
+    """docs view(cleaned parquet)의 실제 컬럼명을 plan 단계에서 조회한다.
+
+    silverone 2026-06-05 — planner에 노출하는 docs-extra 컬럼을 **실제 query 가능한
+    docs 컬럼**으로 거르기 위함(advertised=queryable invariant). clean이 source
+    text_columns(예: 제목/본문)를 raw_text로 병합하고 나머지를 source_json에 넣으면
+    그 원본 컬럼은 docs view에 없으므로, planner가 참조하면 Binder Error가 난다.
+    artifact가 없으면 빈 리스트(=거르지 않음)로 degrade."""
+    path = Path(artifact_paths.docs)
+    if not path.exists():
+        return []
+    con = duckdb.connect(":memory:")
+    try:
+        literal = str(path.resolve()).replace("'", "''")
+        rows = con.execute(
+            f"DESCRIBE SELECT * FROM read_parquet('{literal}')"
+        ).fetchall()
+        return [row[0] for row in rows]
+    finally:
+        con.close()
+
+
 __all__ = [
     "ArtifactPaths",
     "ExecutorContext",
     "ExecutorContextError",
+    "read_docs_columns",
 ]

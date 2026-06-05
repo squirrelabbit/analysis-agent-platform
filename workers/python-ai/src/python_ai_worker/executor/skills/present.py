@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .base import safe_identifier
+from .base import quote_identifier, safe_identifier
 
 if TYPE_CHECKING:
     from ..context import ExecutorContext
@@ -42,7 +42,7 @@ def _projection(params: dict[str, Any]) -> str:
     for col in columns:
         if not isinstance(col, str) or not col.strip():
             return "*"  # 비정상 columns는 무시하고 전체 — validator가 별도로 잡는다.
-        names.append(safe_identifier(col.strip()))
+        names.append(quote_identifier(col.strip()))
     return ", ".join(names)
 
 

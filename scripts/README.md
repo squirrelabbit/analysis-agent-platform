@@ -5,7 +5,7 @@
 | script | 범위 | 의존 |
 |---|---|---|
 | `smoke_analyze_service.sh` | Python `execute_analyze_plan` direct 호출 — compose 없이 deterministic 경로만 | Python venv + committed fixture |
-| `smoke_analyze_endpoint.sh` | python-ai-worker `/tasks/plan_v2` + `/tasks/analyze_v2` 4 case (direct plan / user_question / ambiguous fail) | compose dev (python-ai-worker만) + ANTHROPIC_API_KEY |
+| `smoke_analyze_endpoint.sh` | python-ai-worker 4 case (direct plan / user_question / ambiguous fail). **legacy alias `/tasks/plan_v2`·`/tasks/analyze_v2`를 호출해 alias 호환을 검증**한다 (canonical은 `/tasks/plan`·`/tasks/analyze` — 아래 메모 참조) | compose dev (python-ai-worker만) + ANTHROPIC_API_KEY |
 | `smoke_analyze_e2e.sh` | Go control plane `POST /projects/{pid}/datasets/{did}/analyze` active version mode end-to-end | compose dev (control-plane + python-ai-worker + postgres) + (optional) ANTHROPIC_API_KEY |
 
 `smoke_analyze_e2e.sh`는 두 mode를 분리 실행:

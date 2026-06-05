@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .base import ExecutorError, safe_identifier
+from .base import ExecutorError, quote_identifier, safe_identifier
 
 if TYPE_CHECKING:
     from ..context import ExecutorContext
@@ -28,28 +28,28 @@ def build_sql(params: dict[str, Any], context: "ExecutorContext") -> tuple[str, 
     input_ref = safe_identifier(params["input"])
     pieces: list[str] = ["*"]
     for expression in params["expressions"]:
-        name = safe_identifier(expression["name"])
+        name = quote_identifier(expression["name"])
         operation = str(expression["operation"]).strip().lower()
         if operation in {"add", "subtract"}:
-            left = safe_identifier(expression["left"])
-            right = safe_identifier(expression["right"])
+            left = quote_identifier(expression["left"])
+            right = quote_identifier(expression["right"])
             op = "+" if operation == "add" else "-"
             pieces.append(f"(COALESCE({left}, 0) {op} COALESCE({right}, 0)) AS {name}")
         elif operation == "multiply":
-            left = safe_identifier(expression["left"])
-            right = safe_identifier(expression["right"])
+            left = quote_identifier(expression["left"])
+            right = quote_identifier(expression["right"])
             pieces.append(f"({left} * {right}) AS {name}")
         elif operation == "divide":
             # silverone 2026-05-26 (SQL-2.1, audit C3) — 분모 NULL/0 가드.
-            left = safe_identifier(expression["left"])
-            right = safe_identifier(expression["right"])
+            left = quote_identifier(expression["left"])
+            right = quote_identifier(expression["right"])
             pieces.append(
                 f"(CASE WHEN {right} IS NULL OR {right} = 0 THEN NULL "
                 f"ELSE {left} * 1.0 / {right} END) AS {name}"
             )
         elif operation == "percent_change":
-            base = safe_identifier(expression["base"])
-            current = safe_identifier(expression["current"])
+            base = quote_identifier(expression["base"])
+            current = quote_identifier(expression["current"])
             pieces.append(
                 f"(CASE WHEN {base} IS NULL OR {base} = 0 THEN NULL "
                 f"ELSE (COALESCE({current}, 0) - {base}) * 100.0 / {base} END) AS {name}"
@@ -57,8 +57,8 @@ def build_sql(params: dict[str, Any], context: "ExecutorContext") -> tuple[str, 
         elif operation == "ratio":
             numerator_key = "numerator" if "numerator" in expression else "left"
             denominator_key = "denominator" if "denominator" in expression else "right"
-            numerator = safe_identifier(expression[numerator_key])
-            denominator = safe_identifier(expression[denominator_key])
+            numerator = quote_identifier(expression[numerator_key])
+            denominator = quote_identifier(expression[denominator_key])
             pieces.append(
                 f"(CASE WHEN {denominator} IS NULL OR {denominator} = 0 THEN NULL "
                 f"ELSE {numerator} * 1.0 / {denominator} END) AS {name}"
@@ -66,10 +66,10 @@ def build_sql(params: dict[str, Any], context: "ExecutorContext") -> tuple[str, 
         elif operation == "share_of_total":
             # silverone 2026-06-02 — value의 전체(또는 partition) 합 대비 비중(0~1).
             # window SUM OVER (PARTITION BY ...) 로 합을 broadcast해 row별로 나눈다.
-            value = safe_identifier(expression["value"])
+            value = quote_identifier(expression["value"])
             partition_by = expression.get("partition_by") or []
             if partition_by:
-                cols = ", ".join(safe_identifier(c) for c in partition_by)
+                cols = ", ".join(quote_identifier(c) for c in partition_by)
                 window = f"SUM({value}) OVER (PARTITION BY {cols})"
             else:
                 window = f"SUM({value}) OVER ()"

@@ -45,6 +45,10 @@ class RecipeSpec:
     params: tuple[RecipeParamSpec, ...]
     # lowering으로 확장되는 atomic skill 목록 (문서/검증용).
     lowered_skills: tuple[str, ...]
+    # silverone 2026-06-05 — prompt recipe catalog의 single source. prompt.py
+    # render_recipe_catalog()가 여기서 use_when/avoid_when을 렌더한다(하드코딩 제거).
+    use_when: str = ""
+    avoid_when: str = ""
     implemented: bool = False  # lowering이 구현됐는지
 
 
@@ -63,6 +67,8 @@ DISTRIBUTION_SPEC = RecipeSpec(
         RecipeParamSpec("title", desc="string|null — present 제목"),
     ),
     lowered_skills=("aggregate", "calculate", "present"),
+    use_when="긍정/부정/중립 비율, 전반적인 반응 비율, aspect별 비중, 채널별 구성비처럼 각 그룹이 전체에서 차지하는 몫(구성비)을 모든 그룹에 대해 묻는 질문.",
+    avoid_when="단순 건수는 atomic aggregate. 전체 대비 특정 범주 하나의 비율은 aggregate→share_of_total→filter(atomic). 부분집합 중 비율(분자가 분모의 하위조건)은 compare+calculate.ratio. 날짜별 추이는 atomic.",
     implemented=True,
 )
 
@@ -80,6 +86,8 @@ EVENT_WINDOW_COUNT_SPEC = RecipeSpec(
         RecipeParamSpec("title", desc="string|null"),
     ),
     lowered_skills=("filter", "aggregate", "sort", "present"),
+    use_when="축제일/행사일/특정 날짜 전후 N일 문서 발생량을 일자별로 묻는 질문 (D-day 전후).",
+    avoid_when="기간 전체의 단순 총량은 atomic filter+aggregate. week/month bucket은 미지원(필요 시 clarify/unsupported). 기준일이 없으면 추정 말고 clarify.",
     implemented=True,
 )
 
@@ -97,6 +105,28 @@ TOP_N_SPEC = RecipeSpec(
         RecipeParamSpec("title", desc="string|null"),
     ),
     lowered_skills=("filter", "aggregate", "sort", "present"),
+    use_when="상위 N개/가장 많은/자주 나오는/많이 언급된/랭킹처럼 조건 후 그룹별 count 순위를 묻는 질문. doc-level 필터가 필요하면 먼저 join/filter로 input step을 만든 뒤 top_n.input으로 넘긴다.",
+    avoid_when="전체 대비 비중이 필요하면 distribution. 서로 다른 기간/집단 비교는 atomic compare+calculate.",
+    implemented=True,
+)
+
+# silverone 2026-06-05 — 집계 없이 원문 근거(raw row)를 보여주는 가장 얇은 recipe.
+# 데모에서 "집계 결과의 근거 예시"를 안정 진입점으로 제공. 연산축이 다름(집계 X,
+# row projection + deterministic order + limit)이라 distribution/top_n과 구분된다.
+SAMPLE_ROWS_SPEC = RecipeSpec(
+    name="sample_rows",
+    description="집계 없이 조건에 맞는 원문 row 몇 개를 결정적으로 보여준다. '예시/샘플/원문/근거 문장 보여줘'.",
+    params=(
+        RecipeParamSpec("input", required=True, desc="table_or_step_id"),
+        RecipeParamSpec("columns", required=True, desc="string[] — 보여줄 컬럼(projection)"),
+        RecipeParamSpec("filters", desc="[{column, op, value}] — 선택. op는 =,!=,>,>=,<,<=,in,not_in,contains"),
+        RecipeParamSpec("sort", desc="{by: string[], direction: asc|desc} — 미지정 시 doc_id+columns asc"),
+        RecipeParamSpec("limit", desc="int>0 — 행 수 (기본 10, 최대 100)"),
+        RecipeParamSpec("title", desc="string|null"),
+    ),
+    lowered_skills=("filter", "sort", "present"),
+    use_when="예시/샘플/원문 몇 개/근거 문장/어떤 후기가 있는지처럼 집계가 아니라 실제 row 예시를 묻는 질문. 문서 본문이 필요하면 먼저 join step을 만들고 sample_rows.input으로 넘긴다.",
+    avoid_when="건수/비율/비중/순위/추이 등 집계 질문에는 절대 쓰지 않는다(aggregate/distribution/top_n).",
     implemented=True,
 )
 
@@ -104,7 +134,12 @@ RECIPE_SPECS: dict[str, RecipeSpec] = {
     DISTRIBUTION_SPEC.name: DISTRIBUTION_SPEC,
     EVENT_WINDOW_COUNT_SPEC.name: EVENT_WINDOW_COUNT_SPEC,
     TOP_N_SPEC.name: TOP_N_SPEC,
+    SAMPLE_ROWS_SPEC.name: SAMPLE_ROWS_SPEC,
 }
+
+# sample_rows.limit 상한 (데모용 안전 cap). 초과 요청은 RecipeError.
+SAMPLE_ROWS_MAX_LIMIT = 100
+SAMPLE_ROWS_DEFAULT_LIMIT = 10
 
 
 # ===== lowering =====
@@ -406,17 +441,123 @@ def lower_top_n(step: dict[str, Any]) -> list[dict[str, Any]]:
     return steps
 
 
+def lower_sample_rows(step: dict[str, Any]) -> list[dict[str, Any]]:
+    """sample_rows recipe → [(filter…), sort(by, order, limit), present(columns)].
+
+    집계 없음. filters는 atomic filter step으로 체인, sort는 결정적 정렬 + limit으로
+    상위 N행 선택, present는 columns projection. deterministic — random sampling 없음.
+
+    기본 정렬(미지정 시): ``by = [doc_id, *columns]`` asc.
+    - doc-level 입력(docs/genuineness, doc당 1행)은 doc_id만으로 전순서 → 결정적.
+    - clause-level 입력(clauses, doc당 N행)은 doc_id tie를 projection 컬럼으로 깬다.
+      텍스트 컬럼 정렬은 fallback 성격(알파벳순) — 안정성 확보용이지 의미순 아님.
+    - TODO(후속): source_row_index / clause_id 같은 stable key가 생기면 그걸 우선 사용.
+    atomic sort는 order가 컬럼 공통 1개라 컬럼별 방향 혼합은 불가(혼합 필요 시 미지원)."""
+    params = step.get("params") or {}
+    if not isinstance(params, dict):
+        raise RecipeError("sample_rows.params must be an object")
+    base = str(step.get("id") or "sample_rows").strip() or "sample_rows"
+
+    input_ref = _required_str(params, "sample_rows", "input")
+
+    columns_raw = params.get("columns")
+    if (
+        not isinstance(columns_raw, list)
+        or not columns_raw
+        or not all(isinstance(c, str) and c.strip() for c in columns_raw)
+    ):
+        raise RecipeError("sample_rows.columns must be a non-empty string list")
+    columns = [c.strip() for c in columns_raw]
+
+    limit = params.get("limit")
+    if limit is None:  # 미지정(absent) 또는 null → 기본값
+        limit = SAMPLE_ROWS_DEFAULT_LIMIT
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        raise RecipeError("sample_rows.limit must be a positive integer")
+    if limit > SAMPLE_ROWS_MAX_LIMIT:
+        raise RecipeError(f"sample_rows.limit must be <= {SAMPLE_ROWS_MAX_LIMIT}")
+
+    # sort: 미지정 시 doc_id + projection 컬럼 asc (결정적 기본).
+    sort_spec = params.get("sort") or {}
+    if not isinstance(sort_spec, dict):
+        raise RecipeError("sample_rows.sort must be an object {by, direction}")
+    by_raw = sort_spec.get("by")
+    if by_raw is None:
+        # doc_id 우선 + projection 컬럼 tiebreak (중복 제거, 순서 보존).
+        sort_by = list(dict.fromkeys(["doc_id", *columns]))
+    elif (
+        isinstance(by_raw, list)
+        and by_raw
+        and all(isinstance(c, str) and c.strip() for c in by_raw)
+    ):
+        sort_by = [c.strip() for c in by_raw]
+    else:
+        raise RecipeError("sample_rows.sort.by must be a non-empty string list")
+    direction = _opt_str(sort_spec, "direction", "asc")
+    if direction not in ("asc", "desc"):
+        raise RecipeError(f"sample_rows.sort.direction must be asc|desc; got {direction!r}")
+
+    steps: list[dict[str, Any]] = []
+    chain_input = input_ref
+
+    filters = params.get("filters") or []
+    if not isinstance(filters, list):
+        raise RecipeError("sample_rows.filters must be a list")
+    for idx, flt in enumerate(filters, start=1):
+        if not isinstance(flt, dict):
+            raise RecipeError(f"sample_rows.filters[{idx - 1}] must be an object")
+        column = _required_str(flt, "sample_rows.filters", "column")
+        op_raw = _required_str(flt, "sample_rows.filters", "op")
+        operator = _FILTER_OP_MAP.get(op_raw)
+        if operator is None:
+            raise RecipeError(f"sample_rows.filters op '{op_raw}' not supported")
+        filter_id = f"{base}_filter{idx}"
+        steps.append(
+            {
+                "id": filter_id,
+                "skill": "filter",
+                "params": {
+                    "input": chain_input,
+                    "column": column,
+                    "operator": operator,
+                    "value": flt.get("value"),
+                },
+            }
+        )
+        chain_input = filter_id
+
+    sorted_id = f"{base}_sorted"
+    steps.append(
+        {
+            "id": sorted_id,
+            "skill": "sort",
+            "params": {"input": chain_input, "by": sort_by, "order": direction, "limit": limit},
+        }
+    )
+    present_params: dict[str, Any] = {
+        "input": sorted_id,
+        "format": "table",
+        "columns": columns,
+    }
+    title = params.get("title")
+    if isinstance(title, str) and title.strip():
+        present_params["title"] = title.strip()
+    steps.append({"id": f"{base}_present", "skill": "present", "params": present_params})
+    return steps
+
+
 _LOWERERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "distribution": lower_distribution,
     "event_window_count": lower_event_window_count,
     "top_n": lower_top_n,
+    "sample_rows": lower_sample_rows,
 }
 
 
 # Runtime 실행 + validator 허용 recipe. validator/executor가 같은 이 집합을 참조해
 # "validator 허용 == runtime 실행 가능"을 단일 source로 보장한다.
 RUNTIME_ENABLED_RECIPES: frozenset[str] = frozenset(
-    {"distribution", "event_window_count", "top_n"}
+    {"distribution", "event_window_count", "top_n", "sample_rows"}
 )
 
 
@@ -461,10 +602,12 @@ __all__ = [
     "DISTRIBUTION_SPEC",
     "EVENT_WINDOW_COUNT_SPEC",
     "TOP_N_SPEC",
+    "SAMPLE_ROWS_SPEC",
     "lower_recipe",
     "lower_distribution",
     "lower_event_window_count",
     "lower_top_n",
+    "lower_sample_rows",
     "expand_recipes",
     "RUNTIME_ENABLED_RECIPES",
 ]

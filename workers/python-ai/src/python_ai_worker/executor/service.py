@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ..composer import compose_answer
+from ..obs import get as _get_logger
 from ..planner.recipes import expand_recipes
 from ..planner.step_display import plan_with_step_display
 from ..planner import (
@@ -28,8 +29,35 @@ from ..planner import (
     PlannerResult,
     generate_plan,
 )
-from .context import ArtifactPaths, ExecutorContext, ExecutorContextError
+from .context import ArtifactPaths, ExecutorContext, ExecutorContextError, read_docs_columns
 from .runner import ExecutionStepResult, ExecutorError, execute_plan
+
+_LOG = _get_logger("executor.service")
+
+
+def _filter_docs_extra_columns(
+    docs_extra_columns: list[DatasetSpecificColumn] | None,
+    artifact_paths: ArtifactPaths | None,
+) -> list[DatasetSpecificColumn] | None:
+    """planner에 노출할 docs-extra 컬럼을 **실제 docs view에 존재하는 컬럼**으로만 거른다.
+
+    silverone 2026-06-05 — advertised=queryable invariant. control-plane이 source
+    원본 컬럼을 docs-extra로 보내도, clean이 병합/삭제해 docs view에 없는 컬럼은
+    planner가 못 보게 한다(없으면 Binder Error). artifact 미해석 시 원본 그대로 반환."""
+    if not docs_extra_columns or artifact_paths is None:
+        return docs_extra_columns
+    available = set(read_docs_columns(artifact_paths))
+    if not available:
+        return docs_extra_columns  # 조회 실패 → 거르지 않음(degrade)
+    kept = [c for c in docs_extra_columns if c.name in available]
+    dropped = [c.name for c in docs_extra_columns if c.name not in available]
+    if dropped:
+        _LOG.warning(
+            "analyze.docs_extra_columns_filtered",
+            dropped=dropped,
+            kept=[c.name for c in kept],
+        )
+    return kept
 
 
 class ArtifactPathResolutionError(RuntimeError):
@@ -267,23 +295,68 @@ def plan_and_execute_analyze(
 
     흐름: planner.llm.generate_plan → execute_analyze_plan.
     planner metadata (attempts, usage, prompt_version)를 응답에 함께 노출.
+
+    silverone 2026-06-05 (작업 A) — planner가 repair 후에도 유효한 plan을 못 만들거나
+    (generate_plan), expand 후 atomic 재검증에 실패하면(execute_analyze_plan)
+    ``PlanValidationError``가 난다. user_question 경로에서는 이를 raw 400/500으로
+    올리지 않고 graceful 거절(answerable=false, reason=planner_validation_error)로
+    변환한다 — 사용자에게 raw 500이 보이지 않게. (direct-plan 디버그 경로인
+    ``execute_analyze_plan`` 직접 호출은 그대로 raise 유지.)
     """
 
     client = anthropic_client if anthropic_client is not None else _default_anthropic_client()
-    planner_result = generate_plan(
-        user_question=user_question,
-        anthropic_client=client,
-        docs_extra_columns=docs_extra_columns,
-        conversation_context=conversation_context,
-        prompt_version=prompt_version,
-    )
-    execution_response = execute_analyze_plan(
-        dataset_version_id,
-        planner_result.plan,
-        artifact_paths=artifact_paths,
-        sample_limit=sample_limit,
-        user_question=user_question,
-    )
+    # advertised=queryable: 실제 docs view에 있는 컬럼만 planner에 노출(병합/삭제된
+    # source 컬럼이 prompt에 새어 Binder Error 나는 것 차단). silverone 2026-06-05.
+    docs_extra_columns = _filter_docs_extra_columns(docs_extra_columns, artifact_paths)
+    try:
+        planner_result = generate_plan(
+            user_question=user_question,
+            anthropic_client=client,
+            docs_extra_columns=docs_extra_columns,
+            conversation_context=conversation_context,
+            prompt_version=prompt_version,
+        )
+        execution_response = execute_analyze_plan(
+            dataset_version_id,
+            planner_result.plan,
+            artifact_paths=artifact_paths,
+            sample_limit=sample_limit,
+            user_question=user_question,
+        )
+    except (PlanValidationError, ExecutorError) as exc:
+        # silverone 2026-06-05 — ExecutorError(실행 단계 SQL/skill 실패)도 user_question
+        # 경로에서 raw 500으로 새지 않게 graceful 거절로 변환. validation 실패와 reason만 구분.
+        if isinstance(exc, ExecutorError):
+            event = "analyze.execution_failed"
+            reason = "execution_error"
+            message = (
+                "분석 계획 실행 중 오류가 발생했습니다. 질문을 단순화하거나 "
+                "다른 조건으로 다시 시도해 주세요."
+            )
+        else:
+            event = "analyze.planner_validation_failed"
+            reason = "planner_validation_error"
+            message = (
+                "요청을 실행 가능한 분석 계획으로 변환하지 못했습니다. "
+                "질문을 더 구체적으로(대상·기준·집계 단위) 작성해 다시 시도해 주세요."
+            )
+        _LOG.warning(
+            event,
+            dataset_version_id=dataset_version_id,
+            error_category=type(exc).__name__,
+            error_message=str(exc),
+        )
+        return _build_reject_response(
+            dataset_version_id=dataset_version_id,
+            plan={
+                "answerable": False,
+                "plan_version": "v2",
+                "reason": reason,
+                "message": message,
+                "steps": [],
+            },
+            user_question=user_question,
+        )
     execution_response["planner"] = _planner_metadata(planner_result, user_question=user_question)
     return execution_response
 

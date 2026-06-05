@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .base import safe_identifier
+from .base import quote_identifier, safe_identifier
 
 if TYPE_CHECKING:
     from ..context import ExecutorContext
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 def build_sql(params: dict[str, Any], context: "ExecutorContext") -> tuple[str, dict[str, Any]]:
     input_ref = safe_identifier(params["input"])
-    by = [safe_identifier(c) for c in params["by"]]
+    by = [quote_identifier(c) for c in params["by"]]
     order = str(params.get("order") or "desc").strip().lower()
     direction = "ASC" if order == "asc" else "DESC"
     order_parts = [f"{c} {direction}" for c in by]
