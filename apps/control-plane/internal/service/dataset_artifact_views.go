@@ -3,6 +3,7 @@ package service
 import (
 	"database/sql"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -459,10 +460,16 @@ func loadClauseLabelArtifact(ref string, limit, offset int, aspect, sentiment st
 	if err != nil {
 		return nil, "", 0, nil, err
 	}
+	// aspect × sentiment 교차 분포 (aspect별 sentiment count/percent).
+	aspectSentiment, err := aggregateAspectSentiment(db, source)
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
 	summary := map[string]any{
-		"total":     total,
-		"sentiment": bySentiment,
-		"aspect":    byAspect,
+		"total":            total,
+		"sentiment":        bySentiment,
+		"aspect":           byAspect,
+		"aspect_sentiment": aspectSentiment,
 	}
 
 	prompt, err := firstStringValue(db, source, "prompt_version")
@@ -596,6 +603,101 @@ func aggregateGroupedCounts(db *sql.DB, source, groupColumn string) (int, map[st
 		return 0, nil, err
 	}
 	return total, result, nil
+}
+
+// clauseLabelStandardSentiments — clause_label taxonomy의 고정 sentiment 3종.
+// aspect_sentiment 분포를 차트 친화적으로 만들기 위해 관측되지 않은 sentiment도
+// count 0으로 채운다 (OpenAPI 계약상 고정 키). null sentiment는 "unknown"으로
+// 별도 집계되며, 관측된 경우에만 추가된다.
+var clauseLabelStandardSentiments = []string{"positive", "negative", "neutral"}
+
+// aggregateAspectSentiment — aspect × sentiment 교차 분포를 GROUP BY 한 번으로
+// 집계해 aspect별 sentiment count + percent를 반환한다. percent는 해당 aspect
+// total 대비 비율(소수 1자리 반올림). 반환 shape:
+//
+//	{
+//	  "<aspect>": {
+//	    "total": <int>,
+//	    "sentiment": {
+//	      "<sentiment>": { "count": <int>, "percent": <float> }, ...
+//	    }
+//	  }, ...
+//	}
+//
+// aspect/sentiment가 null이면 "unknown"으로 정규화한다.
+func aggregateAspectSentiment(db *sql.DB, source string) (map[string]any, error) {
+	rows, err := db.Query(fmt.Sprintf(
+		`SELECT aspect, sentiment, COUNT(*) AS cnt FROM %s GROUP BY aspect, sentiment`,
+		source,
+	))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// aspect → sentiment → count (raw 집계).
+	counts := map[string]map[string]int{}
+	totals := map[string]int{}
+	for rows.Next() {
+		var aspectRaw, sentimentRaw sql.NullString
+		var cnt int
+		if err := rows.Scan(&aspectRaw, &sentimentRaw, &cnt); err != nil {
+			return nil, err
+		}
+		aspect := normalizeArtifactKey(aspectRaw)
+		sentiment := normalizeArtifactKey(sentimentRaw)
+		if counts[aspect] == nil {
+			counts[aspect] = map[string]int{}
+		}
+		counts[aspect][sentiment] += cnt
+		totals[aspect] += cnt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result := map[string]any{}
+	for aspect, sentimentCounts := range counts {
+		total := totals[aspect]
+		// 고정 sentiment 3종을 0으로 채운 뒤 관측값을 덮어쓴다.
+		merged := map[string]int{}
+		for _, s := range clauseLabelStandardSentiments {
+			merged[s] = 0
+		}
+		for s, c := range sentimentCounts {
+			merged[s] = c
+		}
+		dist := map[string]any{}
+		for s, c := range merged {
+			dist[s] = map[string]any{
+				"count":   c,
+				"percent": percentOf(c, total),
+			}
+		}
+		result[aspect] = map[string]any{
+			"total":     total,
+			"sentiment": dist,
+		}
+	}
+	return result, nil
+}
+
+// normalizeArtifactKey — NULL/빈 문자열 키를 "unknown"으로 정규화.
+func normalizeArtifactKey(raw sql.NullString) string {
+	if raw.Valid {
+		if trimmed := strings.TrimSpace(raw.String); trimmed != "" {
+			return trimmed
+		}
+	}
+	return "unknown"
+}
+
+// percentOf — count/total*100을 소수 1자리로 반올림. total 0이면 0.
+func percentOf(count, total int) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return math.Round(float64(count)/float64(total)*1000) / 10
 }
 
 // firstStringValue — 첫 행에서 column 값 1개 추출. prompt_version 회수용.

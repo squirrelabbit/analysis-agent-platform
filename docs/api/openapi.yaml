@@ -3229,6 +3229,29 @@ components:
                   additionalProperties:
                     type: integer
                   description: "key: aspect label / value: clause count"
+                aspect_sentiment:
+                  type: object
+                  description: |
+                    aspect × sentiment 교차 분포. aspect별 sentiment count + percent.
+                    필터(aspect/sentiment query)와 무관하게 항상 전체 기준.
+                    고정 sentiment 3종(positive/negative/neutral)은 관측되지 않아도
+                    count 0 / percent 0으로 채워진다. null sentiment는 "unknown"으로
+                    관측 시에만 추가. percent는 해당 aspect total 대비 비율(소수 1자리).
+                  additionalProperties:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      sentiment:
+                        type: object
+                        additionalProperties:
+                          type: object
+                          properties:
+                            count:
+                              type: integer
+                            percent:
+                              type: number
+                              description: "해당 aspect total 대비 백분율 (소수 1자리)"
             items:
               type: array
               items:
