@@ -1,16 +1,7 @@
 import { useState } from "react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  LabelList,
-} from "recharts";
-import { MetricCard } from "@/components/common/cards/MetricCard";
+import { FileText, Check, Minus, X, Clock } from "lucide-react";
+import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
+import { StatCard } from "@/components/common/cards/StatCard";
 import type { ClauseBuild, ClauseItem } from "../../models/build";
 import { Badge } from "@/components/ui/badge";
 import { useBuildVersion } from "../../hooks/build.query";
@@ -29,6 +20,7 @@ import {
   FilterPills,
   type Column,
 } from "../DataTable";
+import { formatSecond } from "@/shared/utils/format";
 
 const SENTIMENT_COLORS: Record<string, string> = {
   positive: "#10b981",
@@ -89,11 +81,13 @@ export function ClauseTab() {
     .sort(([, a], [, b]) => b - a)
     .map(([key, value]) => ({ name: aspectLabelOf(taxonomy, key), value }));
 
-  // Sentiment pie data
+  const maxAspect = Math.max(...aspectData.map((a) => a.value), 1);
+
+  // 감성 도넛 데이터
   const sentimentData = [
-    { name: "positive", value: positive, fill: SENTIMENT_COLORS.positive },
-    { name: "neutral", value: neutral, fill: SENTIMENT_COLORS.neutral },
-    { name: "negative", value: negative, fill: SENTIMENT_COLORS.negative },
+    { name: "positive", value: positive },
+    { name: "neutral", value: neutral },
+    { name: "negative", value: negative },
   ];
 
   // aspect 옵션은 전체 분포(summary.aspect) 기준 — 현재 페이지 items가 아니라.
@@ -104,12 +98,6 @@ export function ClauseTab() {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const loadedStart = totalCount === 0 ? 0 : (pagination?.offset ?? 0) + 1;
   const loadedEnd = (pagination?.offset ?? 0) + (items?.length ?? 0);
-
-  const totalSec = Math.round(durationSeconds ?? 0);
-  const durationLabel =
-    totalSec >= 60
-      ? `${Math.floor(totalSec / 60)}분 ${totalSec % 60}초`
-      : `${totalSec}초`;
 
   const columns: Column<ClauseItem>[] = [
     {
@@ -154,88 +142,106 @@ export function ClauseTab() {
 
   return (
     <div className="space-y-5">
-      {/* Metrics */}
+      {/* 메타 */}
+      <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
+        <span className="inline-flex items-center gap-1.5 font-medium">
+          <Clock className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
+          소요 시간
+          <b className="font-bold text-zinc-800">
+            {formatSecond(durationSeconds)}
+          </b>
+        </span>
+        <span className="h-3 w-px bg-zinc-200" />
+        <span className="inline-flex items-center gap-1.5 font-medium">
+          <FileText className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
+          프롬프트
+          <code className="rounded-md bg-violet-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-violet-700">
+            {applied?.promptVersion ?? "-"}
+          </code>
+        </span>
+      </div>
+
+      {/* 분류 현황 */}
       <div>
-        <p className="text-xs font-medium text-zinc-400 uppercase tracking-widest mb-2">
-          분류 현황
-        </p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <MetricCard label="총 조항 수" value={summary.total} />
-          <MetricCard
+        <p className="mb-3 text-[13px] font-bold text-zinc-600">분류 현황</p>
+        <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+          <StatCard
+            value={summary.total?.toLocaleString()}
+            label="총 조항 수"
+            icon={FileText}
+            tone="neutral"
+          />
+          <StatCard
+            value={positive?.toLocaleString()}
             label="긍정 (positive)"
-            value={positive}
+            icon={Check}
+            tone="ok"
             valueColor="text-emerald-600"
           />
-          <MetricCard
+          <StatCard
+            value={neutral?.toLocaleString()}
             label="중립 (neutral)"
-            value={neutral}
+            icon={Minus}
+            tone="muted"
             valueColor="text-zinc-500"
           />
-          <MetricCard
+          <StatCard
+            value={negative?.toLocaleString()}
             label="부정 (negative)"
-            value={negative}
+            icon={X}
+            tone="danger"
             valueColor="text-red-500"
           />
         </div>
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {/* Aspect bar chart */}
-        <div className="rounded-xl border border-zinc-100 bg-white p-4">
-          <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">
-            Aspect 분포
-          </p>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart
-              data={aspectData}
-              layout="vertical"
-              margin={{ top: 0, right: 40, bottom: 0, left: 10 }}
-            >
-              <XAxis
-                type="number"
-                tick={{ fontSize: 11, fill: "#a1a1aa" }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                type="category"
-                dataKey="name"
-                interval={0}
-                tick={{ fontSize: 11, fill: "#71717a" }}
-                axisLine={false}
-                tickLine={false}
-                width={104}
-              />
-              {/* <Tooltip
-                formatter={(v: number) => [`${v}건`, "조항 수"]}
-                contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #f4f4f5" }}
-              /> */}
-              <Bar
-                dataKey="value"
-                fill="#3b82f6"
-                radius={[0, 3, 3, 0]}
-                barSize={10}
-              >
-                <LabelList
-                  dataKey="value"
-                  position="right"
-                  fontSize={11}
-                  fill="#71717a"
-                />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+      {/* 분포 */}
+      <div>
+        <p className="mb-3 text-[13px] font-bold text-zinc-600">분포</p>
+        <div className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
+          {/* Aspect 건수 막대 */}
+          <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm md:col-span-2">
+            <div className="text-[15px] font-bold text-zinc-900">
+              Aspect 분포
+            </div>
+            <div className="mt-1 text-xs font-medium text-zinc-400">
+              언급된 조항 수 기준
+            </div>
+            <div className="mt-5 flex flex-col gap-3">
+              {aspectData.map((a) => (
+                <div
+                  key={a.name}
+                  className="grid grid-cols-[96px_1fr_auto] items-center gap-3"
+                >
+                  <span className="truncate text-right text-xs font-semibold text-zinc-500">
+                    {a.name}
+                  </span>
+                  <div className="h-2.5 overflow-hidden rounded-full bg-zinc-100">
+                    <div
+                      className="h-full rounded-full bg-linear-to-r from-blue-500 to-blue-400"
+                      style={{ width: `${(a.value / maxAspect) * 100}%` }}
+                    />
+                  </div>
+                  <span className="min-w-9 text-right text-xs font-bold tabular-nums text-zinc-800">
+                    {a.value.toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
 
-        {/* Sentiment donut + meta */}
-        <div className="space-y-3">
-          <div className="rounded-xl border border-zinc-100 bg-white p-4">
-            <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">
-              감성 분포
-            </p>
-            <div className="flex items-center gap-4">
-              <ResponsiveContainer width={120} height={120}>
+          {/* 감성 도넛 */}
+          <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
+            <div className="text-[15px] font-bold text-zinc-900">감성 분포</div>
+            <div className="mt-1 text-xs font-medium text-zinc-400">
+              전체 {summary.total?.toLocaleString()}건 기준
+            </div>
+            <div className="mt-4 flex flex-col items-center gap-6">
+              <ResponsiveContainer
+                width={120}
+                height={120}
+                className="shrink-0"
+              >
                 <PieChart>
                   <Pie
                     data={sentimentData}
@@ -244,8 +250,9 @@ export function ClauseTab() {
                     innerRadius={34}
                     outerRadius={54}
                     paddingAngle={3}
-                    nameKey="type"
+                    nameKey="name"
                     dataKey="value"
+                    stroke="none"
                   >
                     {sentimentData.map((entry) => (
                       <Cell
@@ -256,50 +263,29 @@ export function ClauseTab() {
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-1 flex-col gap-2.5">
                 {sentimentData.map((d) => (
                   <div
                     key={d.name}
-                    className="flex items-center gap-2 text-xs text-zinc-500"
+                    className="flex items-center gap-2 text-[13px]"
                   >
                     <span
-                      className="w-2.5 h-2.5 rounded-sm inline-block"
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
                       style={{ background: SENTIMENT_COLORS[d.name] }}
                     />
-                    <span>{d.name}</span>
-                    <span className="font-semibold text-zinc-700 ml-auto pl-2">
-                      {Math.round((d.value / summary.total) * 100)}%
+                    <span className="font-semibold text-zinc-600">
+                      {d.name}
+                    </span>
+                    <span className="ml-auto font-extrabold tabular-nums text-zinc-800">
+                      {summary.total > 0
+                        ? Math.round((d.value / summary.total) * 100)
+                        : 0}
+                      %
                     </span>
                   </div>
                 ))}
               </div>
             </div>
-          </div>
-
-          {/* Meta */}
-          <div className="rounded-xl border border-zinc-100 bg-white px-4 py-3 space-y-2">
-            {[
-              {
-                label: "프롬프트 버전",
-                value: (
-                  <span className="font-mono text-xs">
-                    {applied?.promptVersion}
-                  </span>
-                ),
-              },
-              {
-                label: "소요 시간",
-                value: durationLabel,
-              },
-            ].map(({ label, value }) => (
-              <div
-                key={label}
-                className="flex items-center justify-between text-xs border-b border-zinc-50 pb-2 last:border-0 last:pb-0"
-              >
-                <span className="text-zinc-400">{label}</span>
-                <span className="font-medium text-zinc-700">{value}</span>
-              </div>
-            ))}
           </div>
         </div>
       </div>
