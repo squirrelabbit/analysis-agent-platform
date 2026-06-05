@@ -88,7 +88,7 @@ class DocGenuinenessTests(unittest.TestCase):
         payload.update(overrides)
         return payload
 
-    def _patch_config_and_run(self, urlopen_fn, payload=None):
+    def _patch_config_and_run(self, urlopen_fn, payload=None, model_display_name=""):
         from python_ai_worker.dataset_build import doc_genuineness
         from python_ai_worker.config import WorkerConfig
 
@@ -96,6 +96,7 @@ class DocGenuinenessTests(unittest.TestCase):
             lloa_api_key="test-key",
             lloa_api_url="http://lloa.example/v1/chat/completions",
             lloa_model="wisenut/wise-lloa-max-v1.2.1",
+            lloa_model_display_name=model_display_name,
             lloa_max_tokens=2048,
             lloa_timeout_sec=30,
             lloa_reasoning_effort=None,
@@ -207,12 +208,34 @@ class DocGenuinenessTests(unittest.TestCase):
         }
         fake_urlopen, _ = _fake_urlopen_factory(responses)
         result = self._patch_config_and_run(fake_urlopen)
-        applied = result["artifact"]["summary"]["applied"]
+        summary = result["artifact"]["summary"]
+        applied = summary["applied"]
         self.assertEqual(applied["subject_name"], "강릉 국가유산야행")
         self.assertEqual(applied["subject_aliases"], ["문화유산야행", "문화재야행", "강릉야행"])
         self.assertEqual(applied["recruitment_keywords"], ["서포터즈", "푸드트럭"])
         self.assertEqual(applied["subject_type"], "festival")
         self.assertEqual(applied["prompt_version"], "v1")
+        # silverone 2026-06-05 — display name env 미설정 시 raw model 보존 + display는 "".
+        self.assertEqual(summary["model"], "wisenut/wise-lloa-max-v1.2.1")
+        self.assertEqual(summary["model_display_name"], "")
+        self.assertEqual(applied["model"], "wisenut/wise-lloa-max-v1.2.1")
+        self.assertEqual(applied["model_display_name"], "")
+
+    def test_model_display_name_from_env(self) -> None:
+        # silverone 2026-06-05 — LLOA_MODEL_DISPLAY_NAME가 있으면 raw model은 그대로
+        # 두고 summary/applied의 model_display_name으로 노출된다(하드코딩 매핑 없음).
+        responses = {
+            "row:1": _llm_completion('{"doc_id":"row:1","genuineness":"genuine_review","reason":"본인 방문."}'),
+            "row:2": _llm_completion('{"doc_id":"row:2","genuineness":"non_review","reason":"공식 안내."}'),
+            "row:3": _llm_completion('{"doc_id":"row:3","genuineness":"uncertain","reason":"정보 부족."}'),
+        }
+        fake_urlopen, _ = _fake_urlopen_factory(responses)
+        result = self._patch_config_and_run(fake_urlopen, model_display_name="WISE LLOA Max v1.2.1")
+        summary = result["artifact"]["summary"]
+        self.assertEqual(summary["model"], "wisenut/wise-lloa-max-v1.2.1")
+        self.assertEqual(summary["model_display_name"], "WISE LLOA Max v1.2.1")
+        self.assertEqual(summary["applied"]["model"], "wisenut/wise-lloa-max-v1.2.1")
+        self.assertEqual(summary["applied"]["model_display_name"], "WISE LLOA Max v1.2.1")
 
 
 def _fake_urlopen_with_failures(responses_by_doc: dict[str, dict], fail_doc_ids: set[str]):

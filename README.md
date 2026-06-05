@@ -99,7 +99,7 @@ docker compose -f compose.dev.yml up -d --build
 - python-ai worker: `http://127.0.0.1:18090`
 - Swagger UI: `http://127.0.0.1:18080/swagger`
 
-분석/빌드에 LLM이 필요하면 `.env`에 `ANTHROPIC_API_KEY`, `WISENUT_LLOA_MAX_V1_2_1_API_KEY`를 설정한다 (`.env.example` 참고). 로컬 API 호출 예시는 [docs/api/local.http](docs/api/local.http).
+분석/빌드에 LLM이 필요하면 `.env`에 `ANTHROPIC_API_KEY`, `LLOA_API_KEY`를 설정한다 (`.env.example` 참고). 로컬 API 호출 예시는 [docs/api/local.http](docs/api/local.http).
 
 ## 배포 (staging / 내부 서버)
 

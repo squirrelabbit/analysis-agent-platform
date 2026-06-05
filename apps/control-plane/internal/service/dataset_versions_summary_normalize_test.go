@@ -26,11 +26,14 @@ func TestNormalizeDocGenuinenessSummaryHappyPath(t *testing.T) {
 		"input_row_count":         float64(2121),
 		"parse_failures":          float64(0),
 		"model":                   "wisenut/wise-lloa-max-v1.2.1",
+		"model_display_name":      "WISE LLOA Max v1.2.1",
 		"prompt_version":          "v1",
 		"total_prompt_tokens":     float64(8758881),
 		"total_completion_tokens": float64(241666),
 		"applied": map[string]any{
-			"subject_name": "강릉 국가유산야행",
+			"subject_name":       "강릉 국가유산야행",
+			"model":              "wisenut/wise-lloa-max-v1.2.1",
+			"model_display_name": "WISE LLOA Max v1.2.1",
 		},
 	}
 	got := normalizeDocGenuinenessSummary(raw).(map[string]any)
@@ -60,11 +63,49 @@ func TestNormalizeDocGenuinenessSummaryHappyPath(t *testing.T) {
 		t.Errorf("total: want 2121, got %v", got["total"])
 	}
 
-	// 부수 필드 보존
-	for _, k := range []string{"input_row_count", "parse_failures", "model", "prompt_version", "total_prompt_tokens", "total_completion_tokens", "applied", "processed_row_count"} {
+	// 부수 필드 보존 (model_display_name 포함 — 하드코딩 매핑 없이 passthrough)
+	for _, k := range []string{"input_row_count", "parse_failures", "model", "model_display_name", "prompt_version", "total_prompt_tokens", "total_completion_tokens", "applied", "processed_row_count"} {
 		if _, ok := got[k]; !ok {
 			t.Errorf("metadata field %q must be preserved", k)
 		}
+	}
+	if got["model_display_name"] != "WISE LLOA Max v1.2.1" {
+		t.Errorf("model_display_name passthrough: want %q, got %v", "WISE LLOA Max v1.2.1", got["model_display_name"])
+	}
+}
+
+func TestSummaryMetadataStringReadsModelDisplayName(t *testing.T) {
+	// silverone 2026-06-05 — artifact view applied.model_display_name은 build 시
+	// 저장된 <stage>_summary metadata에서 summaryMetadataString으로 회수한다.
+	// raw model id와 화면 표시용 이름(env 기반)이 함께 들어 있다.
+	metadata := map[string]any{
+		"doc_genuineness_summary": map[string]any{
+			"model":              "wisenut/wise-lloa-max-v1.2.1",
+			"model_display_name": "WISE LLOA Max v1.2.1",
+		},
+	}
+	if got := summaryMetadataString(metadata, "doc_genuineness_summary", "model"); got != "wisenut/wise-lloa-max-v1.2.1" {
+		t.Errorf("model: want raw id, got %q", got)
+	}
+	if got := summaryMetadataString(metadata, "doc_genuineness_summary", "model_display_name"); got != "WISE LLOA Max v1.2.1" {
+		t.Errorf("model_display_name: want display, got %q", got)
+	}
+}
+
+func TestSummaryMetadataStringModelDisplayNameAbsentOrEmpty(t *testing.T) {
+	// 옛 dataset: summary에 model_display_name 없음 → "" (화면이 model fallback).
+	old := map[string]any{
+		"clause_label_summary": map[string]any{"model": "wisenut/wise-lloa-max-v1.2.1"},
+	}
+	if got := summaryMetadataString(old, "clause_label_summary", "model_display_name"); got != "" {
+		t.Errorf("absent display name: want empty, got %q", got)
+	}
+	// 빈 문자열도 trim 후 "" — applied에서 생략된다.
+	empty := map[string]any{
+		"clause_label_summary": map[string]any{"model_display_name": "  "},
+	}
+	if got := summaryMetadataString(empty, "clause_label_summary", "model_display_name"); got != "" {
+		t.Errorf("blank display name: want empty, got %q", got)
 	}
 }
 

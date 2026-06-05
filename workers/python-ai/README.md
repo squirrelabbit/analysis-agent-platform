@@ -66,7 +66,7 @@ GET `/healthz`(생존), `/capabilities`(task 목록)도 제공한다.
 - planner prompt는 저장소 루트 [../../config/prompts](../../config/prompts)의 Markdown으로 관리한다 (version 이름 = 파일 stem).
 - dataset build prompt(doc_genuineness / clause_label)는 task-folder(`config/prompts/<task>/`)에서 resolve하며 `/prompt_options`로 선택지를 노출한다.
 - rule config는 기본 상수 위에 `PYTHON_AI_RULE_CONFIG_PATH`, `PYTHON_AI_RULE_CONFIG_JSON`, request payload override를 순서대로 덮는다.
-- LLM key: `ANTHROPIC_API_KEY`(planner/composer), `WISENUT_LLOA_MAX_V1_2_1_API_KEY`(dataset build).
+- LLM key: `ANTHROPIC_API_KEY`(planner/composer), `LLOA_API_KEY`(dataset build).
 
 ## 자주 쓰는 명령
 
