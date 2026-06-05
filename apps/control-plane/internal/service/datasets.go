@@ -158,6 +158,34 @@ func (s *DatasetService) UpdateDatasetMetadata(projectID, datasetID string, patc
 	return dataset, nil
 }
 
+// UpdateDatasetInfo — PATCH /projects/{pid}/datasets/{did}. 데이터셋 이름/설명 수정.
+// silverone 2026-06-05 — non-nil 필드만 반영. name은 trim 후 빈 문자열이면 거부.
+// data_type은 기존 버전/빌드 정합성 위험으로 이 endpoint 변경 대상에서 제외.
+func (s *DatasetService) UpdateDatasetInfo(projectID, datasetID string, input domain.DatasetInfoUpdateRequest) (domain.Dataset, error) {
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
+		return domain.Dataset{}, err
+	}
+	if input.Name == nil && input.Description == nil {
+		return domain.Dataset{}, ErrInvalidArgument{Message: "name or description is required"}
+	}
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" {
+			return domain.Dataset{}, ErrInvalidArgument{Message: "name must not be empty"}
+		}
+		dataset.Name = name
+	}
+	if input.Description != nil {
+		description := strings.TrimSpace(*input.Description)
+		dataset.Description = &description
+	}
+	if err := s.store.SaveDataset(dataset); err != nil {
+		return domain.Dataset{}, err
+	}
+	return dataset, nil
+}
+
 func cloneMetadata(source map[string]any) map[string]any {
 	if len(source) == 0 {
 		return nil

@@ -175,6 +175,15 @@ type DatasetMetadataPatchRequest struct {
 	Metadata map[string]any `json:"metadata"`
 }
 
+// DatasetInfoUpdateRequest — PATCH /projects/{pid}/datasets/{did} 본문.
+// silverone 2026-06-05 — 데이터셋 이름/설명 수정. 지정된(non-nil) 필드만 반영.
+// name은 trim 후 빈 문자열이면 거부. data_type은 기존 버전/빌드와 정합성
+// 위험이 있어 이 endpoint에서 변경하지 않는다.
+type DatasetInfoUpdateRequest struct {
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+}
+
 type DatasetListResponse struct {
 	Items []Dataset `json:"items"`
 }
