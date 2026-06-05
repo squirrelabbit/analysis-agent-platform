@@ -732,8 +732,14 @@ def _validate_aggregate(params: dict[str, Any], ctx: _StepContext) -> None:
     if not _check_required_keys(params, ("input", "group_by", "metrics"), ctx):
         return
     group_by = params.get("group_by")
-    if not isinstance(group_by, list) or not group_by:
-        ctx.issue(code="params.group_by_not_list", message="aggregate.group_by must be a non-empty list")
+    # silverone 2026-06-05 — group_by=[] (total mode) 허용. 빈 리스트면 전체 1행 집계
+    # (GROUP BY 없이 SELECT COUNT(*) AS count FROM input). 리스트가 아닐 때만 거절.
+    # non-empty group_by 동작은 불변.
+    if not isinstance(group_by, list):
+        ctx.issue(
+            code="params.group_by_not_list",
+            message="aggregate.group_by must be a list (전체 집계는 [] 사용)",
+        )
         group_columns: list[str] = []
     else:
         group_columns = [str(col or "").strip() for col in group_by]
@@ -855,12 +861,47 @@ def _check_aggregate_numeric_column(
         )
 
 
+def _is_scalar_aggregate_ref(ref: Any, ctx: _StepContext) -> bool:
+    """ref가 group_by=[] aggregate step(= scalar 1행 결과)를 가리키는지.
+
+    compare scalar mode(join_key=[]) 허용 조건 판정용. step_lookup에서 참조 step을
+    찾아 skill==aggregate이고 group_by가 빈 리스트일 때만 True. RESERVED 테이블 직접
+    참조나 다른 skill 결과는 scalar로 보지 않는다."""
+    name = str(ref or "").strip()
+    step = ctx.step_lookup.get(name)
+    if not isinstance(step, dict):
+        return False
+    if str(step.get("skill") or "").strip() != "aggregate":
+        return False
+    params = step.get("params")
+    if not isinstance(params, dict):
+        return False
+    group_by = params.get("group_by")
+    return isinstance(group_by, list) and len(group_by) == 0
+
+
 def _validate_compare(params: dict[str, Any], ctx: _StepContext) -> None:
     if not _check_required_keys(params, ("left", "right", "join_key", "left_label", "right_label"), ctx):
         return
     join_key = params.get("join_key")
-    if not isinstance(join_key, list) or not join_key:
-        ctx.issue(code="params.join_key_not_list", message="compare.join_key must be a non-empty list")
+    # silverone 2026-06-05 — join_key=[] (scalar mode) 제한적 허용. 양쪽 left/right가
+    # 둘 다 group_by=[] aggregate 결과(각 1행 scalar)일 때만 CROSS JOIN으로 결합한다.
+    # 일반 non-scalar compare에서 join_key=[]는 계속 거절(잘못 쓰면 N×M cross product).
+    if not isinstance(join_key, list):
+        ctx.issue(code="params.join_key_not_list", message="compare.join_key must be a list")
+        join_columns: list[str] = []
+    elif not join_key:
+        left_scalar = _is_scalar_aggregate_ref(params.get("left"), ctx)
+        right_scalar = _is_scalar_aggregate_ref(params.get("right"), ctx)
+        if not (left_scalar and right_scalar):
+            ctx.issue(
+                code="params.join_key_empty_not_scalar",
+                message=(
+                    "compare.join_key가 비었지만 left/right가 둘 다 group_by=[] aggregate "
+                    "(scalar 1행) 결과가 아니다. 일반 compare는 group_by 컬럼을 join_key로 둔다. "
+                    "두 기간/집단의 전체 합계만 비교하려면 양쪽을 aggregate(group_by=[], count)로 만든다."
+                ),
+            )
         join_columns: list[str] = []
     else:
         join_columns = [str(key or "").strip() for key in join_key]
@@ -1112,10 +1153,106 @@ def _validate_recipe_params(skill_name: str, params: dict[str, Any], ctx: _StepC
         _validate_top_n_recipe(params, ctx)
     elif skill_name == "sample_rows":
         _validate_sample_rows_recipe(params, ctx)
+    elif skill_name == "period_compare_count":
+        _validate_period_compare_count_recipe(params, ctx)
     else:
         ctx.issue(
             code="step.skill_unknown",
             message=f"recipe '{skill_name}' is runtime-enabled but has no validator",
+        )
+
+
+def _validate_period_bounds(period: Any, key: str, ctx: _StepContext) -> None:
+    """period_compare_count.period_a/period_b ({start, end}) 검증 — inclusive YYYY-MM-DD."""
+    if not isinstance(period, dict):
+        ctx.issue(
+            code="params.recipe_period_invalid",
+            message=f"period_compare_count.{key} must be an object {{start, end}}",
+        )
+        return
+    parsed: list[date] = []
+    for field_name in ("start", "end"):
+        value = period.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            ctx.issue(
+                code="params.recipe_period_invalid",
+                message=f"period_compare_count.{key}.{field_name} must be YYYY-MM-DD",
+            )
+            continue
+        try:
+            parsed.append(date.fromisoformat(value.strip()))
+        except ValueError:
+            ctx.issue(
+                code="params.recipe_period_invalid",
+                message=f"period_compare_count.{key}.{field_name} must be YYYY-MM-DD",
+            )
+    if len(parsed) == 2 and parsed[0] > parsed[1]:
+        ctx.issue(
+            code="params.recipe_period_invalid",
+            message=f"period_compare_count.{key}.start must be <= end",
+        )
+
+
+def _validate_period_compare_count_recipe(params: dict[str, Any], ctx: _StepContext) -> None:
+    if not _check_required_keys(params, ("input", "period_a", "period_b"), ctx):
+        return
+
+    input_ref = params.get("input")
+
+    date_column = params.get("date_column")
+    if date_column is None:
+        date_column_name = "created_at"
+    elif isinstance(date_column, str) and date_column.strip():
+        date_column_name = date_column.strip()
+    else:
+        date_column_name = "created_at"
+        ctx.issue(
+            code="params.recipe_date_column_invalid",
+            message="period_compare_count.date_column must be a non-empty string",
+        )
+
+    # group_by 생략/[] → total mode, 있으면 group mode.
+    group_by = params.get("group_by")
+    group_columns: list[str] = []
+    if group_by is None or group_by == []:
+        pass
+    elif isinstance(group_by, list) and all(isinstance(c, str) and c.strip() for c in group_by):
+        group_columns = [c.strip() for c in group_by]
+    else:
+        ctx.issue(
+            code="params.recipe_group_by_invalid",
+            message="period_compare_count.group_by must be a string list or omitted ([] for total)",
+        )
+
+    require_columns = [date_column_name, *group_columns]
+    _check_input_ref(input_ref, "input", ctx, require_column=require_columns or None)
+
+    input_name = str(input_ref or "").strip()
+    column_type = RESERVED_COLUMN_TYPES.get(input_name, {}).get(date_column_name)
+    if column_type and column_type not in TIMESTAMP_COLUMN_TYPES:
+        ctx.issue(
+            code="params.recipe_date_column_invalid",
+            message=(
+                "period_compare_count.date_column must reference a timestamp/date column "
+                f"(got {date_column_name}: {column_type})"
+            ),
+        )
+
+    _validate_period_bounds(params.get("period_a"), "period_a", ctx)
+    _validate_period_bounds(params.get("period_b"), "period_b", ctx)
+
+    metric = params.get("metric")
+    if metric is not None and str(metric).strip() != "count":
+        ctx.issue(
+            code="params.recipe_metric_unsupported",
+            message="period_compare_count.metric only supports 'count'",
+        )
+
+    title = params.get("title")
+    if title is not None and not isinstance(title, str):
+        ctx.issue(
+            code="params.recipe_title_invalid",
+            message="period_compare_count.title must be a string or null",
         )
 
 

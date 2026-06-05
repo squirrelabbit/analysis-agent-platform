@@ -130,11 +130,37 @@ SAMPLE_ROWS_SPEC = RecipeSpec(
     implemented=True,
 )
 
+# silverone 2026-06-05 — 두 기간(전/후)의 문서 count 비교. "축제 전/후 게시물 수 비교"
+# 같은 핵심 질문. total mode(group_by 생략/[] → 전체 합계 비교)와 group mode(group_by
+# 있으면 그룹별 비교) 둘 다 지원. atomic aggregate(group_by=[]) + compare(join_key=[]
+# scalar) 보강 위에서 동작한다. metric은 count만. date range는 inclusive YYYY-MM-DD.
+PERIOD_COMPARE_COUNT_SPEC = RecipeSpec(
+    name="period_compare_count",
+    description=(
+        "두 기간(period_a/period_b)의 문서 count를 비교해 a_count·b_count·delta_count·"
+        "delta_rate를 낸다. 축제 전/후 게시물 수 비교 등. group_by 있으면 그룹별 비교."
+    ),
+    params=(
+        RecipeParamSpec("input", required=True, desc="table_or_step_id"),
+        RecipeParamSpec("period_a", required=True, desc="{start, end} — 비교 기준 기간 A (inclusive YYYY-MM-DD)"),
+        RecipeParamSpec("period_b", required=True, desc="{start, end} — 비교 대상 기간 B (inclusive YYYY-MM-DD)"),
+        RecipeParamSpec("date_column", desc="string — 날짜 컬럼 (기본 created_at)"),
+        RecipeParamSpec("group_by", desc="string[] — 생략/[]이면 전체 합계(total), 있으면 그룹별 비교"),
+        RecipeParamSpec("metric", desc="count (현재 count만)"),
+        RecipeParamSpec("title", desc="string|null"),
+    ),
+    lowered_skills=("filter", "aggregate", "compare", "calculate", "present"),
+    use_when="두 기간(전/후, 작년/올해 등) 사이의 문서 수 증감을 묻는 질문. group_by 없으면 전체 총량 비교, 있으면 그룹별 증감.",
+    avoid_when="단일 기간 총량은 atomic filter+aggregate. 기준일 전후 일자별 추이는 event_window_count. 비율 구성비는 distribution. 기간이 명확하지 않으면 추정 말고 clarify.",
+    implemented=True,
+)
+
 RECIPE_SPECS: dict[str, RecipeSpec] = {
     DISTRIBUTION_SPEC.name: DISTRIBUTION_SPEC,
     EVENT_WINDOW_COUNT_SPEC.name: EVENT_WINDOW_COUNT_SPEC,
     TOP_N_SPEC.name: TOP_N_SPEC,
     SAMPLE_ROWS_SPEC.name: SAMPLE_ROWS_SPEC,
+    PERIOD_COMPARE_COUNT_SPEC.name: PERIOD_COMPARE_COUNT_SPEC,
 }
 
 # sample_rows.limit 상한 (데모용 안전 cap). 초과 요청은 RecipeError.
@@ -546,18 +572,146 @@ def lower_sample_rows(step: dict[str, Any]) -> list[dict[str, Any]]:
     return steps
 
 
+def _period_bounds(params: dict[str, Any], key: str) -> tuple[str, str]:
+    """period_compare_count.period_a/period_b → (start, end) inclusive YYYY-MM-DD.
+
+    {start, end} object를 받아 ISO date로 파싱·검증한다. start>end면 오류."""
+    period = params.get(key)
+    if not isinstance(period, dict):
+        raise RecipeError(f"period_compare_count.{key} must be an object {{start, end}}")
+    start = period.get("start")
+    end = period.get("end")
+    if not isinstance(start, str) or not start.strip() or not isinstance(end, str) or not end.strip():
+        raise RecipeError(f"period_compare_count.{key}.start/end are required (YYYY-MM-DD)")
+    try:
+        start_d = date.fromisoformat(start.strip())
+        end_d = date.fromisoformat(end.strip())
+    except ValueError as exc:
+        raise RecipeError(f"period_compare_count.{key}.start/end must be YYYY-MM-DD") from exc
+    if start_d > end_d:
+        raise RecipeError(f"period_compare_count.{key}.start must be <= end")
+    return start.strip(), end.strip()
+
+
+def lower_period_compare_count(step: dict[str, Any]) -> list[dict[str, Any]]:
+    """period_compare_count recipe → [filterA, aggA, filterB, aggB, compare, calculate, present].
+
+    각 기간을 filter(between)로 자른 뒤 aggregate(count)로 집계하고 compare로 결합한다.
+      - total mode (group_by 생략/[]): aggregate(group_by=[]) → compare(join_key=[], scalar).
+      - group mode (group_by 있음): aggregate(group_by=...) → compare(join_key=group_by).
+    compare label은 a/b 고정 → 출력 컬럼 a_count/b_count. calculate가 delta_count
+    (b-a), delta_rate((b-a)/a*100)를 합성한다. metric은 count만. deterministic."""
+    params = step.get("params") or {}
+    if not isinstance(params, dict):
+        raise RecipeError("period_compare_count.params must be an object")
+    base = str(step.get("id") or "period_compare_count").strip() or "period_compare_count"
+
+    input_ref = _required_str(params, "period_compare_count", "input")
+    date_column = _opt_str(params, "date_column", "created_at")
+
+    metric = _opt_str(params, "metric", "count")
+    if metric != "count":
+        raise RecipeError(f"period_compare_count.metric '{metric}' not supported (count only)")
+
+    period_a = _period_bounds(params, "period_a")
+    period_b = _period_bounds(params, "period_b")
+
+    group_by_raw = params.get("group_by")
+    if group_by_raw is None or group_by_raw == []:
+        group_by: list[str] = []
+    elif isinstance(group_by_raw, list) and all(
+        isinstance(c, str) and c.strip() for c in group_by_raw
+    ):
+        group_by = [c.strip() for c in group_by_raw]
+    else:
+        raise RecipeError("period_compare_count.group_by must be a string list or omitted")
+
+    title = params.get("title")
+
+    steps: list[dict[str, Any]] = []
+    agg_ids: dict[str, str] = {}
+    for label, (lo, hi) in (("a", period_a), ("b", period_b)):
+        filter_id = f"{base}_{label}_window"
+        agg_id = f"{base}_{label}_agg"
+        agg_ids[label] = agg_id
+        steps.append(
+            {
+                "id": filter_id,
+                "skill": "filter",
+                "params": {
+                    "input": input_ref,
+                    "column": date_column,
+                    "operator": "between",
+                    "value": [lo, hi],
+                },
+            }
+        )
+        steps.append(
+            {
+                "id": agg_id,
+                "skill": "aggregate",
+                "params": {
+                    "input": filter_id,
+                    "group_by": list(group_by),
+                    "metrics": [{"name": "count", "function": "count", "column": "*"}],
+                },
+            }
+        )
+
+    compare_id = f"{base}_compare"
+    steps.append(
+        {
+            "id": compare_id,
+            "skill": "compare",
+            "params": {
+                "left": agg_ids["a"],
+                "right": agg_ids["b"],
+                "join_key": list(group_by),  # total mode면 [] (scalar CROSS JOIN)
+                "left_label": "a",
+                "right_label": "b",
+            },
+        }
+    )
+
+    delta_id = f"{base}_delta"
+    steps.append(
+        {
+            "id": delta_id,
+            "skill": "calculate",
+            "params": {
+                "input": compare_id,
+                "expressions": [
+                    {"name": "delta_count", "operation": "subtract", "left": "b_count", "right": "a_count"},
+                    {"name": "delta_rate", "operation": "percent_change", "base": "a_count", "current": "b_count"},
+                ],
+            },
+        }
+    )
+
+    present_params: dict[str, Any] = {
+        "input": delta_id,
+        "format": "table",
+        "columns": [*group_by, "a_count", "b_count", "delta_count", "delta_rate"],
+    }
+    if isinstance(title, str) and title.strip():
+        present_params["title"] = title.strip()
+    steps.append({"id": f"{base}_present", "skill": "present", "params": present_params})
+    return steps
+
+
 _LOWERERS: dict[str, Callable[[dict[str, Any]], list[dict[str, Any]]]] = {
     "distribution": lower_distribution,
     "event_window_count": lower_event_window_count,
     "top_n": lower_top_n,
     "sample_rows": lower_sample_rows,
+    "period_compare_count": lower_period_compare_count,
 }
 
 
 # Runtime 실행 + validator 허용 recipe. validator/executor가 같은 이 집합을 참조해
 # "validator 허용 == runtime 실행 가능"을 단일 source로 보장한다.
 RUNTIME_ENABLED_RECIPES: frozenset[str] = frozenset(
-    {"distribution", "event_window_count", "top_n", "sample_rows"}
+    {"distribution", "event_window_count", "top_n", "sample_rows", "period_compare_count"}
 )
 
 
@@ -603,11 +757,13 @@ __all__ = [
     "EVENT_WINDOW_COUNT_SPEC",
     "TOP_N_SPEC",
     "SAMPLE_ROWS_SPEC",
+    "PERIOD_COMPARE_COUNT_SPEC",
     "lower_recipe",
     "lower_distribution",
     "lower_event_window_count",
     "lower_top_n",
     "lower_sample_rows",
+    "lower_period_compare_count",
     "expand_recipes",
     "RUNTIME_ENABLED_RECIPES",
 ]

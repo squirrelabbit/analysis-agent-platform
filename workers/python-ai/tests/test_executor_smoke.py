@@ -482,6 +482,155 @@ class RecipeExecutionTests(unittest.TestCase):
             )
 
 
+class TotalModeAndScalarCompareTests(unittest.TestCase):
+    """silverone 2026-06-05 — aggregate group_by=[] (total) + compare join_key=[]
+    (scalar) atomic 보강. period_compare_count recipe의 토대."""
+
+    def test_aggregate_total_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _fixture_paths(Path(tmp))
+            plan = {
+                "plan_version": "v2",
+                "steps": [
+                    {
+                        "id": "total",
+                        "skill": "aggregate",
+                        "params": {
+                            "input": "clauses",
+                            "group_by": [],
+                            "metrics": [{"name": "count", "function": "count", "column": "*"}],
+                        },
+                    },
+                    {"id": "out", "skill": "present", "params": {"input": "total", "format": "table"}},
+                ],
+            }
+            with ExecutorContext(paths) as ctx:
+                result = execute_plan(ctx, plan)
+                rows = ctx.fetch_rows("total")
+                self.assertEqual(len(rows), 1)  # GROUP BY 없이 전체 1행
+                self.assertEqual(rows[0]["count"], 5)
+                self.assertEqual(result["out"].sample_rows[0]["count"], 5)
+
+    def test_compare_scalar_mode_cross_join(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _fixture_paths(Path(tmp))
+            plan = {
+                "plan_version": "v2",
+                "steps": [
+                    {
+                        "id": "all_count",
+                        "skill": "aggregate",
+                        "params": {
+                            "input": "clauses",
+                            "group_by": [],
+                            "metrics": [{"name": "count", "function": "count", "column": "*"}],
+                        },
+                    },
+                    {
+                        "id": "positive_clauses",
+                        "skill": "filter",
+                        "params": {"input": "clauses", "column": "sentiment", "operator": "eq", "value": "positive"},
+                    },
+                    {
+                        "id": "positive_count",
+                        "skill": "aggregate",
+                        "params": {
+                            "input": "positive_clauses",
+                            "group_by": [],
+                            "metrics": [{"name": "count", "function": "count", "column": "*"}],
+                        },
+                    },
+                    {
+                        "id": "cmp",
+                        "skill": "compare",
+                        "params": {
+                            "left": "all_count",
+                            "right": "positive_count",
+                            "join_key": [],
+                            "left_label": "a",
+                            "right_label": "b",
+                        },
+                    },
+                    {"id": "out", "skill": "present", "params": {"input": "cmp", "format": "table"}},
+                ],
+            }
+            with ExecutorContext(paths) as ctx:
+                execute_plan(ctx, plan)
+                rows = ctx.fetch_rows("cmp")
+                self.assertEqual(len(rows), 1)  # 1×1 CROSS JOIN
+                self.assertEqual(rows[0]["a_count"], 5)
+                self.assertEqual(rows[0]["b_count"], 3)
+
+
+class PeriodCompareCountRecipeExecutionTests(unittest.TestCase):
+    """period_compare_count recipe expand → 실행 smoke. fixture docs: d1 2025-03-10,
+    d2 2026-04-15, d3 2026-05-01. 2025 1건 / 2026 2건."""
+
+    def test_total_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _fixture_paths(Path(tmp))
+            plan = {
+                "plan_version": "v2",
+                "steps": [
+                    {
+                        "id": "pcc",
+                        "skill": "period_compare_count",
+                        "params": {
+                            "input": "docs",
+                            "period_a": {"start": "2025-01-01", "end": "2025-12-31"},
+                            "period_b": {"start": "2026-01-01", "end": "2026-12-31"},
+                            "title": "연도별 게시물 수 비교",
+                        },
+                    }
+                ],
+            }
+            resp = execute_analyze_plan("v1", plan, artifact_paths=paths)
+            self.assertEqual(
+                [s["skill"] for s in resp["plan"]["steps"]],
+                ["filter", "aggregate", "filter", "aggregate", "compare", "calculate", "present"],
+            )
+            rows = resp["present"]["rows"]
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertEqual(row["a_count"], 1)
+            self.assertEqual(row["b_count"], 2)
+            self.assertEqual(row["delta_count"], 1)
+            self.assertAlmostEqual(row["delta_rate"], 100.0)
+
+    def test_group_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _fixture_paths(Path(tmp))
+            plan = {
+                "plan_version": "v2",
+                "steps": [
+                    {
+                        "id": "pcc",
+                        "skill": "period_compare_count",
+                        "params": {
+                            "input": "docs",
+                            "period_a": {"start": "2025-01-01", "end": "2025-12-31"},
+                            "period_b": {"start": "2026-01-01", "end": "2026-12-31"},
+                            "group_by": ["channel"],
+                        },
+                    }
+                ],
+            }
+            resp = execute_analyze_plan("v1", plan, artifact_paths=paths)
+            self.assertEqual(
+                [s["skill"] for s in resp["plan"]["steps"]],
+                ["filter", "aggregate", "filter", "aggregate", "compare", "calculate", "present"],
+            )
+            rows = {r["channel"]: r for r in resp["present"]["rows"]}
+            # 다음 카페: 2025 d1(1), 2026 d3(1) → delta 0
+            self.assertEqual(rows["다음 카페"]["a_count"], 1)
+            self.assertEqual(rows["다음 카페"]["b_count"], 1)
+            self.assertEqual(rows["다음 카페"]["delta_count"], 0)
+            self.assertAlmostEqual(rows["다음 카페"]["delta_rate"], 0.0)
+            # 인스타그램: 2025 없음 → a NULL, 2026 d2(1) → delta 1, rate NULL(base 0/NULL)
+            self.assertEqual(rows["인스타그램"]["b_count"], 1)
+            self.assertEqual(rows["인스타그램"]["delta_count"], 1)
+
+
 class GuardrailTests(unittest.TestCase):
     def test_invalid_plan_raises_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
