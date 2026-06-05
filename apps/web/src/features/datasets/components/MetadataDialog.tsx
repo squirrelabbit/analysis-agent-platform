@@ -35,7 +35,7 @@ export default function MetadataDialog({ datasetId }: { datasetId: string }) {
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader className="shrink-0">
-          <DialogTitle>진정 분석 설정</DialogTitle>
+          <DialogTitle>분석 메타데이터 설정</DialogTitle>
         </DialogHeader>
         <div className="flex-1 overflow-y-auto">
           <div>

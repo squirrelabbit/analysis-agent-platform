@@ -69,7 +69,7 @@ export default function CreateDatasetDialog() {
                   <div className="hidden sm:block">
                     <p className="text-xs font-medium text-slate-600">
                       {step === 1 && "기본 정보"}
-                      {step === 2 && "진정 분석 설정"}
+                      {step === 2 && "분석 메타데이터 설정"}
                     </p>
                   </div>
                 </div>
@@ -83,7 +83,7 @@ export default function CreateDatasetDialog() {
               />
             )}
 
-            {/* Step 2: 진정 분석 설정 */}
+            {/* Step 2: 분석 메타데이터 설정 */}
             {currentStep === 2 && (
               <div>
                 <div className="bg-amber-50 my-3 border border-amber-200 rounded-lg p-2 flex gap-3">

@@ -7,7 +7,12 @@ export const getStatusColor = (status: string) => {
     case "running":
       return "bg-yellow-100 text-yellow-800";
     case "not_requested":
+    case "not_started":
+    case "waiting":
       return "bg-slate-100 text-slate-800";
+    case "not_applicable":
+    case "skipped":
+      return "bg-slate-100 text-slate-500";
     case "failed":
       return "bg-red-100 text-red-800";
     case "completed":
@@ -25,6 +30,14 @@ export const getStatusLabel = (status: string) => {
       return "실행중";
     case "not_requested":
       return "대기중";
+    case "not_started":
+      return "시작 전";
+    case "waiting":
+      return "대기";
+    case "not_applicable":
+      return "해당 없음";
+    case "skipped":
+      return "건너뜀";
     case "failed":
       return "실패";
     case "completed":
@@ -41,6 +54,10 @@ export const getStatusIcon = (status: string) => {
     case "running":
       return <Loader className="w-5 h-5 text-yellow-600 animate-spin" />;
     case "not_requested":
+    case "not_started":
+    case "waiting":
+    case "not_applicable":
+    case "skipped":
       return <AlertCircle className="w-5 h-5 text-slate-600" />;
     case "failed":
       return <AlertCircle className="w-5 h-5 text-red-600" />;

@@ -1,0 +1,458 @@
+/*
+ * 데이터셋 버전 상세(버전 목록) 리디자인 — Anthropic Design handoff "데이터셋 버전 상세.html" 재현.
+ * 앱 셸(topbar/sidebar)은 기존 레이아웃이 제공하므로 main-inner 영역만 옮긴다.
+ * CSS 변수는 전역 오염을 피하려고 :root가 아닌 .page 컨테이너에 둔다.
+ */
+.page {
+  --surface: #ffffff;
+  --line: #e7e7ec;
+  --line-strong: #dcdce3;
+  --ink: #1b1b22;
+  --ink-2: #6b6b76;
+  --ink-3: #9a9aa4;
+  --primary: oklch(0.56 0.17 290);
+  --primary-soft: oklch(0.95 0.035 290);
+  --primary-ink: oklch(0.48 0.18 290);
+  --ok: oklch(0.6 0.13 155);
+  --ok-soft: oklch(0.95 0.045 155);
+  --warn: oklch(0.7 0.13 70);
+  --warn-soft: oklch(0.96 0.05 80);
+  --radius: 16px;
+  --shadow-sm: 0 1px 2px rgba(20, 20, 30, 0.04), 0 1px 1px rgba(20, 20, 30, 0.03);
+  --shadow-md: 0 6px 22px -6px rgba(28, 28, 40, 0.14), 0 2px 6px -2px rgba(28, 28, 40, 0.08);
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.inner {
+  max-width: 1180px;
+  padding: 30px 40px 60px;
+}
+
+/* breadcrumbs */
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+.crumbs a {
+  color: var(--ink-3);
+  text-decoration: none;
+  cursor: pointer;
+}
+.crumbs a:hover {
+  color: var(--primary-ink);
+}
+.crumbs b {
+  color: var(--ink);
+  font-weight: 700;
+}
+.crumbs svg {
+  width: 14px;
+  height: 14px;
+  opacity: 0.6;
+}
+
+/* head */
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  margin-top: 14px;
+}
+.htext {
+  flex: 1;
+  min-width: 0;
+}
+.head h1 {
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.sub {
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.btnPrimary {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 11px;
+  border: 0;
+  background: #16161c;
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.12s, background 0.14s;
+}
+.btnPrimary:hover {
+  background: #2a2a33;
+  transform: translateY(-1px);
+}
+.btnPrimary:active {
+  transform: translateY(0);
+}
+.btnPrimary svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* summary bar */
+.summary {
+  margin-top: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 11px 16px;
+  box-shadow: var(--shadow-sm);
+}
+.s {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.s svg {
+  width: 15px;
+  height: 15px;
+  color: var(--ink-3);
+}
+.s b {
+  color: var(--ink);
+  font-weight: 700;
+}
+.divider {
+  width: 1px;
+  height: 14px;
+  background: var(--line-strong);
+  margin: 0 16px;
+}
+
+/* version list */
+.vlist {
+  margin-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.vrow {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 22px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px 22px 20px 26px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: box-shadow 0.16s, border-color 0.16s, transform 0.12s;
+}
+.vrow:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--line-strong);
+  transform: translateY(-2px);
+}
+.vrow:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm);
+}
+.vrow.active {
+  border-color: color-mix(in oklch, var(--primary) 45%, var(--line));
+  background: linear-gradient(0deg, color-mix(in oklch, var(--primary-soft) 30%, #fff), #fff);
+}
+.vrow::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 4px;
+  border-radius: 0 4px 4px 0;
+  background: transparent;
+}
+.vrow.active::before {
+  background: var(--primary);
+}
+
+.vId {
+  width: 96px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  padding-top: 2px;
+}
+.vTag {
+  width: 100%;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  padding: 10px 0;
+  border-radius: 12px;
+  background: #f1f1f5;
+  color: var(--ink-2);
+}
+.vrow.active .vTag {
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+.vState {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+.vState.on {
+  color: var(--primary-ink);
+  background: var(--primary-soft);
+}
+.vState.on svg {
+  width: 12px;
+  height: 12px;
+}
+.vState.off {
+  color: var(--ink-3);
+  background: #f1f1f4;
+}
+
+.vBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 2px;
+}
+.vFile {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.vMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.mi {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mi svg {
+  width: 14px;
+  height: 14px;
+  color: var(--ink-3);
+}
+.sep {
+  color: var(--line-strong);
+}
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 11px;
+  border-radius: 999px;
+}
+.chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.chip.done {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.chip.done .dot {
+  background: var(--ok);
+}
+.chip.pend {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.chip.pend .dot {
+  background: var(--warn);
+}
+
+/* actions */
+.vActions {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+.actRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 13px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: border-color 0.14s, color 0.14s, background 0.14s;
+}
+.btn svg {
+  width: 15px;
+  height: 15px;
+}
+.btn:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+  background: #fafafb;
+}
+.btn.icon {
+  width: 36px;
+  padding: 0;
+  justify-content: center;
+}
+.btnActivate {
+  height: 36px;
+  padding: 0 15px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklch, var(--primary) 40%, transparent);
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: background 0.14s, transform 0.12s;
+}
+.btnActivate svg {
+  width: 15px;
+  height: 15px;
+}
+.btnActivate:hover {
+  background: color-mix(in oklch, var(--primary-soft) 60%, var(--primary) 14%);
+  transform: translateY(-1px);
+}
+.btnActivate:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+}
+
+.footNote {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+.footNote svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* dropdown (shadcn DropdownMenu content 위에 덧입히는 항목 색) */
+.menuDanger {
+  color: oklch(0.55 0.2 25);
+}
+.menuDisabled {
+  color: var(--ink-3);
+}
+
+.empty {
+  margin-top: 22px;
+  padding: 40px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--ink-3);
+  background: var(--surface);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+}
+
+/* 하단 새 버전 업로드 추가 영역 (슬림 점선 행) */
+.addCard {
+  border: 1.5px dashed var(--line-strong);
+  background: transparent;
+  border-radius: var(--radius);
+  min-height: 64px;
+  padding: 14px 22px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.16s, color 0.16s, background 0.16s;
+}
+.addCard:hover {
+  border-color: var(--primary);
+  color: var(--primary-ink);
+  background: color-mix(in oklch, var(--primary-soft) 50%, transparent);
+}
+.addCard .plus {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: #efeff3;
+  display: grid;
+  place-items: center;
+  transition: background 0.16s;
+}
+.addCard:hover .plus {
+  background: #fff;
+}
+.addCard .plus svg {
+  width: 20px;
+  height: 20px;
+}
+.addCard span:last-child {
+  font-size: 13.5px;
+  font-weight: 600;
+}

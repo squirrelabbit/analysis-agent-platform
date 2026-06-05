@@ -23,6 +23,16 @@ export const datasetApi = {
       .patch<DatasetResponse>(`/projects/${projectId}/datasets/${datasetId}/metadata`, req)
       .then((r) => r.data),
 
+  // 이름/설명 수정 (PATCH /datasets/{id}). 지정한 필드만 반영.
+  updateInfo: (
+    projectId: string,
+    datasetId: string,
+    req: { name?: string; description?: string },
+  ) =>
+    apiClient
+      .patch<DatasetResponse>(`/projects/${projectId}/datasets/${datasetId}`, req)
+      .then((r) => r.data),
+
   deleteDataset: (projectId: string,  datasetId: string) =>
     apiClient
       .delete<void>(`/projects/${projectId}/datasets/${datasetId}`)

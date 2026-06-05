@@ -524,6 +524,35 @@ paths:
                 $ref: "#/components/schemas/Dataset"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+    patch:
+      tags: [Datasets]
+      summary: dataset 이름/설명 수정
+      description: |
+        데이터셋의 `name` / `description`을 수정한다. silverone 2026-06-05 —
+        지정된(non-null) 필드만 반영하고, 보내지 않은 필드는 기존 값을 보존한다.
+        `name`은 trim 후 빈 문자열이면 400. `data_type`은 기존 버전/빌드 정합성
+        위험으로 이 endpoint에서 변경하지 않는다(metadata는 `/metadata` 별도).
+      operationId: updateDatasetInfo
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetInfoUpdateRequest"
+      responses:
+        "200":
+          description: 수정 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
     delete:
       tags: [Datasets]
       summary: dataset 삭제
@@ -1822,6 +1851,19 @@ components:
             새 metadata patch. 생략하면 top-level key가 patch 본문으로 그대로
             해석된다.
       additionalProperties: true
+    DatasetInfoUpdateRequest:
+      type: object
+      description: |
+        PATCH `/projects/{pid}/datasets/{did}` body. 데이터셋 이름/설명 수정.
+        지정된(non-null) 필드만 반영, 보내지 않은 필드는 기존 값 보존.
+        최소 하나의 필드는 있어야 한다. silverone 2026-06-05.
+      properties:
+        name:
+          type: string
+          description: 새 데이터셋 이름. trim 후 빈 문자열이면 400.
+        description:
+          type: string
+          description: 새 설명.
     DatasetListResponse:
       type: object
       properties:

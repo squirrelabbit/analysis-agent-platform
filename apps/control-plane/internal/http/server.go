@@ -113,6 +113,7 @@ func (s *Server) routes() {
 	// silverone 2026-05-22 (옵션 α1) — dataset-level 설정 갱신. body는
 	// `{"metadata": {...}}` 또는 `{...}` 둘 다 허용.
 	s.mux.HandleFunc("PATCH /projects/{project_id}/datasets/{dataset_id}/metadata", s.handleUpdateDatasetMetadata)
+	s.mux.HandleFunc("PATCH /projects/{project_id}/datasets/{dataset_id}", s.handleUpdateDatasetInfo)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}", s.handleGetDataset)
 	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}", s.handleDeleteDataset)
 	s.mux.HandleFunc("PUT /projects/{project_id}/datasets/{dataset_id}/active_version", s.handleActivateDatasetVersion)
@@ -546,6 +547,26 @@ func (s *Server) handleUpdateDatasetMetadata(w stdhttp.ResponseWriter, r *stdhtt
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
 		patch,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+// handleUpdateDatasetInfo — PATCH /projects/{pid}/datasets/{did}. 이름/설명 수정.
+// silverone 2026-06-05 — non-nil 필드만 반영. (metadata 수정은 /metadata 별도)
+func (s *Server) handleUpdateDatasetInfo(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetInfoUpdateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.UpdateDatasetInfo(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		payload,
 	)
 	if err != nil {
 		s.writeServiceError(w, err)
