@@ -194,14 +194,20 @@ func (s *DatasetService) GetDocGenuinenessView(
 		return domain.DatasetArtifactView{}, err
 	}
 	view.Summary = summary
-	// model은 build 시 doc_genuineness_summary metadata에 저장된 LLOA 모델명.
+	// model / model_display_name은 build 시 doc_genuineness_summary metadata에 저장된
+	// 값. raw model id는 그대로, display name(env LLOA_MODEL_DISPLAY_NAME 기반)은 옛
+	// dataset엔 없을 수 있어 비면 생략(프론트가 model fallback).
 	model := summaryMetadataString(version.Metadata, "doc_genuineness_summary", "model")
+	modelDisplayName := summaryMetadataString(version.Metadata, "doc_genuineness_summary", "model_display_name")
 	applied := map[string]any{}
 	if prompt != "" {
 		applied["prompt_version"] = prompt
 	}
 	if model != "" {
 		applied["model"] = model
+	}
+	if modelDisplayName != "" {
+		applied["model_display_name"] = modelDisplayName
 	}
 	if len(applied) > 0 {
 		view.Applied = applied
@@ -261,15 +267,19 @@ func (s *DatasetService) GetClauseLabelView(
 	if prompt == "" {
 		prompt = fallbackPrompt
 	}
-	// model은 build 시 clause_label_summary metadata에 저장된 LLOA 모델명.
-	// artifact per-clause record에는 없으므로 metadata에서 회수한다.
+	// model / model_display_name은 build 시 clause_label_summary metadata에 저장된 값.
+	// per-clause record에는 없어 metadata에서 회수한다. display name은 비면 생략.
 	model := summaryMetadataString(version.Metadata, "clause_label_summary", "model")
+	modelDisplayName := summaryMetadataString(version.Metadata, "clause_label_summary", "model_display_name")
 	applied := map[string]any{}
 	if prompt != "" {
 		applied["prompt_version"] = prompt
 	}
 	if model != "" {
 		applied["model"] = model
+	}
+	if modelDisplayName != "" {
+		applied["model_display_name"] = modelDisplayName
 	}
 	if len(applied) > 0 {
 		view.Applied = applied

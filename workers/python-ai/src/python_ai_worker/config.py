@@ -37,6 +37,10 @@ class WorkerConfig:
     lloa_api_key: str | None = None
     lloa_api_url: str = "http://210.180.82.135:9023/v1/chat/completions"
     lloa_model: str = "wisenut/wise-lloa-max-v1.2.1"
+    # silverone 2026-06-05 — 화면 표시용 모델명. raw model id(lloa_model)는 그대로
+    # 보존하고, env로 내려주는 사람이 읽기 좋은 이름을 노출한다(하드코딩 매핑 금지,
+    # 모델 교체 시 env만 바꾸면 됨). 비어 있으면 화면은 raw model로 fallback.
+    lloa_model_display_name: str = ""
     lloa_max_tokens: int = 65536
     lloa_timeout_sec: float = 180.0
     lloa_reasoning_effort: str | None = "low"  # "low"/"medium"/"high"/None — 5/20 결정 default low (clause_label 속도 ↑)
@@ -81,7 +85,7 @@ def load_config() -> WorkerConfig:
         anthropic_input_price_per_million_tokens=max(0.0, float(os.getenv("ANTHROPIC_INPUT_PRICE_PER_MILLION_TOKENS", "0"))),
         anthropic_output_price_per_million_tokens=max(0.0, float(os.getenv("ANTHROPIC_OUTPUT_PRICE_PER_MILLION_TOKENS", "0"))),
         openai_embedding_price_per_million_tokens=max(0.0, float(os.getenv("OPENAI_EMBEDDING_PRICE_PER_MILLION_TOKENS", "0"))),
-        # LLOA — silverone .env의 WISENUT_LLOA_MAX_V1_2_1_API_KEY와도 호환
+        # LLOA_API_KEY is canonical; WISENUT_* names remain direct-run fallbacks.
         lloa_api_key=(
             os.getenv("LLOA_API_KEY")
             or os.getenv("WISENUT_LLOA_API_KEY")
@@ -90,6 +94,7 @@ def load_config() -> WorkerConfig:
         ),
         lloa_api_url=os.getenv("LLOA_API_URL", "http://210.180.82.135:9023/v1/chat/completions"),
         lloa_model=os.getenv("LLOA_MODEL", "wisenut/wise-lloa-max-v1.2.1"),
+        lloa_model_display_name=os.getenv("LLOA_MODEL_DISPLAY_NAME", "").strip(),
         lloa_max_tokens=int(os.getenv("LLOA_MAX_TOKENS", "65536")),
         lloa_timeout_sec=float(os.getenv("LLOA_TIMEOUT_SEC", "180")),
         lloa_reasoning_effort=(os.getenv("LLOA_REASONING_EFFORT", "").strip() or None),

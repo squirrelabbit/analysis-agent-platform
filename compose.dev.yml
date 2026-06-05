@@ -44,8 +44,6 @@ services:
       DATABASE_URL: postgresql://platform:platform@postgres:5432/analysis_support
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
-      ANTHROPIC_PREPARE_MODEL: ${ANTHROPIC_PREPARE_MODEL:-claude-haiku-4-5}
-      ANTHROPIC_SENTIMENT_MODEL: ${ANTHROPIC_SENTIMENT_MODEL:-claude-haiku-4-5}
       ANTHROPIC_TIMEOUT_SEC: ${ANTHROPIC_TIMEOUT_SEC:-90}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
@@ -54,12 +52,10 @@ services:
       OPENAI_TIMEOUT_SEC: ${OPENAI_TIMEOUT_SEC:-30}
       LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
       # ADR-017 / 5/19 결정 — LLOA(사내 wisenut vLLM) 전처리 LLM 단계 전용 env.
-      # silverone .env의 WISENUT_LLOA_MAX_V1_2_1_API_KEY와 호환 (config.py에서 fallback chain).
       LLOA_API_KEY: ${LLOA_API_KEY:-}
-      WISENUT_LLOA_API_KEY: ${WISENUT_LLOA_API_KEY:-}
-      WISENUT_LLOA_MAX_V1_2_1_API_KEY: ${WISENUT_LLOA_MAX_V1_2_1_API_KEY:-}
       LLOA_API_URL: ${LLOA_API_URL:-http://210.180.82.135:9023/v1/chat/completions}
       LLOA_MODEL: ${LLOA_MODEL:-wisenut/wise-lloa-max-v1.2.1}
+      LLOA_MODEL_DISPLAY_NAME: ${LLOA_MODEL_DISPLAY_NAME:-}
       LLOA_MAX_TOKENS: ${LLOA_MAX_TOKENS:-65536}
       LLOA_TIMEOUT_SEC: ${LLOA_TIMEOUT_SEC:-180}
       LLOA_REASONING_EFFORT: ${LLOA_REASONING_EFFORT:-low}

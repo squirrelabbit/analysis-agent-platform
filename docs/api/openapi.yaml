@@ -3167,16 +3167,24 @@ components:
           properties:
             applied:
               type: object
-              description: 실제 적용된 prompt_version / model 등.
+              description: |
+                실제 적용된 prompt_version / model 등. prompt_version은 artifact
+                첫 행에서, model / model_display_name은 build 시 metadata에 저장된
+                doc_genuineness_summary에서 회수한다. model_display_name은 env
+                LLOA_MODEL_DISPLAY_NAME 기반(하드코딩 매핑 없음)으로, 옛 dataset
+                에는 없을 수 있어 화면은 model_display_name → model 순으로 fallback.
               properties:
                 prompt_version:
                   type: string
                 model:
                   type: string
                   description: |
-                    doc_genuineness build에 사용된 LLOA 모델명. build 시 summary에
-                    기록된 값을 metadata에서 회수한다. build 이전이거나 모델명이
-                    없으면 생략된다.
+                    doc_genuineness build에 사용된 raw LLOA 모델 id
+                    (예 wisenut/wise-lloa-max-v1.2.1). build 시 summary에 기록된
+                    값을 metadata에서 회수한다. build 이전이거나 없으면 생략.
+                model_display_name:
+                  type: string
+                  description: 화면 표시용 모델명 (env LLOA_MODEL_DISPLAY_NAME). 미설정 시 생략.
             summary:
               type: object
               properties:
@@ -3217,15 +3225,22 @@ components:
           properties:
             applied:
               type: object
+              description: |
+                실제 적용된 prompt_version / model 등. model_display_name은 env
+                LLOA_MODEL_DISPLAY_NAME 기반(하드코딩 매핑 없음). 옛 dataset에는
+                없을 수 있어 화면은 model_display_name → model 순으로 fallback.
               properties:
                 prompt_version:
                   type: string
                 model:
                   type: string
                   description: |
-                    clause_label build에 사용된 LLOA 모델명. build 시 summary에
-                    기록된 값을 metadata에서 회수한다. build 이전이거나 모델명이
-                    없으면 생략된다.
+                    clause_label build에 사용된 raw LLOA 모델 id
+                    (예 wisenut/wise-lloa-max-v1.2.1). build 시 summary에 기록된
+                    값을 metadata에서 회수한다. build 이전이거나 없으면 생략.
+                model_display_name:
+                  type: string
+                  description: 화면 표시용 모델명 (env LLOA_MODEL_DISPLAY_NAME). 미설정 시 생략.
             summary:
               type: object
               properties:

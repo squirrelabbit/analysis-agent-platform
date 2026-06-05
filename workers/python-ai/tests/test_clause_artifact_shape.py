@@ -154,6 +154,61 @@ class ClauseArtifactShapeTests(unittest.TestCase):
                     records.append(json.loads(line))
         return records
 
+    def _run_capture(self, clauses_by_doc: dict[str, list[dict]], model_display_name: str = ""):
+        """run_dataset_clause_label 결과(artifact summary 포함)를 반환. summary.model /
+        model_display_name 검증용. _run은 output jsonl만 보므로 별도."""
+        from python_ai_worker.dataset_build import clause_label
+        from python_ai_worker.config import WorkerConfig
+
+        fake_config = WorkerConfig(
+            lloa_api_key="test-key",
+            lloa_api_url="http://lloa.example/v1/chat/completions",
+            lloa_model="wisenut/wise-lloa-max-v1.2.1",
+            lloa_model_display_name=model_display_name,
+            lloa_max_tokens=8192,
+            lloa_timeout_sec=60,
+            lloa_reasoning_effort="low",
+            lloa_prepend_no_think=True,
+        )
+        original_init = clause_label.LloaClient.__init__
+        fake_urlopen = _fake_urlopen_with_clauses(clauses_by_doc)
+
+        def _init_with_fake(self, config, *, urlopen=None):
+            original_init(self, config, urlopen=fake_urlopen)
+
+        with patch.object(clause_label, "load_config", return_value=fake_config), \
+             patch.object(clause_label.LloaClient, "__init__", _init_with_fake):
+            return clause_label.run_dataset_clause_label({
+                "dataset_version_id": "dvid:test",
+                "clean_artifact_ref": str(self.clean_path),
+                "output_path": str(self.output_path),
+                "concurrency": 1,
+                "include_genuineness": [],
+            })
+
+    def test_model_display_name_default_empty(self) -> None:
+        # silverone 2026-06-05 — display name env 미설정 시 raw model 보존 + display "".
+        result = self._run_capture({
+            "row:1": [{"clause": "야경 환상적", "sentiment": "positive", "aspect": "ambiance_scenery"}],
+        })
+        summary = result["artifact"]["summary"]
+        self.assertEqual(summary["model"], "wisenut/wise-lloa-max-v1.2.1")
+        self.assertEqual(summary["model_display_name"], "")
+        self.assertEqual(summary["applied"]["model"], "wisenut/wise-lloa-max-v1.2.1")
+        self.assertEqual(summary["applied"]["model_display_name"], "")
+
+    def test_model_display_name_from_env(self) -> None:
+        # LLOA_MODEL_DISPLAY_NAME 설정 시 raw model은 그대로, display name 노출(하드코딩 X).
+        result = self._run_capture(
+            {"row:1": [{"clause": "야경 환상적", "sentiment": "positive", "aspect": "ambiance_scenery"}]},
+            model_display_name="WISE LLOA Max v1.2.1",
+        )
+        summary = result["artifact"]["summary"]
+        self.assertEqual(summary["model"], "wisenut/wise-lloa-max-v1.2.1")
+        self.assertEqual(summary["model_display_name"], "WISE LLOA Max v1.2.1")
+        self.assertEqual(summary["applied"]["model"], "wisenut/wise-lloa-max-v1.2.1")
+        self.assertEqual(summary["applied"]["model_display_name"], "WISE LLOA Max v1.2.1")
+
     def test_locked_keys_present(self) -> None:
         records = self._run({
             "row:1": [
