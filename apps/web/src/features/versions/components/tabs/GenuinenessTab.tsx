@@ -5,13 +5,18 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import type { GenuinenessBuild } from "../../models/build";
+import type { GenuinenessBuild, GenuinenessItem } from "../../models/build";
 import { useState } from "react";
 import { Card, CardContent, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { useBuildVersion } from "../../hooks/build.query";
+import {
+  DataTable,
+  ExpandableTextCell,
+  FilterPills,
+  type Column,
+} from "../DataTable";
 
 const COLORS = {
   genuineReview: "#10b981", // emerald-500
@@ -27,11 +32,13 @@ const chartConfig = {
   uncertain: { label: "불확실" },
 } as const;
 
+// 값은 백엔드 genuineness 컬럼 원본(snake_case)과 일치해야 서버 필터가 동작.
 const FILTER_OPTIONS: { label: string; value: string }[] = [
   { label: "전체", value: "" },
   { label: "진성", value: "genuine_review" },
   { label: "비진성", value: "non_review" },
   { label: "불확실", value: "uncertain" },
+  { label: "혼합", value: "mixed" },
 ];
 
 export function GenuinenessBadge({ value }: { value: string }) {
@@ -49,6 +56,39 @@ export function GenuinenessBadge({ value }: { value: string }) {
   };
   return <Badge className={cn(map[value])}>{labels[value]}</Badge>;
 }
+
+const COLUMNS: Column<GenuinenessItem>[] = [
+  {
+    header: "문서 ID",
+    headerClassName: "w-48",
+    cell: (item) => (
+      <td className="px-4 py-3 font-mono text-xs text-zinc-400 max-w-45 truncate">
+        {item.docId}
+      </td>
+    ),
+  },
+  {
+    header: "정제 텍스트",
+    cell: (item) => <ExpandableTextCell text={item.cleanedText} />,
+  },
+  {
+    header: "판별 결과",
+    headerClassName: "w-36",
+    cell: (item) => (
+      <td className="px-4 py-3">
+        <GenuinenessBadge value={item.genuineness} />
+      </td>
+    ),
+  },
+  {
+    header: "사유",
+    cell: (item) => (
+      <td className="px-4 py-3 text-xs text-zinc-500 leading-relaxed max-w-sm">
+        {item.reason}
+      </td>
+    ),
+  },
+];
 
 export default function GenuinenessTab() {
   const [filter, setFilter] = useState<string>("");
@@ -173,111 +213,26 @@ export default function GenuinenessTab() {
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-zinc-100 bg-white overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-50 flex items-center justify-between flex-wrap gap-2">
-          <span className="text-xs font-medium text-zinc-500">
-            판별 결과 상세 ({totalCount}건)
-          </span>
-          <div className="flex gap-1.5 flex-wrap">
-            {FILTER_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => {
-                  setFilter(opt.value);
-                  setPage(1);
-                }}
-                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
-                  filter === opt.value
-                    ? "bg-zinc-800 text-white border-zinc-800"
-                    : "bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-50">
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide w-48">
-                  문서 ID
-                </th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide">
-                  정제 텍스트
-                </th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide w-36">
-                  판별 결과
-                </th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide">
-                  사유
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-50">
-              {!items || items.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="text-center py-8 text-sm text-zinc-400"
-                  >
-                    해당 항목이 없습니다
-                  </td>
-                </tr>
-              ) : (
-                items.map((item) => (
-                  <tr
-                    key={item.docId}
-                    className="hover:bg-zinc-50/60 transition-colors"
-                  >
-                    <td className="px-4 py-3 font-mono text-xs text-zinc-400 max-w-45 truncate">
-                      {item.docId}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-zinc-500 leading-relaxed max-w-sm">
-                      {item.cleanedText}
-                    </td>
-                    <td className="px-4 py-3">
-                      {/* <p>{item.genuineness}</p> */}
-                      <GenuinenessBadge value={item.genuineness} />
-                    </td>
-                    <td className="px-4 py-3 text-xs text-zinc-500 leading-relaxed max-w-sm">
-                      {item.reason}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-          <div className="flex items-center justify-between px-4 py-3 border-t border-zinc-100">
-            <p className="text-xs text-zinc-400">총 {totalCount}개</p>
-
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={page === 1}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                이전
-              </Button>
-
-              <span className="text-xs text-zinc-500">
-                {page} / {totalPages}
-              </span>
-
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={page === totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                다음
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <DataTable
+        columns={COLUMNS}
+        items={items}
+        rowKey={(item) => item.docId}
+        title={`판별 결과 상세 (${totalCount}건)`}
+        toolbar={
+          <FilterPills
+            options={FILTER_OPTIONS}
+            value={filter}
+            onChange={(value) => {
+              setFilter(value);
+              setPage(1);
+            }}
+          />
+        }
+        page={page}
+        totalPages={totalPages}
+        totalCount={totalCount}
+        onPageChange={setPage}
+      />
     </div>
   );
 }

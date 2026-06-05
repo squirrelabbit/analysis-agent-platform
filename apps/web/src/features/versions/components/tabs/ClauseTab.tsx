@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import {
   BarChart,
   Bar,
@@ -12,7 +11,7 @@ import {
   LabelList,
 } from "recharts";
 import { MetricCard } from "@/components/common/cards/MetricCard";
-import type { ClauseBuild } from "../../models/build";
+import type { ClauseBuild, ClauseItem } from "../../models/build";
 import { Badge } from "@/components/ui/badge";
 import { useBuildVersion } from "../../hooks/build.query";
 import {
@@ -24,6 +23,12 @@ import {
 } from "@/components/ui/select";
 import { useTaxonomy } from "@/features/taxonomy/hooks/taxonomy.query";
 import { aspectLabelOf } from "@/features/taxonomy/models";
+import {
+  DataTable,
+  ExpandableTextCell,
+  FilterPills,
+  type Column,
+} from "../DataTable";
 
 const SENTIMENT_COLORS: Record<string, string> = {
   positive: "#10b981",
@@ -70,7 +75,9 @@ export function ClauseTab() {
   const { summary, items, applied, durationSeconds, pagination } = data || {};
 
   if (!summary) {
-    return <p className="text-sm text-zinc-500">표시할 분류 요약이 없습니다.</p>;
+    return (
+      <p className="text-sm text-zinc-500">표시할 분류 요약이 없습니다.</p>
+    );
   }
 
   const {
@@ -103,6 +110,47 @@ export function ClauseTab() {
     totalSec >= 60
       ? `${Math.floor(totalSec / 60)}분 ${totalSec % 60}초`
       : `${totalSec}초`;
+
+  const columns: Column<ClauseItem>[] = [
+    {
+      header: "문서 ID",
+      headerClassName: "w-48",
+      cell: (item) => (
+        <td className="px-4 py-3 font-mono text-xs text-zinc-400 max-w-45 truncate">
+          {item.docId}
+        </td>
+      ),
+    },
+    {
+      header: "조항",
+      headerClassName: "w-80",
+      cell: (item) => <ExpandableTextCell text={item.clause} />,
+    },
+    {
+      header: "Aspect",
+      headerClassName: "w-28",
+      cell: (item) => (
+        <td className="px-4 py-3">
+          <span className="text-xs text-zinc-500">
+            {aspectLabelOf(taxonomy, item.aspect)}
+          </span>
+        </td>
+      ),
+    },
+    {
+      header: "감성",
+      headerClassName: "w-24",
+      cell: (item) => (
+        <td className="px-4 py-3">
+          <SentimentBadge value={item.sentiment} />
+        </td>
+      ),
+    },
+    {
+      header: "조항 텍스트",
+      cell: (item) => <ExpandableTextCell text={item.clause} />,
+    },
+  ];
 
   return (
     <div className="space-y-5">
@@ -257,12 +305,13 @@ export function ClauseTab() {
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-zinc-100 bg-white overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-50 flex items-center justify-between flex-wrap gap-2">
-          <span className="text-xs font-medium text-zinc-500">
-            총 {totalCount}건 중 {loadedStart}–{loadedEnd}건 표시
-          </span>
-          <div className="flex items-center gap-1.5 flex-wrap">
+      <DataTable
+        columns={columns}
+        items={items}
+        rowKey={(item) => item.clauseId}
+        title={`총 ${totalCount}건 중 ${loadedStart}–${loadedEnd}건 표시`}
+        toolbar={
+          <>
             <Select
               value={aspectFilter}
               onValueChange={(v) => {
@@ -282,106 +331,21 @@ export function ClauseTab() {
                 ))}
               </SelectContent>
             </Select>
-            {SENTIMENT_FILTER_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => {
-                  setFilter(opt.value);
-                  setPage(1);
-                }}
-                className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
-                  filter === opt.value
-                    ? "bg-zinc-800 text-white border-zinc-800"
-                    : "bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-50">
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide w-80">
-                  조항
-                </th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide w-28">
-                  Aspect
-                </th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide w-24">
-                  감성
-                </th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide">
-                  조항 텍스트
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-50">
-              {!items || items.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="text-center py-8 text-sm text-zinc-400"
-                  >
-                    해당 항목이 없습니다
-                  </td>
-                </tr>
-              ) : (
-                items.map((item) => (
-                  <tr
-                    key={item.clauseId}
-                    className="hover:bg-zinc-50/60 transition-colors"
-                  >
-                    <td className="px-4 py-3 font-mono text-xs text-zinc-400 max-w-40 truncate">
-                      {item.clause}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs text-zinc-500">
-                        {aspectLabelOf(taxonomy, item.aspect)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <SentimentBadge value={item.sentiment} />
-                    </td>
-                    <td className="px-4 py-3 text-xs text-zinc-500 leading-relaxed max-w-sm">
-                      {item.clause}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-          <div className="flex items-center justify-between px-4 py-3 border-t border-zinc-100">
-            <p className="text-xs text-zinc-400">총 {totalCount}개</p>
-
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={page === 1}
-                onClick={() => setPage((p) => p - 1)}
-              >
-                이전
-              </Button>
-
-              <span className="text-xs text-zinc-500">
-                {page} / {totalPages}
-              </span>
-
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={page === totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                다음
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
+            <FilterPills
+              options={SENTIMENT_FILTER_OPTIONS}
+              value={filter}
+              onChange={(value) => {
+                setFilter(value);
+                setPage(1);
+              }}
+            />
+          </>
+        }
+        page={page}
+        totalPages={totalPages}
+        totalCount={totalCount}
+        onPageChange={setPage}
+      />
     </div>
   );
 }
