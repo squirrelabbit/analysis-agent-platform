@@ -51,13 +51,19 @@ export function GenuinenessBadge({ value }: { value: string }) {
 }
 
 export default function GenuinenessTab() {
-  const { data } = useBuildVersion("doc_genuineness") as {
-    data: GenuinenessBuild | undefined;
-  };
-  const { summary, applied, items } = data || {};
   const [filter, setFilter] = useState<string>("");
   const [page, setPage] = useState(1);
   const pageSize = 10;
+
+  // 서버 페이징 + 서버 필터: 표는 서버가 필터/페이징해 준 현재 페이지(items)만 렌더.
+  const { data } = useBuildVersion("doc_genuineness", undefined, {
+    limit: pageSize,
+    offset: (page - 1) * pageSize,
+    genuineness: filter || undefined,
+  }) as {
+    data: GenuinenessBuild | undefined;
+  };
+  const { summary, applied, items, pagination } = data || {};
 
   if (!summary) {
     return (
@@ -96,15 +102,9 @@ export default function GenuinenessTab() {
     },
   ];
 
-  const filtered = filter
-    ? items?.filter((i) => i.genuineness.includes(filter))
-    : items;
-
-  const paginatedItems = filtered?.slice(
-    (page - 1) * pageSize,
-    page * pageSize,
-  );
-  const totalPages = Math.ceil((filtered?.length ?? 0) / pageSize);
+  // pagination.total은 (필터 적용된) 전체 건수. 표/페이지 계산 기준.
+  const totalCount = pagination?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   return (
     <div className="space-y-5">
       {/* Metrics */}
@@ -176,7 +176,7 @@ export default function GenuinenessTab() {
       <div className="rounded-xl border border-zinc-100 bg-white overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-50 flex items-center justify-between flex-wrap gap-2">
           <span className="text-xs font-medium text-zinc-500">
-            판별 결과 상세 ({items?.length ?? 0}건)
+            판별 결과 상세 ({totalCount}건)
           </span>
           <div className="flex gap-1.5 flex-wrap">
             {FILTER_OPTIONS.map((opt) => (
@@ -216,7 +216,7 @@ export default function GenuinenessTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-50">
-              {filtered?.length === 0 ? (
+              {!items || items.length === 0 ? (
                 <tr>
                   <td
                     colSpan={4}
@@ -226,7 +226,7 @@ export default function GenuinenessTab() {
                   </td>
                 </tr>
               ) : (
-                paginatedItems?.map((item) => (
+                items.map((item) => (
                   <tr
                     key={item.docId}
                     className="hover:bg-zinc-50/60 transition-colors"
@@ -250,9 +250,7 @@ export default function GenuinenessTab() {
             </tbody>
           </table>
           <div className="flex items-center justify-between px-4 py-3 border-t border-zinc-100">
-            <p className="text-xs text-zinc-400">
-              총 {filtered?.length ?? 0}개
-            </p>
+            <p className="text-xs text-zinc-400">총 {totalCount}개</p>
 
             <div className="flex items-center gap-2">
               <Button

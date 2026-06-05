@@ -53,14 +53,21 @@ function SentimentBadge({ value }: { value: string }) {
 }
 
 export function ClauseTab() {
-  const { data } = useBuildVersion("clause_label") as { data: ClauseBuild | undefined };
-  // taxonomy 조회 실패해도 aspectLabelOf가 key로 fallback하므로 화면은 동작한다.
-  const { data: taxonomy } = useTaxonomy();
-  const { summary, items, applied, durationSeconds, pagination } = data || {};
   const [filter, setFilter] = useState<string | "">("");
   const [aspectFilter, setAspectFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
   const pageSize = 10;
+
+  // 서버 페이징 + 서버 필터: 표는 서버가 필터/페이징해 준 현재 페이지(items)만 렌더.
+  const { data } = useBuildVersion("clause_label", undefined, {
+    limit: pageSize,
+    offset: (page - 1) * pageSize,
+    aspect: aspectFilter === "all" ? undefined : aspectFilter,
+    sentiment: filter || undefined,
+  }) as { data: ClauseBuild | undefined };
+  // taxonomy 조회 실패해도 aspectLabelOf가 key로 fallback하므로 화면은 동작한다.
+  const { data: taxonomy } = useTaxonomy();
+  const { summary, items, applied, durationSeconds, pagination } = data || {};
 
   if (!summary) {
     return <p className="text-sm text-zinc-500">표시할 분류 요약이 없습니다.</p>;
@@ -82,19 +89,14 @@ export function ClauseTab() {
     { name: "negative", value: negative, fill: SENTIMENT_COLORS.negative },
   ];
 
-  const aspectOptions = [...new Set(items?.map((i) => i.aspect) ?? [])];
+  // aspect 옵션은 전체 분포(summary.aspect) 기준 — 현재 페이지 items가 아니라.
+  const aspectOptions = Object.keys(summary.aspect);
 
-  const filtered = items?.filter(
-    (i) =>
-      (!filter || i.sentiment === filter) &&
-      (aspectFilter === "all" || i.aspect === aspectFilter),
-  );
-  const paginatedItems = filtered?.slice((page - 1) * pageSize, page * pageSize);
-  const totalPages = Math.ceil((filtered?.length ?? 0) / pageSize);
-
-  const loadedStart = (pagination?.offset ?? 0) + 1;
+  // pagination.total은 (필터 적용된) 전체 건수. 표/페이지 계산의 기준.
+  const totalCount = pagination?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const loadedStart = totalCount === 0 ? 0 : (pagination?.offset ?? 0) + 1;
   const loadedEnd = (pagination?.offset ?? 0) + (items?.length ?? 0);
-  const totalCount = pagination?.total ?? items?.length ?? 0;
 
   const totalSec = Math.round(durationSeconds ?? 0);
   const durationLabel =
@@ -317,7 +319,7 @@ export function ClauseTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-50">
-              {filtered?.length === 0 ? (
+              {!items || items.length === 0 ? (
                 <tr>
                   <td
                     colSpan={4}
@@ -327,7 +329,7 @@ export function ClauseTab() {
                   </td>
                 </tr>
               ) : (
-                paginatedItems?.map((item) => (
+                items.map((item) => (
                   <tr
                     key={item.clauseId}
                     className="hover:bg-zinc-50/60 transition-colors"
@@ -352,7 +354,7 @@ export function ClauseTab() {
             </tbody>
           </table>
           <div className="flex items-center justify-between px-4 py-3 border-t border-zinc-100">
-            <p className="text-xs text-zinc-400">총 {filtered?.length ?? 0}개</p>
+            <p className="text-xs text-zinc-400">총 {totalCount}개</p>
 
             <div className="flex items-center gap-2">
               <Button

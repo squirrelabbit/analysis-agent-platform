@@ -866,6 +866,15 @@ paths:
         - $ref: "#/components/parameters/VersionId"
         - $ref: "#/components/parameters/ArtifactLimit"
         - $ref: "#/components/parameters/ArtifactOffset"
+        - name: genuineness
+          in: query
+          required: false
+          description: |
+            genuineness 서버 필터(genuine_review/non_review/uncertain 등). 지정 시 해당
+            판별 결과 문서만 반환하고 pagination.total도 필터 기준. summary(차트 통계)는
+            필터와 무관하게 전체 분포 유지. silverone 2026-06-05.
+          schema:
+            type: string
       responses:
         "200":
           description: doc_genuineness artifact view
@@ -957,6 +966,23 @@ paths:
         - $ref: "#/components/parameters/VersionId"
         - $ref: "#/components/parameters/ArtifactLimit"
         - $ref: "#/components/parameters/ArtifactOffset"
+        - name: aspect
+          in: query
+          required: false
+          description: |
+            aspect 서버 필터. 지정 시 해당 aspect의 clauses만 반환하고 pagination.total도
+            필터 기준 건수가 된다. summary(차트 통계)는 필터와 무관하게 전체 분포 유지.
+            silverone 2026-06-05.
+          schema:
+            type: string
+        - name: sentiment
+          in: query
+          required: false
+          description: |
+            sentiment 서버 필터(positive/neutral/negative). aspect와 AND 결합.
+            summary는 전체 분포 유지.
+          schema:
+            type: string
       responses:
         "200":
           description: clause_label artifact view

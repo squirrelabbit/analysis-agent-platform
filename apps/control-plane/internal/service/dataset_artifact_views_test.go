@@ -14,7 +14,7 @@ import (
 func TestLoadDocGenuinenessArtifactWithCleanedTextJoin(t *testing.T) {
 	jsonlPath, parquetPath := setupDocGenuinenessFixture(t, []string{"v:row:0", "v:row:1"}, []string{"v:row:0", "v:row:1"})
 
-	summary, prompt, total, items, err := loadDocGenuinenessArtifact(jsonlPath, parquetPath, 10, 0, "v")
+	summary, prompt, total, items, err := loadDocGenuinenessArtifact(jsonlPath, parquetPath, 10, 0, "v", "")
 	if err != nil {
 		t.Fatalf("loadDocGenuinenessArtifact: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestLoadDocGenuinenessArtifactWithCleanedTextJoin(t *testing.T) {
 func TestLoadDocGenuinenessArtifactWithoutCleanRefFallsBackToLegacySchema(t *testing.T) {
 	jsonlPath, _ := setupDocGenuinenessFixture(t, []string{"v:row:0"}, []string{"v:row:0"})
 
-	_, _, total, items, err := loadDocGenuinenessArtifact(jsonlPath, "", 10, 0, "v")
+	_, _, total, items, err := loadDocGenuinenessArtifact(jsonlPath, "", 10, 0, "v", "")
 	if err != nil {
 		t.Fatalf("loadDocGenuinenessArtifact: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestLoadDocGenuinenessArtifactJoinMissKeepsItemWithNullCleanedText(t *testi
 		[]string{"v:row:0"},              // parquet row_ids (v:row:99는 없음)
 	)
 
-	_, _, total, items, err := loadDocGenuinenessArtifact(jsonlPath, parquetPath, 10, 0, "v")
+	_, _, total, items, err := loadDocGenuinenessArtifact(jsonlPath, parquetPath, 10, 0, "v", "")
 	if err != nil {
 		t.Fatalf("loadDocGenuinenessArtifact must not fail on join miss: %v", err)
 	}
