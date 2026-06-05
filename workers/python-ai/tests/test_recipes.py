@@ -19,6 +19,7 @@ from python_ai_worker.planner.recipes import (
     expand_recipes,
     lower_distribution,
     lower_event_window_count,
+    lower_period_compare_count,
     lower_recipe,
     lower_top_n,
 )
@@ -409,11 +410,136 @@ class ExpandRecipesTests(unittest.TestCase):
             expand_recipes(plan)
 
 
+def _pcc_step(**param_overrides):
+    params = {
+        "input": "docs",
+        "period_a": {"start": "2024-08-01", "end": "2024-08-14"},
+        "period_b": {"start": "2024-08-15", "end": "2024-08-28"},
+    }
+    params.update(param_overrides)
+    return {"id": "pcc", "skill": "period_compare_count", "params": params}
+
+
+def _wrap_one(step):
+    return {"plan_version": "v2", "answerable": True, "steps": [step]}
+
+
+def _codes(plan):
+    return [i.code for i in collect_plan_issues(plan)]
+
+
+class PeriodCompareCountLoweringTests(unittest.TestCase):
+    def test_total_mode_lowers_to_expected_atomic_steps(self) -> None:
+        steps = lower_recipe(_pcc_step())
+        self.assertEqual(
+            [s["skill"] for s in steps],
+            ["filter", "aggregate", "filter", "aggregate", "compare", "calculate", "present"],
+        )
+        # 두 aggregate는 group_by=[] (total)
+        aggs = [s for s in steps if s["skill"] == "aggregate"]
+        self.assertEqual(aggs[0]["params"]["group_by"], [])
+        self.assertEqual(aggs[1]["params"]["group_by"], [])
+        cmp = next(s for s in steps if s["skill"] == "compare")
+        self.assertEqual(cmp["params"]["join_key"], [])
+        self.assertEqual(cmp["params"]["left_label"], "a")
+        self.assertEqual(cmp["params"]["right_label"], "b")
+        calc = next(s for s in steps if s["skill"] == "calculate")
+        names = {e["name"] for e in calc["params"]["expressions"]}
+        self.assertEqual(names, {"delta_count", "delta_rate"})
+        present = next(s for s in steps if s["skill"] == "present")
+        self.assertEqual(
+            present["params"]["columns"], ["a_count", "b_count", "delta_count", "delta_rate"]
+        )
+
+    def test_group_mode_uses_group_by_as_join_key(self) -> None:
+        steps = lower_recipe(_pcc_step(group_by=["channel"]))
+        aggs = [s for s in steps if s["skill"] == "aggregate"]
+        self.assertEqual(aggs[0]["params"]["group_by"], ["channel"])
+        cmp = next(s for s in steps if s["skill"] == "compare")
+        self.assertEqual(cmp["params"]["join_key"], ["channel"])
+        present = next(s for s in steps if s["skill"] == "present")
+        self.assertEqual(
+            present["params"]["columns"],
+            ["channel", "a_count", "b_count", "delta_count", "delta_rate"],
+        )
+
+    def test_filter_windows_use_between_bounds(self) -> None:
+        steps = lower_recipe(_pcc_step())
+        filters = [s for s in steps if s["skill"] == "filter"]
+        self.assertEqual(filters[0]["params"]["operator"], "between")
+        self.assertEqual(filters[0]["params"]["value"], ["2024-08-01", "2024-08-14"])
+        self.assertEqual(filters[1]["params"]["value"], ["2024-08-15", "2024-08-28"])
+        self.assertEqual(filters[0]["params"]["column"], "created_at")
+
+    def test_deterministic(self) -> None:
+        self.assertEqual(lower_period_compare_count(_pcc_step()), lower_period_compare_count(_pcc_step()))
+
+    def test_lowered_total_plan_passes_validator(self) -> None:
+        steps = lower_recipe(_pcc_step())
+        self.assertEqual(collect_plan_issues({"plan_version": "v2", "steps": steps}), [])
+
+    def test_lowered_group_plan_passes_validator(self) -> None:
+        steps = lower_recipe(_pcc_step(group_by=["channel"]))
+        self.assertEqual(collect_plan_issues({"plan_version": "v2", "steps": steps}), [])
+
+    def test_bad_date_raises(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_period_compare_count(_pcc_step(period_a={"start": "2024/08/01", "end": "2024-08-14"}))
+
+    def test_start_after_end_raises(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_period_compare_count(_pcc_step(period_b={"start": "2024-08-28", "end": "2024-08-15"}))
+
+    def test_metric_other_than_count_raises(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_period_compare_count(_pcc_step(metric="sum"))
+
+
+class PeriodCompareCountValidatorTests(unittest.TestCase):
+    def test_valid_total_passes(self) -> None:
+        self.assertEqual(collect_plan_issues(_wrap_one(_pcc_step())), [])
+
+    def test_valid_group_passes(self) -> None:
+        self.assertEqual(collect_plan_issues(_wrap_one(_pcc_step(group_by=["channel"]))), [])
+
+    def test_missing_period_b(self) -> None:
+        step = _pcc_step()
+        del step["params"]["period_b"]
+        self.assertIn("params.missing_keys", _codes(_wrap_one(step)))
+
+    def test_bad_period_shape(self) -> None:
+        self.assertIn(
+            "params.recipe_period_invalid",
+            _codes(_wrap_one(_pcc_step(period_a={"start": "2024-08-01"}))),
+        )
+
+    def test_bad_period_date_format(self) -> None:
+        self.assertIn(
+            "params.recipe_period_invalid",
+            _codes(_wrap_one(_pcc_step(period_a={"start": "08-01-2024", "end": "2024-08-14"}))),
+        )
+
+    def test_group_by_invalid_type(self) -> None:
+        self.assertIn(
+            "params.recipe_group_by_invalid",
+            _codes(_wrap_one(_pcc_step(group_by="channel"))),
+        )
+
+    def test_unsupported_metric(self) -> None:
+        self.assertIn(
+            "params.recipe_metric_unsupported",
+            _codes(_wrap_one(_pcc_step(metric="sum"))),
+        )
+
+    def test_unknown_input(self) -> None:
+        self.assertIn("params.input_unknown", _codes(_wrap_one(_pcc_step(input="nope"))))
+
+
 class RecipeRegistryTests(unittest.TestCase):
     def test_specs_present(self) -> None:
         self.assertEqual(
             set(RECIPE_SPECS),
-            {"distribution", "event_window_count", "top_n", "sample_rows"},
+            {"distribution", "event_window_count", "top_n", "sample_rows", "period_compare_count"},
         )
 
     def test_all_recipes_implemented(self) -> None:

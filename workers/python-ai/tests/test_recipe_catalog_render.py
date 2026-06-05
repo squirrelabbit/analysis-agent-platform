@@ -67,6 +67,11 @@ class RecipeCatalogRenderTest(unittest.TestCase):
             "event_window_count": {"input": "docs", "event_date": "2024-08-15"},
             "top_n": {"input": "clauses", "group_by": ["aspect"]},
             "sample_rows": {"input": "clauses", "columns": ["clause"]},
+            "period_compare_count": {
+                "input": "docs",
+                "period_a": {"start": "2024-08-01", "end": "2024-08-14"},
+                "period_b": {"start": "2024-08-15", "end": "2024-08-28"},
+            },
         }
         for name in RUNTIME_ENABLED_RECIPES:
             self.assertIn(name, minimal, f"minimal plan 누락: {name}")

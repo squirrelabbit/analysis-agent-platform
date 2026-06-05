@@ -211,13 +211,27 @@ class AggregateRuleTests(unittest.TestCase):
         }
         self.assertEqual(collect_plan_issues(_wrap([step])), [])
 
-    def test_group_by_empty(self) -> None:
+    def test_group_by_empty_total_mode_allowed(self) -> None:
+        # silverone 2026-06-05 — group_by=[]는 total mode(전체 1행 집계)로 허용된다.
         step = {
             "id": "agg",
             "skill": "aggregate",
             "params": {
                 "input": "clauses",
                 "group_by": [],
+                "metrics": [{"name": "c", "function": "count", "column": "*"}],
+            },
+        }
+        self.assertEqual(collect_plan_issues(_wrap([step])), [])
+
+    def test_group_by_not_list_rejected(self) -> None:
+        # 리스트가 아니면 여전히 거절.
+        step = {
+            "id": "agg",
+            "skill": "aggregate",
+            "params": {
+                "input": "clauses",
+                "group_by": "aspect",
                 "metrics": [{"name": "c", "function": "count", "column": "*"}],
             },
         }
@@ -315,6 +329,106 @@ class CompareRuleTests(unittest.TestCase):
         codes = _codes(_wrap([step]))
         self.assertIn("params.left_label_missing", codes)
         self.assertIn("params.right_label_missing", codes)
+
+    def _scalar_agg(self, step_id: str) -> dict[str, Any]:
+        return {
+            "id": step_id,
+            "skill": "aggregate",
+            "params": {
+                "input": "clauses",
+                "group_by": [],
+                "metrics": [{"name": "count", "function": "count", "column": "*"}],
+            },
+        }
+
+    def _group_agg(self, step_id: str) -> dict[str, Any]:
+        return {
+            "id": step_id,
+            "skill": "aggregate",
+            "params": {
+                "input": "clauses",
+                "group_by": ["aspect"],
+                "metrics": [{"name": "count", "function": "count", "column": "*"}],
+            },
+        }
+
+    def test_join_key_empty_scalar_aggregates_allowed(self) -> None:
+        # silverone 2026-06-05 — 양쪽이 group_by=[] aggregate면 join_key=[] (scalar) 허용.
+        plan = _wrap(
+            [
+                self._scalar_agg("a"),
+                self._scalar_agg("b"),
+                {
+                    "id": "cmp",
+                    "skill": "compare",
+                    "params": {
+                        "left": "a",
+                        "right": "b",
+                        "join_key": [],
+                        "left_label": "a",
+                        "right_label": "b",
+                    },
+                },
+            ]
+        )
+        self.assertEqual(collect_plan_issues(plan), [])
+
+    def test_join_key_empty_non_scalar_rejected(self) -> None:
+        # 양쪽이 group_by 있는 aggregate면 join_key=[]는 거절(N×M cross product 방지).
+        plan = _wrap(
+            [
+                self._group_agg("a"),
+                self._group_agg("b"),
+                {
+                    "id": "cmp",
+                    "skill": "compare",
+                    "params": {
+                        "left": "a",
+                        "right": "b",
+                        "join_key": [],
+                        "left_label": "a",
+                        "right_label": "b",
+                    },
+                },
+            ]
+        )
+        self.assertIn("params.join_key_empty_not_scalar", _codes(plan))
+
+    def test_join_key_empty_reserved_table_rejected(self) -> None:
+        # RESERVED 테이블 직접 참조는 scalar가 아니므로 join_key=[] 거절.
+        step = {
+            "id": "cmp",
+            "skill": "compare",
+            "params": {
+                "left": "clauses",
+                "right": "clauses",
+                "join_key": [],
+                "left_label": "a",
+                "right_label": "b",
+            },
+        }
+        self.assertIn("params.join_key_empty_not_scalar", _codes(_wrap([step])))
+
+    def test_join_key_empty_one_side_scalar_rejected(self) -> None:
+        # 한쪽만 scalar여도 거절(둘 다 scalar여야 함).
+        plan = _wrap(
+            [
+                self._scalar_agg("a"),
+                self._group_agg("b"),
+                {
+                    "id": "cmp",
+                    "skill": "compare",
+                    "params": {
+                        "left": "a",
+                        "right": "b",
+                        "join_key": [],
+                        "left_label": "a",
+                        "right_label": "b",
+                    },
+                },
+            ]
+        )
+        self.assertIn("params.join_key_empty_not_scalar", _codes(plan))
 
 
 class CalculateRuleTests(unittest.TestCase):
