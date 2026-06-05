@@ -12,7 +12,7 @@ import DatasetMetaForm from "../components/forms/DatasetMetaForm";
 import { useEditMetadata } from "../hooks/dataset.mutation";
 
 /*
- * 기존 MetadataDialog의 controlled 버전. 케밥 메뉴 "수정"(진정 분석 설정)에서 연다.
+ * 기존 MetadataDialog의 controlled 버전. 케밥 메뉴 "수정"(분석 메타데이터 설정)에서 연다.
  * 폼/뮤테이션은 기존과 동일(DatasetMetaForm + useEditMetadata).
  */
 export default function MetadataDialogControlled({
@@ -34,7 +34,7 @@ export default function MetadataDialogControlled({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader className="shrink-0">
-          <DialogTitle>진정 분석 설정</DialogTitle>
+          <DialogTitle>분석 메타데이터 설정</DialogTitle>
         </DialogHeader>
         <div className="flex-1 overflow-y-auto">
           <div className="bg-amber-50 my-3 border border-amber-200 rounded-lg p-2 flex gap-3">

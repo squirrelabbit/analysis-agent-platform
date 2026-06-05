@@ -1,5 +1,12 @@
 import type { DataType } from "@/shared/types/common";
 
+export interface DatasetDocGenuineness {
+  subjectType: string;
+  subjectName: string;
+  subjectAliases: string[];
+  recruitmentKeywords: string[];
+}
+
 export interface Dataset {
   id: string,
   projectId: string,
@@ -8,6 +15,7 @@ export interface Dataset {
   dataType: DataType,
   activeDatasetVersionId: string,
   activeVersionUpdatedAt: string,
-  createdAt: string
+  createdAt: string,
+  docGenuineness?: DatasetDocGenuineness,
 }
 

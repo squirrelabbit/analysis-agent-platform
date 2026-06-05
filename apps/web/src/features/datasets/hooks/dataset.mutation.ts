@@ -24,6 +24,29 @@ export const useCreateDataset = () => {
   });
 };
 
+export const useEditDatasetInfo = () => {
+  const { projectId } = useProjectParams();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      datasetId,
+      name,
+      description,
+    }: {
+      datasetId: string;
+      name?: string;
+      description?: string;
+    }) => datasetApi.updateInfo(projectId, datasetId, { name, description }),
+    onSuccess: (_, { datasetId }) => {
+      queryClient.invalidateQueries({
+        queryKey: datasetKeys.detail(projectId, datasetId),
+      });
+      queryClient.invalidateQueries({ queryKey: datasetKeys.lists() });
+    },
+  });
+};
+
 export const useEditMetadata = () => {
   const { projectId } = useProjectParams();
   const queryClient = useQueryClient();

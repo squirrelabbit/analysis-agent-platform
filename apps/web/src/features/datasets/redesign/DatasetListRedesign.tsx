@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import Breadcrumbs from "@/components/common/Breadcrumbs";
 import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { useProjectDetail } from "@/features/projects/hooks/project.query";
 import { useDatasets } from "../hooks/dataset.query";
@@ -34,7 +35,7 @@ import { useDeleteDataset } from "../hooks/dataset.mutation";
 import type { Dataset } from "../models/model";
 import { useDatasetVersionStats } from "./useDatasetVersionStats";
 import CreateDatasetDialogControlled from "./CreateDatasetDialogControlled";
-import MetadataDialogControlled from "./MetadataDialogControlled";
+import EditInfoDialogControlled from "./EditInfoDialogControlled";
 import styles from "./DatasetListRedesign.module.css";
 
 export default function DatasetListRedesign() {
@@ -48,11 +49,12 @@ export default function DatasetListRedesign() {
     <div className={styles.page}>
       <div className={styles.inner}>
         {/* breadcrumbs */}
-        <div className={styles.crumbs}>
-          <a onClick={() => navigate("/projects")}>프로젝트</a>
-          <ChevronRight />
-          <b>{project?.name ?? "프로젝트"}</b>
-        </div>
+        <Breadcrumbs
+          items={[
+            { label: "프로젝트", to: "/projects" },
+            { label: project?.name ?? "프로젝트" },
+          ]}
+        />
 
         {/* head */}
         <div className={styles.head}>
@@ -106,7 +108,7 @@ function DatasetCard({
   const { data: stats, isPending } = useDatasetVersionStats(id);
   const { mutate: removeDataset } = useDeleteDataset();
 
-  const [metaOpen, setMetaOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const versionCount = stats?.versionCount ?? 0;
@@ -121,7 +123,7 @@ function DatasetCard({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-        <DropdownMenuItem onClick={() => setMetaOpen(true)}>
+        <DropdownMenuItem onClick={() => setEditOpen(true)}>
           <Pencil />수정
         </DropdownMenuItem>
         <DropdownMenuItem onClick={onOpen}>
@@ -209,17 +211,17 @@ function DatasetCard({
         </div>
       )}
 
-      {/* controlled dialogs (케밥에서 state로 연다 — dropdown 안에 dialog를 중첩하지 않음) */}
-      <MetadataDialogControlled
-        datasetId={id}
-        open={metaOpen}
-        onOpenChange={setMetaOpen}
-      />
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent
-          className="sm:max-w-sm"
-          onClick={(e) => e.stopPropagation()}
-        >
+      {/* controlled dialogs (케밥에서 state로 연다 — dropdown 안에 dialog를 중첩하지 않음).
+          다이얼로그는 포털로 body에 렌더되지만 React 이벤트는 트리를 따라 버블링되므로,
+          내부 클릭(X·오버레이)이 카드 onClick(=버전 이동)으로 새지 않게 wrapper에서 차단. */}
+      <div onClick={(e) => e.stopPropagation()}>
+        <EditInfoDialogControlled
+          dataset={dataset}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+        />
+        <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>데이터셋 삭제</DialogTitle>
             <DialogDescription className="text-xs">
@@ -238,7 +240,8 @@ function DatasetCard({
             </DialogClose>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+        </Dialog>
+      </div>
     </article>
   );
 }

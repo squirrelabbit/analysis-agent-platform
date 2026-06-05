@@ -1,0 +1,28 @@
+/* 데이터셋 계열 페이지 공용 breadcrumb. 디자인 핸드오프 .crumbs 스타일 통일. */
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #9a9aa4;
+  font-weight: 500;
+}
+.crumbs a {
+  color: #9a9aa4;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.14s;
+}
+.crumbs a:hover {
+  color: oklch(0.48 0.18 290);
+}
+.crumbs b {
+  color: #1b1b22;
+  font-weight: 700;
+}
+.sep {
+  width: 14px;
+  height: 14px;
+  opacity: 0.6;
+  flex-shrink: 0;
+}

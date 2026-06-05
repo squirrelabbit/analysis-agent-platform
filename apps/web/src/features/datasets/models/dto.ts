@@ -1,5 +1,12 @@
 import type { DataType } from "@/shared/types/common";
 
+export interface DocGenuinenessMeta {
+  subject_type?: string;
+  subject_name?: string;
+  subject_aliases?: string[];
+  recruitment_keywords?: string[];
+}
+
 export interface DatasetResponse {
   dataset_id: string;
   project_id: string;
@@ -9,6 +16,9 @@ export interface DatasetResponse {
   active_dataset_version_id: string;
   active_version_updated_at: string;
   created_at: string;
+  metadata?: {
+    doc_genuineness?: DocGenuinenessMeta;
+  };
 }
 
 export interface DatasetListResponse {

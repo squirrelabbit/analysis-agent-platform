@@ -80,7 +80,7 @@ export default function CreateDatasetDialogControlled({
                 <div className="hidden sm:block">
                   <p className="text-xs font-medium text-slate-600">
                     {step === 1 && "기본 정보"}
-                    {step === 2 && "진정 분석 설정"}
+                    {step === 2 && "분석 메타데이터 설정"}
                   </p>
                 </div>
               </div>
