@@ -92,13 +92,32 @@ group_by별 count와 전체 대비 share(0~1)를 한 번에 계산한다.
 - 쓰지 않는 경우: 전체 대비 비중이 필요하면 `distribution`, 서로 다른 기간/집단
   비교는 atomic `compare` + `calculate`.
 
+### sample_rows
+
+집계 없이 조건에 맞는 **원문 row 몇 개**를 결정적으로 보여준다. 집계 결과의 근거가
+되는 실제 문장/문서 예시를 제시할 때 쓴다.
+
+- params:
+  - `input`: table_or_step_id (보통 `clauses`, 또는 join/filter 결과 step)
+  - `columns`: string[] — 보여줄 컬럼(projection). 예 `["clause","aspect","sentiment"]`
+  - `filters`: [{column, op, value}] — 선택. op는 `=`,`!=`,`>`,`>=`,`<`,`<=`,`in`,`not_in`,`contains`
+  - `sort`: {by: string[], direction: asc|desc} — 선택. 미지정 시 `doc_id` + columns asc로 결정적 정렬
+  - `limit`: int>0 — 행 수 (기본 10, 최대 100)
+  - `title`: string|null
+- 쓰는 경우: "예시 보여줘", "샘플 보여줘", "원문 몇 개 보여줘", "근거 문장 보여줘",
+  "어떤 후기들이 있는지 몇 개 보여줘"처럼 **집계가 아니라 실제 row 예시**를 묻는 질문.
+- 쓰지 않는 경우: **건수/비율/비중/순위/추이 등 집계 질문에는 절대 쓰지 않는다**
+  (그건 `aggregate` / `distribution` / `top_n`). 다른 테이블 컬럼(문서 본문 등)이
+  필요하면 sample_rows가 직접 join하지 말고 먼저 `join` step을 만든 뒤 그 step을
+  `sample_rows.input`으로 넘긴다. (sample_rows는 filter/sort/projection/limit/present만 담당)
+
 ## 규칙
 
 - 위 skill catalog의 skill **또는 위 recipe**만 사용한다 (수치 계산도 `calculate`
   skill로만 표현). catalog/recipe에 없는 이름을 만들지 않는다.
 - 각 skill의 params는 위 catalog의 `params` 명세를 그대로 따른다.
-- **recipe는 terminal이다.** recipe(`distribution` / `event_window_count` / `top_n`)
-  step의 `id`를 다른 step의 `input`으로 참조하지 않는다. recipe는 실행 시 내부
+- **recipe는 terminal이다.** recipe(`distribution` / `event_window_count` / `top_n` /
+  `sample_rows`) step의 `id`를 다른 step의 `input`으로 참조하지 않는다. recipe는 실행 시 내부
   atomic step(예: `<id>_agg` / `<id>_share` / `<id>_present`)으로 펼쳐져 그 recipe
   `id` 자체는 사라지므로, 뒤 step이 그것을 `input`으로 쓰면 `input_unknown` 오류가
   난다. recipe 결과를 추가로 가공(특정 row만 추출, 추가 계산 등)해야 하면 recipe를
@@ -148,6 +167,12 @@ group_by별 count와 전체 대비 share(0~1)를 한 번에 계산한다.
 - "축제일/행사일/특정 날짜 전후 N일 문서 발생량"처럼 기준일 주변의 날짜별
   발생량을 묻는 질문은 **`event_window_count` recipe를 사용한다**. 기준일이
   없으면 멋대로 추정하지 말고 clarify한다.
+- "예시/샘플/원문 몇 개/근거 문장/어떤 후기가 있는지 보여줘"처럼 **집계가 아니라
+  실제 row 예시**를 묻는 질문은 **`sample_rows` recipe를 사용한다**. 반대로
+  건수·비율·비중·순위·추이 같은 **집계 질문에는 sample_rows를 절대 쓰지 않는다**
+  (aggregate / distribution / top_n). 예: "부정 후기 예시 10개" → sample_rows
+  (input=clauses, filters=[{column:sentiment, op:'=', value:negative}],
+  columns=[clause, aspect], limit=10). "aspect별 건수" → sample_rows 금지, aggregate.
 - **final present는 사용자의 질문에 직접 답하는 결과 step을 input으로 해야 한다.**
   중간 aggregate/count step은 분자·분모 계산용일 뿐 final present의 input으로 쓰지
   않는다. `calculate.ratio` / `average` / `delta` 등 계산 step을 만들었다면, 그 계산

@@ -39,7 +39,7 @@ from .schema import (
     TIMESTAMP_COLUMN_TYPES,
 )
 from .skill_specs import CALCULATE_SPEC
-from .recipes import RUNTIME_ENABLED_RECIPES
+from .recipes import RUNTIME_ENABLED_RECIPES, SAMPLE_ROWS_MAX_LIMIT
 
 
 # step id는 executor에서 DuckDB temp view 이름으로 직접 사용된다.
@@ -1110,6 +1110,8 @@ def _validate_recipe_params(skill_name: str, params: dict[str, Any], ctx: _StepC
         _validate_event_window_count_recipe(params, ctx)
     elif skill_name == "top_n":
         _validate_top_n_recipe(params, ctx)
+    elif skill_name == "sample_rows":
+        _validate_sample_rows_recipe(params, ctx)
     else:
         ctx.issue(
             code="step.skill_unknown",
@@ -1378,6 +1380,124 @@ def _validate_top_n_filters(
                 ctx.issue(
                     code="params.recipe_filter_value_invalid",
                     message=f"top_n.filters[{index}].value must be a non-empty list for op '{op_name}'",
+                )
+
+
+# ===== sample_rows recipe (silverone 2026-06-05) =====
+
+
+def _validate_sample_rows_recipe(params: dict[str, Any], ctx: _StepContext) -> None:
+    if not _check_required_keys(params, ("input", "columns"), ctx):
+        return
+
+    input_ref = params.get("input")
+
+    columns = params.get("columns")
+    column_names: list[str] | None = None
+    if (
+        not isinstance(columns, list)
+        or not columns
+        or not all(isinstance(c, str) and c.strip() for c in columns)
+    ):
+        ctx.issue(
+            code="params.recipe_columns_invalid",
+            message="sample_rows.columns must be a non-empty list of column names",
+        )
+    else:
+        column_names = [c.strip() for c in columns]
+
+    _check_input_ref(input_ref, "input", ctx, require_column=column_names or None)
+
+    limit = params.get("limit")
+    if limit is not None:
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            ctx.issue(
+                code="params.recipe_limit_invalid",
+                message="sample_rows.limit must be a positive integer",
+            )
+        elif limit > SAMPLE_ROWS_MAX_LIMIT:
+            ctx.issue(
+                code="params.recipe_limit_invalid",
+                message=f"sample_rows.limit must be <= {SAMPLE_ROWS_MAX_LIMIT}",
+            )
+
+    filters = params.get("filters")
+    if filters is not None:
+        if not isinstance(filters, list):
+            ctx.issue(
+                code="params.recipe_filter_invalid",
+                message="sample_rows.filters must be a list",
+            )
+        else:
+            _validate_sample_rows_filters(input_ref, filters, ctx)
+
+    sort = params.get("sort")
+    if sort is not None:
+        if not isinstance(sort, dict):
+            ctx.issue(
+                code="params.recipe_sort_invalid",
+                message="sample_rows.sort must be an object {by, direction}",
+            )
+        else:
+            by = sort.get("by")
+            if by is not None and (
+                not isinstance(by, list)
+                or not by
+                or not all(isinstance(c, str) and c.strip() for c in by)
+            ):
+                ctx.issue(
+                    code="params.recipe_sort_invalid",
+                    message="sample_rows.sort.by must be a non-empty list of column names",
+                )
+            direction = sort.get("direction")
+            if direction is not None and str(direction).strip() not in SORT_ORDERS:
+                ctx.issue(
+                    code="params.recipe_sort_invalid",
+                    message="sample_rows.sort.direction must be asc or desc",
+                )
+
+
+def _validate_sample_rows_filters(
+    input_ref: Any,
+    filters: list[Any],
+    ctx: _StepContext,
+) -> None:
+    input_name = str(input_ref or "").strip()
+    for index, item in enumerate(filters):
+        if not isinstance(item, dict):
+            ctx.issue(
+                code="params.recipe_filter_invalid",
+                message=f"sample_rows.filters[{index}] must be an object",
+            )
+            continue
+
+        column = item.get("column")
+        if not isinstance(column, str) or not column.strip():
+            ctx.issue(
+                code="params.recipe_filter_invalid",
+                message=f"sample_rows.filters[{index}].column must be a non-empty string",
+            )
+        elif input_name in TABLE_SCHEMAS:
+            _check_input_ref(input_ref, "input", ctx, require_column=column.strip())
+
+        op = item.get("op")
+        op_name = str(op or "").strip()
+        if op_name not in _TOP_N_FILTER_OPS:
+            ctx.issue(
+                code="params.recipe_filter_invalid",
+                message=(
+                    f"sample_rows.filters[{index}].op must be one of "
+                    f"{sorted(_TOP_N_FILTER_OPS)}"
+                ),
+            )
+            continue
+
+        if op_name in {"in", "not_in"}:
+            value = item.get("value")
+            if not isinstance(value, list) or not value:
+                ctx.issue(
+                    code="params.recipe_filter_value_invalid",
+                    message=f"sample_rows.filters[{index}].value must be a non-empty list for op '{op_name}'",
                 )
 
 

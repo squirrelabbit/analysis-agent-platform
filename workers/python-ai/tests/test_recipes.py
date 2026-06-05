@@ -411,7 +411,10 @@ class ExpandRecipesTests(unittest.TestCase):
 
 class RecipeRegistryTests(unittest.TestCase):
     def test_specs_present(self) -> None:
-        self.assertEqual(set(RECIPE_SPECS), {"distribution", "event_window_count", "top_n"})
+        self.assertEqual(
+            set(RECIPE_SPECS),
+            {"distribution", "event_window_count", "top_n", "sample_rows"},
+        )
 
     def test_all_recipes_implemented(self) -> None:
         self.assertTrue(DISTRIBUTION_SPEC.implemented)
