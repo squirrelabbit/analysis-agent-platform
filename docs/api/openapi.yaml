@@ -3167,10 +3167,16 @@ components:
           properties:
             applied:
               type: object
-              description: 실제 적용된 prompt_version 등. artifact 첫 행에서 회수.
+              description: 실제 적용된 prompt_version / model 등.
               properties:
                 prompt_version:
                   type: string
+                model:
+                  type: string
+                  description: |
+                    doc_genuineness build에 사용된 LLOA 모델명. build 시 summary에
+                    기록된 값을 metadata에서 회수한다. build 이전이거나 모델명이
+                    없으면 생략된다.
             summary:
               type: object
               properties:
@@ -3214,6 +3220,12 @@ components:
               properties:
                 prompt_version:
                   type: string
+                model:
+                  type: string
+                  description: |
+                    clause_label build에 사용된 LLOA 모델명. build 시 summary에
+                    기록된 값을 metadata에서 회수한다. build 이전이거나 모델명이
+                    없으면 생략된다.
             summary:
               type: object
               properties:

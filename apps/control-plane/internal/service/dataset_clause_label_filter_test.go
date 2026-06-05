@@ -138,6 +138,29 @@ func TestLoadClauseLabelArtifact_AspectSentimentSummary(t *testing.T) {
 	}
 }
 
+// silverone 2026-06-05 — applied.model 회수 잠금. build 시 clause_label_summary
+// metadata에 저장된 model명을 GET view가 노출한다. artifact per-clause record에는
+// 없으므로 metadata에서 읽는다.
+func TestClauseLabelSummaryString_Model(t *testing.T) {
+	metadata := map[string]any{
+		"clause_label_summary": map[string]any{
+			"model":          "lloa-x",
+			"prompt_version": "v3",
+		},
+	}
+	if got := summaryMetadataString(metadata, "clause_label_summary", "model"); got != "lloa-x" {
+		t.Fatalf("model = %q, want lloa-x", got)
+	}
+	// summary 없으면 "".
+	if got := summaryMetadataString(map[string]any{}, "clause_label_summary", "model"); got != "" {
+		t.Fatalf("missing summary → want empty, got %q", got)
+	}
+	// 키 없으면 "".
+	if got := summaryMetadataString(map[string]any{"clause_label_summary": map[string]any{}}, "clause_label_summary", "model"); got != "" {
+		t.Fatalf("missing key → want empty, got %q", got)
+	}
+}
+
 func TestLoadClauseLabelArtifact_Pagination(t *testing.T) {
 	path := setupClauseLabelFixture(t)
 	_, _, total, items, err := loadClauseLabelArtifact(path, 1, 1, "", "")

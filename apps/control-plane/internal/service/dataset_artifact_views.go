@@ -194,8 +194,17 @@ func (s *DatasetService) GetDocGenuinenessView(
 		return domain.DatasetArtifactView{}, err
 	}
 	view.Summary = summary
+	// model은 build 시 doc_genuineness_summary metadata에 저장된 LLOA 모델명.
+	model := summaryMetadataString(version.Metadata, "doc_genuineness_summary", "model")
+	applied := map[string]any{}
 	if prompt != "" {
-		view.Applied = map[string]any{"prompt_version": prompt}
+		applied["prompt_version"] = prompt
+	}
+	if model != "" {
+		applied["model"] = model
+	}
+	if len(applied) > 0 {
+		view.Applied = applied
 	}
 	view.Items = items
 	view.Pagination.Total = total
@@ -252,8 +261,18 @@ func (s *DatasetService) GetClauseLabelView(
 	if prompt == "" {
 		prompt = fallbackPrompt
 	}
+	// model은 build 시 clause_label_summary metadata에 저장된 LLOA 모델명.
+	// artifact per-clause record에는 없으므로 metadata에서 회수한다.
+	model := summaryMetadataString(version.Metadata, "clause_label_summary", "model")
+	applied := map[string]any{}
 	if prompt != "" {
-		view.Applied = map[string]any{"prompt_version": prompt}
+		applied["prompt_version"] = prompt
+	}
+	if model != "" {
+		applied["model"] = model
+	}
+	if len(applied) > 0 {
+		view.Applied = applied
 	}
 	view.Items = items
 	view.Pagination.Total = total
@@ -698,6 +717,21 @@ func percentOf(count, total int) float64 {
 		return 0
 	}
 	return math.Round(float64(count)/float64(total)*1000) / 10
+}
+
+// summaryMetadataString — version.Metadata[summaryKey] (build 시 저장된 summary
+// map)에서 string 필드 1개를 읽는다. summary가 없거나 키가 없으면 "".
+// Postgres JSON round-trip 후에도 string은 string으로 유지된다.
+// clause_label_summary / doc_genuineness_summary의 model 등 회수에 공용.
+func summaryMetadataString(metadata map[string]any, summaryKey, field string) string {
+	summary, ok := metadata[summaryKey].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if v, ok := summary[field].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
 }
 
 // firstStringValue — 첫 행에서 column 값 1개 추출. prompt_version 회수용.
