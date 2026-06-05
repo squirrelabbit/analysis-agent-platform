@@ -29,10 +29,35 @@ from ..planner import (
     PlannerResult,
     generate_plan,
 )
-from .context import ArtifactPaths, ExecutorContext, ExecutorContextError
+from .context import ArtifactPaths, ExecutorContext, ExecutorContextError, read_docs_columns
 from .runner import ExecutionStepResult, ExecutorError, execute_plan
 
 _LOG = _get_logger("executor.service")
+
+
+def _filter_docs_extra_columns(
+    docs_extra_columns: list[DatasetSpecificColumn] | None,
+    artifact_paths: ArtifactPaths | None,
+) -> list[DatasetSpecificColumn] | None:
+    """planner에 노출할 docs-extra 컬럼을 **실제 docs view에 존재하는 컬럼**으로만 거른다.
+
+    silverone 2026-06-05 — advertised=queryable invariant. control-plane이 source
+    원본 컬럼을 docs-extra로 보내도, clean이 병합/삭제해 docs view에 없는 컬럼은
+    planner가 못 보게 한다(없으면 Binder Error). artifact 미해석 시 원본 그대로 반환."""
+    if not docs_extra_columns or artifact_paths is None:
+        return docs_extra_columns
+    available = set(read_docs_columns(artifact_paths))
+    if not available:
+        return docs_extra_columns  # 조회 실패 → 거르지 않음(degrade)
+    kept = [c for c in docs_extra_columns if c.name in available]
+    dropped = [c.name for c in docs_extra_columns if c.name not in available]
+    if dropped:
+        _LOG.warning(
+            "analyze.docs_extra_columns_filtered",
+            dropped=dropped,
+            kept=[c.name for c in kept],
+        )
+    return kept
 
 
 class ArtifactPathResolutionError(RuntimeError):
@@ -280,6 +305,9 @@ def plan_and_execute_analyze(
     """
 
     client = anthropic_client if anthropic_client is not None else _default_anthropic_client()
+    # advertised=queryable: 실제 docs view에 있는 컬럼만 planner에 노출(병합/삭제된
+    # source 컬럼이 prompt에 새어 Binder Error 나는 것 차단). silverone 2026-06-05.
+    docs_extra_columns = _filter_docs_extra_columns(docs_extra_columns, artifact_paths)
     try:
         planner_result = generate_plan(
             user_question=user_question,
