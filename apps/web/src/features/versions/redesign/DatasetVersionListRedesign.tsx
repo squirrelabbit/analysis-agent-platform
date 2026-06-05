@@ -1,3 +1,4 @@
+import type { MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Calendar,
@@ -21,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { formatFileSize } from "@/shared/utils/format";
 import { useDownloadFile } from "@/shared/apis/common.mutation";
+import { useDatasetParams } from "@/shared/hooks/useRouteParams";
 import { useDataset } from "@/features/datasets/hooks/dataset.query";
 import { useActiveVersion, useDeleteVersion } from "../hooks/version.mutation";
 import { useVersionsWithNumber } from "./useVersionsWithNumber";
@@ -46,6 +48,7 @@ interface Props {
 
 export default function DatasetVersionListRedesign({ onNewVersion }: Props) {
   const navigate = useNavigate();
+  const { projectId } = useDatasetParams();
   const { data: dataset } = useDataset();
   const { data: versions = [], isLoading } = useVersionsWithNumber();
 
@@ -65,9 +68,11 @@ export default function DatasetVersionListRedesign({ onNewVersion }: Props) {
         <div className={styles.crumbs}>
           <a onClick={() => navigate("/projects")}>프로젝트</a>
           <ChevronRight />
-          <a onClick={() => navigate("..")}>{dataset?.name ?? "데이터셋"}</a>
+          <a onClick={() => navigate(`/projects/${projectId}/datasets`)}>
+            데이터셋
+          </a>
           <ChevronRight />
-          <b>{dataset?.name ?? "버전"}</b>
+          <b>{dataset?.name ?? "데이터셋 버전"}</b>
         </div>
 
         {/* head */}
@@ -136,8 +141,19 @@ interface RowProps {
 }
 
 function VersionRow({ v, onDetail, onDownload, onActivate, onDelete }: RowProps) {
+  // 카드 전체 클릭으로 상세 이동. 내부 버튼은 카드 클릭과 충돌하지 않게 버블링 차단.
+  const stop = (fn: () => void) => (e: MouseEvent) => {
+    e.stopPropagation();
+    fn();
+  };
+
   return (
-    <div className={`${styles.vrow} ${v.isActive ? styles.active : ""}`}>
+    <div
+      className={`${styles.vrow} ${v.isActive ? styles.active : ""}`}
+      onClick={onDetail}
+      role="button"
+      tabIndex={0}
+    >
       <div className={styles.vId}>
         <div className={styles.vTag}>v{v.versionNumber}</div>
         {v.isActive ? (
@@ -185,19 +201,22 @@ function VersionRow({ v, onDetail, onDownload, onActivate, onDelete }: RowProps)
 
       <div className={styles.vActions}>
         <div className={styles.actRow}>
-          <button className={styles.btn} onClick={onDetail}>
+          <button className={styles.btn} onClick={stop(onDetail)}>
             <FileText />상세 보기
           </button>
-          <button className={styles.btn} onClick={onDownload}>
+          <button className={styles.btn} onClick={stop(onDownload)}>
             <Download />다운로드
           </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className={`${styles.btn} ${styles.icon}`}>
+              <button
+                className={`${styles.btn} ${styles.icon}`}
+                onClick={(e) => e.stopPropagation()}
+              >
                 <MoreVertical />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
               <DropdownMenuItem disabled>이름 변경</DropdownMenuItem>
               <DropdownMenuItem disabled>메타데이터</DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -208,7 +227,7 @@ function VersionRow({ v, onDetail, onDownload, onActivate, onDelete }: RowProps)
               ) : (
                 <DropdownMenuItem
                   variant="destructive"
-                  onClick={onDelete}
+                  onClick={stop(onDelete)}
                   className={styles.menuDanger}
                 >
                   삭제
@@ -218,7 +237,7 @@ function VersionRow({ v, onDetail, onDownload, onActivate, onDelete }: RowProps)
           </DropdownMenu>
         </div>
         {!v.isActive && (
-          <button className={styles.btnActivate} onClick={onActivate}>
+          <button className={styles.btnActivate} onClick={stop(onActivate)}>
             <Zap />이 버전 활성화
           </button>
         )}

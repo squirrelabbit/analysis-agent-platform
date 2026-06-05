@@ -160,10 +160,17 @@
   border-radius: var(--radius);
   padding: 20px 22px 20px 26px;
   box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.16s, border-color 0.16s;
+  cursor: pointer;
+  transition: box-shadow 0.16s, border-color 0.16s, transform 0.12s;
 }
 .vrow:hover {
   box-shadow: var(--shadow-md);
+  border-color: var(--line-strong);
+  transform: translateY(-2px);
+}
+.vrow:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm);
 }
 .vrow.active {
   border-color: color-mix(in oklch, var(--primary) 45%, var(--line));
