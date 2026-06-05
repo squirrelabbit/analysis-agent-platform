@@ -37,6 +37,7 @@ from .schema import (
     TABLE_SCHEMAS,
     TableSchema,
 )
+from .recipes import RECIPE_SPECS, RUNTIME_ENABLED_RECIPES, RecipeSpec
 
 
 DEFAULT_PLANNER_V2_PROMPT_VERSION = "planner-v2-anthropic-v1"
@@ -115,6 +116,7 @@ def render_planner_prompt(
                 dataset_specific_columns or []
             ),
             "skill_catalog": render_skill_catalog(),
+            "recipe_catalog": render_recipe_catalog(),
             "today": today_value,
         },
         prompt_version,
@@ -164,6 +166,22 @@ def render_skill_catalog() -> str:
     """8 skill을 Markdown으로 렌더. 각 skill = bullet section."""
 
     blocks = [_render_skill(SKILL_CATALOG[name]) for name in _ORDERED_SKILL_NAMES]
+    return "\n\n".join(blocks)
+
+
+def render_recipe_catalog() -> str:
+    """runtime-enabled recipe를 Markdown으로 렌더 (silverone 2026-06-05).
+
+    single source는 ``recipes.py``의 ``RecipeSpec``. prompt md에 recipe 상세를
+    하드코딩하지 않고 ``{{recipe_catalog}}`` placeholder로 이 결과를 주입한다.
+    ``RUNTIME_ENABLED_RECIPES``에 있는 recipe만 노출(disabled는 제외)해
+    'enabled == prompt 노출' 일치를 보장한다. 순서는 RECIPE_SPECS 정의순."""
+
+    blocks = [
+        _render_recipe(spec)
+        for name, spec in RECIPE_SPECS.items()
+        if name in RUNTIME_ENABLED_RECIPES
+    ]
     return "\n\n".join(blocks)
 
 
@@ -269,6 +287,22 @@ def _render_skill(skill: SkillSpec) -> str:
     return "\n".join(lines)
 
 
+def _render_recipe(spec: RecipeSpec) -> str:
+    lines = [f"### {spec.name}", "", spec.description, ""]
+    if spec.use_when:
+        lines.append(f"- 쓰는 경우: {spec.use_when}")
+    if spec.avoid_when:
+        lines.append(f"- 쓰지 않는 경우: {spec.avoid_when}")
+    if spec.params:
+        lines.append("- params:")
+        for param in spec.params:
+            req = " (required)" if param.required else ""
+            lines.append(f"  - `{param.name}`{req}: {param.desc}")
+    if spec.lowered_skills:
+        lines.append(f"- lowered_skills: {', '.join(spec.lowered_skills)}")
+    return "\n".join(lines)
+
+
 def _row(name: str, type_: str, description: str) -> str:
     safe_description = description.replace("|", "\\|") if description else ""
     return f"| `{name}` | {type_} | {safe_description} |"
@@ -281,5 +315,6 @@ __all__ = [
     "render_conversation_context",
     "render_dataset_specific_columns",
     "render_skill_catalog",
+    "render_recipe_catalog",
     "render_table_schemas",
 ]

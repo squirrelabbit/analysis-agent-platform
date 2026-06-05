@@ -181,16 +181,20 @@ class SampleRowsValidatorTest(unittest.TestCase):
 
 
 class SampleRowsPromptRoutingLockTest(unittest.TestCase):
-    def test_prompt_has_sample_rows_section_and_routing(self):
+    def test_sample_rows_section_rendered_in_catalog(self):
+        # C 이후: recipe 상세는 prompt md가 아니라 render_recipe_catalog()에서 렌더.
+        from python_ai_worker.planner.prompt import render_recipe_catalog
+
+        cat = render_recipe_catalog()
+        self.assertIn("### sample_rows", cat)
+
+    def test_prompt_template_keeps_sample_rows_routing_policy(self):
+        # 라우팅 정책 문장은 prompt md(규칙)에 남는다(세부 params는 catalog).
         prompt = (
             Path(__file__).resolve().parents[3]
             / "config/prompts/planner-v2-anthropic-v1.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("### sample_rows", prompt)
-        # 예시/샘플/원문/근거 라우팅
         self.assertIn("예시", prompt)
-        self.assertIn("sample_rows", prompt)
-        # 집계 질문 금지 규칙
         self.assertIn("sample_rows를 절대 쓰지 않는다", prompt)
 
 

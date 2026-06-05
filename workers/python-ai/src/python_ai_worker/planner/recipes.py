@@ -45,6 +45,10 @@ class RecipeSpec:
     params: tuple[RecipeParamSpec, ...]
     # lowering으로 확장되는 atomic skill 목록 (문서/검증용).
     lowered_skills: tuple[str, ...]
+    # silverone 2026-06-05 — prompt recipe catalog의 single source. prompt.py
+    # render_recipe_catalog()가 여기서 use_when/avoid_when을 렌더한다(하드코딩 제거).
+    use_when: str = ""
+    avoid_when: str = ""
     implemented: bool = False  # lowering이 구현됐는지
 
 
@@ -63,6 +67,8 @@ DISTRIBUTION_SPEC = RecipeSpec(
         RecipeParamSpec("title", desc="string|null — present 제목"),
     ),
     lowered_skills=("aggregate", "calculate", "present"),
+    use_when="긍정/부정/중립 비율, 전반적인 반응 비율, aspect별 비중, 채널별 구성비처럼 각 그룹이 전체에서 차지하는 몫(구성비)을 모든 그룹에 대해 묻는 질문.",
+    avoid_when="단순 건수는 atomic aggregate. 전체 대비 특정 범주 하나의 비율은 aggregate→share_of_total→filter(atomic). 부분집합 중 비율(분자가 분모의 하위조건)은 compare+calculate.ratio. 날짜별 추이는 atomic.",
     implemented=True,
 )
 
@@ -80,6 +86,8 @@ EVENT_WINDOW_COUNT_SPEC = RecipeSpec(
         RecipeParamSpec("title", desc="string|null"),
     ),
     lowered_skills=("filter", "aggregate", "sort", "present"),
+    use_when="축제일/행사일/특정 날짜 전후 N일 문서 발생량을 일자별로 묻는 질문 (D-day 전후).",
+    avoid_when="기간 전체의 단순 총량은 atomic filter+aggregate. week/month bucket은 미지원(필요 시 clarify/unsupported). 기준일이 없으면 추정 말고 clarify.",
     implemented=True,
 )
 
@@ -97,6 +105,8 @@ TOP_N_SPEC = RecipeSpec(
         RecipeParamSpec("title", desc="string|null"),
     ),
     lowered_skills=("filter", "aggregate", "sort", "present"),
+    use_when="상위 N개/가장 많은/자주 나오는/많이 언급된/랭킹처럼 조건 후 그룹별 count 순위를 묻는 질문. doc-level 필터가 필요하면 먼저 join/filter로 input step을 만든 뒤 top_n.input으로 넘긴다.",
+    avoid_when="전체 대비 비중이 필요하면 distribution. 서로 다른 기간/집단 비교는 atomic compare+calculate.",
     implemented=True,
 )
 
@@ -115,6 +125,8 @@ SAMPLE_ROWS_SPEC = RecipeSpec(
         RecipeParamSpec("title", desc="string|null"),
     ),
     lowered_skills=("filter", "sort", "present"),
+    use_when="예시/샘플/원문 몇 개/근거 문장/어떤 후기가 있는지처럼 집계가 아니라 실제 row 예시를 묻는 질문. 문서 본문이 필요하면 먼저 join step을 만들고 sample_rows.input으로 넘긴다.",
+    avoid_when="건수/비율/비중/순위/추이 등 집계 질문에는 절대 쓰지 않는다(aggregate/distribution/top_n).",
     implemented=True,
 )
 
