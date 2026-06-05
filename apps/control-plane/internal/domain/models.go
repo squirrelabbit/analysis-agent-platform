@@ -469,6 +469,7 @@ type DatasetVersionListResponse struct {
 // build_jobs/profile 등은 노출하지 않는다 — 실행 이력은 별도 endpoint.
 type DatasetVersionDetail struct {
 	DatasetVersionID string                    `json:"dataset_version_id"`
+	VersionNumber    int                       `json:"version_number"`
 	CreatedAt        time.Time                 `json:"created_at"`
 	ReadyAt          *time.Time                `json:"ready_at,omitempty"`
 	IsActive         bool                      `json:"is_active"`
@@ -492,6 +493,7 @@ type DatasetVersionStageDetail struct {
 // GET /versions/{version_id}로 조회.
 type DatasetVersionListItem struct {
 	DatasetVersionID     string    `json:"dataset_version_id"`
+	VersionNumber        int       `json:"version_number"`
 	CreatedAt            time.Time `json:"created_at"`
 	IsActive             bool      `json:"is_active"`
 	RowCount             int       `json:"row_count"`

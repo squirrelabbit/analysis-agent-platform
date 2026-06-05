@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -150,6 +151,16 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 		metadata["embedding_model"] = *input.EmbeddingModel
 	}
 
+	// silverone 2026-06-04 — 생성 시점에 display용 version_number를 부여한다.
+	// 같은 dataset의 기존 버전 최대 번호 + 1 (생성순 1-based). metadata에 저장해
+	// 삭제가 일어나도 남은 버전 번호를 재계산하지 않는다(stable). 동일 파일명을
+	// 여러 번 올려도 번호로 구분 가능. read 시 fallback 규칙은 numberDatasetVersions 참조.
+	existingVersions, err := s.store.ListDatasetVersions(projectID, dataset.DatasetID)
+	if err != nil {
+		return domain.DatasetVersion{}, err
+	}
+	metadata[versionNumberMetaKey] = nextVersionNumber(existingVersions)
+
 	version := domain.DatasetVersion{
 		DatasetVersionID: id.New(),
 		DatasetID:        dataset.DatasetID,
@@ -251,13 +262,69 @@ func (s *DatasetService) ListDatasetVersions(projectID, datasetID string) (domai
 	if err != nil {
 		return domain.DatasetVersionListResponse{}, err
 	}
+	numByID := numberDatasetVersions(items)
 	list := make([]domain.DatasetVersionListItem, 0, len(items))
 	for index := range items {
 		enrichDatasetVersionView(&items[index])
 		markDatasetVersionActive(&items[index], dataset)
-		list = append(list, summarizeDatasetVersionForList(items[index]))
+		item := summarizeDatasetVersionForList(items[index])
+		item.VersionNumber = numByID[items[index].DatasetVersionID]
+		list = append(list, item)
 	}
 	return domain.DatasetVersionListResponse{Items: list}, nil
+}
+
+const versionNumberMetaKey = "version_number"
+
+// storedVersionNumber — 생성 시점에 metadata에 저장한 version_number(없으면 0).
+// JSONB는 숫자를 float64로 역직렬화하므로 int/int64/float64 모두 처리.
+func storedVersionNumber(meta map[string]any) int {
+	if meta == nil {
+		return 0
+	}
+	switch v := meta[versionNumberMetaKey].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	}
+	return 0
+}
+
+// numberDatasetVersions — 같은 dataset version들의 display 번호를 versionID->number로.
+// 우선순위: metadata 저장값(생성 시 부여, 삭제해도 불변) → 없으면(legacy) created_at
+// ASC rank fallback. 목록 정렬과 무관하게 항상 생성순 번호를 준다.
+func numberDatasetVersions(versions []domain.DatasetVersion) map[string]int {
+	asc := make([]domain.DatasetVersion, len(versions))
+	copy(asc, versions)
+	sort.SliceStable(asc, func(i, j int) bool {
+		if asc[i].CreatedAt.Equal(asc[j].CreatedAt) {
+			return asc[i].DatasetVersionID < asc[j].DatasetVersionID
+		}
+		return asc[i].CreatedAt.Before(asc[j].CreatedAt)
+	})
+	out := make(map[string]int, len(asc))
+	for i := range asc {
+		n := storedVersionNumber(asc[i].Metadata)
+		if n == 0 {
+			n = i + 1 // legacy(미저장) fallback — operator migration 0003로 영구화 가능.
+		}
+		out[asc[i].DatasetVersionID] = n
+	}
+	return out
+}
+
+// nextVersionNumber — 새 version에 부여할 생성순 번호 (기존 최대 + 1).
+func nextVersionNumber(existing []domain.DatasetVersion) int {
+	max := 0
+	for _, n := range numberDatasetVersions(existing) {
+		if n > max {
+			max = n
+		}
+	}
+	return max + 1
 }
 
 func (s *DatasetService) GetDatasetVersionDetail(projectID, datasetID, datasetVersionID string) (domain.DatasetVersionDetail, error) {
@@ -265,7 +332,15 @@ func (s *DatasetService) GetDatasetVersionDetail(projectID, datasetID, datasetVe
 	if err != nil {
 		return domain.DatasetVersionDetail{}, err
 	}
-	return summarizeDatasetVersionDetail(version), nil
+	detail := summarizeDatasetVersionDetail(version)
+	// stored 번호 우선. legacy(미저장)면 sibling들과 함께 created_at rank로 계산.
+	detail.VersionNumber = storedVersionNumber(version.Metadata)
+	if detail.VersionNumber == 0 {
+		if siblings, sErr := s.store.ListDatasetVersions(projectID, datasetID); sErr == nil {
+			detail.VersionNumber = numberDatasetVersions(siblings)[datasetVersionID]
+		}
+	}
+	return detail, nil
 }
 
 // summarizeDatasetVersionDetail — GET /versions/{version_id} 응답용 변환.

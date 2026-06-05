@@ -1977,6 +1977,9 @@ components:
       properties:
         dataset_version_id:
           type: string
+        version_number:
+          type: integer
+          description: "같은 dataset 안에서 생성순 1-based 표시 번호(v1/v2/v3). 생성 시 부여되어 삭제·정렬과 무관하게 고정."
         created_at:
           type: string
           format: date-time
@@ -2046,6 +2049,9 @@ components:
       properties:
         dataset_version_id:
           type: string
+        version_number:
+          type: integer
+          description: "같은 dataset 안에서 생성순 1-based 표시 번호(v1/v2/v3). 생성 시 부여되어 삭제·정렬과 무관하게 고정. 목록은 created_at DESC라 최신 버전의 version_number가 가장 크다."
         created_at:
           type: string
           format: date-time
@@ -2071,7 +2077,7 @@ components:
         original_filename:
           type: string
           description: "업로드 시 저장한 사용자 파일명. metadata.upload.original_filename → stored_filename fallback. 옛 row(직접 storage_uri로 만든 version 등)는 빈 문자열."
-      required: [dataset_version_id, created_at, is_active, row_count, column_count, columns, byte_size, clean_status, doc_genuineness_status, clause_label_status]
+      required: [dataset_version_id, version_number, created_at, is_active, row_count, column_count, columns, byte_size, clean_status, doc_genuineness_status, clause_label_status]
     DatasetCleanSummary:
       type: object
       properties:
