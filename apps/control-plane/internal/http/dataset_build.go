@@ -3,6 +3,7 @@ package http
 import (
 	stdhttp "net/http"
 	"strconv"
+	"strings"
 
 	"analysis-support-platform/control-plane/internal/domain"
 	"analysis-support-platform/control-plane/internal/obs"
@@ -54,11 +55,13 @@ func (s *Server) handleGetCleanView(w stdhttp.ResponseWriter, r *stdhttp.Request
 
 func (s *Server) handleGetDocGenuinenessView(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	limit, offset := parseArtifactPagination(r)
+	genuineness := strings.TrimSpace(r.URL.Query().Get("genuineness"))
 	view, err := s.datasetService.GetDocGenuinenessView(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
 		r.PathValue("version_id"),
 		limit, offset,
+		genuineness,
 	)
 	if err != nil {
 		s.writeServiceError(w, err)
@@ -69,11 +72,14 @@ func (s *Server) handleGetDocGenuinenessView(w stdhttp.ResponseWriter, r *stdhtt
 
 func (s *Server) handleGetClauseLabelView(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	limit, offset := parseArtifactPagination(r)
+	aspect := strings.TrimSpace(r.URL.Query().Get("aspect"))
+	sentiment := strings.TrimSpace(r.URL.Query().Get("sentiment"))
 	view, err := s.datasetService.GetClauseLabelView(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
 		r.PathValue("version_id"),
 		limit, offset,
+		aspect, sentiment,
 	)
 	if err != nil {
 		s.writeServiceError(w, err)

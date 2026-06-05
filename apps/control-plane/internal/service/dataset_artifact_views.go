@@ -139,6 +139,7 @@ func (s *DatasetService) GetCleanView(projectID, datasetID, datasetVersionID str
 func (s *DatasetService) GetDocGenuinenessView(
 	projectID, datasetID, datasetVersionID string,
 	limit, offset int,
+	genuineness string,
 ) (domain.DatasetArtifactView, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
@@ -187,7 +188,7 @@ func (s *DatasetService) GetDocGenuinenessView(
 			cleanRef = "" // file 없으면 join 생략
 		}
 	}
-	summary, prompt, total, items, err := loadDocGenuinenessArtifact(ref, cleanRef, limit, offset, version.DatasetVersionID)
+	summary, prompt, total, items, err := loadDocGenuinenessArtifact(ref, cleanRef, limit, offset, version.DatasetVersionID, genuineness)
 	if err != nil {
 		return domain.DatasetArtifactView{}, err
 	}
@@ -204,6 +205,7 @@ func (s *DatasetService) GetDocGenuinenessView(
 func (s *DatasetService) GetClauseLabelView(
 	projectID, datasetID, datasetVersionID string,
 	limit, offset int,
+	aspect, sentiment string,
 ) (domain.DatasetArtifactView, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
@@ -241,7 +243,7 @@ func (s *DatasetService) GetClauseLabelView(
 	// clause_label_prompt_version은 build 완료 시 metadata에 저장되므로 먼저 본다.
 	// 없으면 DuckDB로 첫 행 prompt_version을 회수한다 (Applied source single).
 	prompt := strings.TrimSpace(metadataString(version.Metadata, "clause_label_prompt_version", ""))
-	summary, fallbackPrompt, total, items, err := loadClauseLabelArtifact(ref, limit, offset)
+	summary, fallbackPrompt, total, items, err := loadClauseLabelArtifact(ref, limit, offset, aspect, sentiment)
 	if err != nil {
 		return domain.DatasetArtifactView{}, err
 	}
@@ -327,7 +329,7 @@ func latestJobForBuildType(s *DatasetService, projectID, datasetVersionID, build
 // prompt_version 회수. silverone 2026-05-28 (옵션 A) — cleanRef가 주어지면
 // cleaned.parquet의 cleaned_text를 doc_id 기준 LEFT JOIN해 items 응답에
 // 포함한다. join miss는 본문 null로 두고 obs warning으로 카운트 노출.
-func loadDocGenuinenessArtifact(ref, cleanRef string, limit, offset int, datasetVersionID string) (map[string]any, string, int, []map[string]any, error) {
+func loadDocGenuinenessArtifact(ref, cleanRef string, limit, offset int, datasetVersionID, genuineness string) (map[string]any, string, int, []map[string]any, error) {
 	db, cleanup, err := openTempDuckDB()
 	if err != nil {
 		return nil, "", 0, nil, err
@@ -336,7 +338,7 @@ func loadDocGenuinenessArtifact(ref, cleanRef string, limit, offset int, dataset
 
 	source := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(ref))
 
-	// total + by-genuineness 집계.
+	// summary: 전체(필터 미적용). total + by-genuineness 집계.
 	total, byGenuineness, err := aggregateGroupedCounts(db, source, "genuineness")
 	if err != nil {
 		return nil, "", 0, nil, err
@@ -351,6 +353,20 @@ func loadDocGenuinenessArtifact(ref, cleanRef string, limit, offset int, dataset
 		return nil, "", 0, nil, err
 	}
 
+	// genuineness 서버 필터. summary는 전체 유지, items/total만 필터 반영.
+	// join 경로는 dg. prefix, 비-join 경로는 컬럼명 그대로.
+	whereSource, whereJoin := "", ""
+	filteredTotal := total
+	if g := strings.TrimSpace(genuineness); g != "" {
+		esc := escapeDuckDBLiteral(g)
+		whereSource = fmt.Sprintf("WHERE genuineness = '%s'", esc)
+		whereJoin = fmt.Sprintf("WHERE dg.genuineness = '%s'", esc)
+		filteredTotal, err = countRowsWhere(db, source, whereSource)
+		if err != nil {
+			return nil, "", 0, nil, err
+		}
+	}
+
 	if cleanRef != "" {
 		// cleaned.parquet의 row_id 컬럼이 doc_genuineness.jsonl의 doc_id와
 		// 동일 값 ({version_id}:row:N). LEFT JOIN으로 본문 누락 시에도
@@ -360,9 +376,10 @@ func loadDocGenuinenessArtifact(ref, cleanRef string, limit, offset int, dataset
 			`SELECT dg.doc_id, dg.genuineness, dg.reason, dg.source, c.cleaned_text
 			 FROM %s AS dg
 			 LEFT JOIN %s AS c ON dg.doc_id = c.row_id
+			 %s
 			 ORDER BY dg.doc_id
 			 LIMIT %d OFFSET %d`,
-			source, cleanSource, limit, offset,
+			source, cleanSource, whereJoin, limit, offset,
 		)
 		items, err := scanArtifactRows(db, itemQuery, []string{"doc_id", "genuineness", "reason", "source", "cleaned_text"})
 		if err != nil {
@@ -374,7 +391,7 @@ func loadDocGenuinenessArtifact(ref, cleanRef string, limit, offset int, dataset
 				"clean_ref", cleanRef,
 				"error", err.Error(),
 			)
-			return loadDocGenuinenessArtifactWithoutBody(db, source, summary, prompt, total, limit, offset)
+			return loadDocGenuinenessArtifactWithoutBody(db, source, summary, prompt, filteredTotal, limit, offset, whereSource)
 		}
 
 		// join miss 카운트(전체 base — 페이징 무관) — 운영자가 본문 누락
@@ -395,21 +412,23 @@ func loadDocGenuinenessArtifact(ref, cleanRef string, limit, offset int, dataset
 				"total", total,
 			)
 		}
-		return summary, prompt, total, items, nil
+		return summary, prompt, filteredTotal, items, nil
 	}
 
-	return loadDocGenuinenessArtifactWithoutBody(db, source, summary, prompt, total, limit, offset)
+	return loadDocGenuinenessArtifactWithoutBody(db, source, summary, prompt, filteredTotal, limit, offset, whereSource)
 }
 
 // loadDocGenuinenessArtifactWithoutBody — cleanRef 없거나 join 실패 시 본문
 // 컬럼 없이 기존 schema(doc_id/genuineness/reason/source)로 items 반환.
-func loadDocGenuinenessArtifactWithoutBody(db *sql.DB, source string, summary map[string]any, prompt string, total, limit, offset int) (map[string]any, string, int, []map[string]any, error) {
+// where는 genuineness 서버 필터(빈 문자열이면 전체).
+func loadDocGenuinenessArtifactWithoutBody(db *sql.DB, source string, summary map[string]any, prompt string, total, limit, offset int, where string) (map[string]any, string, int, []map[string]any, error) {
 	itemQuery := fmt.Sprintf(
 		`SELECT doc_id, genuineness, reason, source
 		 FROM %s
+		 %s
 		 ORDER BY doc_id
 		 LIMIT %d OFFSET %d`,
-		source, limit, offset,
+		source, where, limit, offset,
 	)
 	items, err := scanArtifactRows(db, itemQuery, []string{"doc_id", "genuineness", "reason", "source"})
 	if err != nil {
@@ -420,7 +439,9 @@ func loadDocGenuinenessArtifactWithoutBody(db *sql.DB, source string, summary ma
 
 // loadClauseLabelArtifact — DuckDB on-demand로 summary/total/items + 첫 행
 // prompt_version 회수. clause_id는 `{doc_id}-{partition_row_index}`로 즉시 생성.
-func loadClauseLabelArtifact(ref string, limit, offset int) (map[string]any, string, int, []map[string]any, error) {
+// summary(차트용)는 항상 전체 분포(필터 무관)이고, items + 반환 total은 aspect/
+// sentiment 필터가 적용된 결과(서버 페이징 대상)다. 필터가 비면 전체.
+func loadClauseLabelArtifact(ref string, limit, offset int, aspect, sentiment string) (map[string]any, string, int, []map[string]any, error) {
 	db, cleanup, err := openTempDuckDB()
 	if err != nil {
 		return nil, "", 0, nil, err
@@ -429,7 +450,7 @@ func loadClauseLabelArtifact(ref string, limit, offset int) (map[string]any, str
 
 	source := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(ref))
 
-	// total + 2 grouping (sentiment, aspect).
+	// summary: 전체(필터 미적용) 분포. total + 2 grouping (sentiment, aspect).
 	total, bySentiment, err := aggregateGroupedCounts(db, source, "sentiment")
 	if err != nil {
 		return nil, "", 0, nil, err
@@ -449,28 +470,71 @@ func loadClauseLabelArtifact(ref string, limit, offset int) (map[string]any, str
 		return nil, "", 0, nil, err
 	}
 
+	// 필터(aspect/sentiment) WHERE 절. 비면 전체.
+	where := buildClauseFilter(aspect, sentiment)
+
+	// 페이징 total은 필터 적용 행 수. 필터 없으면 전체 total과 동일.
+	filteredTotal := total
+	if where != "" {
+		filteredTotal, err = countRowsWhere(db, source, where)
+		if err != nil {
+			return nil, "", 0, nil, err
+		}
+	}
+
 	// clause_id는 doc_id 내 ROW_NUMBER에서 1을 빼 0-base index로 만든다.
-	// ROW_NUMBER OVER 외부에 ORDER BY가 없으면 jsonl scan 순서를 따른다 — file
-	// 작성 순서가 곧 표시 순서.
+	// ROW_NUMBER는 *전체* scan 순서 기준으로 먼저 매겨 필터와 무관하게 안정적이게
+	// 하고, 그 뒤에 필터/페이징을 적용한다.
 	itemQuery := fmt.Sprintf(
 		`WITH ordered AS (
 		    SELECT *, ROW_NUMBER() OVER () AS _rn
 		    FROM %s
+		 ),
+		 numbered AS (
+		    SELECT
+		       doc_id,
+		       doc_id || '-' || CAST(ROW_NUMBER() OVER (PARTITION BY doc_id ORDER BY _rn) - 1 AS VARCHAR) AS clause_id,
+		       clause, sentiment, aspect, source, _rn
+		    FROM ordered
 		 )
-		 SELECT
-		    doc_id,
-		    doc_id || '-' || CAST(ROW_NUMBER() OVER (PARTITION BY doc_id ORDER BY _rn) - 1 AS VARCHAR) AS clause_id,
-		    clause, sentiment, aspect, source
-		 FROM ordered
+		 SELECT doc_id, clause_id, clause, sentiment, aspect, source
+		 FROM numbered
+		 %s
 		 ORDER BY _rn
 		 LIMIT %d OFFSET %d`,
-		source, limit, offset,
+		source, where, limit, offset,
 	)
 	items, err := scanArtifactRows(db, itemQuery, []string{"doc_id", "clause_id", "clause", "sentiment", "aspect", "source"})
 	if err != nil {
 		return nil, "", 0, nil, err
 	}
-	return summary, prompt, total, items, nil
+	return summary, prompt, filteredTotal, items, nil
+}
+
+// buildClauseFilter — aspect/sentiment 필터를 WHERE 절로. 둘 다 비면 "".
+// 값은 escapeDuckDBLiteral로 escape (SQL injection 방지).
+func buildClauseFilter(aspect, sentiment string) string {
+	conds := make([]string, 0, 2)
+	if a := strings.TrimSpace(aspect); a != "" {
+		conds = append(conds, fmt.Sprintf("aspect = '%s'", escapeDuckDBLiteral(a)))
+	}
+	if s := strings.TrimSpace(sentiment); s != "" {
+		conds = append(conds, fmt.Sprintf("sentiment = '%s'", escapeDuckDBLiteral(s)))
+	}
+	if len(conds) == 0 {
+		return ""
+	}
+	return "WHERE " + strings.Join(conds, " AND ")
+}
+
+// countRowsWhere — source에서 where 조건 행 수.
+func countRowsWhere(db *sql.DB, source, where string) (int, error) {
+	row := db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s %s`, source, where))
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 // openTempDuckDB — clean_download / artifact view 공통 패턴. temp duckdb file
