@@ -11,6 +11,7 @@ import { Download } from "lucide-react";
 import BuildDialog from "./BuildDialog";
 import { useDownloadFile } from "@/shared/apis/common.mutation";
 import type { BuildJobType } from "@/shared/types/common";
+import { buildLabel } from "@/shared/constants/buildLabels";
 
 interface PipelineCardProps {
   versionId: string;
@@ -55,7 +56,9 @@ export default function PipelineCard({ versionId, type }: PipelineCardProps) {
           <div className="flex items-center gap-3">
             {getStatusIcon(status)}
             <div>
-              <h3 className="font-semibold text-slate-900">{buildType}</h3>
+              <h3 className="font-semibold text-slate-900">
+                {buildLabel(buildType as BuildJobType)}
+              </h3>
             </div>
           </div>
           <Badge className={`${getStatusColor(status)}`}>

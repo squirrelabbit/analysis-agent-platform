@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/shared/utils/common";
 import DeleteDialog from "@/components/common/dialogs/DeleteDialog";
 import type { BuildJobType } from "@/shared/types/common";
+import { buildLabel } from "@/shared/constants/buildLabels";
 import type { Version } from "../models/version";
 
 type Status = {
@@ -24,15 +25,15 @@ type Status = {
 function BadgeStatus(version: Version) {
   const { cleanStatus, docGenuinenessStatus, clauseLabelStatus } = version;
   const status: Status[] = [
-    { id: "clean", label: "정제", status: cleanStatus },
+    { id: "clean", label: buildLabel("clean"), status: cleanStatus },
     {
       id: "doc_genuineness",
-      label: "진성 분류",
+      label: buildLabel("doc_genuineness"),
       status: docGenuinenessStatus,
     },
     {
       id: "clause_label",
-      label: "절 라벨링",
+      label: buildLabel("clause_label"),
       status: clauseLabelStatus,
     },
   ];
