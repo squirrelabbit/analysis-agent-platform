@@ -295,9 +295,25 @@ def plan_and_execute_analyze(
             sample_limit=sample_limit,
             user_question=user_question,
         )
-    except PlanValidationError as exc:
+    except (PlanValidationError, ExecutorError) as exc:
+        # silverone 2026-06-05 — ExecutorError(실행 단계 SQL/skill 실패)도 user_question
+        # 경로에서 raw 500으로 새지 않게 graceful 거절로 변환. validation 실패와 reason만 구분.
+        if isinstance(exc, ExecutorError):
+            event = "analyze.execution_failed"
+            reason = "execution_error"
+            message = (
+                "분석 계획 실행 중 오류가 발생했습니다. 질문을 단순화하거나 "
+                "다른 조건으로 다시 시도해 주세요."
+            )
+        else:
+            event = "analyze.planner_validation_failed"
+            reason = "planner_validation_error"
+            message = (
+                "요청을 실행 가능한 분석 계획으로 변환하지 못했습니다. "
+                "질문을 더 구체적으로(대상·기준·집계 단위) 작성해 다시 시도해 주세요."
+            )
         _LOG.warning(
-            "analyze.planner_validation_failed",
+            event,
             dataset_version_id=dataset_version_id,
             error_category=type(exc).__name__,
             error_message=str(exc),
@@ -307,11 +323,8 @@ def plan_and_execute_analyze(
             plan={
                 "answerable": False,
                 "plan_version": "v2",
-                "reason": "planner_validation_error",
-                "message": (
-                    "요청을 실행 가능한 분석 계획으로 변환하지 못했습니다. "
-                    "질문을 더 구체적으로(대상·기준·집계 단위) 작성해 다시 시도해 주세요."
-                ),
+                "reason": reason,
+                "message": message,
                 "steps": [],
             },
             user_question=user_question,

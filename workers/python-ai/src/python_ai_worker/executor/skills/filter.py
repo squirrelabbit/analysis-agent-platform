@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .base import ExecutorError, safe_identifier, sql_literal, sql_literal_list
+from .base import ExecutorError, quote_identifier, safe_identifier, sql_literal, sql_literal_list
 
 if TYPE_CHECKING:
     from ..context import ExecutorContext
@@ -27,7 +27,7 @@ def _wrap_value_for_column(value: Any, column_type: str) -> str:
 
 def build_sql(params: dict[str, Any], context: "ExecutorContext") -> tuple[str, dict[str, Any]]:
     input_ref = safe_identifier(params["input"])
-    column = safe_identifier(params["column"])
+    column = quote_identifier(params["column"])
     operator = str(params["operator"]).strip()
     value = params.get("value")
 

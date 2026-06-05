@@ -625,6 +625,7 @@ _REJECT_REASONS = frozenset(
         "unsupported_skill",
         "missing_data_or_artifact",
         "planner_validation_error",
+        "execution_error",
     }
 )
 

@@ -27,6 +27,19 @@ def safe_identifier(value: Any) -> str:
     return text
 
 
+def quote_identifier(value: Any) -> str:
+    """SQL **column** identifier를 double-quote로 감싼다 (silverone 2026-06-05).
+
+    비-ASCII(한글 등) 컬럼명도 안전하게 지원하기 위함. 내부 `"`는 `""`로 escape해
+    SQL injection / grammar 충돌을 막는다. table/step id는 ASCII 정책(safe_identifier)을
+    그대로 유지하고, **컬럼 참조에만** 이 함수를 쓴다."""
+
+    text = str(value or "").strip()
+    if not text:
+        raise ExecutorError(f"empty SQL identifier: {value!r}")
+    return '"' + text.replace('"', '""') + '"'
+
+
 def sql_literal(value: Any) -> str:
     """plan param 값을 SQL literal로 변환. None → NULL, bool/숫자 그대로,
     문자열은 single-quote escape, datetime/date는 ISO 문자열로."""
@@ -55,6 +68,7 @@ def sql_literal_list(values: Any) -> str:
 __all__ = [
     "ExecutorError",
     "safe_identifier",
+    "quote_identifier",
     "sql_literal",
     "sql_literal_list",
 ]
