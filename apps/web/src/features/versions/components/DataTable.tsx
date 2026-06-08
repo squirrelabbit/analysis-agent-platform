@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode, useState } from "react";
+import { Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -40,9 +41,14 @@ export function DataTable<T>({
   onPageChange,
 }: DataTableProps<T>) {
   return (
-    <div className="rounded-xl border border-zinc-100 bg-white overflow-hidden">
+    <div className="rounded-2xl border border-zinc-100 bg-white shadow-sm overflow-hidden">
       <div className="px-4 py-3 border-b border-zinc-50 flex items-center justify-between flex-wrap gap-2">
-        <span className="text-xs font-medium text-zinc-500">{title}</span>
+        <div className="flex gap-2 items-center">
+          <div className="text-[15px] font-bold text-zinc-900">{title}</div>
+          <span className="text-xs text-zinc-400">
+            {totalCount.toLocaleString()}건{" "}
+          </span>
+        </div>
         {toolbar && (
           <div className="flex items-center gap-1.5 flex-wrap">{toolbar}</div>
         )}
@@ -52,12 +58,12 @@ export function DataTable<T>({
             auto-layout이면 필터마다 셀 내용 길이가 달라져 테이블/컬럼 폭이 출렁인다. */}
         <table className="w-full table-fixed text-sm">
           <thead>
-            <tr className="border-b border-zinc-50">
+            <tr className="border-b border-zinc-100 bg-zinc-50/70">
               {columns.map((col, i) => (
                 <th
                   key={i}
                   className={cn(
-                    "text-left px-4 py-2.5 text-xs font-medium text-zinc-400 uppercase tracking-wide",
+                    "text-left px-4 py-3 text-xs font-semibold text-zinc-500",
                     col.headerClassName,
                   )}
                 >
@@ -146,6 +152,35 @@ export function FilterPills({
         </button>
       ))}
     </>
+  );
+}
+
+/** 잘리는 문서 ID를 표시하고 클릭하면 전체 ID를 클립보드로 복사하는 셀 */
+export function DocIdCell({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    // clipboard API는 보안 컨텍스트(localhost/https)에서만 동작. 실패해도 조용히 무시.
+    navigator.clipboard?.writeText(id).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    });
+  };
+  return (
+    <td className="px-4 py-3">
+      <button
+        type="button"
+        onClick={copy}
+        title={copied ? "복사됨" : `클릭하여 복사: ${id}`}
+        className="group flex w-full min-w-0 items-center gap-1.5 text-left"
+      >
+        <span className="truncate text-xs text-zinc-400">{id}</span>
+        {copied ? (
+          <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+        ) : (
+          <Copy className="h-3.5 w-3.5 shrink-0 text-zinc-300 transition-colors group-hover:text-zinc-500" />
+        )}
+      </button>
+    </td>
   );
 }
 
