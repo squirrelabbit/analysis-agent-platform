@@ -68,8 +68,8 @@ export default function VersionDetailPage() {
           )}
           <span className="text-slate-300">·</span>
           <span className="text-sm text-slate-500">
-            {fmtDate(current.createdAt)} · {current.rowCount.toLocaleString()}건 ·{" "}
-            {formatFileSize(current.byteSize)}
+            {fmtDate(current.createdAt)} · {current.rowCount.toLocaleString()}건
+            · {formatFileSize(current.byteSize)}
           </span>
           <button
             onClick={() =>
@@ -89,23 +89,32 @@ export default function VersionDetailPage() {
         ))}
       </div>
       <Tabs value={tab} onValueChange={(v) => setTab(v as BuildJobType)}>
-        <TabsList className="mt-4">
-          <TabsTrigger value="clean">{buildLabel("clean")}</TabsTrigger>
-          <TabsTrigger value="doc_genuineness">
-            {buildLabel("doc_genuineness")}
-          </TabsTrigger>
-          <TabsTrigger value="clause_label">
-            {buildLabel("clause_label")}
-          </TabsTrigger>
+        <TabsList variant="line" className="my-6">
+          {builds.map((build) => (
+            <TabsTrigger
+              key={build}
+              value={build}
+              className="h-auto flex-none gap-2 rounded-none border-0 bg-transparent px-4 pb-3 pt-2.5 text-[14.5px] font-semibold text-zinc-400 transition-colors after:bg-violet-600 hover:text-zinc-600 data-[state=active]:bg-transparent data-[state=active]:text-violet-700 data-[state=active]:shadow-none"
+            >
+              {buildLabel(build)}
+            </TabsTrigger>
+          ))}
         </TabsList>
+
         {/* 각 탭이 로딩/미실행/진행중/결과 상태를 자체 처리하므로 항상 렌더 */}
-        <TabsContent value="clean">
+        <TabsContent value="clean" className="animate-in fade-in duration-300">
           <CleanTab />
         </TabsContent>
-        <TabsContent value="doc_genuineness">
+        <TabsContent
+          value="doc_genuineness"
+          className="animate-in fade-in duration-300"
+        >
           <GenuinenessTab />
         </TabsContent>
-        <TabsContent value="clause_label">
+        <TabsContent
+          value="clause_label"
+          className="animate-in fade-in duration-300"
+        >
           <ClauseTab />
         </TabsContent>
       </Tabs>
