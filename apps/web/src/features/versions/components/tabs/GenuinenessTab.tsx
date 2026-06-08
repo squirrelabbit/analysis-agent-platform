@@ -44,7 +44,8 @@ export function GenuinenessBadge({ value }: { value: string }) {
     non_review: "비진성",
     uncertain: "불확실",
   };
-  return <Badge className={cn(map[value])}>{labels[value]}</Badge>;
+  // w-16으로 라벨 길이(진성/비진성/불확실)와 무관하게 동일 폭 + 가운데 정렬.
+  return <Badge className={cn("w-16", map[value])}>{labels[value]}</Badge>;
 }
 
 const COLUMNS: Column<GenuinenessItem>[] = [
@@ -63,9 +64,9 @@ const COLUMNS: Column<GenuinenessItem>[] = [
   },
   {
     header: "판별 결과",
-    headerClassName: "w-36",
+    headerClassName: "w-36 text-center",
     cell: (item) => (
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 text-center">
         <GenuinenessBadge value={item.genuineness} />
       </td>
     ),
