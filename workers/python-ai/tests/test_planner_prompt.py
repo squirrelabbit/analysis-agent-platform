@@ -60,15 +60,23 @@ class TableSchemaRendererTests(unittest.TestCase):
 
 class DatasetSpecificColumnsRendererTests(unittest.TestCase):
     def test_columns_rendered_as_markdown_table(self) -> None:
+        # silverone 2026-06-08 (파일럿) — name(SQL alias)/type/label/source_column 노출.
         rendered = render_dataset_specific_columns(
             [
-                DatasetSpecificColumn(name="channel", type="string", description="유입 채널"),
-                DatasetSpecificColumn(name="like_count", type="int", description="좋아요 수"),
+                DatasetSpecificColumn(
+                    name="col_3", type="string", label="수집채널", source_column="수집채널"
+                ),
+                DatasetSpecificColumn(
+                    name="like_count", type="integer", label="좋아요 수", source_column="좋아요 수"
+                ),
             ]
         )
-        self.assertIn("`channel`", rendered)
+        self.assertIn("`col_3`", rendered)
         self.assertIn("`like_count`", rendered)
-        self.assertIn("| column | type | description |", rendered)
+        self.assertIn("| column | type | label | source_column |", rendered)
+        # label/source_column(원본 컬럼명)이 렌더돼 planner가 의미 파악 가능.
+        self.assertIn("수집채널", rendered)
+        self.assertIn("좋아요 수", rendered)
 
     def test_empty_yields_sentinel(self) -> None:
         rendered = render_dataset_specific_columns([])

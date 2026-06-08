@@ -54,14 +54,19 @@ DEFAULT_PLANNER_TIMEZONE = "Asia/Seoul"
 
 @dataclass(frozen=True)
 class DatasetSpecificColumn:
-    """SourceSummary에서 가져온 dataset별 docs 추가 컬럼.
+    """clean 단계가 materialize한 dataset별 docs 추가 컬럼.
 
-    standard ``docs`` table의 invariant 컬럼 외에 실제 dataset에 있는 컬럼을
-    planner prompt에 명시적으로 노출한다."""
+    standard ``docs`` table의 invariant 컬럼 외에 실제 parquet에 존재하는 컬럼을
+    planner prompt에 명시적으로 노출한다.
+    - name: SQL에서 쓰는 컬럼명(alias, 예: col_2).
+    - label / source_column: 원본 CSV 컬럼명(예: 수집채널) — planner가 의미 파악.
+    silverone 2026-06-08 (파일럿) — label/source_column 추가."""
 
     name: str
     type: str = "string"
     description: str = ""
+    label: str = ""
+    source_column: str = ""
 
 
 def render_planner_prompt(
@@ -156,9 +161,19 @@ def render_dataset_specific_columns(
 
     if not columns:
         return "이 dataset에는 dataset별 추가 컬럼이 없다."
-    lines = ["| column | type | description |", "| --- | --- | --- |"]
+    # silverone 2026-06-08 (파일럿) — name(SQL 컬럼)/type/label/source_column 노출.
+    # label·source_column은 원본 CSV 컬럼명이라 planner가 의미를 파악하고, SQL에는
+    # name(alias)을 쓴다. description은 비어 있으면 label로 대체.
+    lines = [
+        "| column | type | label | source_column |",
+        "| --- | --- | --- | --- |",
+    ]
     for column in columns:
-        lines.append(_row(column.name, column.type, column.description))
+        label = column.label or column.description
+        source = column.source_column or column.label
+        lines.append(
+            f"| `{column.name}` | {column.type} | {label} | {source} |"
+        )
     return "\n".join(lines)
 
 

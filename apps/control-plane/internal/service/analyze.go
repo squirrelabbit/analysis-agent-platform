@@ -267,6 +267,57 @@ func isRawMessageSet(raw json.RawMessage) bool {
 	return true
 }
 
+// docsExtraColumnsFromAnalysis — clean_summary.analysis_columns(=clean이 materialize한
+// typed 분석 컬럼)를 docs_extra_columns payload로 변환한다. name=parquet alias(SQL용),
+// type=advertise/parquet type, label/source_column=원본 CSV 컬럼명. clean_summary나
+// analysis_columns가 없으면(옛 데이터셋) nil을 반환해 caller가 fallback하게 한다.
+// silverone 2026-06-08 (파일럿).
+func docsExtraColumnsFromAnalysis(version domain.DatasetVersion) []map[string]any {
+	summaryRaw, ok := version.Metadata["clean_summary"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	colsRaw, ok := summaryRaw["analysis_columns"].([]any)
+	if !ok || len(colsRaw) == 0 {
+		return nil
+	}
+	asString := func(v any) string {
+		s, _ := v.(string)
+		return strings.TrimSpace(s)
+	}
+	result := make([]map[string]any, 0, len(colsRaw))
+	for _, item := range colsRaw {
+		col, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := asString(col["name"])
+		if name == "" {
+			continue
+		}
+		colType := asString(col["type"])
+		if colType == "" {
+			colType = "string"
+		}
+		label := asString(col["label"])
+		source := asString(col["source_column"])
+		if source == "" {
+			source = label
+		}
+		result = append(result, map[string]any{
+			"name":          name,
+			"type":          colType,
+			"description":   label,
+			"label":         label,
+			"source_column": source,
+		})
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 // deriveDocsExtraColumns — dataset의 원본 컬럼 중 plan_v2 docs table의 표준
 // 컬럼이 아닌 것들을 추려 planner prompt에 inject할 수 있는 형태로 반환한다.
 // 화면이 매번 컬럼 메타를 들고 보낼 필요 없도록 서버가 SourceSummary를 읽어
@@ -278,6 +329,13 @@ func isRawMessageSet(raw json.RawMessage) bool {
 // 그 외 클린 단계 메타 컬럼(source_row_index 등)도 dataset-specific으로 노출할
 // 가치가 없어 함께 필터링한다. SourceSummary가 비어 있으면 nil 반환.
 func deriveDocsExtraColumns(version domain.DatasetVersion) []map[string]any {
+	// silverone 2026-06-08 (파일럿) — clean이 materialize한 analysis_columns가 있으면
+	// 우선 사용한다. 이건 실제 parquet에 적재된 SQL-safe alias + typed 컬럼이라
+	// advertised type == executable parquet type을 보장한다. (옛 source-summary
+	// 경로는 원본 컬럼명을 advertise했지만 parquet에 없어 executor에서 걸러졌다.)
+	if cols := docsExtraColumnsFromAnalysis(version); len(cols) > 0 {
+		return cols
+	}
 	summary := loadDatasetSourceSummary(version.StorageURI, 0)
 	if summary == nil || len(summary.Columns) == 0 {
 		return nil
