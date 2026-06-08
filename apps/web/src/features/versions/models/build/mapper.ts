@@ -33,8 +33,19 @@ export const mapProgress = (dto: ProgressDto): ProgressType => ({
   percent: dto.percent ?? 0,
   processedRows: dto.processed_rows ?? 0,
   totalRows: dto.total_rows ?? 0,
+  etaSeconds: dto.eta_seconds,
   message: dto.message ?? "",
   updatedAt: dto.updated_at,
+});
+
+// applied snake_case → camelCase. raw model(snapshot)과 화면 표시명(응답 시점 env)을
+// 함께 매핑한다. 옛 응답엔 model/model_display_name이 없을 수 있어 optional.
+const mapApplied = (
+  dto?: { prompt_version?: string; model?: string; model_display_name?: string },
+): { promptVersion: string; model?: string; modelDisplayName?: string } => ({
+  promptVersion: dto?.prompt_version ?? "",
+  model: dto?.model,
+  modelDisplayName: dto?.model_display_name,
 });
 
 export const mapCleanSummary = (dto: CleanSummaryDto): CleanSummary => ({
@@ -120,7 +131,7 @@ export const mapGenuinenessBuild = (
   progress: dto.progress ? mapProgress(dto.progress) : undefined,
   summary: dto.summary ? mapGenuinenessSummary(dto.summary) : undefined,
   pagination: dto.pagination,
-  applied: { promptVersion: dto.applied?.prompt_version ?? "" },
+  applied: mapApplied(dto.applied),
   items: dto.items?.map(mapGenuinenessItem) ?? [],
 });
 
@@ -137,7 +148,7 @@ export const mapClauseLabelBuild = (
   progress: dto.progress ? mapProgress(dto.progress) : undefined,
   summary: dto.summary ? mapClauseSummary(dto.summary) : undefined,
   pagination: dto.pagination,
-  applied: { promptVersion: dto.applied?.prompt_version ?? "" },
+  applied: mapApplied(dto.applied),
   items: dto.items?.map(mapClauseItem) ?? [],
 });
 

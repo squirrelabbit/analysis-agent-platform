@@ -1,5 +1,5 @@
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
-import { AlignLeft, Box, Check, Clock, FileText, Minus, X } from "lucide-react";
+import { AlignLeft, Box, Check, FileText, Minus, X } from "lucide-react";
 import type { GenuinenessBuild, GenuinenessItem } from "../../models/build";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -12,38 +12,41 @@ import {
   FilterPills,
   type Column,
 } from "../DataTable";
-import { formatSecond } from "@/shared/utils/format";
+import {
+  BuildRunningBanner,
+  BuildTimerChip,
+  isBuildRunning,
+} from "../BuildStatusMeta";
 
 const COLORS = {
   genuineReview: "#10b981", // emerald-500
-  mixed: "#f59e0b", // amber-500
   nonReview: "#f87171", // red-400
   uncertain: "#a1a1aa", // zinc-400
 };
 
 // 값은 백엔드 genuineness 컬럼 원본(snake_case)과 일치해야 서버 필터가 동작.
+// mixed는 planner가 더 이상 생성하지 않아(backward-compat enum만 존재) UI에서 제거.
 const FILTER_OPTIONS: { label: string; value: string }[] = [
   { label: "전체", value: "" },
   { label: "진성", value: "genuine_review" },
   { label: "비진성", value: "non_review" },
   { label: "불확실", value: "uncertain" },
-  { label: "혼합", value: "mixed" },
 ];
 
 export function GenuinenessBadge({ value }: { value: string }) {
   const map: Record<string, string> = {
     genuine_review: "bg-emerald-50 text-emerald-800 border-emerald-200",
-    mixed: "bg-amber-50 text-amber-800 border-amber-200",
-    non_review: "bg-zinc-100 text-zinc-600 border-zinc-200",
+    non_review: "bg-red-50 text-red-800 border-red-200",
     uncertain: "bg-zinc-100 text-zinc-400 border-zinc-200",
   };
   const labels: Record<string, string> = {
     genuine_review: "진성",
-    mixed: "혼합",
     non_review: "비진성",
     uncertain: "불확실",
   };
-  return <Badge className={cn(map[value])}>{labels[value]}</Badge>;
+  // min-w-14로 가장 긴 라벨(비진성/불확실, 3글자) 폭에 맞춰 동일 폭 + 가운데 정렬.
+  // 진성(2글자)도 같은 폭이 되고, 더 긴 텍스트면 늘어나 clip 안 됨.
+  return <Badge className={cn("min-w-14", map[value])}>{labels[value]}</Badge>;
 }
 
 const COLUMNS: Column<GenuinenessItem>[] = [
@@ -62,9 +65,9 @@ const COLUMNS: Column<GenuinenessItem>[] = [
   },
   {
     header: "판별 결과",
-    headerClassName: "w-36",
+    headerClassName: "w-36 text-center",
     cell: (item) => (
-      <td className="px-4 py-3">
+      <td className="px-4 py-3 text-center">
         <GenuinenessBadge value={item.genuineness} />
       </td>
     ),
@@ -92,10 +95,13 @@ export default function GenuinenessTab() {
   }) as {
     data: GenuinenessBuild | undefined;
   };
-  const { summary, applied, items, pagination, durationSeconds } = data || {};
+  const { summary, applied, items, pagination, status, progress, durationSeconds } =
+    data || {};
 
   if (!summary) {
-    return (
+    return isBuildRunning(status) ? (
+      <BuildRunningBanner status={status} progress={progress} hasPrevious={false} />
+    ) : (
       <p className="text-sm text-zinc-500">
         표시할 진위성 분석 요약이 없습니다.
       </p>
@@ -103,17 +109,16 @@ export default function GenuinenessTab() {
   }
 
   const { genuineness, total } = summary;
-  const { genuineReview, mixed, nonReview, uncertain } = genuineness;
+  const { genuineReview, nonReview, uncertain } = genuineness;
 
   const pct = (value: number) =>
     total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
 
-  // 도넛/범례 공용 분포 데이터. 혼합(mixed)은 0이면 숨겨 시안의 3분류 구성에 맞춘다.
+  // 도넛/범례 공용 분포 데이터 (진성/비진성/불확실 3분류, mixed 제거).
   const ratioData = [
     { key: "진성", value: genuineReview, color: COLORS.genuineReview },
     { key: "비진성", value: nonReview, color: COLORS.nonReview },
     { key: "불확실", value: uncertain, color: COLORS.uncertain },
-    { key: "혼합", value: mixed, color: COLORS.mixed },
   ].filter((d) => d.value > 0);
 
   // pagination.total은 (필터 적용된) 전체 건수. 표/페이지 계산 기준.
@@ -123,13 +128,7 @@ export default function GenuinenessTab() {
     <div className="space-y-5">
       {/* 메타 */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-        <span className="inline-flex items-center gap-1.5 font-medium">
-          <Clock className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
-          소요 시간
-          <b className="font-bold text-zinc-800">
-            {formatSecond(durationSeconds)}
-          </b>
-        </span>
+        <BuildTimerChip status={status} durationSeconds={durationSeconds} />
         <span className="h-3 w-px bg-zinc-200" />
         <span className="inline-flex items-center gap-1.5 font-medium">
           <AlignLeft className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
@@ -142,9 +141,14 @@ export default function GenuinenessTab() {
         <span className="inline-flex items-center gap-1.5 font-medium">
           <Box className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
           모델
-          <b className="font-bold text-zinc-800">{items?.[0]?.source ?? "-"}</b>
+          {/* 표시명 우선, 없으면 raw model. raw model id는 title(tooltip)로 확인. */}
+          <b className="font-bold text-zinc-800" title={applied?.model}>
+            {applied?.modelDisplayName || applied?.model || "-"}
+          </b>
         </span>
       </div>
+
+      <BuildRunningBanner status={status} progress={progress} hasPrevious />
 
       {/* 판별 결과 요약 */}
       <div>

@@ -6,6 +6,7 @@ export interface ProgressDto {
   percent: number;
   processed_rows: number;
   total_rows: number;
+  eta_seconds?: number;
   message: string;
   updated_at: string;
 }
@@ -25,7 +26,9 @@ export interface BuildBaseDto<TType extends BuildJobType, TSummary> {
 export interface PaginatedSummaryDto<T> {
   items: T[];
   pagination: Pagination;
-  applied: { prompt_version: string };
+  // model: 빌드 당시 raw model id snapshot. model_display_name: control-plane이 응답
+  // 시점에 env로 입히는 화면 표시명(불일치/미설정 시 생략). 옛 응답엔 없을 수 있어 optional.
+  applied: { prompt_version: string; model?: string; model_display_name?: string };
 }
 
 export interface CleanSummaryDto {
