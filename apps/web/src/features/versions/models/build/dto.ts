@@ -1,5 +1,6 @@
 import type { Pagination } from "@/shared/models/common";
 import type { BuildJobType } from "@/shared/types/common";
+import type { AspectSentiment } from "./model";
 
 
 export interface ProgressDto {
@@ -71,17 +72,8 @@ export interface ClauseItemDto {
 }
 
 export interface ClauseSummaryDto {
-  aspect: {
-    show_program?: number;
-    experience_booth?: number;
-    ambiance_scenery?: number;
-    food?: number;
-    price_cost?: number;
-    facility_crowd?: number;
-    access_traffic?: number;
-    operation_service?: number;
-    etc?: number;
-  };
+  aspect: Record<string, number>;
+  aspect_sentiment: Record<string, AspectSentiment>
   sentiment: {
     positive?: number;
     negative?: number;

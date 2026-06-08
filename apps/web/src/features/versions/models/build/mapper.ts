@@ -98,6 +98,7 @@ export const mapClauseSummary = (dto: ClauseSummaryDto): ClauseSummary => ({
   aspect: Object.fromEntries(
     Object.entries(dto.aspect ?? {}).map(([key, value]) => [key, value ?? 0]),
   ),
+  aspectSentiment: dto.aspect_sentiment,
   sentiment: {
     positive: dto.sentiment?.positive ?? 0,
     negative: dto.sentiment?.negative ?? 0,
