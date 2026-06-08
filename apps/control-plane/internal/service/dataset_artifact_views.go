@@ -194,11 +194,9 @@ func (s *DatasetService) GetDocGenuinenessView(
 		return domain.DatasetArtifactView{}, err
 	}
 	view.Summary = summary
-	// model / model_display_name은 build 시 doc_genuineness_summary metadata에 저장된
-	// 값. raw model id는 그대로, display name(env LLOA_MODEL_DISPLAY_NAME 기반)은 옛
-	// dataset엔 없을 수 있어 비면 생략(프론트가 model fallback).
+	// model은 build 당시 doc_genuineness_summary metadata의 raw 모델 id(snapshot).
+	// model_display_name은 응답 시점에 env로 입힌다(빌드 재실행 불필요).
 	model := summaryMetadataString(version.Metadata, "doc_genuineness_summary", "model")
-	modelDisplayName := summaryMetadataString(version.Metadata, "doc_genuineness_summary", "model_display_name")
 	applied := map[string]any{}
 	if prompt != "" {
 		applied["prompt_version"] = prompt
@@ -206,8 +204,8 @@ func (s *DatasetService) GetDocGenuinenessView(
 	if model != "" {
 		applied["model"] = model
 	}
-	if modelDisplayName != "" {
-		applied["model_display_name"] = modelDisplayName
+	if display := s.modelDisplayNameFor(model); display != "" {
+		applied["model_display_name"] = display
 	}
 	if len(applied) > 0 {
 		view.Applied = applied
@@ -267,10 +265,10 @@ func (s *DatasetService) GetClauseLabelView(
 	if prompt == "" {
 		prompt = fallbackPrompt
 	}
-	// model / model_display_name은 build 시 clause_label_summary metadata에 저장된 값.
-	// per-clause record에는 없어 metadata에서 회수한다. display name은 비면 생략.
+	// model은 build 당시 clause_label_summary metadata의 raw 모델 id(snapshot).
+	// per-clause record에는 없어 metadata에서 회수한다. model_display_name은 응답
+	// 시점에 env로 입힌다(빌드 재실행 불필요).
 	model := summaryMetadataString(version.Metadata, "clause_label_summary", "model")
-	modelDisplayName := summaryMetadataString(version.Metadata, "clause_label_summary", "model_display_name")
 	applied := map[string]any{}
 	if prompt != "" {
 		applied["prompt_version"] = prompt
@@ -278,8 +276,8 @@ func (s *DatasetService) GetClauseLabelView(
 	if model != "" {
 		applied["model"] = model
 	}
-	if modelDisplayName != "" {
-		applied["model_display_name"] = modelDisplayName
+	if display := s.modelDisplayNameFor(model); display != "" {
+		applied["model_display_name"] = display
 	}
 	if len(applied) > 0 {
 		view.Applied = applied
@@ -290,6 +288,21 @@ func (s *DatasetService) GetClauseLabelView(
 }
 
 // ===== helpers =====
+
+// modelDisplayNameFor — artifact의 raw 모델 id에 대한 화면 표시명을 응답 시점에
+// 계산한다. 빌드 당시 모델(model)이 현재 설정된 LLOA_MODEL과 같을 때만 현재
+// LLOA_MODEL_DISPLAY_NAME을 반환한다. 다른 모델로 빌드된 옛 결과는 "" → 표시명
+// 미노출(프론트가 raw model로 fallback). 하드코딩 매핑 없이 env 기반.
+func (s *DatasetService) modelDisplayNameFor(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" || s.lloaModelDisplayName == "" {
+		return ""
+	}
+	if model != s.lloaModel {
+		return ""
+	}
+	return s.lloaModelDisplayName
+}
 
 func normalizeArtifactPagination(limit, offset int) (int, int) {
 	if limit <= 0 {

@@ -99,6 +99,10 @@ services:
       PYTHON_AI_WORKER_URL: http://python-ai-worker:8090
       PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC: ${PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC:-5400}
       PLANNER_BACKEND: python-ai
+      # artifact view 응답의 model_display_name을 응답 시점에 입히기 위해 control-plane도
+      # LLOA 모델/표시명 env를 읽는다(빌드 snapshot 아님 — .env 변경 즉시 반영).
+      LLOA_MODEL: ${LLOA_MODEL:-wisenut/wise-lloa-max-v1.2.1}
+      LLOA_MODEL_DISPLAY_NAME: ${LLOA_MODEL_DISPLAY_NAME:-}
     ports:
       - "127.0.0.1:18080:8080"
     volumes:
