@@ -42,15 +42,42 @@ function ProgressBar({ percent }: { percent: number }) {
   );
 }
 
+/** 빌드 상태 조회 전(첫 로딩) 표시하는 카드 스켈레톤 */
+function PipelineCardSkeleton() {
+  return (
+    <Card className="ring-0 flex-1 border-zinc-100 shadow-sm">
+      <CardContent>
+        <div className="mb-4 flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-5 w-5 animate-pulse rounded-full bg-zinc-100" />
+            <div className="h-4 w-24 animate-pulse rounded bg-zinc-100" />
+          </div>
+          <div className="h-5 w-14 animate-pulse rounded-full bg-zinc-100" />
+        </div>
+        <div className="mb-4">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="h-3 w-10 animate-pulse rounded bg-zinc-100" />
+            <div className="h-3 w-8 animate-pulse rounded bg-zinc-100" />
+          </div>
+          <div className="h-2 w-full animate-pulse rounded-full bg-zinc-100" />
+        </div>
+        <div className="h-7 w-full animate-pulse rounded-lg bg-zinc-100" />
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function PipelineCard({ versionId, type }: PipelineCardProps) {
   const { mutateAsync: onDownload, isPending: isDownloading } =
     useDownloadFile();
 
   const { data, isLoading } = useBuildVersion(type);
-  const status = isLoading ? "running" : (data?.status ?? "not_requested");
+  const status = data?.status ?? "not_requested";
   const buildType = data?.buildType ?? type;
   const percent = data?.progress?.percent ?? 0;
   const running = isBuildRunning(status);
+
+  if (isLoading) return <PipelineCardSkeleton />;
 
   return (
     <Card className="flex-1 ring-0 border-zinc-100 hover:shadow-md transition-shadow shadow-sm">
