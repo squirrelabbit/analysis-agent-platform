@@ -17,6 +17,7 @@ import { useTaxonomy } from "@/features/taxonomy/hooks/taxonomy.query";
 import { aspectLabelOf } from "@/features/taxonomy/models";
 import {
   DataTable,
+  DocIdCell,
   ExpandableTextCell,
   FilterPills,
   type Column,
@@ -118,6 +119,9 @@ export function ClauseTab() {
       value,
     }));
 
+  // aspect 막대 스케일 기준 = 1위 aspect 건수 (전체는 막대 표시 안 함).
+  const maxAspect = Math.max(...aspectData.map((a) => a.value), 1);
+
   // 드릴다운: "전체"(ALL_KEY) 또는 개별 aspect 선택. 기본값은 전체.
   const overallByName: Record<string, number> = { positive, neutral, negative };
   const selectedKey = activeAspect ?? ALL_KEY;
@@ -146,18 +150,12 @@ export function ClauseTab() {
   // pagination.total은 (필터 적용된) 전체 건수. 표/페이지 계산의 기준.
   const totalCount = pagination?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-  const loadedStart = totalCount === 0 ? 0 : (pagination?.offset ?? 0) + 1;
-  const loadedEnd = (pagination?.offset ?? 0) + (items?.length ?? 0);
 
   const columns: Column<ClauseItem>[] = [
     {
       header: "문서 ID",
-      headerClassName: "w-48",
-      cell: (item) => (
-        <td className="px-4 py-3 font-mono text-xs text-zinc-400 max-w-45 truncate">
-          {item.docId}
-        </td>
-      ),
+      headerClassName: "w-30",
+      cell: (item) => <DocIdCell id={item.docId} />,
     },
     {
       header: "문장",
@@ -213,193 +211,202 @@ export function ClauseTab() {
       <BuildRunningBanner status={status} progress={progress} hasPrevious />
 
       {/* 분류 현황 */}
-      <div>
-        <p className="mb-3 text-[13px] font-bold text-zinc-600">분류 현황</p>
-        <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
-          <StatCard
-            value={summary.total?.toLocaleString()}
-            label="총 문장 수"
-            icon={FileText}
-            tone="neutral"
-          />
-          <StatCard
-            value={positive?.toLocaleString()}
-            label="긍정 (positive)"
-            icon={Check}
-            tone="ok"
-            valueColor="text-emerald-600"
-          />
-          <StatCard
-            value={neutral?.toLocaleString()}
-            label="중립 (neutral)"
-            icon={Minus}
-            tone="muted"
-            valueColor="text-zinc-500"
-          />
-          <StatCard
-            value={negative?.toLocaleString()}
-            label="부정 (negative)"
-            icon={X}
-            tone="danger"
-            valueColor="text-red-500"
-          />
-        </div>
+      <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+        <StatCard
+          value={summary.total?.toLocaleString()}
+          label="총 문장 수"
+          icon={FileText}
+          tone="neutral"
+        />
+        <StatCard
+          value={positive?.toLocaleString()}
+          label="긍정 (positive)"
+          icon={Check}
+          tone="ok"
+          valueColor="text-emerald-600"
+        />
+        <StatCard
+          value={neutral?.toLocaleString()}
+          label="중립 (neutral)"
+          icon={Minus}
+          tone="muted"
+          valueColor="text-zinc-500"
+        />
+        <StatCard
+          value={negative?.toLocaleString()}
+          label="부정 (negative)"
+          icon={X}
+          tone="danger"
+          valueColor="text-red-500"
+        />
       </div>
 
       {/* Aspect별 감성 분포 (전체 + aspect 드릴다운) */}
-      <div>
-        <p className="mb-3 text-[13px] font-bold text-zinc-600">Aspect 감성 분포</p>
-        <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
-          <div className="grid grid-cols-1 gap-7 md:grid-cols-[minmax(240px,1fr)_1px_minmax(220px,0.85fr)]">
-            {/* 좌: 주제 선택 목록 (전체 + aspect) */}
-            <div className="flex flex-col gap-1">
-              <p className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
-                주제 선택
-              </p>
-              {/* 전체 */}
-              <button
-                type="button"
-                onClick={() => setActiveAspect(null)}
+      <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
+        <div className="grid grid-cols-1 gap-7 md:grid-cols-[minmax(240px,1fr)_1px_minmax(220px,0.85fr)]">
+          {/* 좌: 주제 선택 목록 (전체 + aspect) */}
+          <div className="flex flex-col gap-1">
+            <div className="text-[15px] font-bold text-zinc-900">
+              Aspect 감성 분포
+            </div>
+            <p className="mb-2 text-xs font-medium text-zinc-400">
+              조항 수 기준 · 막대를 누르면 오른쪽에 감성 구성이 표시됩니다
+            </p>
+            {/* 전체 — 막대 없이 라벨/건수만 (전체 건수는 aspect 스케일 밖) */}
+            <button
+              type="button"
+              onClick={() => setActiveAspect(null)}
+              className={cn(
+                "grid grid-cols-[84px_1fr_auto_16px] items-center gap-2.5 rounded-xl border-l-2 px-2 py-2 text-left transition-colors",
+                isAll
+                  ? "border-violet-500 bg-violet-50"
+                  : "border-transparent hover:bg-zinc-50",
+              )}
+            >
+              <span
                 className={cn(
-                  "grid grid-cols-[1fr_auto_16px] items-center gap-2.5 rounded-xl border-l-2 px-2 py-2 text-left transition-colors",
-                  isAll
-                    ? "border-violet-500 bg-violet-50"
-                    : "border-transparent hover:bg-zinc-50",
+                  "truncate text-right text-xs font-bold",
+                  isAll ? "text-violet-700" : "text-zinc-600",
                 )}
               >
-                <span
+                전체
+              </span>
+              <span aria-hidden />
+              <span className="min-w-9 text-right text-xs font-bold tabular-nums text-zinc-800">
+                {summary.total?.toLocaleString()}
+              </span>
+              <ChevronRight
+                className={cn(
+                  "h-3.5 w-3.5 transition-colors",
+                  isAll ? "text-violet-600" : "text-zinc-300",
+                )}
+              />
+            </button>
+            <div className="my-1 h-px bg-zinc-100" />
+            {/* aspect 목록 — 막대는 1위 aspect(maxAspect) 기준 스케일 */}
+            {aspectData.map((a) => {
+              const sel = !isAll && a.key === selectedKey;
+              return (
+                <button
+                  key={a.key}
+                  type="button"
+                  onClick={() => setActiveAspect(a.key)}
                   className={cn(
-                    "text-xs font-bold",
-                    isAll ? "text-violet-700" : "text-zinc-600",
+                    "grid grid-cols-[84px_1fr_auto_16px] items-center gap-2.5 rounded-xl border-l-2 px-2 py-2 text-left transition-colors",
+                    sel
+                      ? "border-violet-500 bg-violet-50"
+                      : "border-transparent hover:bg-zinc-50",
                   )}
                 >
-                  전체
-                </span>
-                <span className="min-w-9 text-right text-xs font-bold tabular-nums text-zinc-800">
-                  {summary.total?.toLocaleString()}
-                </span>
-                <ChevronRight
-                  className={cn(
-                    "h-3.5 w-3.5 transition-colors",
-                    isAll ? "text-violet-600" : "text-zinc-300",
-                  )}
-                />
-              </button>
-              <div className="my-1 h-px bg-zinc-100" />
-              {/* aspect 목록 */}
-              {aspectData.map((a) => {
-                const sel = !isAll && a.key === selectedKey;
-                return (
-                  <button
-                    key={a.key}
-                    type="button"
-                    onClick={() => setActiveAspect(a.key)}
+                  <span
                     className={cn(
-                      "grid grid-cols-[1fr_auto_16px] items-center gap-2.5 rounded-xl border-l-2 px-2 py-2 text-left transition-colors",
-                      sel
-                        ? "border-violet-500 bg-violet-50"
-                        : "border-transparent hover:bg-zinc-50",
+                      "truncate text-right text-xs font-semibold",
+                      sel ? "text-violet-700" : "text-zinc-600",
                     )}
                   >
+                    {a.name}
+                  </span>
+                  <span className="h-2.5 overflow-hidden rounded-full bg-zinc-100">
                     <span
                       className={cn(
-                        "truncate text-xs font-semibold",
-                        sel ? "text-violet-700" : "text-zinc-600",
+                        "block h-full rounded-full bg-linear-to-r",
+                        sel
+                          ? "from-violet-600 to-violet-400"
+                          : "from-blue-500 to-blue-400",
                       )}
-                    >
-                      {a.name}
-                    </span>
-                    <span className="min-w-9 text-right text-xs font-bold tabular-nums text-zinc-800">
-                      {a.value.toLocaleString()}
-                    </span>
-                    <ChevronRight
-                      className={cn(
-                        "h-3.5 w-3.5 transition-colors",
-                        sel ? "text-violet-600" : "text-zinc-300",
-                      )}
+                      style={{ width: `${(a.value / maxAspect) * 100}%` }}
                     />
-                  </button>
-                );
-              })}
+                  </span>
+                  <span className="min-w-9 text-right text-xs font-bold tabular-nums text-zinc-800">
+                    {a.value.toLocaleString()}
+                  </span>
+                  <ChevronRight
+                    className={cn(
+                      "h-3.5 w-3.5 transition-colors",
+                      sel ? "text-violet-600" : "text-zinc-300",
+                    )}
+                  />
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 구분선 */}
+          <div className="hidden self-stretch bg-zinc-100 md:block" />
+
+          {/* 우: 선택 주제 + 설명 + 도넛 */}
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 shrink-0 rounded-full bg-violet-600" />
+              <span className="truncate font-extrabold text-violet-700">
+                {selectedLabel}
+              </span>
+            </div>
+            <div className="mt-1 text-xs font-medium text-zinc-400">
+              {selectedDesc}
             </div>
 
-            {/* 구분선 */}
-            <div className="hidden self-stretch bg-zinc-100 md:block" />
-
-            {/* 우: 선택 주제 + 설명 + 도넛 */}
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 shrink-0 rounded-full bg-violet-600" />
-                <span className="truncate font-extrabold text-violet-700">
-                  {selectedLabel}
-                </span>
-              </div>
-              <div className="mt-1 text-xs font-medium text-zinc-400">
-                {selectedDesc}
-              </div>
-
-              <div className="relative mx-auto mt-6 h-44 w-44">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={drillData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={56}
-                      outerRadius={82}
-                      paddingAngle={3}
-                      nameKey="name"
-                      dataKey="value"
-                      stroke="none"
-                    >
-                      {drillData.map((d) => (
-                        <Cell key={d.name} fill={SENTIMENT_COLORS[d.name]} />
-                      ))}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="pointer-events-none absolute inset-0 grid place-items-center">
-                  <div className="text-center">
-                    <div className="text-3xl font-extrabold leading-none tabular-nums text-zinc-900">
-                      {drillTotal.toLocaleString()}
-                    </div>
-                    <div className="mt-1 text-[11px] font-semibold text-zinc-400">
-                      총 문장
-                    </div>
+            <div className="relative mx-auto mt-6 h-44 w-44">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={drillData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={56}
+                    outerRadius={82}
+                    paddingAngle={3}
+                    nameKey="name"
+                    dataKey="value"
+                    stroke="none"
+                  >
+                    {drillData.map((d) => (
+                      <Cell key={d.name} fill={SENTIMENT_COLORS[d.name]} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 grid place-items-center">
+                <div className="text-center">
+                  <div className="text-3xl font-extrabold leading-none tabular-nums text-zinc-900">
+                    {drillTotal.toLocaleString()}
+                  </div>
+                  <div className="mt-1 text-[11px] font-semibold text-zinc-400">
+                    총 문장
                   </div>
                 </div>
               </div>
+            </div>
 
-              <div className="mt-6 flex flex-col gap-3">
-                {drillData.map((d) => (
-                  <div key={d.name}>
-                    <div className="flex items-center gap-2 text-[13px]">
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ background: SENTIMENT_COLORS[d.name] }}
-                      />
-                      <span className="font-semibold text-zinc-600">
-                        {SENTIMENT_LABELS[d.name]}
-                      </span>
-                      <span className="ml-auto font-semibold tabular-nums text-zinc-400">
-                        {d.value.toLocaleString()}건
-                      </span>
-                      <span className="min-w-12 text-right font-extrabold tabular-nums text-zinc-800">
-                        {d.percent}%
-                      </span>
-                    </div>
-                    <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-zinc-100">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${d.percent}%`,
-                          background: SENTIMENT_COLORS[d.name],
-                        }}
-                      />
-                    </div>
+            <div className="mt-6 flex flex-col gap-3">
+              {drillData.map((d) => (
+                <div key={d.name}>
+                  <div className="flex items-center gap-2 text-[13px]">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ background: SENTIMENT_COLORS[d.name] }}
+                    />
+                    <span className="font-semibold text-zinc-600">
+                      {SENTIMENT_LABELS[d.name]}
+                    </span>
+                    <span className="ml-auto font-semibold tabular-nums text-zinc-400">
+                      {d.value.toLocaleString()}건
+                    </span>
+                    <span className="min-w-12 text-right font-extrabold tabular-nums text-zinc-800">
+                      {d.percent}%
+                    </span>
                   </div>
-                ))}
-              </div>
+                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-zinc-100">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${d.percent}%`,
+                        background: SENTIMENT_COLORS[d.name],
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -410,7 +417,7 @@ export function ClauseTab() {
         columns={columns}
         items={items}
         rowKey={(item) => item.clauseId}
-        title={`총 ${totalCount}건 중 ${loadedStart}–${loadedEnd}건 표시`}
+        title={`절 라벨링 결과 상세`}
         toolbar={
           <>
             <Select

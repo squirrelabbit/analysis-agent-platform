@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { useBuildVersion } from "../../hooks/build.query";
 import {
   DataTable,
+  DocIdCell,
   ExpandableTextCell,
   FilterPills,
   type Column,
@@ -53,11 +54,7 @@ const COLUMNS: Column<GenuinenessItem>[] = [
   {
     header: "문서 ID",
     headerClassName: "w-48",
-    cell: (item) => (
-      <td className="px-4 py-3 font-mono text-xs text-zinc-400 max-w-45 truncate">
-        {item.docId}
-      </td>
-    ),
+    cell: (item) => <DocIdCell id={item.docId} />,
   },
   {
     header: "정제 텍스트",
@@ -95,12 +92,23 @@ export default function GenuinenessTab() {
   }) as {
     data: GenuinenessBuild | undefined;
   };
-  const { summary, applied, items, pagination, status, progress, durationSeconds } =
-    data || {};
+  const {
+    summary,
+    applied,
+    items,
+    pagination,
+    status,
+    progress,
+    durationSeconds,
+  } = data || {};
 
   if (!summary) {
     return isBuildRunning(status) ? (
-      <BuildRunningBanner status={status} progress={progress} hasPrevious={false} />
+      <BuildRunningBanner
+        status={status}
+        progress={progress}
+        hasPrevious={false}
+      />
     ) : (
       <p className="text-sm text-zinc-500">
         표시할 진위성 분석 요약이 없습니다.
@@ -151,102 +159,92 @@ export default function GenuinenessTab() {
       <BuildRunningBanner status={status} progress={progress} hasPrevious />
 
       {/* 판별 결과 요약 */}
-      <div>
-        <p className="mb-3 text-[13px] font-bold text-zinc-600">
-          판별 결과 요약
-        </p>
-        <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
-          <StatCard
-            value={total?.toLocaleString()}
-            label="전체 문서"
-            icon={FileText}
-            tone="neutral"
-          />
-          <StatCard
-            value={genuineReview?.toLocaleString()}
-            label="진성"
-            icon={Check}
-            tone="ok"
-            valueColor="text-emerald-600"
-          />
-          <StatCard
-            value={nonReview?.toLocaleString()}
-            label="비진성"
-            icon={X}
-            tone="danger"
-            valueColor="text-red-500"
-          />
-          <StatCard
-            value={uncertain?.toLocaleString()}
-            label="불확실"
-            icon={Minus}
-            tone="muted"
-            valueColor="text-zinc-400"
-          />
-        </div>
+      <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+        <StatCard
+          value={total?.toLocaleString()}
+          label="전체 문서"
+          icon={FileText}
+          tone="neutral"
+        />
+        <StatCard
+          value={genuineReview?.toLocaleString()}
+          label="진성"
+          icon={Check}
+          tone="ok"
+          valueColor="text-emerald-600"
+        />
+        <StatCard
+          value={nonReview?.toLocaleString()}
+          label="비진성"
+          icon={X}
+          tone="danger"
+          valueColor="text-red-500"
+        />
+        <StatCard
+          value={uncertain?.toLocaleString()}
+          label="불확실"
+          icon={Minus}
+          tone="muted"
+          valueColor="text-zinc-400"
+        />
       </div>
 
       {/* 판별 결과 분포 */}
-      <div>
-        <p className="mb-3 text-[13px] font-bold text-zinc-600">
+      <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
+        <div className="text-[15px] font-bold text-zinc-900">
           판별 결과 분포
-        </p>
-        <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
-          <div className="text-[15px] font-bold text-zinc-900">
-            판별 결과 분포
-          </div>
-          <div className="mt-1 text-xs font-medium text-zinc-400">
-            전체 {total?.toLocaleString()}건 기준 · 진성 비율{" "}
-            {pct(genuineReview)}%
-          </div>
-          <div className="mt-5 flex flex-wrap items-center gap-7">
-            <ResponsiveContainer width={132} height={132} className="shrink-0">
-              <PieChart>
-                <Pie
-                  data={ratioData}
-                  dataKey="value"
-                  nameKey="key"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={42}
-                  outerRadius={62}
-                  paddingAngle={2}
-                  stroke="none"
-                >
-                  {ratioData.map((d) => (
-                    <Cell key={d.key} fill={d.color} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="flex min-w-60 flex-1 flex-col gap-4">
-              {ratioData.map((d) => (
-                <div key={d.key}>
-                  <div className="flex items-center gap-2 text-[13.5px]">
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ background: d.color }}
-                    />
-                    <span className="font-semibold text-zinc-600">{d.key}</span>
-                    <span className="ml-auto font-semibold tabular-nums text-zinc-400">
-                      {d.value.toLocaleString()}건
-                    </span>
-                    <span className="min-w-14 text-right font-extrabold tabular-nums text-zinc-800">
-                      {pct(d.value)}%
-                    </span>
-                  </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-zinc-100">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${pct(d.value)}%`,
-                        background: d.color,
-                      }}
-                    />
-                  </div>
+        </div>
+        <div className="mt-1 text-xs font-medium text-zinc-400">
+          전체 {total?.toLocaleString()}건 기준 · 진성 비율 {pct(genuineReview)}
+          %
+        </div>
+        <div className="mt-5 flex flex-wrap items-center gap-7">
+          <ResponsiveContainer width={132} height={132} className="shrink-0">
+            <PieChart>
+              <Pie
+                data={ratioData}
+                dataKey="value"
+                nameKey="key"
+                cx="50%"
+                cy="50%"
+                innerRadius={42}
+                outerRadius={62}
+                paddingAngle={2}
+                stroke="none"
+              >
+                {ratioData.map((d) => (
+                  <Cell key={d.key} fill={d.color} />
+                ))}
+              </Pie>
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="flex min-w-60 flex-1 flex-col gap-4">
+            {ratioData.map((d) => (
+              <div key={d.key}>
+                <div className="flex items-center gap-2 text-[13.5px]">
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ background: d.color }}
+                  />
+                  <span className="font-semibold text-zinc-600">{d.key}</span>
+                  <span className="ml-auto font-semibold tabular-nums text-zinc-400">
+                    {d.value.toLocaleString()}건
+                  </span>
+                  <span className="min-w-14 text-right font-extrabold tabular-nums text-zinc-800">
+                    {pct(d.value)}%
+                  </span>
                 </div>
-              ))}
-            </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-zinc-100">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${pct(d.value)}%`,
+                      background: d.color,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -256,7 +254,7 @@ export default function GenuinenessTab() {
         columns={COLUMNS}
         items={items}
         rowKey={(item) => item.docId}
-        title={`판별 결과 상세 (${totalCount}건)`}
+        title={`판별 결과 상세`}
         toolbar={
           <FilterPills
             options={FILTER_OPTIONS}
