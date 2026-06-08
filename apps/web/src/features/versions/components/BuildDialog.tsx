@@ -27,17 +27,21 @@ export default function BuildDialog({
   formId,
   stage,
   status,
+  disabled = false,
 }: {
   stage: BuildJobType;
   formId: string;
   status: string;
+  /** 외부 사유(예: 다운로드 중)로 강제 비활성화 */
+  disabled?: boolean;
 }) {
   const { projectId, datasetId } = useParams();
   const { mutateAsync } = useBuildJob();
   const [open, setOpen] = useState(false);
 
   const close = () => setOpen(false);
-  const isRunning = status === "queued";
+  const isRunning = status === "queued" || status === "running";
+  const blocked = isRunning || disabled;
 
   if (!projectId || !datasetId) return null;
   return (
@@ -45,10 +49,10 @@ export default function BuildDialog({
       <DialogTrigger asChild>
         <Button
           variant={status === "ready" ? "secondary" : "outline"}
-          disabled={isRunning}
+          disabled={blocked}
           className={cn(
             "flex-1 h-7 gap-1.5 rounded-lg px-2.5 text-xs transition-all",
-            isRunning && "cursor-not-allowed opacity-70",
+            blocked && "cursor-not-allowed opacity-70",
             status === "ready" && "text-blue-600 hover:text-blue-700",
           )}
         >

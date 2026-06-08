@@ -15,6 +15,8 @@ import {
 } from "../DataTable";
 import {
   BuildRunningBanner,
+  BuildTabEmpty,
+  BuildTabLoading,
   BuildTimerChip,
   isBuildRunning,
 } from "../BuildStatusMeta";
@@ -85,13 +87,21 @@ export default function GenuinenessTab() {
   const pageSize = 10;
 
   // 서버 페이징 + 서버 필터: 표는 서버가 필터/페이징해 준 현재 페이지(items)만 렌더.
-  const { data } = useBuildVersion("doc_genuineness", undefined, {
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
-    genuineness: filter || undefined,
-  }) as {
+  const { data, isLoading, isPlaceholderData } = useBuildVersion(
+    "doc_genuineness",
+    undefined,
+    {
+      limit: pageSize,
+      offset: (page - 1) * pageSize,
+      genuineness: filter || undefined,
+    },
+  ) as {
     data: GenuinenessBuild | undefined;
+    isLoading: boolean;
+    isPlaceholderData: boolean;
   };
+  // 페이지/필터 변경으로 새 데이터 도착 전(이전 데이터 표시 중) → 표 로딩 오버레이.
+  const tableLoading = isPlaceholderData;
   const {
     summary,
     applied,
@@ -102,6 +112,7 @@ export default function GenuinenessTab() {
     durationSeconds,
   } = data || {};
 
+  if (isLoading) return <BuildTabLoading />;
   if (!summary) {
     return isBuildRunning(status) ? (
       <BuildRunningBanner
@@ -110,9 +121,7 @@ export default function GenuinenessTab() {
         hasPrevious={false}
       />
     ) : (
-      <p className="text-sm text-zinc-500">
-        표시할 진위성 분석 요약이 없습니다.
-      </p>
+      <BuildTabEmpty type="doc_genuineness" status={status} />
     );
   }
 
@@ -269,6 +278,7 @@ export default function GenuinenessTab() {
         totalPages={totalPages}
         totalCount={totalCount}
         onPageChange={setPage}
+        loading={tableLoading}
       />
     </div>
   );

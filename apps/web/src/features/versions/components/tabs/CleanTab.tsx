@@ -5,13 +5,19 @@ import type { CleanBuild } from "../../models/build";
 import { useBuildVersion } from "../../hooks/build.query";
 import {
   BuildRunningBanner,
+  BuildTabEmpty,
+  BuildTabLoading,
   BuildTimerChip,
   isBuildRunning,
 } from "../BuildStatusMeta";
 
 export default function CleanTab() {
-  const { data } = useBuildVersion("clean") as { data: CleanBuild | undefined };
+  const { data, isLoading } = useBuildVersion("clean") as {
+    data: CleanBuild | undefined;
+    isLoading: boolean;
+  };
   const { summary, status, progress, durationSeconds } = data || {};
+  if (isLoading) return <BuildTabLoading />;
   if (!summary) {
     return isBuildRunning(status) ? (
       <BuildRunningBanner
@@ -20,7 +26,7 @@ export default function CleanTab() {
         hasPrevious={false}
       />
     ) : (
-      <p className="text-sm text-zinc-500">표시할 정제 요약이 없습니다.</p>
+      <BuildTabEmpty type="clean" status={status} />
     );
   }
 

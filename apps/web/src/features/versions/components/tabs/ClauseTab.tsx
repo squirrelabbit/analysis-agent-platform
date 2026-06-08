@@ -24,6 +24,8 @@ import {
 } from "../DataTable";
 import {
   BuildRunningBanner,
+  BuildTabEmpty,
+  BuildTabLoading,
   BuildTimerChip,
   isBuildRunning,
 } from "../BuildStatusMeta";
@@ -76,12 +78,22 @@ export function ClauseTab() {
   const pageSize = 10;
 
   // 서버 페이징 + 서버 필터: 표는 서버가 필터/페이징해 준 현재 페이지(items)만 렌더.
-  const { data } = useBuildVersion("clause_label", undefined, {
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
-    aspect: aspectFilter === "all" ? undefined : aspectFilter,
-    sentiment: filter || undefined,
-  }) as { data: ClauseBuild | undefined };
+  const { data, isLoading, isPlaceholderData } = useBuildVersion(
+    "clause_label",
+    undefined,
+    {
+      limit: pageSize,
+      offset: (page - 1) * pageSize,
+      aspect: aspectFilter === "all" ? undefined : aspectFilter,
+      sentiment: filter || undefined,
+    },
+  ) as {
+    data: ClauseBuild | undefined;
+    isLoading: boolean;
+    isPlaceholderData: boolean;
+  };
+  // isPlaceholderData: 페이지/필터 변경으로 새 데이터 도착 전(이전 데이터 표시 중) → 로딩.
+  const tableLoading = isPlaceholderData;
   // taxonomy 조회 실패해도 aspectLabelOf가 key로 fallback하므로 화면은 동작한다.
   const { data: taxonomy } = useTaxonomy();
   const {
@@ -94,6 +106,7 @@ export function ClauseTab() {
     pagination,
   } = data || {};
 
+  if (isLoading) return <BuildTabLoading />;
   if (!summary) {
     return isBuildRunning(status) ? (
       <BuildRunningBanner
@@ -102,7 +115,7 @@ export function ClauseTab() {
         hasPrevious={false}
       />
     ) : (
-      <p className="text-sm text-zinc-500">표시할 분류 요약이 없습니다.</p>
+      <BuildTabEmpty type="clause_label" status={status} />
     );
   }
 
@@ -453,6 +466,7 @@ export function ClauseTab() {
         totalPages={totalPages}
         totalCount={totalCount}
         onPageChange={setPage}
+        loading={tableLoading}
       />
     </div>
   );
