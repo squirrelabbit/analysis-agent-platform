@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { FileText, Check, Minus, X, Box } from "lucide-react";
+import { FileText, Check, Minus, X, Box, ChevronRight } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
+import { cn } from "@/lib/utils";
 import { StatCard } from "@/components/common/cards/StatCard";
 import type { ClauseBuild, ClauseItem } from "../../models/build";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +33,18 @@ const SENTIMENT_COLORS: Record<string, string> = {
   negative: "#ef4444",
 };
 
+const SENTIMENT_LABELS: Record<string, string> = {
+  positive: "긍정",
+  neutral: "중립",
+  negative: "부정",
+};
+
+// 드릴다운 도넛/범례 순서 고정 (긍정 → 중립 → 부정)
+const SENTIMENT_ORDER = ["positive", "neutral", "negative"] as const;
+
+// 드릴다운 selector의 "전체" 항목 sentinel key (실제 aspect key와 충돌 방지).
+const ALL_KEY = "__all__";
+
 const SENTIMENT_FILTER_OPTIONS: { label: string; value: string | "" }[] = [
   { label: "전체", value: "" },
   { label: "긍정", value: "positive" },
@@ -57,6 +70,8 @@ export function ClauseTab() {
   const [filter, setFilter] = useState<string | "">("");
   const [aspectFilter, setAspectFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
+  // 드릴다운: 선택된 aspect key (null이면 건수 1위 aspect로 fallback)
+  const [activeAspect, setActiveAspect] = useState<string | null>(null);
   const pageSize = 10;
 
   // 서버 페이징 + 서버 필터: 표는 서버가 필터/페이징해 준 현재 페이지(items)만 렌더.
@@ -68,12 +83,23 @@ export function ClauseTab() {
   }) as { data: ClauseBuild | undefined };
   // taxonomy 조회 실패해도 aspectLabelOf가 key로 fallback하므로 화면은 동작한다.
   const { data: taxonomy } = useTaxonomy();
-  const { summary, items, applied, status, progress, durationSeconds, pagination } =
-    data || {};
+  const {
+    summary,
+    items,
+    applied,
+    status,
+    progress,
+    durationSeconds,
+    pagination,
+  } = data || {};
 
   if (!summary) {
     return isBuildRunning(status) ? (
-      <BuildRunningBanner status={status} progress={progress} hasPrevious={false} />
+      <BuildRunningBanner
+        status={status}
+        progress={progress}
+        hasPrevious={false}
+      />
     ) : (
       <p className="text-sm text-zinc-500">표시할 분류 요약이 없습니다.</p>
     );
@@ -86,16 +112,33 @@ export function ClauseTab() {
   // summary.aspect는 snake_case key → 한글 label로 변환해 차트 축에 표시.
   const aspectData = Object.entries(summary.aspect)
     .sort(([, a], [, b]) => b - a)
-    .map(([key, value]) => ({ name: aspectLabelOf(taxonomy, key), value }));
+    .map(([key, value]) => ({
+      key,
+      name: aspectLabelOf(taxonomy, key),
+      value,
+    }));
 
-  const maxAspect = Math.max(...aspectData.map((a) => a.value), 1);
-
-  // 감성 도넛 데이터
-  const sentimentData = [
-    { name: "positive", value: positive },
-    { name: "neutral", value: neutral },
-    { name: "negative", value: negative },
-  ];
+  // 드릴다운: "전체"(ALL_KEY) 또는 개별 aspect 선택. 기본값은 전체.
+  const overallByName: Record<string, number> = { positive, neutral, negative };
+  const selectedKey = activeAspect ?? ALL_KEY;
+  const selectedAspect = summary.aspectSentiment?.[selectedKey];
+  const isAll = !selectedAspect;
+  const drillTotal = isAll ? summary.total : selectedAspect.total;
+  // percent: 전체는 summary 기준 직접 계산(소수1자리), aspect는 백엔드 percent 사용.
+  const drillData = SENTIMENT_ORDER.map((name) => {
+    if (isAll) {
+      const value = overallByName[name] ?? 0;
+      const percent =
+        summary.total > 0 ? Math.round((value / summary.total) * 1000) / 10 : 0;
+      return { name, value, percent };
+    }
+    const s = selectedAspect.sentiment[name];
+    return { name, value: s?.count ?? 0, percent: s?.percent ?? 0 };
+  });
+  const selectedLabel = isAll ? "전체" : aspectLabelOf(taxonomy, selectedKey);
+  const selectedDesc = isAll
+    ? "전체 문장의 긍정·중립·부정 구성"
+    : "선택한 Aspect의 긍정·중립·부정 구성";
 
   // aspect 옵션은 전체 분포(summary.aspect) 기준 — 현재 페이지 items가 아니라.
   const aspectOptions = Object.keys(summary.aspect);
@@ -203,93 +246,157 @@ export function ClauseTab() {
         </div>
       </div>
 
-      {/* 분포 */}
+      {/* Aspect별 감성 분포 (전체 + aspect 드릴다운) */}
       <div>
-        <p className="mb-3 text-[13px] font-bold text-zinc-600">분포</p>
-        <div className="grid grid-cols-1 gap-3.5 md:grid-cols-3">
-          {/* Aspect 건수 막대 */}
-          <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm md:col-span-2">
-            <div className="text-[15px] font-bold text-zinc-900">
-              Aspect 분포
-            </div>
-            <div className="mt-1 text-xs font-medium text-zinc-400">
-              언급된 문장 수 기준
-            </div>
-            <div className="mt-5 flex flex-col gap-3">
-              {aspectData.map((a) => (
-                <div
-                  key={a.name}
-                  className="grid grid-cols-[96px_1fr_auto] items-center gap-3"
-                >
-                  <span className="truncate text-right text-xs font-semibold text-zinc-500">
-                    {a.name}
-                  </span>
-                  <div className="h-2.5 overflow-hidden rounded-full bg-zinc-100">
-                    <div
-                      className="h-full rounded-full bg-linear-to-r from-blue-500 to-blue-400"
-                      style={{ width: `${(a.value / maxAspect) * 100}%` }}
-                    />
-                  </div>
-                  <span className="min-w-9 text-right text-xs font-bold tabular-nums text-zinc-800">
-                    {a.value.toLocaleString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* 감성 도넛 */}
-          <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
-            <div className="text-[15px] font-bold text-zinc-900">감성 분포</div>
-            <div className="mt-1 text-xs font-medium text-zinc-400">
-              전체 {summary.total?.toLocaleString()}건 기준
-            </div>
-            <div className="mt-4 flex flex-col items-center gap-6">
-              <ResponsiveContainer
-                width={120}
-                height={120}
-                className="shrink-0"
+        <p className="mb-3 text-[13px] font-bold text-zinc-600">Aspect 감성 분포</p>
+        <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
+          <div className="grid grid-cols-1 gap-7 md:grid-cols-[minmax(240px,1fr)_1px_minmax(220px,0.85fr)]">
+            {/* 좌: 주제 선택 목록 (전체 + aspect) */}
+            <div className="flex flex-col gap-1">
+              <p className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                주제 선택
+              </p>
+              {/* 전체 */}
+              <button
+                type="button"
+                onClick={() => setActiveAspect(null)}
+                className={cn(
+                  "grid grid-cols-[1fr_auto_16px] items-center gap-2.5 rounded-xl border-l-2 px-2 py-2 text-left transition-colors",
+                  isAll
+                    ? "border-violet-500 bg-violet-50"
+                    : "border-transparent hover:bg-zinc-50",
+                )}
               >
-                <PieChart>
-                  <Pie
-                    data={sentimentData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={34}
-                    outerRadius={54}
-                    paddingAngle={3}
-                    nameKey="name"
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {sentimentData.map((entry) => (
-                      <Cell
-                        key={entry.name}
-                        fill={SENTIMENT_COLORS[entry.name]}
-                      />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="flex flex-1 flex-col gap-2.5">
-                {sentimentData.map((d) => (
-                  <div
-                    key={d.name}
-                    className="flex items-center gap-2 text-[13px]"
+                <span
+                  className={cn(
+                    "text-xs font-bold",
+                    isAll ? "text-violet-700" : "text-zinc-600",
+                  )}
+                >
+                  전체
+                </span>
+                <span className="min-w-9 text-right text-xs font-bold tabular-nums text-zinc-800">
+                  {summary.total?.toLocaleString()}
+                </span>
+                <ChevronRight
+                  className={cn(
+                    "h-3.5 w-3.5 transition-colors",
+                    isAll ? "text-violet-600" : "text-zinc-300",
+                  )}
+                />
+              </button>
+              <div className="my-1 h-px bg-zinc-100" />
+              {/* aspect 목록 */}
+              {aspectData.map((a) => {
+                const sel = !isAll && a.key === selectedKey;
+                return (
+                  <button
+                    key={a.key}
+                    type="button"
+                    onClick={() => setActiveAspect(a.key)}
+                    className={cn(
+                      "grid grid-cols-[1fr_auto_16px] items-center gap-2.5 rounded-xl border-l-2 px-2 py-2 text-left transition-colors",
+                      sel
+                        ? "border-violet-500 bg-violet-50"
+                        : "border-transparent hover:bg-zinc-50",
+                    )}
                   >
                     <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ background: SENTIMENT_COLORS[d.name] }}
+                      className={cn(
+                        "truncate text-xs font-semibold",
+                        sel ? "text-violet-700" : "text-zinc-600",
+                      )}
+                    >
+                      {a.name}
+                    </span>
+                    <span className="min-w-9 text-right text-xs font-bold tabular-nums text-zinc-800">
+                      {a.value.toLocaleString()}
+                    </span>
+                    <ChevronRight
+                      className={cn(
+                        "h-3.5 w-3.5 transition-colors",
+                        sel ? "text-violet-600" : "text-zinc-300",
+                      )}
                     />
-                    <span className="font-semibold text-zinc-600">
-                      {d.name}
-                    </span>
-                    <span className="ml-auto font-extrabold tabular-nums text-zinc-800">
-                      {summary.total > 0
-                        ? Math.round((d.value / summary.total) * 100)
-                        : 0}
-                      %
-                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 구분선 */}
+            <div className="hidden self-stretch bg-zinc-100 md:block" />
+
+            {/* 우: 선택 주제 + 설명 + 도넛 */}
+            <div className="flex flex-col">
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 shrink-0 rounded-full bg-violet-600" />
+                <span className="truncate font-extrabold text-violet-700">
+                  {selectedLabel}
+                </span>
+              </div>
+              <div className="mt-1 text-xs font-medium text-zinc-400">
+                {selectedDesc}
+              </div>
+
+              <div className="relative mx-auto mt-6 h-44 w-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={drillData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={56}
+                      outerRadius={82}
+                      paddingAngle={3}
+                      nameKey="name"
+                      dataKey="value"
+                      stroke="none"
+                    >
+                      {drillData.map((d) => (
+                        <Cell key={d.name} fill={SENTIMENT_COLORS[d.name]} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="pointer-events-none absolute inset-0 grid place-items-center">
+                  <div className="text-center">
+                    <div className="text-3xl font-extrabold leading-none tabular-nums text-zinc-900">
+                      {drillTotal.toLocaleString()}
+                    </div>
+                    <div className="mt-1 text-[11px] font-semibold text-zinc-400">
+                      총 문장
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-col gap-3">
+                {drillData.map((d) => (
+                  <div key={d.name}>
+                    <div className="flex items-center gap-2 text-[13px]">
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ background: SENTIMENT_COLORS[d.name] }}
+                      />
+                      <span className="font-semibold text-zinc-600">
+                        {SENTIMENT_LABELS[d.name]}
+                      </span>
+                      <span className="ml-auto font-semibold tabular-nums text-zinc-400">
+                        {d.value.toLocaleString()}건
+                      </span>
+                      <span className="min-w-12 text-right font-extrabold tabular-nums text-zinc-800">
+                        {d.percent}%
+                      </span>
+                    </div>
+                    <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-zinc-100">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${d.percent}%`,
+                          background: SENTIMENT_COLORS[d.name],
+                        }}
+                      />
+                    </div>
                   </div>
                 ))}
               </div>
