@@ -38,6 +38,12 @@ type Config struct {
 	DatasetBuildClusterMaxConcurrent        int
 	AnthropicExecutionTokenCeiling          int
 	PythonAIWorkerHTTPTimeoutSec            int
+	// silverone 2026-06-08 — LLOA 모델 화면 표시명. artifact view 응답의
+	// applied.model_display_name을 빌드 재실행 없이 응답 시점에 입히기 위해
+	// control-plane도 이 env를 읽는다. raw model(LLOAModel)이 빌드 당시 summary.model과
+	// 일치할 때만 LLOAModelDisplayName을 노출한다(하드코딩 매핑 없음, env 기반).
+	LLOAModel            string
+	LLOAModelDisplayName string
 }
 
 func Load() Config {
@@ -149,6 +155,8 @@ func Load() Config {
 		DatasetBuildClusterMaxConcurrent:        clusterMaxConcurrent,
 		AnthropicExecutionTokenCeiling:          anthropicExecutionTokenCeiling,
 		PythonAIWorkerHTTPTimeoutSec:            pythonAIWorkerHTTPTimeoutSec,
+		LLOAModel:                               strings.TrimSpace(os.Getenv("LLOA_MODEL")),
+		LLOAModelDisplayName:                    strings.TrimSpace(os.Getenv("LLOA_MODEL_DISPLAY_NAME")),
 	}
 }
 

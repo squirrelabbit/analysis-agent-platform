@@ -564,9 +564,6 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         "max_input_chars": max_input_chars,
         "prompt_version": prompt_version,
         "model": lloa_config.model,
-        # silverone 2026-06-05 — raw model id는 그대로 두고 화면 표시용 이름을 함께
-        # 남긴다(env LLOA_MODEL_DISPLAY_NAME). 비어 있으면 ""(프론트가 model fallback).
-        "model_display_name": config.lloa_model_display_name,
         "concurrency": concurrency,
         "reasoning_effort": lloa_config.reasoning_effort,
         "total_prompt_tokens": total_prompt_tokens,
@@ -577,10 +574,6 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         # version.metadata["doc_genuineness_applied"]로 또 한 번 보존.
         "applied": {
             "prompt_version": prompt_version,
-            # raw model id + 화면 표시용 이름(env). 옛 artifact엔 없을 수 있어 프론트는
-            # model_display_name || model || "-" 순으로 fallback.
-            "model": lloa_config.model,
-            "model_display_name": config.lloa_model_display_name,
             "subject_name": doc_genuineness_config["subject_name"],
             "subject_aliases": list(doc_genuineness_config["subject_aliases"]),
             "recruitment_keywords": list(doc_genuineness_config["recruitment_keywords"]),

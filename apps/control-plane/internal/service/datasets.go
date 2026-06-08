@@ -49,6 +49,11 @@ type DatasetService struct {
 	// internal/service/datasetprompts/로 분리. DatasetService는 facade method로
 	// 같은 public 시그니처를 유지하고 위임만 한다.
 	prompts *datasetprompts.Service
+	// silverone 2026-06-08 — artifact view 응답에 화면 표시용 모델명을 빌드 재실행
+	// 없이 입히기 위한 env 값. lloaModel(현재 raw model)과 artifact summary.model이
+	// 같을 때만 lloaModelDisplayName을 노출한다. SetLLOAModelDisplay로 주입.
+	lloaModel            string
+	lloaModelDisplayName string
 }
 
 func NewDatasetService(repository store.Repository, pythonAIWorkerURL string, uploadRoot string, artifactRoot string) *DatasetService {
@@ -90,6 +95,15 @@ func (s *DatasetService) SetDatasetProfilesPath(path string) error {
 
 func (s *DatasetService) SetBuildJobStarter(starter workflows.Starter) {
 	s.buildJobStarter = starter
+}
+
+// SetLLOAModelDisplay — artifact view 응답의 model_display_name 계산용 env 주입.
+// model은 현재 LLOA_MODEL(raw id), displayName은 LLOA_MODEL_DISPLAY_NAME.
+// 빌드 시점 snapshot이 아니라 응답 시점에 입히므로 .env 변경 후 control-plane
+// 재시작만으로 반영된다(전처리 재실행 불필요).
+func (s *DatasetService) SetLLOAModelDisplay(model, displayName string) {
+	s.lloaModel = strings.TrimSpace(model)
+	s.lloaModelDisplayName = strings.TrimSpace(displayName)
 }
 
 // SetPythonAITaskTimeout — analyze worker 호출 HTTP timeout 주입.

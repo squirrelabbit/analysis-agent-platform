@@ -3168,11 +3168,11 @@ components:
             applied:
               type: object
               description: |
-                실제 적용된 prompt_version / model 등. prompt_version은 artifact
-                첫 행에서, model / model_display_name은 build 시 metadata에 저장된
-                doc_genuineness_summary에서 회수한다. model_display_name은 env
-                LLOA_MODEL_DISPLAY_NAME 기반(하드코딩 매핑 없음)으로, 옛 dataset
-                에는 없을 수 있어 화면은 model_display_name → model 순으로 fallback.
+                실제 적용된 prompt_version / model 등. prompt_version과 model(raw
+                id)은 build 당시 doc_genuineness_summary에 기록된 snapshot이다.
+                model_display_name은 응답 시점에 control-plane이 env로 입힌다 —
+                build 재실행 없이 .env 변경만으로 바뀐다. 화면은 model_display_name
+                → model 순으로 fallback.
               properties:
                 prompt_version:
                   type: string
@@ -3180,11 +3180,15 @@ components:
                   type: string
                   description: |
                     doc_genuineness build에 사용된 raw LLOA 모델 id
-                    (예 wisenut/wise-lloa-max-v1.2.1). build 시 summary에 기록된
-                    값을 metadata에서 회수한다. build 이전이거나 없으면 생략.
+                    (예 wisenut/wise-lloa-max-v1.2.1). build 당시 summary에 기록된
+                    snapshot. build 이전이거나 없으면 생략.
                 model_display_name:
                   type: string
-                  description: 화면 표시용 모델명 (env LLOA_MODEL_DISPLAY_NAME). 미설정 시 생략.
+                  description: |
+                    화면 표시용 모델명. control-plane이 응답 시점에 env
+                    LLOA_MODEL_DISPLAY_NAME으로 입힌다(하드코딩 매핑 없음). artifact의
+                    raw model이 현재 LLOA_MODEL과 일치할 때만 노출되며, 미설정/불일치
+                    시 생략(화면은 model로 fallback).
             summary:
               type: object
               properties:
@@ -3226,9 +3230,10 @@ components:
             applied:
               type: object
               description: |
-                실제 적용된 prompt_version / model 등. model_display_name은 env
-                LLOA_MODEL_DISPLAY_NAME 기반(하드코딩 매핑 없음). 옛 dataset에는
-                없을 수 있어 화면은 model_display_name → model 순으로 fallback.
+                실제 적용된 prompt_version / model 등. prompt_version과 model(raw id)은
+                build 당시 clause_label_summary snapshot이다. model_display_name은 응답
+                시점에 control-plane이 env로 입힌다(.env 변경만으로 반영, 재빌드 불필요).
+                화면은 model_display_name → model 순으로 fallback.
               properties:
                 prompt_version:
                   type: string
@@ -3236,11 +3241,15 @@ components:
                   type: string
                   description: |
                     clause_label build에 사용된 raw LLOA 모델 id
-                    (예 wisenut/wise-lloa-max-v1.2.1). build 시 summary에 기록된
-                    값을 metadata에서 회수한다. build 이전이거나 없으면 생략.
+                    (예 wisenut/wise-lloa-max-v1.2.1). build 당시 summary에 기록된
+                    snapshot. build 이전이거나 없으면 생략.
                 model_display_name:
                   type: string
-                  description: 화면 표시용 모델명 (env LLOA_MODEL_DISPLAY_NAME). 미설정 시 생략.
+                  description: |
+                    화면 표시용 모델명. control-plane이 응답 시점에 env
+                    LLOA_MODEL_DISPLAY_NAME으로 입힌다(하드코딩 매핑 없음). artifact의
+                    raw model이 현재 LLOA_MODEL과 일치할 때만 노출되며, 미설정/불일치
+                    시 생략(화면은 model로 fallback).
             summary:
               type: object
               properties:

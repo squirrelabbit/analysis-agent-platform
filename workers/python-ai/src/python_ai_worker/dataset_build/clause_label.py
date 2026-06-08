@@ -449,9 +449,6 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
         "include_genuineness": sorted(include_tiers) if include_tiers else None,
         "prompt_version": prompt_version,
         "model": lloa_config.model,
-        # silverone 2026-06-05 — raw model id는 그대로 두고 화면 표시용 이름을 함께
-        # 남긴다(env LLOA_MODEL_DISPLAY_NAME). 비어 있으면 ""(프론트가 model fallback).
-        "model_display_name": config.lloa_model_display_name,
         "concurrency": concurrency,
         "reasoning_effort": lloa_config.reasoning_effort,
         # taxonomy-driven config Phase 2-B (2026-05-27) — artifact가 어떤
@@ -464,10 +461,6 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
         # dataset이면 festival default값이 기록된다.
         "applied": {
             "prompt_version": prompt_version,
-            # raw model id + 화면 표시용 이름(env). 옛 artifact엔 없을 수 있어 프론트는
-            # model_display_name || model || "-" 순으로 fallback.
-            "model": lloa_config.model,
-            "model_display_name": config.lloa_model_display_name,
             "subject_name": subject_config["subject_name"],
             "subject_aliases": list(subject_config["subject_aliases"]),
             "subject_type": subject_config["subject_type"],
