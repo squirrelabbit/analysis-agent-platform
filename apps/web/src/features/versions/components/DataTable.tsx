@@ -1,7 +1,30 @@
 import { Fragment, type ReactNode, useState } from "react";
 import { Check, Copy } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { Pagination } from "./Pagination";
+
+// 스켈레톤 셀 바 폭 — 컬럼마다 다르게 줘서 실제 표처럼 보이게.
+const SKELETON_WIDTHS = ["55%", "85%", "45%", "60%", "70%"];
+
+/** 로딩 중 표 본문을 대체하는 스켈레톤 행들 */
+function SkeletonRows({ rows, cols }: { rows: number; cols: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, r) => (
+        <tr key={r}>
+          {Array.from({ length: cols }).map((_, c) => (
+            <td key={c} className="px-4 py-3.5">
+              <div
+                className="h-3.5 animate-pulse rounded bg-zinc-100"
+                style={{ width: SKELETON_WIDTHS[c % SKELETON_WIDTHS.length] }}
+              />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
 
 export type Column<T> = {
   /** thead 헤더 내용 */
@@ -25,6 +48,8 @@ type DataTableProps<T> = {
   totalPages: number;
   totalCount: number;
   onPageChange: (page: number) => void;
+  /** 페이지/필터 변경으로 API 재호출 중일 때 true → 표 위에 로딩 오버레이 */
+  loading?: boolean;
 };
 
 /** 빌드 결과 탭의 공통 표: 필터 헤더 + 테이블 + 페이지네이션 푸터 */
@@ -39,6 +64,7 @@ export function DataTable<T>({
   totalPages,
   totalCount,
   onPageChange,
+  loading = false,
 }: DataTableProps<T>) {
   return (
     <div className="rounded-2xl border border-zinc-100 bg-white shadow-sm overflow-hidden">
@@ -53,7 +79,7 @@ export function DataTable<T>({
           <div className="flex items-center gap-1.5 flex-wrap">{toolbar}</div>
         )}
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" aria-busy={loading}>
         {/* table-fixed: 컬럼 폭을 내용(필터로 바뀌는 행)에 의존하지 않게 고정.
             auto-layout이면 필터마다 셀 내용 길이가 달라져 테이블/컬럼 폭이 출렁인다. */}
         <table className="w-full table-fixed text-sm">
@@ -73,7 +99,13 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-50">
-            {!items || items.length === 0 ? (
+            {loading ? (
+              // 로딩(페이징/필터 재호출) 중: 이전 행 수만큼 스켈레톤 행 표시 → 높이 유지.
+              <SkeletonRows
+                rows={items?.length || 8}
+                cols={columns.length}
+              />
+            ) : !items || items.length === 0 ? (
               <tr>
                 <td
                   colSpan={columns.length}
@@ -96,31 +128,13 @@ export function DataTable<T>({
             )}
           </tbody>
         </table>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-zinc-100">
-          <p className="text-xs text-zinc-400">총 {totalCount}개</p>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={page === 1}
-              onClick={() => onPageChange(page - 1)}
-            >
-              이전
-            </Button>
-            <span className="text-xs text-zinc-500">
-              {page} / {totalPages}
-            </span>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={page === totalPages}
-              onClick={() => onPageChange(page + 1)}
-            >
-              다음
-            </Button>
-          </div>
-        </div>
       </div>
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        totalCount={totalCount}
+        onPageChange={onPageChange}
+      />
     </div>
   );
 }
