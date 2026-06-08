@@ -20,30 +20,27 @@ import {
 
 const COLORS = {
   genuineReview: "#10b981", // emerald-500
-  mixed: "#f59e0b", // amber-500
   nonReview: "#f87171", // red-400
   uncertain: "#a1a1aa", // zinc-400
 };
 
 // 값은 백엔드 genuineness 컬럼 원본(snake_case)과 일치해야 서버 필터가 동작.
+// mixed는 planner가 더 이상 생성하지 않아(backward-compat enum만 존재) UI에서 제거.
 const FILTER_OPTIONS: { label: string; value: string }[] = [
   { label: "전체", value: "" },
   { label: "진성", value: "genuine_review" },
   { label: "비진성", value: "non_review" },
   { label: "불확실", value: "uncertain" },
-  { label: "혼합", value: "mixed" },
 ];
 
 export function GenuinenessBadge({ value }: { value: string }) {
   const map: Record<string, string> = {
     genuine_review: "bg-emerald-50 text-emerald-800 border-emerald-200",
-    mixed: "bg-amber-50 text-amber-800 border-amber-200",
-    non_review: "bg-zinc-100 text-zinc-600 border-zinc-200",
+    non_review: "bg-red-50 text-red-800 border-red-200",
     uncertain: "bg-zinc-100 text-zinc-400 border-zinc-200",
   };
   const labels: Record<string, string> = {
     genuine_review: "진성",
-    mixed: "혼합",
     non_review: "비진성",
     uncertain: "불확실",
   };
@@ -110,17 +107,16 @@ export default function GenuinenessTab() {
   }
 
   const { genuineness, total } = summary;
-  const { genuineReview, mixed, nonReview, uncertain } = genuineness;
+  const { genuineReview, nonReview, uncertain } = genuineness;
 
   const pct = (value: number) =>
     total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
 
-  // 도넛/범례 공용 분포 데이터. 혼합(mixed)은 0이면 숨겨 시안의 3분류 구성에 맞춘다.
+  // 도넛/범례 공용 분포 데이터 (진성/비진성/불확실 3분류, mixed 제거).
   const ratioData = [
     { key: "진성", value: genuineReview, color: COLORS.genuineReview },
     { key: "비진성", value: nonReview, color: COLORS.nonReview },
     { key: "불확실", value: uncertain, color: COLORS.uncertain },
-    { key: "혼합", value: mixed, color: COLORS.mixed },
   ].filter((d) => d.value > 0);
 
   // pagination.total은 (필터 적용된) 전체 건수. 표/페이지 계산 기준.
