@@ -23,6 +23,3 @@ services:
   web:
     ports: !override
       - "5173:80"   # 0.0.0.0:5173. 도메인 80 직결하려면 "80:80" 으로.
-  control-plane:
-    ports: !override
-      - "18080:8080"   # 0.0.0.0:18080 → container 8080
