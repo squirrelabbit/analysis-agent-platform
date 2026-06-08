@@ -1,7 +1,6 @@
 import type { Pagination } from "@/shared/models/common";
 import type { BuildJobType } from "@/shared/types/common";
 
-
 export interface ProgressType {
   percent: number;
   processedRows: number;
@@ -51,7 +50,7 @@ export interface GenuinenessItem {
   cleanedText: string;
 }
 
-export interface GenuinenessSummary  {
+export interface GenuinenessSummary {
   genuineness: {
     genuineReview: number;
     nonReview: number;
@@ -70,10 +69,25 @@ export interface ClauseItem {
   source: string;
 }
 
+export interface SentimentCount {
+  count: number;
+  percent: number;
+}
+
+export interface AspectSentiment {
+  sentiment: {
+    positive: SentimentCount;
+    negative: SentimentCount;
+    neutral: SentimentCount;
+  };
+  total: number;
+}
+
 export interface ClauseSummary {
   // aspect key(snake_case, taxonomy 기반) → 건수. key 집합은 taxonomy config에
   // 따라 달라지므로 고정 필드가 아닌 동적 맵으로 둔다.
   aspect: Record<string, number>;
+  aspectSentiment: Record<string, AspectSentiment>;
   sentiment: {
     positive: number;
     negative: number;
@@ -83,16 +97,20 @@ export interface ClauseSummary {
 }
 
 export type CleanBuild = BuildBase<"clean", CleanSummary>;
-export type GenuinenessBuild = BuildBase<"doc_genuineness", GenuinenessSummary> & PaginatedSummary<GenuinenessItem>;
-export type ClauseBuild = BuildBase<"clause_label", ClauseSummary> & PaginatedSummary<ClauseItem>;
+export type GenuinenessBuild = BuildBase<
+  "doc_genuineness",
+  GenuinenessSummary
+> &
+  PaginatedSummary<GenuinenessItem>;
+export type ClauseBuild = BuildBase<"clause_label", ClauseSummary> &
+  PaginatedSummary<ClauseItem>;
 
 export type Build = CleanBuild | GenuinenessBuild | ClauseBuild;
 
-
 export interface VersionBuild<T> {
-  status: string,
-  completedAt?: string,
-  summary?: T
+  status: string;
+  completedAt?: string;
+  summary?: T;
 }
 
 export type CleanVersionBuild = VersionBuild<CleanSummary>;
