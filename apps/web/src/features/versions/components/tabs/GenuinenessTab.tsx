@@ -44,8 +44,9 @@ export function GenuinenessBadge({ value }: { value: string }) {
     non_review: "비진성",
     uncertain: "불확실",
   };
-  // w-16으로 라벨 길이(진성/비진성/불확실)와 무관하게 동일 폭 + 가운데 정렬.
-  return <Badge className={cn("w-16", map[value])}>{labels[value]}</Badge>;
+  // min-w-14로 가장 긴 라벨(비진성/불확실, 3글자) 폭에 맞춰 동일 폭 + 가운데 정렬.
+  // 진성(2글자)도 같은 폭이 되고, 더 긴 텍스트면 늘어나 clip 안 됨.
+  return <Badge className={cn("min-w-14", map[value])}>{labels[value]}</Badge>;
 }
 
 const COLUMNS: Column<GenuinenessItem>[] = [
