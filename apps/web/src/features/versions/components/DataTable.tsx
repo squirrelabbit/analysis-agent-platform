@@ -48,7 +48,9 @@ export function DataTable<T>({
         )}
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        {/* table-fixed: 컬럼 폭을 내용(필터로 바뀌는 행)에 의존하지 않게 고정.
+            auto-layout이면 필터마다 셀 내용 길이가 달라져 테이블/컬럼 폭이 출렁인다. */}
+        <table className="w-full table-fixed text-sm">
           <thead>
             <tr className="border-b border-zinc-50">
               {columns.map((col, i) => (
