@@ -25,7 +25,9 @@ export interface BuildBase<TType extends BuildJobType, TSummary> {
 export interface PaginatedSummary<T> {
   items: T[];
   pagination: Pagination;
-  applied: { promptVersion: string };
+  // model: 빌드 당시 raw model id. modelDisplayName: 응답 시점 env 기반 화면 표시명.
+  // 표시값은 modelDisplayName || model. 옛 응답엔 없을 수 있어 optional.
+  applied: { promptVersion: string; model?: string; modelDisplayName?: string };
 }
 
 export interface CleanSummary {

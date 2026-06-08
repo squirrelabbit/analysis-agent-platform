@@ -142,7 +142,10 @@ export default function GenuinenessTab() {
         <span className="inline-flex items-center gap-1.5 font-medium">
           <Box className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
           모델
-          <b className="font-bold text-zinc-800">{items?.[0]?.source ?? "-"}</b>
+          {/* 표시명 우선, 없으면 raw model. raw model id는 title(tooltip)로 확인. */}
+          <b className="font-bold text-zinc-800" title={applied?.model}>
+            {applied?.modelDisplayName || applied?.model || "-"}
+          </b>
         </span>
       </div>
 

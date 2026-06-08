@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText, Check, Minus, X, Clock } from "lucide-react";
+import { FileText, Check, Minus, X, Clock, Box } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { StatCard } from "@/components/common/cards/StatCard";
 import type { ClauseBuild, ClauseItem } from "../../models/build";
@@ -158,6 +158,15 @@ export function ClauseTab() {
           <code className="rounded-md bg-violet-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-violet-700">
             {applied?.promptVersion ?? "-"}
           </code>
+        </span>
+        <span className="h-3 w-px bg-zinc-200" />
+        <span className="inline-flex items-center gap-1.5 font-medium">
+          <Box className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
+          모델
+          {/* 표시명 우선, 없으면 raw model. raw model id는 title(tooltip)로 확인. */}
+          <b className="font-bold text-zinc-800" title={applied?.model}>
+            {applied?.modelDisplayName || applied?.model || "-"}
+          </b>
         </span>
       </div>
 
