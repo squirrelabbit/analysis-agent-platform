@@ -117,7 +117,7 @@ export function ClauseTab() {
       ),
     },
     {
-      header: "조항",
+      header: "문장",
       headerClassName: "w-80",
       cell: (item) => <ExpandableTextCell text={item.clause} />,
     },
@@ -140,10 +140,6 @@ export function ClauseTab() {
           <SentimentBadge value={item.sentiment} />
         </td>
       ),
-    },
-    {
-      header: "조항 텍스트",
-      cell: (item) => <ExpandableTextCell text={item.clause} />,
     },
   ];
 
@@ -179,7 +175,7 @@ export function ClauseTab() {
         <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
           <StatCard
             value={summary.total?.toLocaleString()}
-            label="총 조항 수"
+            label="총 문장 수"
             icon={FileText}
             tone="neutral"
           />
@@ -217,7 +213,7 @@ export function ClauseTab() {
               Aspect 분포
             </div>
             <div className="mt-1 text-xs font-medium text-zinc-400">
-              언급된 조항 수 기준
+              언급된 문장 수 기준
             </div>
             <div className="mt-5 flex flex-col gap-3">
               {aspectData.map((a) => (
