@@ -6,7 +6,6 @@ import json
 import re
 import time
 from collections import Counter
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +17,12 @@ from ._common import (
     joined_text,
     row_id,
     write_progress,
+)
+from .schema_inference import (
+    AnalysisColumn,
+    coerce_timestamp,
+    coerce_value,
+    infer_analysis_columns,
 )
 
 LOGGER = get(__name__)
@@ -97,60 +102,44 @@ def _apply_noise_scrub(text: str, patterns: list[re.Pattern[str]]) -> tuple[str,
     return scrubbed, hits
 
 
-def _clean_output_schema() -> Any:
-    """silverone 2026-05-28 (clean 정식화) — 표준 9 컬럼.
+def _clean_output_schema(analysis_columns: list[AnalysisColumn] | None = None) -> Any:
+    """silverone 2026-05-28 (clean 정식화) — 표준 9 컬럼 + (2026-06-08) 분석 컬럼.
 
-    - 분석 path가 의존하는 표준 컬럼만 top-level로 노출.
+    - 분석 path가 의존하는 표준 컬럼을 top-level로 노출.
     - 원본 source 컬럼(한글/BOM/괄호 포함)은 source_json에 보존 — SQL identifier
       문제(SAFE_SQL_IDENTIFIER_RE)를 피하면서 운영자가 원본 row를 확인 가능.
-    - clean_disposition → clean_status로 rename. clean_flags /
-      clean_regex_applied_rules는 row-level audit 가치 낮아 summary 통계로만
-      집계 (regex_rule_hits / noise_pattern_hits).
+    - 추가로 추론된 analysis_columns를 SQL-safe alias + typed 컬럼으로 materialize
+      (integer→int64, float→float64, timestamp→string ISO, string→string).
+      advertised type == parquet 적재 type. source_json은 그대로 유지.
     """
     arrow, _ = rt._require_pyarrow()
-    return arrow.schema(
-        [
-            ("row_id", arrow.string()),
-            ("doc_id", arrow.string()),
-            ("source_row_index", arrow.int64()),
-            ("raw_text", arrow.string()),
-            ("cleaned_text", arrow.string()),
-            ("created_at", arrow.string()),
-            ("clean_status", arrow.string()),
-            ("clean_reason", arrow.string()),
-            ("source_json", arrow.string()),
-        ]
-    )
+    fields = [
+        ("row_id", arrow.string()),
+        ("doc_id", arrow.string()),
+        ("source_row_index", arrow.int64()),
+        ("raw_text", arrow.string()),
+        ("cleaned_text", arrow.string()),
+        ("created_at", arrow.string()),
+        ("clean_status", arrow.string()),
+        ("clean_reason", arrow.string()),
+        ("source_json", arrow.string()),
+    ]
+    for col in analysis_columns or []:
+        if col.type == "integer":
+            arrow_type = arrow.int64()
+        elif col.type == "float":
+            arrow_type = arrow.float64()
+        else:
+            # timestamp는 created_at과 동일하게 ISO string으로 저장. string도 string.
+            arrow_type = arrow.string()
+        fields.append((col.name, arrow_type))
+    return arrow.schema(fields)
 
 
 def _coerce_created_at(value: Any) -> str | None:
     """date_column 값을 ISO 8601 UTC string으로 변환. 실패 시 None.
-
-    silverone 2026-05-28 — festival 임시 후처리(`YYYY-MM-DD` → ISO) 패턴을
-    정식 path로 흡수. `Invalid date--` / 빈 문자열 / parse 실패는 None.
-    """
-    if value is None:
-        return None
-    raw = str(value).strip()
-    if not raw or raw.lower().startswith("invalid"):
-        return None
-    # 다중 후보 format 시도. 'YYYY-MM-DD' 먼저 — festival 패턴.
-    candidate_formats = (
-        "%Y-%m-%dT%H:%M:%S%z",
-        "%Y-%m-%dT%H:%M:%SZ",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d",
-        "%Y/%m/%d",
-    )
-    for fmt in candidate_formats:
-        try:
-            dt = datetime.strptime(raw, fmt)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        except ValueError:
-            continue
-    return None
+    분석 컬럼 timestamp 추론과 동일 규칙(schema_inference.coerce_timestamp) 사용."""
+    return coerce_timestamp(value)
 
 
 @skill_handler("python-ai")
@@ -185,6 +174,13 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
     cleaned_input_char_count = 0
     date_parse_miss_count = 0
     cleaned_rows: list[dict[str, Any]] = []
+
+    # silverone 2026-06-08 (파일럿) — CSV 메타 컬럼을 queryable typed 분석 컬럼으로
+    # 추론. text_columns(raw_text로 사용)와 date_column(created_at로 표준화)은 제외.
+    analysis_exclude = list(normalized["text_columns"])
+    if normalized["date_column"]:
+        analysis_exclude.append(normalized["date_column"])
+    analysis_columns: list[AnalysisColumn] = infer_analysis_columns(rows, analysis_exclude)
 
     handle = output_path.open("w", encoding="utf-8") if output_format == "jsonl" else None
     try:
@@ -240,6 +236,9 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
                 "clean_reason": "text kept after deterministic cleaning",
                 "source_json": json.dumps(dict(row), ensure_ascii=False),
             }
+            # 추론된 분석 컬럼을 typed 값으로 materialize (alias = SQL-safe 컬럼명).
+            for col in analysis_columns:
+                cleaned_row[col.name] = coerce_value(row.get(col.source_column), col.type)
             cleaned_rows.append(cleaned_row)
             if handle is not None:
                 handle.write(json.dumps(cleaned_row, ensure_ascii=False))
@@ -266,7 +265,7 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
             handle.close()
 
     if output_format == "parquet":
-        rt._write_parquet_rows(output_path, cleaned_rows, schema=_clean_output_schema())
+        rt._write_parquet_rows(output_path, cleaned_rows, schema=_clean_output_schema(analysis_columns))
     write_progress(
         progress_path,
         processed_rows=source_row_count,
@@ -286,6 +285,13 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
         "text_joiner": normalized["text_joiner"],
         "date_column": normalized["date_column"],
         "date_parse_miss_count": date_parse_miss_count,
+        # silverone 2026-06-08 (파일럿) — materialize된 분석 컬럼 메타. control-plane이
+        # 이걸 docs_extra_columns로 planner에 전달. name=parquet alias(=advertise),
+        # type=parquet/advertise type, label=원본명, source_column=원본명.
+        "analysis_columns": [
+            {"name": c.name, "type": c.type, "label": c.label, "source_column": c.label}
+            for c in analysis_columns
+        ],
         "source_input_char_count": source_input_char_count,
         "cleaned_input_char_count": cleaned_input_char_count,
         "clean_reduced_char_count": max(0, source_input_char_count - cleaned_input_char_count),

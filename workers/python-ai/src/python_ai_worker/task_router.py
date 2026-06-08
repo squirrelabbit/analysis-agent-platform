@@ -395,6 +395,8 @@ def _coerce_docs_extra_columns(payload: Any) -> list[DatasetSpecificColumn] | No
                 name=name,
                 type=str(item.get("type") or "string"),
                 description=str(item.get("description") or ""),
+                label=str(item.get("label") or ""),
+                source_column=str(item.get("source_column") or ""),
             )
         )
     return result
