@@ -1,15 +1,23 @@
-import { Database, Check, Minus, Percent, Clock } from "lucide-react";
+import { Database, Check, Minus, Percent } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatCard } from "@/components/common/cards/StatCard";
 import type { CleanBuild } from "../../models/build";
 import { useBuildVersion } from "../../hooks/build.query";
-import { formatSecond } from "@/shared/utils/format";
+import {
+  BuildRunningBanner,
+  BuildTimerChip,
+  isBuildRunning,
+} from "../BuildStatusMeta";
 
 export default function CleanTab() {
   const { data } = useBuildVersion("clean") as { data: CleanBuild | undefined };
-  const { summary, durationSeconds } = data || {};
+  const { summary, status, progress, durationSeconds } = data || {};
   if (!summary) {
-    return <p className="text-sm text-zinc-500">표시할 정제 요약이 없습니다.</p>;
+    return isBuildRunning(status) ? (
+      <BuildRunningBanner status={status} progress={progress} hasPrevious={false} />
+    ) : (
+      <p className="text-sm text-zinc-500">표시할 정제 요약이 없습니다.</p>
+    );
   }
 
   const {
@@ -58,12 +66,10 @@ export default function CleanTab() {
     <div className="space-y-5">
       {/* 메타 */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-        <span className="inline-flex items-center gap-1.5 font-medium">
-          <Clock className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
-          소요 시간
-          <b className="font-bold text-zinc-800">{formatSecond(durationSeconds)}</b>
-        </span>
+        <BuildTimerChip status={status} durationSeconds={durationSeconds} />
       </div>
+
+      <BuildRunningBanner status={status} progress={progress} hasPrevious />
 
       {/* 처리 현황 */}
       <div>

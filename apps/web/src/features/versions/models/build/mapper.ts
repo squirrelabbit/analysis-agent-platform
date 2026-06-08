@@ -33,6 +33,7 @@ export const mapProgress = (dto: ProgressDto): ProgressType => ({
   percent: dto.percent ?? 0,
   processedRows: dto.processed_rows ?? 0,
   totalRows: dto.total_rows ?? 0,
+  etaSeconds: dto.eta_seconds,
   message: dto.message ?? "",
   updatedAt: dto.updated_at,
 });

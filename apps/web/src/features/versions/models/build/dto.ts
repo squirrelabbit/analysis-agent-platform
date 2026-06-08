@@ -6,6 +6,7 @@ export interface ProgressDto {
   percent: number;
   processed_rows: number;
   total_rows: number;
+  eta_seconds?: number;
   message: string;
   updated_at: string;
 }

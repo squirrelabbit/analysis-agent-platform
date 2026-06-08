@@ -6,6 +6,7 @@ export interface ProgressType {
   percent: number;
   processedRows: number;
   totalRows: number;
+  etaSeconds?: number;
   message: string;
   updatedAt: string;
 }

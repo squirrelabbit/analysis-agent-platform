@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText, Check, Minus, X, Clock, Box } from "lucide-react";
+import { FileText, Check, Minus, X, Box } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { StatCard } from "@/components/common/cards/StatCard";
 import type { ClauseBuild, ClauseItem } from "../../models/build";
@@ -20,7 +20,11 @@ import {
   FilterPills,
   type Column,
 } from "../DataTable";
-import { formatSecond } from "@/shared/utils/format";
+import {
+  BuildRunningBanner,
+  BuildTimerChip,
+  isBuildRunning,
+} from "../BuildStatusMeta";
 
 const SENTIMENT_COLORS: Record<string, string> = {
   positive: "#10b981",
@@ -64,10 +68,13 @@ export function ClauseTab() {
   }) as { data: ClauseBuild | undefined };
   // taxonomy 조회 실패해도 aspectLabelOf가 key로 fallback하므로 화면은 동작한다.
   const { data: taxonomy } = useTaxonomy();
-  const { summary, items, applied, durationSeconds, pagination } = data || {};
+  const { summary, items, applied, status, progress, durationSeconds, pagination } =
+    data || {};
 
   if (!summary) {
-    return (
+    return isBuildRunning(status) ? (
+      <BuildRunningBanner status={status} progress={progress} hasPrevious={false} />
+    ) : (
       <p className="text-sm text-zinc-500">표시할 분류 요약이 없습니다.</p>
     );
   }
@@ -144,13 +151,7 @@ export function ClauseTab() {
     <div className="space-y-5">
       {/* 메타 */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-        <span className="inline-flex items-center gap-1.5 font-medium">
-          <Clock className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
-          소요 시간
-          <b className="font-bold text-zinc-800">
-            {formatSecond(durationSeconds)}
-          </b>
-        </span>
+        <BuildTimerChip status={status} durationSeconds={durationSeconds} />
         <span className="h-3 w-px bg-zinc-200" />
         <span className="inline-flex items-center gap-1.5 font-medium">
           <FileText className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
@@ -169,6 +170,8 @@ export function ClauseTab() {
           </b>
         </span>
       </div>
+
+      <BuildRunningBanner status={status} progress={progress} hasPrevious />
 
       {/* 분류 현황 */}
       <div>

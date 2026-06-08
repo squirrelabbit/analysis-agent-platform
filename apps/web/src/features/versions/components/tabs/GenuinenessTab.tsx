@@ -1,5 +1,5 @@
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
-import { AlignLeft, Box, Check, Clock, FileText, Minus, X } from "lucide-react";
+import { AlignLeft, Box, Check, FileText, Minus, X } from "lucide-react";
 import type { GenuinenessBuild, GenuinenessItem } from "../../models/build";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -12,7 +12,11 @@ import {
   FilterPills,
   type Column,
 } from "../DataTable";
-import { formatSecond } from "@/shared/utils/format";
+import {
+  BuildRunningBanner,
+  BuildTimerChip,
+  isBuildRunning,
+} from "../BuildStatusMeta";
 
 const COLORS = {
   genuineReview: "#10b981", // emerald-500
@@ -92,10 +96,13 @@ export default function GenuinenessTab() {
   }) as {
     data: GenuinenessBuild | undefined;
   };
-  const { summary, applied, items, pagination, durationSeconds } = data || {};
+  const { summary, applied, items, pagination, status, progress, durationSeconds } =
+    data || {};
 
   if (!summary) {
-    return (
+    return isBuildRunning(status) ? (
+      <BuildRunningBanner status={status} progress={progress} hasPrevious={false} />
+    ) : (
       <p className="text-sm text-zinc-500">
         표시할 진위성 분석 요약이 없습니다.
       </p>
@@ -123,13 +130,7 @@ export default function GenuinenessTab() {
     <div className="space-y-5">
       {/* 메타 */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-        <span className="inline-flex items-center gap-1.5 font-medium">
-          <Clock className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
-          소요 시간
-          <b className="font-bold text-zinc-800">
-            {formatSecond(durationSeconds)}
-          </b>
-        </span>
+        <BuildTimerChip status={status} durationSeconds={durationSeconds} />
         <span className="h-3 w-px bg-zinc-200" />
         <span className="inline-flex items-center gap-1.5 font-medium">
           <AlignLeft className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
@@ -148,6 +149,8 @@ export default function GenuinenessTab() {
           </b>
         </span>
       </div>
+
+      <BuildRunningBanner status={status} progress={progress} hasPrevious />
 
       {/* 판별 결과 요약 */}
       <div>
