@@ -532,6 +532,20 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
                         message="doc_genuineness processing",
                     )
 
+    # silverone 2026-06-08 — fail-loud: LLOA 실패(요청+파싱)율이 임계 이상이면 build 중단.
+    # per-doc 격리(uncertain fallback)는 소수 flaky doc 보호용 — LLOA 서버 다운으로
+    # 대부분/전부 실패한 결과를 "완료"로 덮으면 운영자가 망가진 결과를 정상으로 오인한다.
+    failure_count = request_failures + parse_failures
+    max_failure_rate = config.dataset_build_max_failure_rate
+    if total_rows > 0 and failure_count / total_rows >= max_failure_rate:
+        raise RuntimeError(
+            "dataset_doc_genuineness aborted: LLOA 실패율 "
+            f"{failure_count / total_rows:.0%} (request_failures={request_failures}, "
+            f"parse_failures={parse_failures}, total={total_rows}) >= 임계 "
+            f"{max_failure_rate:.0%}. LLOA 서버 상태를 확인하고 재시도하세요 "
+            "(DATASET_BUILD_MAX_FAILURE_RATE로 조정 가능)."
+        )
+
     # 패스 3: 원본 row 순서로 jsonl write.
     processed = 0
     with output_path.open("w", encoding="utf-8") as dst:

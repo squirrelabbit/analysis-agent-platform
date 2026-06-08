@@ -154,24 +154,25 @@ class DocGenuinenessTests(unittest.TestCase):
         self.assertEqual(by_id["row:4"]["source"], "empty_text_shortcut")
 
     def test_parse_failure_falls_back_to_non_review(self) -> None:
+        # 파싱 실패율이 임계(50%) 미만이면(여기 1/4=25%) build는 계속되고 해당 doc만
+        # non_review fallback. (50% 이상이면 별도 fail-loud 테스트 참조)
         responses = {
             "row:1": _llm_completion("not json at all"),
             "row:2": _llm_completion(
                 '{"doc_id":"row:2","genuineness":"non_review","reason":"행사 안내문."}'
             ),
             "row:3": _llm_completion(
-                '{"doc_id":"row:3","genuineness":"invalid_tier","reason":"잘못된 라벨"}'
+                '{"doc_id":"row:3","genuineness":"genuine_review","reason":"본인 방문 후기."}'
             ),
         }
         fake_urlopen, _ = _fake_urlopen_factory(responses)
         result = self._patch_config_and_run(fake_urlopen)
 
         summary = result["artifact"]["summary"]
-        # row:1 parse fail → non_review fallback
-        # row:3 invalid tier → non_review fallback
-        # row:2 success non_review + row:4 empty
-        self.assertEqual(summary["parse_failures"], 2)
-        self.assertEqual(summary["tier_counts"]["non_review"], 4)
+        # row:1 parse fail → non_review fallback. row:2 non_review + row:4 empty.
+        self.assertEqual(summary["parse_failures"], 1)
+        self.assertEqual(summary["tier_counts"]["non_review"], 3)
+        self.assertEqual(summary["tier_counts"]["genuine_review"], 1)
         self.assertEqual(summary["tier_counts"]["uncertain"], 0)
 
         records = [
@@ -180,7 +181,6 @@ class DocGenuinenessTests(unittest.TestCase):
         ]
         by_id = {r["doc_id"]: r for r in records}
         self.assertEqual(by_id["row:1"]["source"], "lloa_parse_failure")
-        self.assertEqual(by_id["row:3"]["source"], "lloa_parse_failure")
 
     def test_missing_lloa_api_key_raises(self) -> None:
         from python_ai_worker.dataset_build import doc_genuineness
@@ -340,6 +340,16 @@ class DocGenuinenessTruncateIsolateTests(DocGenuinenessTests):
         self.assertEqual(records["row:1"]["genuineness"], "uncertain")
         self.assertEqual(records["row:1"]["source"], "lloa_request_failure")
         self.assertGreater(records["row:1"]["original_length"], 0)
+
+    def test_high_request_failure_rate_aborts_build(self) -> None:
+        # silverone 2026-06-08 — LLOA 다운 등으로 실패율이 임계(0.5) 이상이면 build를
+        # fail-loud로 중단한다(전부 uncertain "완료"로 덮지 않음). row:1~3 LLOA 실패
+        # = 3/4(75%) >= 50% → RuntimeError. output 파일도 쓰지 않는다.
+        responses = {}
+        fake_urlopen, _ = _fake_urlopen_with_failures(responses, {"row:1", "row:2", "row:3"})
+        with self.assertRaisesRegex(RuntimeError, "LLOA 실패율"):
+            self._patch_config_and_run(fake_urlopen)
+        self.assertFalse(self.output_path.exists() and self.output_path.read_text(encoding="utf-8").strip())
 
     def test_resolve_max_input_chars_priority(self) -> None:
         import os
