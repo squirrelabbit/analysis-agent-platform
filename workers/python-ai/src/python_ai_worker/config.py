@@ -93,7 +93,7 @@ def load_config() -> WorkerConfig:
             or os.getenv("WISENUT_LLOA_MAX_V1_2_1_API_KEY")
             or None
         ),
-        lloa_api_url=os.getenv("LLOA_API_URL", "http://210.180.82.135:9023/v1/chat/completions"),
+        lloa_api_url=os.getenv("LLOA_API_URL", "http://211.39.140.164:30100/v1/chat/completions"),
         lloa_model=os.getenv("LLOA_MODEL", "wisenut/wise-lloa-max-v1.2.1"),
         lloa_max_tokens=int(os.getenv("LLOA_MAX_TOKENS", "65536")),
         lloa_timeout_sec=float(os.getenv("LLOA_TIMEOUT_SEC", "180")),
