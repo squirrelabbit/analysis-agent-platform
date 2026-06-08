@@ -98,12 +98,15 @@ export default function VersionDetailPage() {
             {buildLabel("clause_label")}
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="clean">{version.clean && <CleanTab />}</TabsContent>
+        {/* 각 탭이 로딩/미실행/진행중/결과 상태를 자체 처리하므로 항상 렌더 */}
+        <TabsContent value="clean">
+          <CleanTab />
+        </TabsContent>
         <TabsContent value="doc_genuineness">
-          {version.docGenuineness && <GenuinenessTab />}
+          <GenuinenessTab />
         </TabsContent>
         <TabsContent value="clause_label">
-          {version.clauseLabel && <ClauseTab />}
+          <ClauseTab />
         </TabsContent>
       </Tabs>
     </div>

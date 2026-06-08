@@ -7,8 +7,9 @@ import {
 } from "@/components/common/Status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Download } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import BuildDialog from "./BuildDialog";
+import { isBuildRunning } from "./BuildStatusMeta";
 import { useDownloadFile } from "@/shared/apis/common.mutation";
 import type { BuildJobType } from "@/shared/types/common";
 import { buildLabel } from "@/shared/constants/buildLabels";
@@ -42,21 +43,23 @@ function ProgressBar({ percent }: { percent: number }) {
 }
 
 export default function PipelineCard({ versionId, type }: PipelineCardProps) {
-  const { mutateAsync: onDownload } = useDownloadFile();
+  const { mutateAsync: onDownload, isPending: isDownloading } =
+    useDownloadFile();
 
   const { data, isLoading } = useBuildVersion(type);
   const status = isLoading ? "running" : (data?.status ?? "not_requested");
   const buildType = data?.buildType ?? type;
   const percent = data?.progress?.percent ?? 0;
+  const running = isBuildRunning(status);
 
   return (
-    <Card className="flex-1 border-slate-200 hover:shadow-md transition-shadow">
+    <Card className="flex-1 ring-0 border-zinc-100 hover:shadow-md transition-shadow shadow-sm">
       <CardContent>
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-3">
             {getStatusIcon(status)}
             <div>
-              <h3 className="font-semibold text-slate-900">
+              <h3 className="text-[15px] font-semibold text-slate-900">
                 {buildLabel(buildType as BuildJobType)}
               </h3>
             </div>
@@ -73,15 +76,30 @@ export default function PipelineCard({ versionId, type }: PipelineCardProps) {
               size="sm"
               variant="outline"
               className="flex-1"
+              disabled={isDownloading || running}
               onClick={async () =>
                 onDownload({ versionId: versionId, type: type })
               }
             >
-              <Download className="w-4 h-4 mr-2" />
-              다운로드
+              {isDownloading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  다운로드 중…
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4 mr-2" />
+                  다운로드
+                </>
+              )}
             </Button>
           )}
-          <BuildDialog formId={`${type}-form`} stage={type} status={status} />
+          <BuildDialog
+            formId={`${type}-form`}
+            stage={type}
+            status={status}
+            disabled={isDownloading}
+          />
         </div>
       </CardContent>
     </Card>
