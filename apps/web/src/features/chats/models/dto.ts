@@ -63,13 +63,24 @@ export interface TaxonomyCheckDto {
 // 신규 turn 응답에는 채워지지만 과거 thread detail 메시지에는 누락될 수
 // 있으므로 항상 optional로 다룬다.
 export interface ChartSpecDto {
-  kind: "bar" | "line" | "diverging_bar";
-  x: string;
-  y: string | string[];
-  series: string | null;
+  kind: "bar" | "line" | "diverging_bar" | "metric" | "evidence";
+  // bar/line/diverging_bar — 축.
+  x?: string;
+  y?: string | string[];
+  series?: string | null;
   // silverone 2026-06-09 — diverging_bar 계약: 단위(건/%p/%) + 정렬(abs_desc).
   unit?: string | null;
   sort?: string | null;
+  // metric (total 비교) — 컬럼명 참조.
+  a_value?: string;
+  b_value?: string;
+  delta_value?: string;
+  delta_rate?: string;
+  // evidence (원문 샘플) — 컬럼명 참조.
+  text?: string;
+  sentiment?: string;
+  chips?: string[];
+  id?: string;
 }
 
 export interface ComposerDisplayDto {
@@ -82,7 +93,7 @@ export interface ComposerDisplayDto {
   max_rows?: number;
   truncated?: boolean;
   warnings?: string[];
-  recommended_view?: "table" | "bar" | "diverging_bar" | "line" | null;
+  recommended_view?: "table" | "bar" | "diverging_bar" | "line" | "metric" | "evidence" | null;
   chart_spec?: ChartSpecDto | null;
   // silverone 2026-06-09 — 기간/그룹 비교 결과의 컬럼별 표시 포맷/라벨 contract.
   // 백엔드가 단위 의미를 선언하고 프론트가 %·%p·정수로 렌더한다(compare 결과에만 존재).

@@ -748,6 +748,69 @@ class CompareColumnContractTests(unittest.TestCase):
         self.assertNotIn("column_labels", out["display"])
 
 
+class MetricEvidenceViewTests(unittest.TestCase):
+    """silverone 2026-06-09 (result view contract 2단계) — metric / evidence."""
+
+    def _present(self, rows, title="t"):
+        return {
+            "total_rows": len(rows), "returned_rows": len(rows), "truncated": False,
+            "format": "table", "title": title, "rows": rows,
+        }
+
+    def test_total_compare_one_row_is_metric(self):
+        out = compose_answer(user_question="q", present=self._present(
+            [{"a_count": 78, "b_count": 98, "delta_count": 20, "delta_rate": 25.6}]))
+        d = out["display"]
+        self.assertEqual(d["recommended_view"], "metric")
+        spec = d["chart_spec"]
+        self.assertEqual(spec["kind"], "metric")
+        self.assertEqual(spec["a_value"], "a_count")
+        self.assertEqual(spec["b_value"], "b_count")
+        self.assertEqual(spec["delta_value"], "delta_count")
+        self.assertEqual(spec["delta_rate"], "delta_rate")
+        self.assertEqual(spec["unit"], "건")
+
+    def test_metric_small_base_warning(self):
+        out = compose_answer(user_question="q", present=self._present(
+            [{"a_count": 1, "b_count": 51, "delta_count": 50, "delta_rate": 5000.0}]))
+        self.assertEqual(out["display"]["recommended_view"], "metric")
+        self.assertTrue(any("증감률" in w for w in (out["display"].get("warnings") or [])))
+
+    def test_sample_rows_is_evidence(self):
+        rows = [
+            {"doc_id": "d1", "clause": "음식 비쌌어요", "sentiment": "negative", "aspect": "food"},
+            {"doc_id": "d2", "clause": "공연 최고", "sentiment": "positive", "aspect": "show_program"},
+        ]
+        out = compose_answer(user_question="q", present=self._present(rows))
+        d = out["display"]
+        self.assertEqual(d["recommended_view"], "evidence")
+        spec = d["chart_spec"]
+        self.assertEqual(spec["kind"], "evidence")
+        self.assertEqual(spec["text"], "clause")
+        self.assertEqual(spec["sentiment"], "sentiment")
+        self.assertEqual(spec["chips"], ["aspect"])
+        self.assertEqual(spec["id"], "doc_id")
+
+    def test_text_with_aggregate_not_evidence(self):
+        # 본문 컬럼이 있어도 numeric 집계(count)가 섞이면 evidence가 아니다.
+        rows = [
+            {"raw_text": "x" * 80, "count": 3},
+            {"raw_text": "y" * 80, "count": 1},
+        ]
+        out = compose_answer(user_question="q", present=self._present(rows))
+        self.assertNotEqual(out["display"]["recommended_view"], "evidence")
+
+    def test_evidence_with_reason_chip(self):
+        rows = [
+            {"doc_id": "d1", "raw_text": "공지입니다", "genuineness": "non_review", "reason": "공지글"},
+            {"doc_id": "d2", "raw_text": "후기입니다", "genuineness": "genuine_review", "reason": "경험서술"},
+        ]
+        spec = compose_answer(user_question="q", present=self._present(rows))["display"]["chart_spec"]
+        self.assertEqual(spec["kind"], "evidence")
+        self.assertEqual(spec["text"], "raw_text")
+        self.assertIn("reason", spec["chips"])
+
+
 class GracefulFallbackTests(unittest.TestCase):
     def test_missing_present_uses_fallback(self) -> None:
         out = compose_answer(user_question="q", present=None)

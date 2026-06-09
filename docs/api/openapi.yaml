@@ -2943,50 +2943,36 @@ components:
             normal result는 `[]`.
         recommended_view:
           type: string
-          enum: [table, bar, line]
+          enum: [table, bar, diverging_bar, line, metric, evidence]
           description: |
-            프론트가 기본 렌더링할 view 힌트 (silverone 2026-06-01 chart-ready
-            metadata v1). deterministic 휴리스틱:
-            - rows 0건 / 1건 / 단일 컬럼 → `table`
-            - compare 결과 (delta_* 또는 last_*/this_* 컬럼 존재) → `bar`
+            프론트가 기본 렌더링할 view 힌트. deterministic 휴리스틱:
+            - rows 0건 / 단일 컬럼 / 모호 → `table`
+            - 본문(clause/raw_text/cleaned_text) row 샘플(집계 아님) → `evidence`
+            - 두 기간 total 비교 1행(a_count/b_count/delta_count) → `metric`
+            - 두 기간/그룹 비교(delta_* 컬럼) + headline delta → `diverging_bar`
             - x축이 created_at/year/month/date 계열 + numeric metric → `line`
             - 단일 categorical group_by + numeric metric → `bar`
-            - 모호하면 `table`
             display.type은 항상 "table" 유지 — recommended_view는 화면 힌트만.
-            pie / scatter는 v2로 보류.
+            (silverone 2026-06-09 result view contract 확장: diverging_bar / metric / evidence)
         chart_spec:
+          description: |
+            view별 렌더 spec (silverone 2026-06-09). recommended_view에 따라 shape이
+            다르며 `kind`로 구분한다. `recommended_view`가 `table`이면 null.
+            - bar/line/diverging_bar: `{kind, x, y, series, [unit, sort]}`
+              (diverging_bar는 unit=건/%p/%, sort=abs_desc)
+            - metric: `{kind:"metric", a_value, b_value, delta_value, [delta_rate], unit}`
+              — 값이 아니라 컬럼명 참조.
+            - evidence: `{kind:"evidence", text, [sentiment], [chips], [id]}`
+              — text/chips/id 모두 컬럼명 참조.
           anyOf:
             - type: object
+              additionalProperties: true
               properties:
                 kind:
                   type: string
-                  enum: [bar, line]
-                x:
-                  type: string
-                  description: x축으로 쓸 컬럼 key.
-                y:
-                  oneOf:
-                    - type: string
-                    - type: array
-                      items:
-                        type: string
-                  description: |
-                    y축으로 쓸 컬럼 key. 단일 numeric metric이면 string,
-                    compare처럼 last_/this_/delta_ 다중 metric을 한 그래프에
-                    묶을 때는 array.
-                series:
-                  type:
-                    - string
-                    - "null"
-                  description: |
-                    series로 나눌 컬럼 key. v1은 항상 null — 단일 dimension만
-                    추정한다. compare는 wide-format(한 row에 last/this/delta가
-                    모여 있음)이라 series 분기가 불필요.
-              required: [kind, x, y, series]
+                  enum: [bar, line, diverging_bar, metric, evidence]
+              required: [kind]
             - type: "null"
-          description: |
-            chart 렌더링에 필요한 최소 spec (silverone 2026-06-01 chart-ready
-            metadata v1). `recommended_view`가 `table`이면 항상 null.
         column_formats:
           type:
             - object
