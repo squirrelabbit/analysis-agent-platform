@@ -10,7 +10,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { MOCK_RESULTS } from "@/features/reports/models/model";
+import { LIBRARY } from "@/features/reports/models/editor";
 
 export default function Sidebar({ project }: { project: Project }) {
   const { pathname } = useLocation();
@@ -54,7 +54,7 @@ export default function Sidebar({ project }: { project: Project }) {
       name: "보고서",
       path: `${basePath}/reports`,
       icon: FileText,
-      badge: MOCK_RESULTS.length,
+      badge: LIBRARY.length,
     },
   ];
 
