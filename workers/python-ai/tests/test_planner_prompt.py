@@ -279,32 +279,25 @@ class PromptRenderTests(unittest.TestCase):
         _, system, _user = render_planner_prompt(user_question="dummy")
         self.assertNotIn("8개 skill", system)
 
-    def test_examples_in_system_prompt(self) -> None:
-        # silverone 2026-05-26 (cost-opt) — examples는 정적이므로 cache 영역(system)
-        # 안에 들어가 있어야 한다.
+    def test_no_manual_fewshot_examples_in_system_prompt(self) -> None:
+        # silverone 2026-06-09 — manual few-shot 예시를 prompt md에서 제거했다
+        # (예시가 catalog/spec보다 강한 신호로 구조를 틀어 planner가 recipe를
+        # 무시하고 atomic으로 가던 문제). 구체 예시는 RecipeSpec.examples로만 노출.
         _, system, _user = render_planner_prompt(user_question="dummy")
-        self.assertIn("### 예시 1 — 작년 vs 올해 aspect 증감", system)
-        self.assertIn("### 예시 2 — doc-level + clause-level 동시 사용", system)
-        for skill in ("join", "filter", "aggregate", "compare", "calculate", "present"):
-            with self.subTest(skill=skill):
-                self.assertIn(f'"skill": "{skill}"', system)
+        self.assertNotIn("## 예시", system)
+        self.assertNotIn("### 예시 1", system)
+        self.assertNotIn("작년 vs 올해 aspect 증감", system)
+        # 완성형 plan JSON few-shot이 박혀있지 않아야 한다.
+        self.assertNotIn('"left_label": "last", "right_label": "this"', system)
 
-    def test_example1_follows_b_contract(self) -> None:
-        """silverone 2026-05-26 (prefix B안) — 예시 1이 aggregate metric `count`
-        (generic) → compare가 left/this prefix → calculate가 `last_count` /
-        `this_count` 참조하는 형태인지 잠금. 옛 `last_count`/`this_count`를
-        aggregate metric에 넣었던 패턴이 prompt에서 사라졌는지도 함께."""
+    def test_recipe_examples_rendered_from_spec(self) -> None:
+        # silverone 2026-06-09 — recipe별 대표 질문은 RecipeSpec.examples에서 렌더.
         _, system, _user = render_planner_prompt(user_question="dummy")
-        # aggregate metric은 generic name `count`
-        self.assertIn('"name": "count", "function": "count"', system)
-        # compare가 prefix 부여
-        self.assertIn('"left_label": "last", "right_label": "this"', system)
-        # calculate가 prefix된 컬럼 reference
-        self.assertIn('"left": "this_count", "right": "last_count"', system)
-        self.assertIn('"base": "last_count", "current": "this_count"', system)
-        # 옛 패턴 (metric name에 label prefix) 흔적 없음
-        self.assertNotIn('"name": "last_count"', system)
-        self.assertNotIn('"name": "this_count"', system)
+        self.assertIn("- 예시 질문:", system)
+        # period_compare_distribution / count의 대표 질문이 catalog에 노출돼
+        # planner가 전후 비교를 recipe로 라우팅하도록 한다.
+        self.assertIn("감성 비율이 어떻게 달라졌는지", system)
+        self.assertIn("전체 게시물 수를 비교", system)
 
     def test_skill_catalog_in_system_prompt(self) -> None:
         _, system, _user = render_planner_prompt(user_question="dummy")
@@ -318,8 +311,8 @@ class PromptRenderTests(unittest.TestCase):
         self.assertIn("### distribution", system)
         self.assertIn("### event_window_count", system)
         self.assertIn("### top_n", system)
-        self.assertIn('"skill": "top_n"', system)
-        self.assertIn("event_window_count", system)
+        self.assertIn("### period_compare_count", system)
+        self.assertIn("### period_compare_distribution", system)
 
     def test_output_format_marker_in_system(self) -> None:
         _, system, _user = render_planner_prompt(user_question="dummy")
