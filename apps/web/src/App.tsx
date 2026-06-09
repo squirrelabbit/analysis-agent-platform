@@ -10,6 +10,7 @@ import ProjectPage from "./pages/ProjectPage";
 import DatasetListRedesign from "./features/datasets/redesign/DatasetListRedesign";
 import VersionDetailPage from "./features/versions/pages/VersionDetailPage";
 import DatasetVersionListRedesign from "./features/versions/redesign/DatasetVersionListRedesign";
+import ReportPage from "./features/reports/pages/ReportPage";
 
 const queryClient = new QueryClient();
 
@@ -36,6 +37,7 @@ function App() {
               </Route>
               {/* <Route path="scenarios" element={<ScenarioPage />} /> */}
               <Route path="chats" element={<ChatPage />} />
+              <Route path="reports" element={<ReportPage />} />
             </Route>
           </Routes>
         </AppLayout>

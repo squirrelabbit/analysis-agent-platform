@@ -27,6 +27,11 @@ export default function Sidebar({ project }: { project: Project }) {
       icon: MessageCircle,
       badge: project.chatCount,
     },
+    // {
+    //   name: "보고서",
+    //   path: `${basePath}/reports`,
+    //   icon: FileText,
+    // },
   ];
 
   // const subMenus = [
