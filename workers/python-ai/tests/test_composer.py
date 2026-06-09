@@ -520,6 +520,28 @@ class ChartReadyMetadataTests(unittest.TestCase):
         self.assertEqual(spec["x"], "aspect")
         self.assertEqual(spec["y"], "count")
 
+    def test_free_text_x_falls_back_to_table(self) -> None:
+        # silverone 2026-06-09 — planner가 raw_text(본문)로 group_by한 plan은 x축이
+        # 문서 전문이 되어 차트가 무의미 → 자유텍스트 x축은 배제하고 table로 fallback.
+        rows = [
+            {"raw_text": "축제 너무 좋았어요 정말 인생 야경이었습니다 " * 6, "count": 3},
+            {"raw_text": "음식이 너무 비쌌습니다 다시는 안 갈 것 같아요 " * 6, "count": 1},
+        ]
+        out = self._compose_with_rows(rows)
+        self.assertEqual(out["display"]["recommended_view"], "table")
+        self.assertIsNone(out["display"]["chart_spec"])
+
+    def test_free_text_column_skipped_for_short_categorical(self) -> None:
+        # 본문 컬럼(clause)은 건너뛰고 짧은 categorical(aspect)을 x축으로 선택.
+        rows = [
+            {"clause": "음식이 너무 비쌌다 가격이 부담스러웠다 " * 5, "aspect": "food", "count": 5},
+            {"clause": "분위기가 정말 좋았다 야경이 멋졌다 " * 5, "aspect": "ambiance", "count": 3},
+        ]
+        out = self._compose_with_rows(rows)
+        display = out["display"]
+        self.assertEqual(display["recommended_view"], "bar")
+        self.assertEqual(display["chart_spec"]["x"], "aspect")
+
     def test_no_numeric_metric_table(self) -> None:
         """categorical 컬럼만 있고 numeric metric 없으면 table."""
         rows = [

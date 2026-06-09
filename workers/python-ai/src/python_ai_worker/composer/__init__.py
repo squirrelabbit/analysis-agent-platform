@@ -646,13 +646,39 @@ def _looks_like_time_column(name: str) -> bool:
     return False
 
 
+# 차트 x축/그룹 라벨로 적절한 string 값의 최대 길이. 초과하면 본문(자유텍스트)으로
+# 보고 x축 후보에서 제외한다 — silverone 2026-06-09. raw_text/cleaned_text/clause
+# 같은 본문이 group_by/x축으로 뽑혀 막대 라벨이 문서 전문이 되는 것을 막는다.
+# 컬럼명 하드코딩이 아니라 값 길이 기반(구조적) — dataset-specific 본문 컬럼도 커버.
+_MAX_CHART_LABEL_LEN = 60
+
+
+def _column_looks_free_text(rows: list[Any], col: str) -> bool:
+    """col의 string 값이 차트 라벨로 쓰기엔 너무 긴(자유텍스트) 컬럼인지.
+
+    상위 일부 row를 샘플링해 string 값 중 하나라도 _MAX_CHART_LABEL_LEN을 넘으면
+    자유텍스트로 판단한다. categorical(aspect/sentiment/channel 등)은 짧아 통과."""
+    for row in rows[:20]:
+        if isinstance(row, dict):
+            value = row.get(col)
+            if isinstance(value, str) and len(value.strip()) > _MAX_CHART_LABEL_LEN:
+                return True
+    return False
+
+
 def _first_categorical_column(rows: list[Any], columns: list[str]) -> str | None:
-    """첫 row에서 string/None 또는 정수 시점 키(year 등)가 들어 있는 첫 컬럼."""
+    """첫 row에서 string/None 또는 정수 시점 키(year 등)가 들어 있는 첫 컬럼.
+
+    단, 본문(자유텍스트) string 컬럼은 차트 x축으로 부적합하므로 건너뛴다
+    (planner가 raw_text 등으로 group_by한 plan이 무의미한 차트로 렌더되는 것 방지).
+    """
     if not rows or not isinstance(rows[0], dict):
         return None
     for col in columns:
         value = rows[0].get(col)
         if isinstance(value, str):
+            if _column_looks_free_text(rows, col):
+                continue  # 자유텍스트 컬럼은 x축 부적합 → 다음 후보로 (없으면 table)
             return col
         # year 같은 정수가 시계열 x축이 될 수 있다 — 컬럼명이 시간 prefix면 채택.
         if isinstance(value, int) and not isinstance(value, bool) and _looks_like_time_column(col):
