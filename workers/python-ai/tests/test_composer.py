@@ -433,7 +433,9 @@ class ChartReadyMetadataTests(unittest.TestCase):
         self.assertIsNone(out["display"]["chart_spec"])
 
     def test_compare_columns_bar(self) -> None:
-        """delta_/last_/this_ 컬럼 존재 + categorical x → bar, y는 list."""
+        """compare wide-format + categorical x → bar. silverone 2026-06-09:
+        프론트가 단일 series만 렌더(다중 y는 첫 값으로 좁혀 last_count만 보임)하므로
+        '변화'를 드러내는 headline delta(delta_count) 하나만 단일 series로 추천한다."""
         rows = [
             {"aspect": "food", "last_count": 1, "this_count": 2, "delta_count": 1},
             {"aspect": "show", "last_count": 0, "this_count": 1, "delta_count": 1},
@@ -445,8 +447,37 @@ class ChartReadyMetadataTests(unittest.TestCase):
         self.assertIsNotNone(spec)
         self.assertEqual(spec["kind"], "bar")
         self.assertEqual(spec["x"], "aspect")
-        self.assertEqual(spec["y"], ["last_count", "this_count", "delta_count"])
+        self.assertEqual(spec["y"], "delta_count")
         self.assertIsNone(spec["series"])
+
+    def test_distribution_compare_uses_delta_ratio(self) -> None:
+        """period_compare_distribution wide-format(count+ratio 혼합) → delta_ratio(pp)
+        단일 series bar. count↔ratio 혼합이라 다중 y는 불가, headline은 delta_ratio 우선."""
+        rows = [
+            {"sentiment": "negative", "a_count": 1, "a_ratio": 0.03, "b_count": 31, "b_ratio": 0.04, "delta_count": 30, "delta_ratio": 0.01},
+            {"sentiment": "neutral", "a_count": 3, "a_ratio": 0.10, "b_count": 277, "b_ratio": 0.39, "delta_count": 274, "delta_ratio": 0.29},
+            {"sentiment": "positive", "a_count": 27, "a_ratio": 0.87, "b_count": 402, "b_ratio": 0.57, "delta_count": 375, "delta_ratio": -0.30},
+        ]
+        out = self._compose_with_rows(rows)
+        display = out["display"]
+        self.assertEqual(display["recommended_view"], "bar")
+        spec = display["chart_spec"]
+        self.assertIsNotNone(spec)
+        self.assertEqual(spec["kind"], "bar")
+        self.assertEqual(spec["x"], "sentiment")
+        self.assertEqual(spec["y"], "delta_ratio")
+        self.assertIsNone(spec["series"])
+
+    def test_compare_without_delta_falls_back_to_table(self) -> None:
+        """compare 계열(last_/this_)이지만 delta 컬럼이 없으면 단일 headline을 못 골라
+        차트 철회 → table."""
+        rows = [
+            {"aspect": "food", "last_count": 1, "this_count": 2},
+            {"aspect": "show", "last_count": 0, "this_count": 1},
+        ]
+        out = self._compose_with_rows(rows)
+        self.assertEqual(out["display"]["recommended_view"], "table")
+        self.assertIsNone(out["display"]["chart_spec"])
 
     def test_time_x_axis_line(self) -> None:
         """created_at/year/month/date 계열 x축 + numeric metric → line."""
