@@ -2350,8 +2350,9 @@ components:
             `composer.display`가 있으면 lightweight projection으로 채워진다.
             keep set은 `ComposerDisplay`의 `type` / `title` / `columns` /
             `rows` / `total_rows` / `returned_rows` / `max_rows` / `truncated`
-            / `warnings` / `recommended_view` / `chart_spec` 11 키 — POST 응답의
-            `result.composer.display`와 schema 동일.
+            / `warnings` / `recommended_view` / `chart_spec` / `column_formats`
+            / `column_labels` 13 키 — POST 응답의 `result.composer.display`와
+            schema 동일.
 
             POST `/datasets/{did}/analyze` / `POST /analysis_threads/{tid}/messages`
             응답에는 포함되지 않는다 (그 응답은 `result.composer.display`로 받음).
@@ -2978,6 +2979,26 @@ components:
           description: |
             chart 렌더링에 필요한 최소 spec (silverone 2026-06-01 chart-ready
             metadata v1). `recommended_view`가 `table`이면 항상 null.
+        column_formats:
+          type:
+            - object
+            - "null"
+          additionalProperties:
+            type: string
+          description: |
+            기간/그룹 비교 결과의 컬럼별 표시 포맷 contract (silverone 2026-06-09).
+            프론트가 %·%p·정수로 렌더하도록 단위 의미를 전달한다. 값 enum:
+            percent(0~1→%) / point(0~1→%p) / int(정수) / number. compare 결과에만
+            존재하며 그 외에는 생략(키 없음).
+        column_labels:
+          type:
+            - object
+            - "null"
+          additionalProperties:
+            type: string
+          description: |
+            비교 결과 컬럼의 화면 표시 라벨 (예: delta_ratio → "Δ비율(%p)",
+            a_ratio → "이전 비율"). count/ratio/pp 혼동 방지용. compare 결과에만 존재.
       required: [type, columns, rows, total_rows, returned_rows, max_rows, truncated, warnings, recommended_view, chart_spec]
     ComposerContextSummary:
       type: object
