@@ -209,10 +209,10 @@ def _build_display(
     # planner 의도(값 정렬 등)를 보존하기 위해 건드리지 않는다.
     if recommended_view == "line" and isinstance(chart_spec, dict):
         rows = _sort_rows_by_x(rows, str(chart_spec.get("x") or ""))
-    # silverone 2026-06-09 — diverging bar는 변화가 큰 항목부터 보이게 abs(delta)
-    # 내림차순 정렬 (chart top-N + 상세 table 동일 순서).
+    # silverone 2026-06-09 — diverging bar는 증가 큰 순(위) → 감소(아래)로
+    # signed delta 내림차순 정렬 (chart top-N + 상세 table 동일 순서).
     if recommended_view == "diverging_bar" and isinstance(chart_spec, dict):
-        rows = _sort_rows_by_abs_delta(rows, str(chart_spec.get("y") or ""))
+        rows = _sort_rows_by_signed_delta(rows, str(chart_spec.get("y") or ""))
     result: dict[str, Any] = {
         "type": fmt,
         "title": present.get("title"),
@@ -445,7 +445,7 @@ def _build_chart_spec(
         return None
     # silverone 2026-06-09 — 두 기간/그룹 비교는 0 기준 diverging bar. headline
     # delta(delta_ratio %p / delta_count 건 / base 충분 시 delta_rate %) 하나만
-    # 단일 series로, abs(delta) 내림차순 정렬. unit으로 단위를 명시한다.
+    # 단일 series로, signed delta 내림차순(증가 위→감소 아래) 정렬. unit 명시.
     if recommended_view == "diverging_bar":
         headline = _headline_delta_column(y_cols, rows)
         if headline is None:
@@ -456,7 +456,7 @@ def _build_chart_spec(
             "y": headline,
             "series": None,
             "unit": _delta_unit(headline),
-            "sort": "abs_desc",
+            "sort": "signed_desc",
         }
     # 일반 compare가 bar/line으로 올 일은 없지만, 방어적으로 headline 단일화 유지.
     if _has_compare_columns(columns):
@@ -728,7 +728,7 @@ def _compare_change_summary(rows: list[Any], columns: list[str]) -> str | None:
             parts.append(f"{_group_label_for_summary(near[0])} 비율은 거의 변하지 않았습니다")
     if not parts:
         return None
-    return "두 기간 비교: " + ", ".join(parts) + "."
+    return ", ".join(parts) + "."
 
 
 # delta_rate(증감률 %)를 차트 headline으로 쓰려면 기준값(a_count)이 이 정도는 돼야
@@ -779,14 +779,15 @@ def _headline_delta_column(y_cols: list[str], rows: list[Any]) -> str | None:
     return None
 
 
-def _sort_rows_by_abs_delta(rows: list[Any], col: str) -> list[Any]:
-    """diverging bar용 — abs(delta) 내림차순 (변화 큰 항목 먼저). 비교 불가 시 원순서."""
+def _sort_rows_by_signed_delta(rows: list[Any], col: str) -> list[Any]:
+    """diverging bar용 — delta 값 내림차순(증가 큰 순 위 → 감소 아래). 0 기준 막대가
+    위에서 아래로 +큰 것 … −큰 것 순으로 정렬돼 읽기 쉽다. 비교 불가 시 원순서."""
     if not col or not isinstance(rows, list) or len(rows) < 2:
         return rows
 
     def key(row: Any) -> float:
         value = row.get(col) if isinstance(row, dict) else None
-        return abs(float(value)) if _is_finite_number(value) else -1.0
+        return float(value) if _is_finite_number(value) else float("-inf")
 
     try:
         return sorted(rows, key=key, reverse=True)
