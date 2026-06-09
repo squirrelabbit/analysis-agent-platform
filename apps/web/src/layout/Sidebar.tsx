@@ -1,8 +1,9 @@
 import { NavLink, useLocation } from "react-router-dom";
-import { Database, MessageCircle } from "lucide-react";
+import { Database, FileText, MessageCircle } from "lucide-react";
 import type { Project } from "@/features/projects/models/model";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { MOCK_RESULTS } from "@/features/reports/models/model";
 
 export default function Sidebar({ project }: { project: Project }) {
   const { pathname } = useLocation();
@@ -27,11 +28,12 @@ export default function Sidebar({ project }: { project: Project }) {
       icon: MessageCircle,
       badge: project.chatCount,
     },
-    // {
-    //   name: "보고서",
-    //   path: `${basePath}/reports`,
-    //   icon: FileText,
-    // },
+    {
+      name: "보고서",
+      path: `${basePath}/reports`,
+      icon: FileText,
+      badge: MOCK_RESULTS.length,
+    },
   ];
 
   // const subMenus = [
