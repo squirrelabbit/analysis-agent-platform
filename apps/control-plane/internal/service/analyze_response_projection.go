@@ -149,6 +149,19 @@ func projectAnalyzeComposer(value any) map[string]any {
 	if display := projectComposerDisplay(composer["display"]); display != nil {
 		out["display"] = display
 	}
+	// silverone 2026-06-08 (작업 1) — graceful 거절 시 대체 질문을 프론트로 전달.
+	// 문자열 리스트만 통과시킨다.
+	if raw, ok := composer["suggested_questions"].([]any); ok && len(raw) > 0 {
+		suggested := make([]string, 0, len(raw))
+		for _, item := range raw {
+			if s, ok := item.(string); ok && s != "" {
+				suggested = append(suggested, s)
+			}
+		}
+		if len(suggested) > 0 {
+			out["suggested_questions"] = suggested
+		}
+	}
 	return out
 }
 

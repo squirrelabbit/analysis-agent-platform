@@ -666,11 +666,21 @@ def _reject_payload(*, user_question: str | None, plan: dict[str, Any]) -> dict[
         if message:
             context_summary["answer_summary"] = message
 
+    # silverone 2026-06-08 (작업 1) — graceful 거절 시 plan이 제안한 대체 질문을
+    # 그대로 노출(없으면 빈 리스트). 프론트가 "이렇게 물어보세요" 버튼으로 쓸 수 있다.
+    suggested = plan.get("suggested_questions")
+    suggested_questions = (
+        [str(q).strip() for q in suggested if str(q).strip()]
+        if isinstance(suggested, (list, tuple))
+        else []
+    )
+
     return {
         "assistant_content": message,
         "display": None,
         "context_summary": context_summary,
         "metadata": metadata,
+        "suggested_questions": suggested_questions,
     }
 
 

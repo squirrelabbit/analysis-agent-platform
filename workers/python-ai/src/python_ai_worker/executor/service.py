@@ -20,19 +20,27 @@ from typing import Any
 
 from ..composer import compose_answer
 from ..obs import get as _get_logger
-from ..planner.recipes import expand_recipes
+from ..planner.recipes import RecipeError, expand_recipes
 from ..planner.step_display import plan_with_step_display
 from ..planner import (
     DatasetSpecificColumn,
     PlanValidationError,
     PlannerCallError,
     PlannerResult,
+    PlannerValidationError,
     generate_plan,
 )
 from .context import ArtifactPaths, ExecutorContext, ExecutorContextError, read_docs_columns
 from .runner import ExecutionStepResult, ExecutorError, execute_plan
 
 _LOG = _get_logger("executor.service")
+
+# silverone 2026-06-08 (작업 1) — graceful 거절 시 함께 내려주는 대체 질문.
+# "복잡해서 못 했다"로 끝내지 않고, 확실히 되는 단순 질문으로 유도한다.
+_ANALYZE_REJECT_SUGGESTIONS: tuple[str, ...] = (
+    "축제 전후 게시물 수를 비교해줘",
+    "부정 후기가 많은 aspect TOP 5를 보여줘",
+)
 
 
 def _filter_docs_extra_columns(
@@ -323,9 +331,19 @@ def plan_and_execute_analyze(
             sample_limit=sample_limit,
             user_question=user_question,
         )
-    except (PlanValidationError, ExecutorError) as exc:
-        # silverone 2026-06-05 — ExecutorError(실행 단계 SQL/skill 실패)도 user_question
-        # 경로에서 raw 500으로 새지 않게 graceful 거절로 변환. validation 실패와 reason만 구분.
+    except (
+        PlanValidationError,
+        PlannerValidationError,
+        RecipeError,
+        ExecutorError,
+    ) as exc:
+        # silverone 2026-06-08 (작업 1) — user_question 경로에서 아래 실패들이 raw 500으로
+        # 새지 않게 graceful 거절(answerable=false + reason + suggested_questions)로 변환:
+        #   - PlannerValidationError: planner self-correct까지 실패(유효 plan 미생성)
+        #   - PlanValidationError: expand 후 atomic 재검증 실패 (잘못된 compare 등)
+        #   - RecipeError: recipe param/lowering 불가
+        #   - ExecutorError: 실행 단계 SQL/skill 실패
+        # "고장"처럼 보이지 않게 — 못 하는 질문을 안전하게 거절한다.
         if isinstance(exc, ExecutorError):
             event = "analyze.execution_failed"
             reason = "execution_error"
@@ -337,8 +355,9 @@ def plan_and_execute_analyze(
             event = "analyze.planner_validation_failed"
             reason = "planner_validation_error"
             message = (
-                "요청을 실행 가능한 분석 계획으로 변환하지 못했습니다. "
-                "질문을 더 구체적으로(대상·기준·집계 단위) 작성해 다시 시도해 주세요."
+                "요청을 실행 가능한 분석 계획으로 변환하지 못했습니다. 전후 기간과 "
+                "감성·비율을 동시에 비교하는 복잡한 교차 분석은 아직 지원 범위를 "
+                "벗어날 수 있습니다. 더 단순한 조건으로 나눠서 질문해 주세요."
             )
         _LOG.warning(
             event,
@@ -353,6 +372,7 @@ def plan_and_execute_analyze(
                 "plan_version": "v2",
                 "reason": reason,
                 "message": message,
+                "suggested_questions": _ANALYZE_REJECT_SUGGESTIONS,
                 "steps": [],
             },
             user_question=user_question,
