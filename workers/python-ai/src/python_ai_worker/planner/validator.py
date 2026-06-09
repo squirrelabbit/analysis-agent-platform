@@ -1155,6 +1155,8 @@ def _validate_recipe_params(skill_name: str, params: dict[str, Any], ctx: _StepC
         _validate_sample_rows_recipe(params, ctx)
     elif skill_name == "period_compare_count":
         _validate_period_compare_count_recipe(params, ctx)
+    elif skill_name == "period_compare_distribution":
+        _validate_period_compare_distribution_recipe(params, ctx)
     else:
         ctx.issue(
             code="step.skill_unknown",
@@ -1162,12 +1164,16 @@ def _validate_recipe_params(skill_name: str, params: dict[str, Any], ctx: _StepC
         )
 
 
-def _validate_period_bounds(period: Any, key: str, ctx: _StepContext) -> None:
-    """period_compare_count.period_a/period_b ({start, end}) 검증 — inclusive YYYY-MM-DD."""
+def _validate_period_bounds(
+    period: Any, key: str, ctx: _StepContext, recipe: str = "period_compare_count"
+) -> None:
+    """period_a/period_b ({start, end}) 검증 — inclusive YYYY-MM-DD.
+
+    recipe는 오류 메시지 prefix (period_compare_count / period_compare_distribution)."""
     if not isinstance(period, dict):
         ctx.issue(
             code="params.recipe_period_invalid",
-            message=f"period_compare_count.{key} must be an object {{start, end}}",
+            message=f"{recipe}.{key} must be an object {{start, end}}",
         )
         return
     parsed: list[date] = []
@@ -1176,7 +1182,7 @@ def _validate_period_bounds(period: Any, key: str, ctx: _StepContext) -> None:
         if not isinstance(value, str) or not value.strip():
             ctx.issue(
                 code="params.recipe_period_invalid",
-                message=f"period_compare_count.{key}.{field_name} must be YYYY-MM-DD",
+                message=f"{recipe}.{key}.{field_name} must be YYYY-MM-DD",
             )
             continue
         try:
@@ -1184,12 +1190,12 @@ def _validate_period_bounds(period: Any, key: str, ctx: _StepContext) -> None:
         except ValueError:
             ctx.issue(
                 code="params.recipe_period_invalid",
-                message=f"period_compare_count.{key}.{field_name} must be YYYY-MM-DD",
+                message=f"{recipe}.{key}.{field_name} must be YYYY-MM-DD",
             )
     if len(parsed) == 2 and parsed[0] > parsed[1]:
         ctx.issue(
             code="params.recipe_period_invalid",
-            message=f"period_compare_count.{key}.start must be <= end",
+            message=f"{recipe}.{key}.start must be <= end",
         )
 
 
@@ -1253,6 +1259,76 @@ def _validate_period_compare_count_recipe(params: dict[str, Any], ctx: _StepCont
         ctx.issue(
             code="params.recipe_title_invalid",
             message="period_compare_count.title must be a string or null",
+        )
+
+
+def _validate_period_compare_distribution_recipe(params: dict[str, Any], ctx: _StepContext) -> None:
+    # silverone 2026-06-08 — period_compare_count과 달리 group_by가 필수(구성비 비교라
+    # 그룹 축이 반드시 필요). count_column / ratio_column은 선택 string.
+    if not _check_required_keys(params, ("input", "period_a", "period_b", "group_by"), ctx):
+        return
+
+    input_ref = params.get("input")
+
+    date_column = params.get("date_column")
+    if date_column is None:
+        date_column_name = "created_at"
+    elif isinstance(date_column, str) and date_column.strip():
+        date_column_name = date_column.strip()
+    else:
+        date_column_name = "created_at"
+        ctx.issue(
+            code="params.recipe_date_column_invalid",
+            message="period_compare_distribution.date_column must be a non-empty string",
+        )
+
+    group_by = params.get("group_by")
+    group_columns: list[str] = []
+    if isinstance(group_by, list) and group_by and all(isinstance(c, str) and c.strip() for c in group_by):
+        group_columns = [c.strip() for c in group_by]
+    else:
+        ctx.issue(
+            code="params.recipe_group_by_invalid",
+            message="period_compare_distribution.group_by must be a non-empty string list",
+        )
+
+    require_columns = [date_column_name, *group_columns]
+    _check_input_ref(input_ref, "input", ctx, require_column=require_columns or None)
+
+    input_name = str(input_ref or "").strip()
+    column_type = RESERVED_COLUMN_TYPES.get(input_name, {}).get(date_column_name)
+    if column_type and column_type not in TIMESTAMP_COLUMN_TYPES:
+        ctx.issue(
+            code="params.recipe_date_column_invalid",
+            message=(
+                "period_compare_distribution.date_column must reference a timestamp/date column "
+                f"(got {date_column_name}: {column_type})"
+            ),
+        )
+
+    _validate_period_bounds(params.get("period_a"), "period_a", ctx, recipe="period_compare_distribution")
+    _validate_period_bounds(params.get("period_b"), "period_b", ctx, recipe="period_compare_distribution")
+
+    metric = params.get("metric")
+    if metric is not None and str(metric).strip() != "count":
+        ctx.issue(
+            code="params.recipe_metric_unsupported",
+            message="period_compare_distribution.metric only supports 'count'",
+        )
+
+    for col_key in ("count_column", "ratio_column"):
+        col_val = params.get(col_key)
+        if col_val is not None and (not isinstance(col_val, str) or not col_val.strip()):
+            ctx.issue(
+                code="params.recipe_column_invalid",
+                message=f"period_compare_distribution.{col_key} must be a non-empty string",
+            )
+
+    title = params.get("title")
+    if title is not None and not isinstance(title, str):
+        ctx.issue(
+            code="params.recipe_title_invalid",
+            message="period_compare_distribution.title must be a string or null",
         )
 
 

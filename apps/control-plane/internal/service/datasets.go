@@ -54,6 +54,10 @@ type DatasetService struct {
 	// 같을 때만 lloaModelDisplayName을 노출한다. SetLLOAModelDisplay로 주입.
 	lloaModel            string
 	lloaModelDisplayName string
+	// silverone 2026-06-08 — plan reuse(POC-1) 토글. 기본 false(비활성).
+	// ANALYSIS_PLAN_REUSE_ENABLED로 SetPlanReuseEnabled를 통해 주입. context
+	// hijack(이전 결과 오재표시) 때문에 기본 OFF. threads()가 sub-service로 전달.
+	planReuseEnabled bool
 }
 
 func NewDatasetService(repository store.Repository, pythonAIWorkerURL string, uploadRoot string, artifactRoot string) *DatasetService {
@@ -104,6 +108,12 @@ func (s *DatasetService) SetBuildJobStarter(starter workflows.Starter) {
 func (s *DatasetService) SetLLOAModelDisplay(model, displayName string) {
 	s.lloaModel = strings.TrimSpace(model)
 	s.lloaModelDisplayName = strings.TrimSpace(displayName)
+}
+
+// SetPlanReuseEnabled — plan reuse(POC-1) 활성 여부 주입. config의
+// ANALYSIS_PLAN_REUSE_ENABLED를 wiring 시점에 넘긴다. 기본 false(비활성).
+func (s *DatasetService) SetPlanReuseEnabled(enabled bool) {
+	s.planReuseEnabled = enabled
 }
 
 // SetPythonAITaskTimeout — analyze worker 호출 HTTP timeout 주입.

@@ -52,6 +52,7 @@ func NewServer(cfg config.Config) *Server {
 	server.datasetService.SetBuildJobStarter(starter)
 	server.datasetService.SetPythonAITaskTimeout(time.Duration(cfg.PythonAIWorkerHTTPTimeoutSec) * time.Second)
 	server.datasetService.SetLLOAModelDisplay(cfg.LLOAModel, cfg.LLOAModelDisplayName)
+	server.datasetService.SetPlanReuseEnabled(cfg.PlanReuseEnabled)
 	server.routes()
 	return server
 }

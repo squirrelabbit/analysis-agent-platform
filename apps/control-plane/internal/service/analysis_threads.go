@@ -306,10 +306,12 @@ func (t *AnalysisThreadService) PostAnalysisThreadMessage(
 		return domain.AnalysisThreadMessageResponse{}, err
 	}
 
-	// silverone 2026-06-01 (PR2) — planner가 answerable=false로 거절했고 reason이
-	// unsupported_skill / missing_data_or_artifact면 rejection event 적재 (skill
-	// upgrade backlog). out_of_dataset_scope는 제외. best-effort — 적재 실패가
-	// 사용자 응답을 깨지 않는다 (assistant message는 이미 저장됨).
+	// silverone 2026-06-01 (PR2) / 2026-06-08 확장 — answerable=false 거절 중 적재
+	// 대상 reason(rejectableRejectionReasons: unsupported_skill /
+	// missing_data_or_artifact / planner_validation_error / execution_error)이면
+	// rejection event 적재(고도화 재료). out_of_dataset_scope/일반 clarification은
+	// 제외. best-effort — 적재 실패가 사용자 응답을 깨지 않는다(assistant message는
+	// 이미 저장됨).
 	if event, ok := rejectionEventFromResult(
 		projectID, datasetID, thread.ThreadID, assistantMessage.MessageID, question, analysisResp.Result,
 	); ok {
@@ -489,11 +491,22 @@ func composerContextSummary(raw json.RawMessage) map[string]any {
 	return out
 }
 
+// rejectableRejectionReasons — planner_rejection_events에 적재할 거절 reason.
+// silverone 2026-06-01 (PR2): unsupported_skill / missing_data_or_artifact (skill
+// upgrade backlog). silverone 2026-06-08: planner_validation_error / execution_error
+// 추가 — "못 만든/못 실행한 복잡 질의"를 고도화 재료로 자동 적재(D3/D4 류). 일반
+// clarification / out_of_dataset_scope는 제외(저장하지 않는다).
+var rejectableRejectionReasons = map[string]bool{
+	"unsupported_skill":        true,
+	"missing_data_or_artifact": true,
+	"planner_validation_error": true,
+	"execution_error":          true,
+}
+
 // rejectionEventFromResult — analyze 결과(composer.metadata.reason)에서 적재 대상
-// 거절 이벤트를 만든다 (silverone 2026-06-01, PR2). 적재 대상은 unsupported_skill /
-// missing_data_or_artifact 두 reason뿐 — out_of_dataset_scope는 (false 반환으로)
-// 저장하지 않는다. message는 composer.assistant_content(사용자 노출 거절 문구),
-// capability_gap은 composer.metadata.capability_gap에서 가져온다.
+// 거절 이벤트를 만든다 (silverone 2026-06-01, PR2 / 2026-06-08 확장). 적재 대상은
+// rejectableRejectionReasons. message는 composer.assistant_content(사용자 노출 거절
+// 문구), capability_gap은 composer.metadata.capability_gap에서 가져온다.
 func rejectionEventFromResult(
 	projectID, datasetID, threadID, messageID, userQuestion string, raw json.RawMessage,
 ) (domain.PlannerRejectionEvent, bool) {
@@ -510,7 +523,7 @@ func rejectionEventFromResult(
 		return domain.PlannerRejectionEvent{}, false
 	}
 	reason := strings.TrimSpace(fmt.Sprintf("%v", meta["reason"]))
-	if reason != "unsupported_skill" && reason != "missing_data_or_artifact" {
+	if !rejectableRejectionReasons[reason] {
 		return domain.PlannerRejectionEvent{}, false
 	}
 	message, _ := composer["assistant_content"].(string)
@@ -595,6 +608,12 @@ func (t *AnalysisThreadService) tryReusePlan(
 	question string,
 	contextItems []map[string]any,
 ) (ReuseDecision, AnalyzeResponse, bool) {
+	// 0) 기능 토글 (silverone 2026-06-08). 기본 OFF. reuse 경로가 "TOP N" 류 새
+	// 분석 질문을 직전 결과로 오재표시하는 context hijack을 유발해(festival E3→E4
+	// 라이브 재현) 비활성. ANALYSIS_PLAN_REUSE_ENABLED=true일 때만 아래 분류로 진입.
+	if !t.planReuseEnabled {
+		return ReuseDecision{Reused: false, FallbackReason: "reuse_disabled"}, AnalyzeResponse{}, false
+	}
 	// 1) classifier
 	action, params, classified := classifyReuseAction(question)
 	if !classified {

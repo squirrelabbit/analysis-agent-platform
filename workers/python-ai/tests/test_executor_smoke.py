@@ -631,6 +631,51 @@ class PeriodCompareCountRecipeExecutionTests(unittest.TestCase):
             self.assertEqual(rows["인스타그램"]["delta_count"], 1)
 
 
+class PeriodCompareDistributionRecipeExecutionTests(unittest.TestCase):
+    """period_compare_distribution recipe expand → 실행 smoke. fixture docs:
+    2025 d1(다음 카페) / 2026 d2(인스타그램)·d3(다음 카페). 기간 내 구성비 비교."""
+
+    def test_group_share_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = _fixture_paths(Path(tmp))
+            plan = {
+                "plan_version": "v2",
+                "steps": [
+                    {
+                        "id": "pcd",
+                        "skill": "period_compare_distribution",
+                        "params": {
+                            "input": "docs",
+                            "period_a": {"start": "2025-01-01", "end": "2025-12-31"},
+                            "period_b": {"start": "2026-01-01", "end": "2026-12-31"},
+                            "group_by": ["channel"],
+                            "title": "채널 구성비 전후 변화",
+                        },
+                    }
+                ],
+            }
+            resp = execute_analyze_plan("v1", plan, artifact_paths=paths)
+            self.assertEqual(
+                [s["skill"] for s in resp["plan"]["steps"]],
+                ["filter", "aggregate", "calculate", "filter", "aggregate", "calculate", "compare", "calculate", "present"],
+            )
+            rows = {r["channel"]: r for r in resp["present"]["rows"]}
+            # 다음 카페: 2025 1/1=1.0 → 2026 1/2=0.5. delta_count 0, delta_ratio -0.5
+            cafe = rows["다음 카페"]
+            self.assertEqual(cafe["a_count"], 1)
+            self.assertAlmostEqual(cafe["a_ratio"], 1.0)
+            self.assertEqual(cafe["b_count"], 1)
+            self.assertAlmostEqual(cafe["b_ratio"], 0.5)
+            self.assertEqual(cafe["delta_count"], 0)
+            self.assertAlmostEqual(cafe["delta_ratio"], -0.5)
+            # 인스타그램: 2025 없음 → a NULL(0 처리), 2026 1/2=0.5. delta_count 1, delta_ratio 0.5
+            insta = rows["인스타그램"]
+            self.assertEqual(insta["b_count"], 1)
+            self.assertAlmostEqual(insta["b_ratio"], 0.5)
+            self.assertEqual(insta["delta_count"], 1)
+            self.assertAlmostEqual(insta["delta_ratio"], 0.5)
+
+
 class GuardrailTests(unittest.TestCase):
     def test_invalid_plan_raises_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

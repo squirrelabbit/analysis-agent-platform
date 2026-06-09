@@ -20,6 +20,7 @@ from python_ai_worker.planner.recipes import (
     lower_distribution,
     lower_event_window_count,
     lower_period_compare_count,
+    lower_period_compare_distribution,
     lower_recipe,
     lower_top_n,
 )
@@ -535,11 +536,148 @@ class PeriodCompareCountValidatorTests(unittest.TestCase):
         self.assertIn("params.input_unknown", _codes(_wrap_one(_pcc_step(input="nope"))))
 
 
+def _pcd_step(**param_overrides):
+    params = {
+        "input": "docs",
+        "period_a": {"start": "2024-08-01", "end": "2024-08-14"},
+        "period_b": {"start": "2024-08-15", "end": "2024-08-28"},
+        "group_by": ["sentiment"],
+    }
+    params.update(param_overrides)
+    return {"id": "pcd", "skill": "period_compare_distribution", "params": params}
+
+
+class PeriodCompareDistributionLoweringTests(unittest.TestCase):
+    def test_lowers_to_expected_atomic_steps(self) -> None:
+        steps = lower_recipe(_pcd_step())
+        self.assertEqual(
+            [s["skill"] for s in steps],
+            ["filter", "aggregate", "calculate", "filter", "aggregate", "calculate", "compare", "calculate", "present"],
+        )
+
+    def test_each_period_computes_share_of_total(self) -> None:
+        steps = lower_recipe(_pcd_step())
+        shares = [
+            s for s in steps
+            if s["skill"] == "calculate"
+            and any(e.get("operation") == "share_of_total" for e in s["params"]["expressions"])
+        ]
+        self.assertEqual(len(shares), 2)
+        for s in shares:
+            expr = s["params"]["expressions"][0]
+            self.assertEqual(expr["operation"], "share_of_total")
+            self.assertEqual(expr["value"], "count")
+            self.assertEqual(expr["name"], "ratio")
+
+    def test_compare_joins_on_group_by_and_labels_ab(self) -> None:
+        cmp = next(s for s in lower_recipe(_pcd_step()) if s["skill"] == "compare")
+        self.assertEqual(cmp["params"]["join_key"], ["sentiment"])
+        self.assertEqual(cmp["params"]["left_label"], "a")
+        self.assertEqual(cmp["params"]["right_label"], "b")
+
+    def test_delta_expressions_and_present_columns(self) -> None:
+        steps = lower_recipe(_pcd_step())
+        delta = steps[-2]
+        self.assertEqual(delta["skill"], "calculate")
+        names = {e["name"] for e in delta["params"]["expressions"]}
+        self.assertEqual(names, {"delta_count", "delta_ratio"})
+        present = steps[-1]
+        self.assertEqual(
+            present["params"]["columns"],
+            ["sentiment", "a_count", "a_ratio", "b_count", "b_ratio", "delta_count", "delta_ratio"],
+        )
+
+    def test_aspect_group_by(self) -> None:
+        steps = lower_recipe(_pcd_step(group_by=["aspect"]))
+        cmp = next(s for s in steps if s["skill"] == "compare")
+        self.assertEqual(cmp["params"]["join_key"], ["aspect"])
+        self.assertEqual(steps[-1]["params"]["columns"][0], "aspect")
+
+    def test_custom_count_ratio_column(self) -> None:
+        steps = lower_recipe(_pcd_step(count_column="cnt", ratio_column="share"))
+        present = steps[-1]
+        self.assertEqual(
+            present["params"]["columns"],
+            ["sentiment", "a_cnt", "a_share", "b_cnt", "b_share", "delta_count", "delta_ratio"],
+        )
+
+    def test_deterministic(self) -> None:
+        self.assertEqual(
+            lower_period_compare_distribution(_pcd_step()),
+            lower_period_compare_distribution(_pcd_step()),
+        )
+
+    def test_lowered_plan_passes_validator(self) -> None:
+        steps = lower_recipe(_pcd_step())
+        self.assertEqual(collect_plan_issues({"plan_version": "v2", "steps": steps}), [])
+
+    def test_group_by_required_raises(self) -> None:
+        step = _pcd_step()
+        del step["params"]["group_by"]
+        with self.assertRaises(RecipeError):
+            lower_period_compare_distribution(step)
+
+    def test_bad_date_raises(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_period_compare_distribution(_pcd_step(period_a={"start": "2024/08/01", "end": "2024-08-14"}))
+
+    def test_start_after_end_raises(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_period_compare_distribution(_pcd_step(period_b={"start": "2024-08-28", "end": "2024-08-15"}))
+
+    def test_metric_other_than_count_raises(self) -> None:
+        with self.assertRaises(RecipeError):
+            lower_period_compare_distribution(_pcd_step(metric="sum"))
+
+
+class PeriodCompareDistributionValidatorTests(unittest.TestCase):
+    def test_valid_sentiment_passes(self) -> None:
+        self.assertEqual(collect_plan_issues(_wrap_one(_pcd_step())), [])
+
+    def test_valid_aspect_passes(self) -> None:
+        self.assertEqual(collect_plan_issues(_wrap_one(_pcd_step(group_by=["aspect"]))), [])
+
+    def test_group_by_required(self) -> None:
+        step = _pcd_step()
+        del step["params"]["group_by"]
+        self.assertIn("params.missing_keys", _codes(_wrap_one(step)))
+
+    def test_group_by_empty_invalid(self) -> None:
+        self.assertIn("params.recipe_group_by_invalid", _codes(_wrap_one(_pcd_step(group_by=[]))))
+
+    def test_missing_period_b(self) -> None:
+        step = _pcd_step()
+        del step["params"]["period_b"]
+        self.assertIn("params.missing_keys", _codes(_wrap_one(step)))
+
+    def test_bad_period_date_format(self) -> None:
+        self.assertIn(
+            "params.recipe_period_invalid",
+            _codes(_wrap_one(_pcd_step(period_a={"start": "08-01-2024", "end": "2024-08-14"}))),
+        )
+
+    def test_unsupported_metric(self) -> None:
+        self.assertIn(
+            "params.recipe_metric_unsupported",
+            _codes(_wrap_one(_pcd_step(metric="sum"))),
+        )
+
+    def test_unknown_input(self) -> None:
+        self.assertIn("params.input_unknown", _codes(_wrap_one(_pcd_step(input="nope"))))
+
+
 class RecipeRegistryTests(unittest.TestCase):
     def test_specs_present(self) -> None:
         self.assertEqual(
             set(RECIPE_SPECS),
-            {"distribution", "event_window_count", "top_n", "sample_rows", "period_compare_count"},
+            {
+                "distribution",
+                "event_window_count",
+                "top_n",
+                "sample_rows",
+                "period_compare_count",
+                "period_compare_distribution",
+            },
         )
 
     def test_all_recipes_implemented(self) -> None:
