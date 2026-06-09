@@ -1,5 +1,11 @@
-import { Fragment, type ReactNode, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import {
+  Fragment,
+  type ReactNode,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { Check, ChevronDown, ChevronUp, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Pagination } from "./Pagination";
 
@@ -169,15 +175,38 @@ export function FilterPills({
   );
 }
 
+/**
+ * 클립보드 복사. navigator.clipboard는 보안 컨텍스트(https/localhost)에서만
+ * 동작하므로, 배포 환경(http)까지 일관되게 쓰기 위해 execCommand("copy")로 통일한다.
+ * http / localhost / https 모두 동일하게 동작.
+ */
+function copyToClipboard(text: string): boolean {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    // 화면 밖 + 스크롤 점프 방지로 배치 후 선택해 복사.
+    ta.style.position = "fixed";
+    ta.style.top = "-9999px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 /** 잘리는 문서 ID를 표시하고 클릭하면 전체 ID를 클립보드로 복사하는 셀 */
 export function DocIdCell({ id }: { id: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    // clipboard API는 보안 컨텍스트(localhost/https)에서만 동작. 실패해도 조용히 무시.
-    navigator.clipboard?.writeText(id).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    });
+    if (!copyToClipboard(id)) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
   };
   return (
     <td className="px-4 py-3">
@@ -198,16 +227,59 @@ export function DocIdCell({ id }: { id: string }) {
   );
 }
 
-/** 클릭하면 2줄 클램프 ↔ 전체 표시를 토글하는 텍스트 셀 */
+/**
+ * 2줄을 넘쳐 잘릴 때만 위/아래 화살표로 펼침/접힘을 토글하는 텍스트 셀.
+ * 텍스트가 너비를 넘지 않으면(2줄 이내) 화살표를 표시하지 않는다.
+ * 오버플로 판정: line-clamp 상태에서 scrollHeight > clientHeight 비교.
+ */
 export function ExpandableTextCell({ text }: { text: string }) {
+  const pRef = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+
+  // clamp(접힘) 상태에서만 정확히 측정 가능 → collapsed일 때 측정하고,
+  // 폭 변화(ResizeObserver)·텍스트 변경 시 다시 측정한다.
+  useLayoutEffect(() => {
+    const el = pRef.current;
+    if (!el || expanded) return;
+    const measure = () =>
+      setOverflowing(el.scrollHeight - el.clientHeight > 1);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text, expanded]);
+
   return (
-    <td
-      onClick={() => setExpanded((v) => !v)}
-      title={expanded ? "접기" : "더보기"}
-      className="px-4 py-3 text-xs text-zinc-500 leading-relaxed max-w-sm cursor-pointer hover:bg-zinc-50/60 transition-colors"
-    >
-      <p className={cn(!expanded && "line-clamp-2")}>{text}</p>
+    <td className="max-w-sm px-4 py-3 align-top text-xs leading-relaxed text-zinc-500">
+      <div className="flex items-start gap-1.5">
+        <p
+          ref={pRef}
+          onClick={() => overflowing && setExpanded((v) => !v)}
+          className={cn(
+            "min-w-0 flex-1",
+            !expanded && "line-clamp-2",
+            overflowing && "cursor-pointer",
+          )}
+        >
+          {text}
+        </p>
+        {overflowing && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            title={expanded ? "접기" : "더보기"}
+            aria-label={expanded ? "접기" : "더보기"}
+            className="mt-px grid h-5 w-5 shrink-0 place-items-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600"
+          >
+            {expanded ? (
+              <ChevronUp className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" />
+            )}
+          </button>
+        )}
+      </div>
     </td>
   );
 }
