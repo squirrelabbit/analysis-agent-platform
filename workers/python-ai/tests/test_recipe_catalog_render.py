@@ -72,6 +72,12 @@ class RecipeCatalogRenderTest(unittest.TestCase):
                 "period_a": {"start": "2024-08-01", "end": "2024-08-14"},
                 "period_b": {"start": "2024-08-15", "end": "2024-08-28"},
             },
+            "period_compare_distribution": {
+                "input": "docs",
+                "period_a": {"start": "2024-08-01", "end": "2024-08-14"},
+                "period_b": {"start": "2024-08-15", "end": "2024-08-28"},
+                "group_by": ["sentiment"],
+            },
         }
         for name in RUNTIME_ENABLED_RECIPES:
             self.assertIn(name, minimal, f"minimal plan 누락: {name}")
