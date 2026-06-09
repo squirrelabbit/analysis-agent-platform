@@ -313,6 +313,10 @@ def _render_recipe(spec: RecipeSpec) -> str:
         for param in spec.params:
             req = " (required)" if param.required else ""
             lines.append(f"  - `{param.name}`{req}: {param.desc}")
+    if spec.examples:
+        lines.append("- 예시 질문:")
+        for example in spec.examples:
+            lines.append(f"  - {example}")
     if spec.lowered_skills:
         lines.append(f"- lowered_skills: {', '.join(spec.lowered_skills)}")
     return "\n".join(lines)
