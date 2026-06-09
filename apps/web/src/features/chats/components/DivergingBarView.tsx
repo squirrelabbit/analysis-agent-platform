@@ -101,8 +101,8 @@ export default function DivergingBarView({ chart }: { chart: ChatChart }) {
         </div>
       )}
       <div className="px-2 pb-1">
-        <ResponsiveContainer width="100%" height={Math.max(170, data.length * 44 + 24)}>
-          <BarChart layout="vertical" data={data} margin={{ top: 6, right: 12, bottom: 0, left: 8 }} barCategoryGap="28%">
+        <ResponsiveContainer width="100%" height={Math.max(120, data.length * 34 + 16)}>
+          <BarChart layout="vertical" data={data} margin={{ top: 6, right: 12, bottom: 0, left: 8 }} barCategoryGap="22%">
             <XAxis type="number" domain={[-axisBound, axisBound]} hide />
             <YAxis
               yAxisId="left"
@@ -124,7 +124,7 @@ export default function DivergingBarView({ chart }: { chart: ChatChart }) {
               tickLine={false}
             />
             <ReferenceLine x={0} yAxisId="left" stroke="#d4d4d8" strokeDasharray="4 3" />
-            <Bar yAxisId="left" dataKey="_y" radius={[3, 3, 3, 3]}>
+            <Bar yAxisId="left" dataKey="_y" radius={[3, 3, 3, 3]} maxBarSize={22}>
               {data.map((d, i) => (
                 <Cell key={i} fill={d._y < 0 ? DECREASE_COLOR : INCREASE_COLOR} />
               ))}
