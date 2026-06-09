@@ -109,6 +109,7 @@ const mapChart = (dto: ComposerDisplayDto | undefined): ChatChart | undefined =>
     yFormat,
     yLabel,
     unit: spec.unit ?? undefined,
+    eventDate: spec.event_date ?? undefined,
   };
 };
 

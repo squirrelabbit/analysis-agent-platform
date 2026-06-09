@@ -40,6 +40,8 @@ export interface ChatChart {
   yLabel?: string;
   // silverone 2026-06-09 — diverging_bar 단위(건/%p/%). 백엔드 chart_spec.unit.
   unit?: string;
+  // line — 기준일(축제일) 기준선 (YYYY-MM-DD). 백엔드 chart_spec.event_date.
+  eventDate?: string;
 }
 
 export type TaxonomyStatus =

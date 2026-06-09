@@ -6,6 +6,7 @@ ADR-020 §5 deterministic v1 정책의 5 템플릿을 한 함수로 구현.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 __all__ = [
@@ -471,7 +472,44 @@ def _build_chart_spec(
     if recommended_view == "line" and not _looks_like_time_column(x_col):
         return None
     y_value: Any = y_cols[0] if len(y_cols) == 1 else y_cols
-    return {"kind": recommended_view, "x": x_col, "y": y_value, "series": None}
+    spec: dict[str, Any] = {"kind": recommended_view, "x": x_col, "y": y_value, "series": None}
+    # silverone 2026-06-09 — 날짜 추이(line)에 기준일(event_date) 기준선용 값을 단다.
+    # event_window_count류 plan의 between 날짜 필터 중점에서 도출(있을 때만).
+    if recommended_view == "line":
+        event_date = _event_date_from_plan(plan, x_col)
+        if event_date:
+            spec["event_date"] = event_date
+    return spec
+
+
+def _event_date_from_plan(plan: dict[str, Any] | None, x_col: str) -> str | None:
+    """날짜 추이 line의 기준일(축제일) 도출 — plan의 between 날짜 필터 중점(YYYY-MM-DD).
+
+    event_window_count는 [event-N, event+N] between 필터로 펼쳐지므로 중점이 기준일.
+    between 날짜 필터가 정확히 1개일 때만 반환(애매하면 None → 기준선 생략)."""
+    if not isinstance(plan, dict):
+        return None
+    found: list[tuple[date, date]] = []
+    for step in plan.get("steps") or []:
+        if not isinstance(step, dict) or step.get("skill") != "filter":
+            continue
+        params = step.get("params") or {}
+        if not isinstance(params, dict) or params.get("operator") != "between":
+            continue
+        value = params.get("value")
+        if not (isinstance(value, list) and len(value) == 2):
+            continue
+        try:
+            lo = date.fromisoformat(str(value[0])[:10])
+            hi = date.fromisoformat(str(value[1])[:10])
+        except ValueError:
+            continue
+        if lo <= hi:
+            found.append((lo, hi))
+    if len(found) != 1:
+        return None
+    lo, hi = found[0]
+    return (lo + (hi - lo) // 2).isoformat()
 
 
 # silverone 2026-06-09 (result view contract 2단계) — metric / evidence.
