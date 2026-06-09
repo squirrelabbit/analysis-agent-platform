@@ -608,8 +608,29 @@ class PeriodCompareDistributionLoweringTests(unittest.TestCase):
         )
 
     def test_lowered_plan_passes_validator(self) -> None:
-        steps = lower_recipe(_pcd_step())
-        self.assertEqual(collect_plan_issues({"plan_version": "v2", "steps": steps}), [])
+        # 전후 감성 구성비는 created_at(docs) + sentiment(clauses)가 함께 필요하므로
+        # 먼저 join한 step을 recipe input으로 준다. validator schema-lineage는 join
+        # 없이 docs에 sentiment를 group_by하면 column_not_in_input으로 잡는다.
+        join_step = {
+            "id": "joined",
+            "skill": "join",
+            "params": {
+                "left": "clauses",
+                "right": "docs",
+                "on": ["doc_id"],
+                "how": "inner",
+            },
+        }
+        steps = lower_recipe(_pcd_step(input="joined"))
+        plan = {"plan_version": "v2", "steps": [join_step, *steps]}
+        self.assertEqual(collect_plan_issues(plan), [])
+
+    def test_group_by_clause_column_on_docs_only_flagged(self) -> None:
+        # silverone 2026-06-09 — join 없이 docs lineage에 clause-level group_by →
+        # lineage가 column_not_in_input으로 잡아 planner self-correct를 유도.
+        steps = lower_recipe(_pcd_step(input="docs", group_by=["sentiment"]))
+        codes = [i.code for i in collect_plan_issues({"plan_version": "v2", "steps": steps})]
+        self.assertIn("params.column_not_in_input", codes)
 
     def test_group_by_required_raises(self) -> None:
         step = _pcd_step()

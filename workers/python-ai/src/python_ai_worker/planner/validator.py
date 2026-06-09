@@ -287,6 +287,10 @@ def collect_plan_issues(plan: dict[str, Any]) -> list[ValidationIssue]:
                 issues=issues,
             )
             _validate_recipe_params(skill_name, params, recipe_ctx)
+            # silverone 2026-06-09 — recipe input(join step 등)에 필요한 table이
+            # 빠졌는지도 lineage로 검증 (예: join(docs)만 한 step을
+            # period_compare_distribution.input으로 주고 group_by=[sentiment]).
+            _check_cross_table_column_refs(skill_name, params, recipe_ctx)
             continue
 
         spec = SKILL_CATALOG.get(skill_name)
@@ -416,6 +420,10 @@ def _validate_skill_params(
     elif skill_name == "summarize":
         _validate_summarize(params, ctx)
 
+    # silverone 2026-06-09 — schema-lineage: step input에 join 안 된 다른 table 전유
+    # 컬럼 참조를 plan 단계에서 잡는다(executor Binder Error → planner-repairable issue).
+    _check_cross_table_column_refs(skill_name, params, ctx)
+
 
 @dataclass
 class _StepContext:
@@ -510,6 +518,168 @@ def _check_columns_on_table(
                 code="params.column_unknown",
                 message=f"'{param_name}' references unknown column '{col_name}' on table '{table_name}'",
             )
+
+
+# ===== cross-table column lineage (silverone 2026-06-09) =====
+# validator schema-lineage: step input의 "기여 reserved table"을 추적해, 어떤 step이
+# 그 input에 join되지 않은 다른 table 전유 컬럼을 참조하면 planner_validation_error로
+# 잡는다. executor DuckDB Binder Error(self-correct 불가)를 plan 단계 issue로 끌어올려
+# planner repair가 join을 추가할 기회를 준다.
+#
+# 안전 정책(false positive 방지): docs는 dynamic 컬럼(dataset-specific)이 있어 unknown
+# 컬럼을 막으면 오탐이 난다. 그래서 "특정 reserved table에만 유일하게 속한 컬럼"
+# (_COLUMN_OWNER)이 그 table 없이 참조될 때만 reject한다. doc_id/prompt_version/source
+# 같은 공유 컬럼이나 docs 추가 컬럼은 판단 보류.
+
+
+def _build_column_owner() -> dict[str, str]:
+    owners: dict[str, set[str]] = {}
+    for table_name, schema in TABLE_SCHEMAS.items():
+        for column in schema.columns:
+            owners.setdefault(column.name, set()).add(table_name)
+    return {col: next(iter(tables)) for col, tables in owners.items() if len(tables) == 1}
+
+
+_COLUMN_OWNER: dict[str, str] = _build_column_owner()
+
+
+def _infer_contributing_tables(
+    ref: str, step_lookup: dict[str, dict[str, Any]], *, visiting: set[str]
+) -> set[str] | None:
+    """ref(step id 또는 reserved table)가 어떤 reserved table에서 유래했는지 추적.
+
+    join/filter/sort/aggregate/calculate/present/compare를 거슬러 기여 table 집합을
+    모은다. 추론 불가(미지원 skill / 순환 / 미존재)면 None."""
+    ref = (ref or "").strip()
+    if not ref:
+        return None
+    if ref in RESERVED_INPUT_NAMES:
+        return {ref}
+    if ref in visiting or ref not in step_lookup:
+        return None
+    step = step_lookup[ref]
+    if not isinstance(step, dict):
+        return None
+    skill = str(step.get("skill") or "").strip()
+    params = step.get("params")
+    if not isinstance(params, dict):
+        return None
+    visiting = visiting | {ref}
+    if skill in ("filter", "sort", "calculate", "present", "summarize", "aggregate"):
+        return _infer_contributing_tables(
+            str(params.get("input") or ""), step_lookup, visiting=visiting
+        )
+    if skill in ("join", "compare"):
+        left = _infer_contributing_tables(str(params.get("left") or ""), step_lookup, visiting=visiting)
+        right = _infer_contributing_tables(str(params.get("right") or ""), step_lookup, visiting=visiting)
+        if left is None and right is None:
+            return None
+        return (left or set()) | (right or set())
+    return None  # recipe(terminal) / unknown skill
+
+
+def _filter_columns(filters: Any) -> list[str]:
+    out: list[str] = []
+    if isinstance(filters, list):
+        for entry in filters:
+            if isinstance(entry, dict):
+                out.append(str(entry.get("column") or "").strip())
+    return out
+
+
+def _iter_referenced_columns(skill: str, params: dict[str, Any]):
+    """(input_ref, column) 쌍 yield — cross-table 검증 대상 컬럼 참조."""
+    ref = params.get("input")
+    if skill == "filter":
+        yield ref, str(params.get("column") or "").strip()
+        for col in _filter_columns(params.get("where")):
+            yield ref, col
+    elif skill == "aggregate":
+        group_by = params.get("group_by")
+        if isinstance(group_by, list):
+            for col in group_by:
+                yield ref, str(col or "").strip()
+        metrics = params.get("metrics")
+        if isinstance(metrics, list):
+            for metric in metrics:
+                if isinstance(metric, dict):
+                    yield ref, str(metric.get("column") or "").strip()
+    elif skill == "sort":
+        by = params.get("by")
+        if isinstance(by, list):
+            for col in by:
+                yield ref, str(col or "").strip()
+        elif isinstance(by, str):
+            yield ref, by.strip()
+    elif skill == "present":
+        for col in params.get("columns") or []:
+            yield ref, str(col or "").strip()
+    elif skill == "calculate":
+        exprs = params.get("expressions")
+        if isinstance(exprs, list):
+            for expr in exprs:
+                if not isinstance(expr, dict):
+                    continue
+                for key in ("left", "right", "value", "base", "current", "numerator", "denominator"):
+                    if key in expr:
+                        yield ref, str(expr.get(key) or "").strip()
+    elif skill in ("distribution", "top_n"):
+        group_by = params.get("group_by")
+        if isinstance(group_by, list):
+            for col in group_by:
+                yield ref, str(col or "").strip()
+        for col in _filter_columns(params.get("filters")):
+            yield ref, col
+    elif skill in ("period_compare_count", "period_compare_distribution"):
+        date_column = params.get("date_column")
+        yield ref, (date_column.strip() if isinstance(date_column, str) and date_column.strip() else "created_at")
+        group_by = params.get("group_by")
+        if isinstance(group_by, list):
+            for col in group_by:
+                yield ref, str(col or "").strip()
+    elif skill == "event_window_count":
+        date_column = params.get("date_column")
+        yield ref, (date_column.strip() if isinstance(date_column, str) and date_column.strip() else "created_at")
+    elif skill == "sample_rows":
+        for col in params.get("columns") or []:
+            yield ref, str(col or "").strip()
+        for col in _filter_columns(params.get("filters")):
+            yield ref, col
+
+
+def _check_cross_table_column_refs(skill: str, params: dict[str, Any], ctx: _StepContext) -> None:
+    """step input(앞선 step)에 join되지 않은 다른 table 전유 컬럼 참조를 잡는다.
+
+    reserved table 직접 input은 _check_input_ref/_check_columns_on_table가 이미
+    검증하므로 step input일 때만 동작한다."""
+    if not isinstance(params, dict):
+        return
+    seen: set[tuple[str, str]] = set()
+    for input_ref, column in _iter_referenced_columns(skill, params):
+        ref = str(input_ref or "").strip()
+        name = column.strip() if isinstance(column, str) else ""
+        if not ref or not name or name == "*":
+            continue
+        if ref in TABLE_SCHEMAS or ref not in ctx.seen_ids:
+            continue  # reserved/unknown input은 다른 검증이 담당
+        owner = _COLUMN_OWNER.get(name)
+        if owner is None:
+            continue  # 공유/미지(docs 추가 가능) 컬럼 — 판단 보류
+        key = (ref, name)
+        if key in seen:
+            continue
+        seen.add(key)
+        tables = _infer_contributing_tables(ref, ctx.step_lookup, visiting=set())
+        if tables is None or owner in tables:
+            continue
+        ctx.issue(
+            code="params.column_not_in_input",
+            message=(
+                f"컬럼 '{name}'은(는) '{owner}' table 전유 컬럼인데 input '{ref}'에 "
+                f"'{owner}'가 포함돼 있지 않습니다. 먼저 '{owner}'를 doc_id 기준으로 "
+                f"join해 input에 포함시키세요."
+            ),
+        )
 
 
 def _validate_join(params: dict[str, Any], ctx: _StepContext) -> None:
