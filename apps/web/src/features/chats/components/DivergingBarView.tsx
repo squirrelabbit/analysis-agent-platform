@@ -4,7 +4,6 @@ import {
   Cell,
   ReferenceLine,
   ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
@@ -51,15 +50,13 @@ export default function DivergingBarView({ chart }: { chart: ChatChart }) {
 
   if (data.length === 0) return null;
 
-  // 값 라벨 — 부호 + 크기(건은 정수, %p/%는 소수1). 단위는 서브타이틀에만.
+  // 값 라벨 — 부호 + 크기 + 단위(건은 정수, %p/%는 소수1). 예: +29.3%p / −30.5%p / +167건.
   const fmtVal = (v: number): string => {
-    if (v === 0) return unit === "건" ? "0" : "0.0";
-    const sign = v > 0 ? "+" : "−";
     const mag = unit === "건" ? String(Math.round(Math.abs(v))) : Math.abs(v).toFixed(1);
-    return `${sign}${mag}`;
+    if (v === 0) return `0${unit}`;
+    const sign = v > 0 ? "+" : "−";
+    return `${sign}${mag}${unit}`;
   };
-  const fmtTooltip = (v: number): string => `${fmtVal(v)}${unit}`;
-
   // 오른쪽 값 컬럼(우 YAxis custom tick)용 — _x별 라벨/색.
   const labelByX: Record<string, { text: string; color: string }> = {};
   for (const d of data) {
@@ -121,16 +118,10 @@ export default function DivergingBarView({ chart }: { chart: ChatChart }) {
               orientation="right"
               type="category"
               dataKey="_x"
-              width={56}
+              width={72}
               tick={renderValueTick}
               axisLine={false}
               tickLine={false}
-            />
-            <Tooltip
-              cursor={{ fill: "#f4f4f5" }}
-              contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #f4f4f5" }}
-              formatter={(v) => [fmtTooltip(Number(v)), chart.yLabel ?? chart.y]}
-              labelFormatter={(l) => `${chart.x}: ${String(l)}`}
             />
             <ReferenceLine x={0} yAxisId="left" stroke="#d4d4d8" strokeDasharray="4 3" />
             <Bar yAxisId="left" dataKey="_y" radius={[3, 3, 3, 3]}>
