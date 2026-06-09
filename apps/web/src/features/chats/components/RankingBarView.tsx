@@ -31,27 +31,46 @@ export default function RankingBarView({ chart }: { chart: ChatChart }) {
     return raw;
   };
 
+  const toCount = (raw: unknown): number | null => {
+    if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+    if (typeof raw === "string" && raw.trim() !== "") {
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  };
+
   const data = chart.rows
     .map((row) => {
       const yValue = scaleForChart(row[chart.y], chart.yFormat);
       if (yValue === null) return null;
       const xValue = row[chart.x];
       const rawX = xValue == null ? "—" : String(xValue);
-      return { _x: labelOfX(rawX), _y: yValue };
+      const count = chart.countKey ? toCount(row[chart.countKey]) : null;
+      return { _x: labelOfX(rawX), _y: yValue, _count: count };
     })
-    .filter((d): d is { _x: string; _y: number } => d !== null)
+    .filter((d): d is { _x: string; _y: number; _count: number | null } => d !== null)
     .sort((a, b) => b._y - a._y)
     .slice(0, MAX_CHART_ITEMS);
 
   if (data.length === 0) return null;
 
-  const fmtVal = (v: number): string => {
-    if (chart.yFormat === "percent") return `${v.toFixed(1)}%`;
-    return `${Math.round(v).toLocaleString()}${unit}`;
+  // 비중(%) 막대는 막대 길이=비중, 라벨에 건수를 함께 보인다("X.X% (N건)").
+  const fmtVal = (d: { _y: number; _count: number | null }): string => {
+    const base =
+      chart.yFormat === "percent"
+        ? `${d._y.toFixed(1)}%`
+        : `${Math.round(d._y).toLocaleString()}${unit}`;
+    if (d._count !== null) return `${base} (${d._count.toLocaleString()}건)`;
+    return base;
   };
 
   const labelByX: Record<string, string> = {};
-  for (const d of data) labelByX[d._x] = fmtVal(d._y);
+  for (const d of data) labelByX[d._x] = fmtVal(d);
+
+  // 값 컬럼 폭 — "X.X% (N,NNN건)"처럼 건수 라벨이 붙으면 잘리지 않게 넓힌다.
+  const longestLabel = Math.max(...Object.values(labelByX).map((t) => t.length), 0);
+  const valueColWidth = Math.min(150, Math.max(64, longestLabel * 8 + 16));
 
   const subtitle = `상위 ${data.length}개 · 내림차순`;
 
@@ -99,7 +118,7 @@ export default function RankingBarView({ chart }: { chart: ChatChart }) {
               orientation="right"
               type="category"
               dataKey="_x"
-              width={64}
+              width={valueColWidth}
               tick={renderValueTick}
               axisLine={false}
               tickLine={false}

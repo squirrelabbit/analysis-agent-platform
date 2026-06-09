@@ -71,6 +71,9 @@ export interface ChartSpecDto {
   // silverone 2026-06-09 — diverging_bar 계약: 단위(건/%p/%) + 정렬(abs_desc).
   unit?: string | null;
   sort?: string | null;
+  // silverone 2026-06-09 — distribution(비중) 막대: y=비중(%), count_col=건수
+  // 라벨 보조("X.X% (N건)").
+  count_col?: string;
   // line — 기준일(축제일) 기준선 (YYYY-MM-DD). 있을 때만.
   event_date?: string | null;
   // metric (total 비교) — 컬럼명 참조.

@@ -251,6 +251,17 @@ def _build_display(
                     *(result.get("warnings") or []),
                     "이전 기간 건수가 적어 증감률(%) 값이 과장될 수 있습니다 — 증감 건수를 함께 보세요.",
                 ]
+    elif rows:
+        # silverone 2026-06-09 — distribution(비중) ratio(0~1) 컬럼은 raw float
+        # 노출(0.0636…)을 막기 위해 percent 포맷을 내린다. table로 두든 share 막대로
+        # 가든 동일하게 %로 렌더된다(막대의 yFormat도 이 contract에서 읽힘).
+        ratio_formats = {
+            col: "percent"
+            for col in columns
+            if _is_ratio_like_column(col) and _column_in_unit_ratio_range(rows, col)
+        }
+        if ratio_formats:
+            result["column_formats"] = ratio_formats
     return result
 
 
@@ -459,6 +470,18 @@ def _build_chart_spec(
             "unit": _delta_unit(headline),
             "sort": "signed_desc",
         }
+    # silverone 2026-06-09 — distribution(비중): count+ratio가 섞이면 ratio를
+    # 단일 series(share %)로, count는 라벨 보조(count_col)로 내린다. 막대 길이=비중,
+    # 프론트 라벨 "X.X% (N건)". 기존 count↔ratio 혼합 가드(table fallback)를 대체.
+    if recommended_view == "bar" and not _has_compare_columns(columns):
+        ratio_col, count_col = _distribution_share_columns(y_cols, rows)
+        if ratio_col is not None:
+            spec: dict[str, Any] = {
+                "kind": "bar", "x": x_col, "y": ratio_col, "series": None, "unit": "%",
+            }
+            if count_col:
+                spec["count_col"] = count_col
+            return spec
     # 일반 compare가 bar/line으로 올 일은 없지만, 방어적으로 headline 단일화 유지.
     if _has_compare_columns(columns):
         headline = _headline_delta_column(y_cols, rows)
@@ -628,6 +651,41 @@ def _is_ratio_like_column(name: str) -> bool:
         return False
     lower = name.lower()
     return any(pat in lower for pat in _RATIO_LIKE_PATTERNS)
+
+
+def _column_in_unit_ratio_range(rows: list[Any], col: str) -> bool:
+    """col의 유효 숫자 값이 모두 0~1 범위(비율)인지 — percent 포맷 안전성 가드.
+
+    distribution의 ratio/share는 0~1이지만 rate/percent_change류는 1을 넘을 수
+    있어, 0~1 범위일 때만 percent(0~1→%) 포맷·share 막대 대상으로 본다."""
+    seen = False
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        value = row.get(col)
+        if _is_finite_number(value):
+            seen = True
+            if value < 0 or value > 1.0000001:
+                return False
+    return seen
+
+
+def _distribution_share_columns(
+    y_cols: list[str], rows: list[Any],
+) -> tuple[str | None, str | None]:
+    """비중(distribution) 막대 대상 — 단일 ratio(0~1) + count 컬럼 쌍을 찾는다.
+
+    distribution recipe는 count·ratio를 함께 낸다. 둘은 같은 축에 못 그리지만
+    (단위 상이) 막대 길이로는 비중(ratio)을, 라벨로는 건수(count)를 함께 보이는 게
+    '비중' 질문에 가장 맞다. (ratio_col, count_col) 또는 (None, None)."""
+    ratio_cols = [
+        c for c in y_cols
+        if _is_ratio_like_column(c) and _column_in_unit_ratio_range(rows, c)
+    ]
+    count_cols = [c for c in y_cols if not _is_ratio_like_column(c)]
+    if len(ratio_cols) == 1 and count_cols:
+        return ratio_cols[0], count_cols[0]
+    return None, None
 
 
 def _is_compare_column(name: str) -> bool:

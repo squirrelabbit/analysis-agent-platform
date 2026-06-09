@@ -552,6 +552,42 @@ class ChartReadyMetadataTests(unittest.TestCase):
         self.assertEqual(spec["x"], "aspect")
         self.assertEqual(spec["y"], "count")
 
+    def test_distribution_count_ratio_share_bar(self) -> None:
+        """비중(distribution): count+ratio 혼합이면 table이 아니라 share 막대.
+        막대 길이=ratio(비중), y=ratio, unit='%', count_col=count(라벨 보조).
+        ratio(0~1) 컬럼은 column_formats=percent로 % 렌더(raw float 노출 방지)."""
+        rows = [
+            {"sentiment": "negative", "count": 352, "ratio": 0.06366431542774462},
+            {"sentiment": "neutral", "count": 2079, "ratio": 0.3760173629951167},
+            {"sentiment": "positive", "count": 3098, "ratio": 0.5603183215771387},
+        ]
+        out = self._compose_with_rows(rows)
+        display = out["display"]
+        self.assertEqual(display["recommended_view"], "bar")
+        spec = display["chart_spec"]
+        self.assertEqual(spec["kind"], "bar")
+        self.assertEqual(spec["x"], "sentiment")
+        self.assertEqual(spec["y"], "ratio")
+        self.assertEqual(spec["unit"], "%")
+        self.assertEqual(spec["count_col"], "count")
+        self.assertIsNone(spec["series"])
+        # ratio는 % 포맷, count는 포맷 미지정(정수 그대로).
+        self.assertEqual(display["column_formats"]["ratio"], "percent")
+        self.assertNotIn("count", display.get("column_formats", {}))
+
+    def test_distribution_ratio_only_percent_format(self) -> None:
+        """ratio만 있는 distribution도 % 포맷이 붙는다(count_col 없음)."""
+        rows = [
+            {"aspect": "food", "ratio": 0.0482},
+            {"aspect": "show", "ratio": 0.214},
+        ]
+        out = self._compose_with_rows(rows)
+        display = out["display"]
+        self.assertEqual(display["recommended_view"], "bar")
+        self.assertEqual(display["chart_spec"]["y"], "ratio")
+        self.assertNotIn("count_col", display["chart_spec"])
+        self.assertEqual(display["column_formats"]["ratio"], "percent")
+
     def test_free_text_x_falls_back_to_table(self) -> None:
         # silverone 2026-06-09 — planner가 raw_text(본문)로 group_by한 plan은 x축이
         # 문서 전문이 되어 차트가 무의미 → 자유텍스트 x축은 배제하고 table로 fallback.
