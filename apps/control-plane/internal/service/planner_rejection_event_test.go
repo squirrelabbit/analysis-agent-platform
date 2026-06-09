@@ -54,6 +54,30 @@ func TestRejectionEventFromResult_MissingDataStored(t *testing.T) {
 	}
 }
 
+func TestRejectionEventFromResult_PlannerValidationStored(t *testing.T) {
+	// silverone 2026-06-08 — planner self-correct 소진(complex 교차 분석) 거절도
+	// 고도화 재료로 적재. (D4 "축제 전후 부정 비율 변화" 류)
+	raw := json.RawMessage(`{"composer":{"assistant_content":"실행 가능한 분석 계획으로 변환하지 못했습니다.","metadata":{"mode":"rejected","reason":"planner_validation_error"}}}`)
+	ev, ok := rejectionEventFromResult("p1", "d1", "t1", "m1", "축제 전후 부정 의견 비율이 어떻게 달라졌는지 보여줘", raw)
+	if !ok || ev.Reason != "planner_validation_error" {
+		t.Fatalf("planner_validation_error must be stored, ok=%v reason=%q", ok, ev.Reason)
+	}
+	if ev.UserQuestion != "축제 전후 부정 의견 비율이 어떻게 달라졌는지 보여줘" {
+		t.Errorf("user_question = %q", ev.UserQuestion)
+	}
+	if ev.DatasetID != "d1" || ev.ThreadID != "t1" || ev.MessageID != "m1" {
+		t.Errorf("ids not propagated: %+v", ev)
+	}
+}
+
+func TestRejectionEventFromResult_ExecutionErrorStored(t *testing.T) {
+	raw := json.RawMessage(`{"composer":{"assistant_content":"분석 계획 실행 중 오류가 발생했습니다.","metadata":{"mode":"rejected","reason":"execution_error"}}}`)
+	ev, ok := rejectionEventFromResult("p1", "d1", "t1", "m1", "축제 전후 aspect 증감률", raw)
+	if !ok || ev.Reason != "execution_error" {
+		t.Fatalf("execution_error must be stored, ok=%v reason=%q", ok, ev.Reason)
+	}
+}
+
 func TestRejectionEventFromResult_OutOfScopeNotStored(t *testing.T) {
 	raw := json.RawMessage(`{"composer":{"assistant_content":"날씨는 범위 밖","metadata":{"mode":"rejected","reason":"out_of_dataset_scope"}}}`)
 	if _, ok := rejectionEventFromResult("p1", "d1", "t1", "m1", "오늘 날씨", raw); ok {
