@@ -96,7 +96,7 @@ export function BlockPopover({
   const [pos, setPos] = useState<{
     left: number;
     top: number;
-    arrow: "left" | "right" | null;
+    arrow: "right" | null;
     arrowTop: number;
   } | null>(null);
 
@@ -110,15 +110,14 @@ export function BlockPopover({
       const r = card.getBoundingClientRect();
       const ph = panel.offsetHeight;
       const gap = 14;
-      const leftBound = 80;
+      // 항상 카드 오른쪽에 배치. 공간이 충분하면 바로 옆에 붙여 화살표로 연결하고,
+      // 부족하면 뷰포트 오른쪽 끝에 고정(카드와 겹칠 수 있어 화살표는 생략).
+      const idealLeft = r.right + gap;
       let left: number;
-      let arrow: "left" | "right" | null;
-      if (r.right + gap + PANEL_W <= window.innerWidth - 12) {
-        left = r.right + gap;
+      let arrow: "right" | null;
+      if (idealLeft + PANEL_W <= window.innerWidth - 12) {
+        left = idealLeft;
         arrow = "right";
-      } else if (r.left - gap - PANEL_W >= leftBound) {
-        left = r.left - PANEL_W - gap;
-        arrow = "left";
       } else {
         left = window.innerWidth - PANEL_W - 12;
         arrow = null;
@@ -151,14 +150,11 @@ export function BlockPopover({
         }}
         className="fixed z-50 rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xl"
       >
-        {pos?.arrow && (
+        {pos?.arrow === "right" && (
+          // 패널이 카드 오른쪽 → 왼쪽을 가리키는 화살표(왼쪽 모서리에 겹쳐 배치).
+          // 45° 회전한 정사각형에서 왼쪽 꼭짓점을 이루는 두 변(아래+왼쪽)만 테두리 유지.
           <span
-            className={cn(
-              "absolute h-3 w-3 rotate-45 border border-zinc-200 bg-white",
-              pos.arrow === "right"
-                ? "-left-1.5 border-b-0 border-r-0"
-                : "-right-1.5 border-l-0 border-t-0",
-            )}
+            className="absolute -left-1.5 h-3 w-3 rotate-45 border border-r-0 border-t-0 border-zinc-200 bg-white"
             style={{ top: pos.arrowTop }}
           />
         )}
