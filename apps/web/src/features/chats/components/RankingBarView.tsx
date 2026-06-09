@@ -53,21 +53,19 @@ export default function RankingBarView({ chart }: { chart: ChatChart }) {
   const labelByX: Record<string, string> = {};
   for (const d of data) labelByX[d._x] = fmtVal(d._y);
 
-  // 최장 막대가 우측 값 컬럼에 닿지 않게 여유.
-  const maxVal = data.reduce((m, d) => Math.max(m, d._y), 0);
-  const axisMax = maxVal > 0 ? maxVal * 1.08 : 1;
-
   const subtitle = `상위 ${data.length}개 · 내림차순`;
 
+  // 값은 트랙(플롯) 우측 경계 바깥으로 밀어 막대와 분리한다. 최장 막대는 트랙을
+  // 꽉 채우고(domain [0,dataMax]), 값은 plot 우측에서 +offset 위치에 좌측정렬.
   const renderValueTick = (props: { x?: number | string; y?: number | string; payload?: { value?: unknown } }) => {
     const text = labelByX[String(props.payload?.value ?? "")];
     if (text === undefined) return <g />;
     return (
       <text
-        x={Number(props.x ?? 0)}
+        x={Number(props.x ?? 0) + 10}
         y={Number(props.y ?? 0)}
         dy={4}
-        textAnchor="end"
+        textAnchor="start"
         fontSize={13}
         fontWeight={700}
         fill="#3f3f46"
@@ -86,7 +84,7 @@ export default function RankingBarView({ chart }: { chart: ChatChart }) {
       <div className="px-2 pb-3">
         <ResponsiveContainer width="100%" height={Math.max(150, data.length * 40 + 16)}>
           <BarChart layout="vertical" data={data} margin={{ top: 4, right: 12, bottom: 0, left: 8 }} barCategoryGap="30%">
-            <XAxis type="number" domain={[0, axisMax]} hide />
+            <XAxis type="number" domain={[0, "dataMax"]} hide />
             <YAxis
               yAxisId="left"
               type="category"
