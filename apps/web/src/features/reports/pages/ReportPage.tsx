@@ -1,109 +1,143 @@
-import { useMemo, useState } from "react";
-import { CheckSquare, Search } from "lucide-react";
+// 분석 보고서 에디터 페이지.
+// 좌: 저장된 결과 보관함(LIBRARY) / 우: 보고서 캔버스(블록 구성).
+// 채팅에서 저장된 차트·표·원문 결과를 골라 블록으로 추가하고, 드래그 정렬·너비 조절·
+// 해석 문구·표시 옵션을 편집한 뒤 PDF/HTML로 내보낸다.
+// NOTE: LIBRARY와 영속(localStorage)은 디자인 샘플. 실제 결과 저장/조회·보고서 저장 API 연동 필요.
+import { Fragment, useMemo, useRef, useState } from "react";
+import { FileText } from "lucide-react";
 import Breadcrumbs from "@/components/common/Breadcrumbs";
 import { cn } from "@/lib/utils";
 import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { useProjectDetail } from "@/features/projects/hooks/project.query";
+import { libById } from "../models/editor";
+import { useReportEditor } from "../hooks/useReportEditor";
+import { ReportLibrary } from "../components/ReportLibrary";
+import { ReportBlock } from "../components/ReportBlock";
+import { BlockPopover } from "../components/BlockPopover";
 import {
-  MOCK_RESULTS,
-  type ReportFormat,
-  type ReportResult,
-} from "../models/model";
-import { ResultCard } from "../components/ResultCard";
-import { SelectionBar } from "../components/SelectionBar";
-import { ReportDrawer } from "../components/ReportDrawer";
-
-type Filter = "all" | "chart" | "table";
-
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: "all", label: "전체" },
-  { value: "chart", label: "차트" },
-  { value: "table", label: "표" },
-];
+  ReportToolbar,
+  type ExportFormat,
+} from "../components/ReportToolbar";
+import {
+  exportReportHTML,
+  exportReportPDF,
+  REPORT_EXPORT_ROOT_ID,
+} from "../utils/exportReport";
 
 export default function ReportPage() {
   const { projectId } = useProjectParams();
   const { data: project } = useProjectDetail(projectId);
+  const { state, dispatch } = useReportEditor();
 
-  const [filter, setFilter] = useState<Filter>("all");
-  const [query, setQuery] = useState("");
-  // 선택된 결과 id를 "순서 있는 배열"로 관리 → 보고서 구성에서 순서 변경을 반영.
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const blocksRef = useRef<HTMLDivElement>(null);
+  const libDragId = useRef<string | null>(null);
+  const gripDragUid = useRef<string | null>(null);
+  const [dropIdx, setDropIdx] = useState<number | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastT = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const counts = useMemo(
-    () => ({
-      all: MOCK_RESULTS.length,
-      chart: MOCK_RESULTS.filter((r) => r.kind === "chart").length,
-      table: MOCK_RESULTS.filter((r) => r.kind === "table").length,
-    }),
-    [],
+  const isEdit = state.mode === "edit";
+  const usedIds = useMemo(
+    () => new Set(state.blocks.map((b) => b.libId)),
+    [state.blocks],
   );
+  const selectedBlock = state.blocks.find((b) => b.uid === state.selected);
+  const selectedLib = selectedBlock ? libById(selectedBlock.libId) : undefined;
 
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return MOCK_RESULTS.filter(
-      (r) => filter === "all" || r.kind === filter,
-    ).filter(
-      (r) =>
-        !q ||
-        r.title.toLowerCase().includes(q) ||
-        r.chat.toLowerCase().includes(q),
-    );
-  }, [filter, query]);
+  const showToast = (msg: string) => {
+    setToast(msg);
+    if (toastT.current) clearTimeout(toastT.current);
+    toastT.current = setTimeout(() => setToast(null), 1900);
+  };
 
-  // 날짜 그룹별로 묶어 라벨과 함께 노출.
-  const groups = useMemo(() => {
-    const map = new Map<string, ReportResult[]>();
-    for (const r of visible) {
-      const arr = map.get(r.group) ?? [];
-      arr.push(r);
-      map.set(r.group, arr);
+  const addBlock = (libId: string, atIdx?: number) => {
+    dispatch({ type: "addBlock", libId, atIdx });
+    showToast(`"${libById(libId)?.title}" 추가됨`);
+  };
+
+  // 드롭 위치 계산 — 캔버스 블록들의 중앙선 기준 가장 가까운 삽입 인덱스.
+  const nearestDropIdx = (y: number): number => {
+    const cards = blocksRef.current?.querySelectorAll("[data-card]");
+    if (!cards) return state.blocks.length;
+    for (let i = 0; i < cards.length; i++) {
+      const r = cards[i].getBoundingClientRect();
+      if (y < r.top + r.height / 2) return i;
     }
-    return [...map.entries()];
-  }, [visible]);
+    return cards.length;
+  };
 
-  // 선택 순서를 유지한 항목 목록(보고서 구성 순서의 source of truth).
-  const selectedItems = selectedIds
-    .map((id) => MOCK_RESULTS.find((r) => r.id === id))
-    .filter((r): r is ReportResult => Boolean(r));
+  const onCanvasDragOver = (e: React.DragEvent) => {
+    if (libDragId.current == null && gripDragUid.current == null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = libDragId.current ? "copy" : "move";
+    setDropIdx(nearestDropIdx(e.clientY));
+  };
 
-  const toggle = (id: string) =>
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
+  const onCanvasDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const idx = nearestDropIdx(e.clientY);
+    if (libDragId.current) {
+      addBlock(libDragId.current, idx);
+      libDragId.current = null;
+    } else if (gripDragUid.current) {
+      const from = state.blocks.findIndex(
+        (b) => b.uid === gripDragUid.current,
+      );
+      if (from >= 0) dispatch({ type: "moveBlock", from, to: idx });
+      gripDragUid.current = null;
+    }
+    setDropIdx(null);
+  };
 
-  const toggleAllVisible = () => {
-    const allSelected = visible.every((r) => selectedIds.includes(r.id));
-    setSelectedIds((prev) => {
-      if (allSelected) {
-        const remove = new Set(visible.map((r) => r.id));
-        return prev.filter((id) => !remove.has(id));
+  const handleExport = (fmt: ExportFormat) => {
+    if (fmt === "pptx") {
+      showToast("PPTX는 블록=슬라이드로 매핑해 곧 지원돼요");
+      return;
+    }
+    if (fmt === "hwp") {
+      showToast("한글(HWP)은 DOCX로 내보내 여는 방식으로 준비 중");
+      return;
+    }
+    // 깔끔한 출력 위해 미리보기로 전환 후 한 틱 뒤 내보내기.
+    if (state.mode !== "preview") dispatch({ type: "setMode", mode: "preview" });
+    setTimeout(() => {
+      if (fmt === "html") {
+        showToast(
+          exportReportHTML(state.title)
+            ? "HTML 파일을 다운로드했어요"
+            : "내보낼 내용이 없습니다",
+        );
+      } else {
+        exportReportPDF();
       }
-      const add = visible.map((r) => r.id).filter((id) => !prev.includes(id));
-      return [...prev, ...add];
-    });
+    }, 220);
   };
 
-  // 보고서 구성 드로어의 드래그 정렬 — from 위치 항목을 to 위치로 이동.
-  const reorder = (from: number, to: number) =>
-    setSelectedIds((prev) => {
-      const next = [...prev];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
-
-  const handleDownload = (format: ReportFormat) => {
-    // 샘플: 실제 생성은 백엔드 연동 예정. (순서대로 selectedIds 전달)
-    console.info("보고서 다운로드", { format, ids: selectedIds });
-    setDrawerOpen(false);
-  };
+  const dropLine = (i: number) =>
+    dropIdx === i ? (
+      <div className="my-0.75 h-0.75 rounded-full bg-violet-600 shadow-[0_0_0_3px] shadow-violet-100" />
+    ) : null;
 
   return (
-    <div className="p-8 pb-32">
-      <div className="mb-6">
-        <Breadcrumbs
+    <div className="flex h-full">
+      {isEdit && (
+        <ReportLibrary
+          usedIds={usedIds}
+          onAdd={(libId) => addBlock(libId)}
+          onDragStart={(libId) => {
+            libDragId.current = libId;
+          }}
+          onDragEnd={() => {
+            libDragId.current = null;
+            setDropIdx(null);
+          }}
+        />
+      )}
+
+      <div className="min-w-0 flex-1 overflow-y-auto">
+        <div className="p-8">
+          <div className="mb-6">
+            <Breadcrumbs
           items={[
             { label: "프로젝트", to: "/projects" },
             { label: project?.name ?? "프로젝트" },
@@ -112,102 +146,162 @@ export default function ReportPage() {
         />
       </div>
 
-      <header>
-        <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900">
-          분석 보고서
-        </h1>
-        <p className="mt-1.5 text-sm text-zinc-500">
-          분석 채팅에서 생성된 차트·표를 모아 보고서로 만듭니다. 항목을 선택해
-          원하는 형식으로 내려받으세요.
-        </p>
-      </header>
-
-      {/* toolbar */}
-      <div className="mt-6 flex flex-wrap items-center gap-2.5">
-        <div className="inline-flex gap-1 rounded-xl bg-zinc-200/60 p-0.75">
-          {FILTERS.map((f) => (
-            <button
-              key={f.value}
-              onClick={() => setFilter(f.value)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors",
-                filter === f.value
-                  ? "bg-white text-zinc-900 shadow-sm"
-                  : "text-zinc-500 hover:text-zinc-700",
-              )}
-            >
-              {f.label}
-              <span
-                className={cn(
-                  "text-[11px] font-bold",
-                  filter === f.value ? "text-violet-600" : "text-zinc-400",
-                )}
-              >
-                {counts[f.value]}
-              </span>
-            </button>
-          ))}
+      {/* 헤더 + 툴바 */}
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-extrabold tracking-tight text-zinc-900">
+            분석 보고서
+          </h1>
+          <p className="mt-1.5 text-sm text-zinc-500">
+            분석 채팅에서 저장된 결과를 골라 보고서를 구성하고 내보냅니다.
+          </p>
         </div>
+        <ReportToolbar
+          mode={state.mode}
+          onMode={(mode) => dispatch({ type: "setMode", mode })}
+          onReset={() => {
+            if (window.confirm("편집 중인 보고서를 처음 상태로 되돌릴까요?")) {
+              dispatch({ type: "reset" });
+              showToast("초기화했어요");
+            }
+          }}
+          onExport={handleExport}
+        />
+      </div>
 
-        <button
-          onClick={toggleAllVisible}
-          className="inline-flex h-9.5 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 text-[13px] font-semibold text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900"
-        >
-          <CheckSquare className="h-4 w-4" />
-          전체 선택
-        </button>
+          {/* 캔버스 */}
+          <main>
+          <div
+            className={cn(
+              "mx-auto",
+              isEdit ? "max-w-205" : "max-w-190",
+            )}
+          >
+            <div id={REPORT_EXPORT_ROOT_ID}>
+              <input
+                value={state.title}
+                onChange={(e) =>
+                  dispatch({ type: "setTitle", title: e.target.value })
+                }
+                placeholder="보고서 제목을 입력하세요"
+                readOnly={!isEdit}
+                className="w-full rounded-lg bg-transparent px-1.5 py-1 text-3xl font-extrabold tracking-tight text-zinc-900 outline-none transition placeholder:text-zinc-300 read-only:cursor-default hover:not-read-only:bg-zinc-100 focus:not-read-only:bg-white focus:not-read-only:ring-2 focus:not-read-only:ring-violet-100"
+              />
+              <div className="mt-2 flex items-center gap-2.5 px-1.5 text-[13px] font-medium text-zinc-400">
+                <span>작성자</span>
+                <span className="h-0.75 w-0.75 rounded-full bg-zinc-300" />
+                <span>2026-06-09</span>
+                <span className="h-0.75 w-0.75 rounded-full bg-zinc-300" />
+                <span>결과 블록 {state.blocks.length}개</span>
+              </div>
 
-        <div className="ml-auto inline-flex h-9.5 min-w-56 items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3">
-          <Search className="h-4 w-4 text-zinc-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="결과 제목·채팅 검색"
-            className="w-full bg-transparent text-[13.5px] text-zinc-800 outline-none placeholder:text-zinc-400"
-          />
+              <div
+                ref={blocksRef}
+                className="mt-6 flex flex-col gap-3"
+                onDragOver={onCanvasDragOver}
+                onDrop={onCanvasDrop}
+              >
+                {state.blocks.length === 0 ? (
+                  <EmptyReport />
+                ) : (
+                  state.blocks.map((b, i) => {
+                    const lib = libById(b.libId);
+                    if (!lib) return null;
+                    return (
+                      <Fragment key={b.uid}>
+                        {dropLine(i)}
+                        <ReportBlock
+                          block={b}
+                          lib={lib}
+                          index={i}
+                          mode={state.mode}
+                          selected={state.selected === b.uid}
+                          sheetRef={blocksRef}
+                          onSelect={(uid) => dispatch({ type: "select", uid })}
+                          onEdit={(uid) => dispatch({ type: "select", uid })}
+                          onGripDragStart={(uid) => {
+                            gripDragUid.current = uid;
+                          }}
+                          onGripDragEnd={() => {
+                            gripDragUid.current = null;
+                            setDropIdx(null);
+                          }}
+                          onSetWidth={(uid, width) =>
+                            dispatch({ type: "setWidth", uid, width })
+                          }
+                        />
+                      </Fragment>
+                    );
+                  })
+                )}
+                {state.blocks.length > 0 && dropLine(state.blocks.length)}
+
+                {isEdit && (
+                  <div
+                    className={cn(
+                      "mt-2 rounded-2xl border-2 border-dashed px-6 py-7 text-center text-sm font-semibold transition-colors",
+                      dropIdx === state.blocks.length
+                        ? "border-violet-500 bg-violet-50 text-violet-700"
+                        : "border-zinc-300 text-zinc-400",
+                    )}
+                  >
+                    보관함에서 결과를 끌어다 놓거나 "추가"로 블록을 삽입하세요
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          </main>
         </div>
       </div>
 
-      {/* 결과 그리드 (날짜 그룹) */}
-      {groups.length === 0 ? (
-        <p className="mt-16 text-center text-sm text-zinc-400">
-          조건에 맞는 결과가 없습니다.
-        </p>
-      ) : (
-        groups.map(([group, items]) => (
-          <section key={group}>
-            <div className="mb-3 mt-7 flex items-center gap-2 text-[12.5px] font-bold text-zinc-400">
-              {group}
-              <span className="h-px flex-1 bg-zinc-100" />
-            </div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(270px,1fr))] gap-4">
-              {items.map((r) => (
-                <ResultCard
-                  key={r.id}
-                  result={r}
-                  selected={selectedIds.includes(r.id)}
-                  onToggle={() => toggle(r.id)}
-                />
-              ))}
-            </div>
-          </section>
-        ))
+      {/* 블록 속성 팝오버 */}
+      {isEdit && selectedBlock && selectedLib && (
+        <BlockPopover
+          block={selectedBlock}
+          lib={selectedLib}
+          onClose={() => dispatch({ type: "select", uid: null })}
+          onSetTitle={(title) =>
+            dispatch({ type: "setBlockTitle", uid: selectedBlock.uid, title })
+          }
+          onSetInterp={(interp) =>
+            dispatch({ type: "setBlockInterp", uid: selectedBlock.uid, interp })
+          }
+          onToggleOpt={(key) =>
+            dispatch({ type: "toggleOpt", uid: selectedBlock.uid, key })
+          }
+          onResetWidth={() =>
+            dispatch({ type: "setWidth", uid: selectedBlock.uid, width: null })
+          }
+          onDelete={() => {
+            dispatch({ type: "deleteBlock", uid: selectedBlock.uid });
+            showToast("블록을 삭제했어요");
+          }}
+        />
       )}
 
-      <SelectionBar
-        count={selectedIds.length}
-        onClear={() => setSelectedIds([])}
-        onCreate={() => setDrawerOpen(true)}
-      />
+      {/* 토스트 */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 z-80 flex -translate-x-1/2 items-center gap-2.25 rounded-xl bg-zinc-900 px-4.5 py-2.75 text-[13.5px] font-semibold text-white shadow-2xl">
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
 
-      <ReportDrawer
-        open={drawerOpen}
-        onOpenChange={setDrawerOpen}
-        items={selectedItems}
-        onRemove={toggle}
-        onReorder={reorder}
-        onDownload={handleDownload}
-      />
+function EmptyReport() {
+  return (
+    <div className="py-15 text-center text-zinc-400">
+      <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl border border-zinc-100 bg-white shadow-sm">
+        <FileText className="h-6.5 w-6.5 text-zinc-400" />
+      </div>
+      <b className="block text-base font-bold text-zinc-600">
+        아직 추가된 결과가 없어요
+      </b>
+      <span className="text-[13.5px]">
+        왼쪽 보관함에서 결과를 추가하거나 끌어다 놓으세요
+      </span>
     </div>
   );
 }

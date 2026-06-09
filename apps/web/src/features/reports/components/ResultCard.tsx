@@ -1,7 +1,7 @@
 import { BarChart3, Check, MessageSquare, MoreHorizontal, Table2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ReportResult } from "../models/model";
 import { ResultPreview } from "./ResultPreview";
+import type { ReportResult } from "../models/model";
 
 export function ResultCard({
   result,
