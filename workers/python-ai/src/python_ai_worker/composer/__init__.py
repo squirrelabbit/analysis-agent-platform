@@ -539,6 +539,23 @@ _NEAR_ZERO_DELTA_RATIO = 0.02
 _SENTIMENT_LABEL_KO = {"positive": "긍정", "neutral": "중립", "negative": "부정"}
 
 
+def _load_aspect_label_map() -> dict[str, str]:
+    """taxonomy aspect key → 한글 label 맵. 요약 문구에서 영어 key(show_program 등)
+    대신 한글(공연/프로그램)로 표기하기 위함 (silverone 2026-06-09). 차트 y축은
+    프론트 taxonomy로 한글화되지만 요약 텍스트는 백엔드에서 한글화해야 한다.
+    taxonomy load 실패 시 빈 맵 → raw key로 graceful fallback."""
+    try:
+        from ..taxonomies import DEFAULT_TAXONOMY_ID, load_taxonomy
+
+        taxonomy = load_taxonomy(DEFAULT_TAXONOMY_ID)
+        return {aspect.key: aspect.label for aspect in taxonomy.aspects}
+    except Exception:
+        return {}
+
+
+_ASPECT_LABEL_KO = _load_aspect_label_map()
+
+
 def _compare_column_format(col: str) -> str | None:
     """compare 결과 컬럼명 → 표시 포맷. delta_ratio는 %p(point), 그 외 ratio는 %,
     rate/percent_change는 %, count는 정수. 해당 없으면 None(포맷 미지정)."""
@@ -568,8 +585,11 @@ def _compare_column_formats_labels(columns: list[str]) -> tuple[dict[str, str], 
 
 
 def _group_label_for_summary(value: Any) -> str:
-    if isinstance(value, str) and value in _SENTIMENT_LABEL_KO:
-        return _SENTIMENT_LABEL_KO[value]
+    if isinstance(value, str):
+        if value in _SENTIMENT_LABEL_KO:
+            return _SENTIMENT_LABEL_KO[value]
+        if value in _ASPECT_LABEL_KO:
+            return _ASPECT_LABEL_KO[value]
     return "—" if value is None else str(value)
 
 

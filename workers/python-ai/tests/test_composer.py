@@ -698,6 +698,20 @@ class CompareColumnContractTests(unittest.TestCase):
         # 단조로운 generic 문구가 아니어야 함.
         self.assertNotIn("분석 결과", content)
 
+    def test_distribution_summary_aspect_korean_labels(self) -> None:
+        # silverone 2026-06-09 — 요약 문구의 aspect는 영어 key가 아니라 taxonomy
+        # 한글 label로 표기 (show_program → 공연/프로그램).
+        rows = [
+            {"aspect": "show_program", "a_count": 1, "a_ratio": 0.05, "b_count": 30, "b_ratio": 0.20, "delta_count": 29, "delta_ratio": 0.15},
+            {"aspect": "ambiance_scenery", "a_count": 20, "a_ratio": 0.60, "b_count": 10, "b_ratio": 0.30, "delta_count": -10, "delta_ratio": -0.30},
+            {"aspect": "food", "a_count": 5, "a_ratio": 0.35, "b_count": 16, "b_ratio": 0.34, "delta_count": 11, "delta_ratio": -0.01},
+        ]
+        content = compose_answer(user_question="q", present=self._present(rows))["assistant_content"]
+        self.assertIn("공연/프로그램", content)
+        self.assertIn("분위기/경관", content)
+        self.assertNotIn("show_program", content)
+        self.assertNotIn("ambiance_scenery", content)
+
     def test_count_compare_formats_no_ratio(self) -> None:
         rows = [
             {"channel": "a", "a_count": 1, "b_count": 2, "delta_count": 1, "delta_rate": 100.0},
