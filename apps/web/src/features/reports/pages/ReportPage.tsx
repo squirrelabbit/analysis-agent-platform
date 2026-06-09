@@ -3,7 +3,7 @@
 // 채팅에서 저장된 차트·표·원문 결과를 골라 블록으로 추가하고, 드래그 정렬·너비 조절·
 // 해석 문구·표시 옵션을 편집한 뒤 PDF/HTML로 내보낸다.
 // NOTE: LIBRARY와 영속(localStorage)은 디자인 샘플. 실제 결과 저장/조회·보고서 저장 API 연동 필요.
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { FileText } from "lucide-react";
 import Breadcrumbs from "@/components/common/Breadcrumbs";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,9 @@ export default function ReportPage() {
   const [dropIdx, setDropIdx] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastT = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 드래그 중 캔버스 가장자리 자동 스크롤.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const autoScroll = useRef<{ vy: number; raf: number }>({ vy: 0, raf: 0 });
 
   const isEdit = state.mode === "edit";
   const usedIds = useMemo(
@@ -66,11 +69,51 @@ export default function ReportPage() {
     return cards.length;
   };
 
+  // 스크롤 컨테이너 위/아래 가장자리에 가까우면 매 프레임 자동 스크롤.
+  const tickAutoScroll = () => {
+    const el = scrollRef.current;
+    const { vy } = autoScroll.current;
+    if (el && vy !== 0) {
+      el.scrollTop += vy;
+      autoScroll.current.raf = requestAnimationFrame(tickAutoScroll);
+    } else {
+      autoScroll.current.raf = 0;
+    }
+  };
+
+  const updateAutoScroll = (clientY: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const EDGE = 64; // 가장자리 감지 영역(px)
+    const MAX = 20; // 프레임당 최대 스크롤(px)
+    let vy = 0;
+    if (clientY < r.top + EDGE)
+      vy = -MAX * Math.min(1, (r.top + EDGE - clientY) / EDGE);
+    else if (clientY > r.bottom - EDGE)
+      vy = MAX * Math.min(1, (clientY - (r.bottom - EDGE)) / EDGE);
+    autoScroll.current.vy = vy;
+    if (vy !== 0 && !autoScroll.current.raf)
+      autoScroll.current.raf = requestAnimationFrame(tickAutoScroll);
+  };
+
+  const stopAutoScroll = () => {
+    autoScroll.current.vy = 0;
+    if (autoScroll.current.raf) {
+      cancelAnimationFrame(autoScroll.current.raf);
+      autoScroll.current.raf = 0;
+    }
+  };
+
+  // 언마운트 시 진행 중인 자동 스크롤 정리.
+  useEffect(() => stopAutoScroll, []);
+
   const onCanvasDragOver = (e: React.DragEvent) => {
     if (libDragId.current == null && gripDragUid.current == null) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = libDragId.current ? "copy" : "move";
     setDropIdx(nearestDropIdx(e.clientY));
+    updateAutoScroll(e.clientY);
   };
 
   const onCanvasDrop = (e: React.DragEvent) => {
@@ -87,6 +130,7 @@ export default function ReportPage() {
       gripDragUid.current = null;
     }
     setDropIdx(null);
+    stopAutoScroll();
   };
 
   const handleExport = (fmt: ExportFormat) => {
@@ -130,11 +174,20 @@ export default function ReportPage() {
           onDragEnd={() => {
             libDragId.current = null;
             setDropIdx(null);
+            stopAutoScroll();
           }}
         />
       )}
 
-      <div className="min-w-0 flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="min-w-0 flex-1 overflow-y-auto"
+        onDragOver={(e) => {
+          // 컨테이너 가장자리(블록 바깥 여백 포함)에서도 자동 스크롤 동작하도록.
+          if (libDragId.current == null && gripDragUid.current == null) return;
+          updateAutoScroll(e.clientY);
+        }}
+      >
         <div className="p-8">
           <div className="mb-6">
             <Breadcrumbs
@@ -225,6 +278,7 @@ export default function ReportPage() {
                           onGripDragEnd={() => {
                             gripDragUid.current = null;
                             setDropIdx(null);
+                            stopAutoScroll();
                           }}
                           onSetWidth={(uid, width) =>
                             dispatch({ type: "setWidth", uid, width })
