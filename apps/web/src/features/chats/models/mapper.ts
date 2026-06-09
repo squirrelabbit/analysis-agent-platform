@@ -19,6 +19,8 @@ import type {
   RunStatus,
   TaxonomyStatus,
 } from "./model";
+import type { ColumnFormat } from "./format";
+import { toColumnFormat } from "./format";
 
 // 유효 numeric value를 가진 row가 N개 이상일 때만 chart로 표시한다.
 // 한두 개 row만 numeric인 경우 막대가 하나만 그려져 오해 소지가 큼.
@@ -38,6 +40,18 @@ const mapPlan = (dto: AnalysisPlanDto | undefined): ChatPlan | undefined => {
   };
 };
 
+const mapColumnFormats = (
+  raw: Record<string, string> | null | undefined,
+): Record<string, ColumnFormat> | undefined => {
+  if (!raw) return undefined;
+  const out: Record<string, ColumnFormat> = {};
+  for (const [col, fmt] of Object.entries(raw)) {
+    const f = toColumnFormat(fmt);
+    if (f) out[col] = f;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+};
+
 const mapDisplay = (dto: ComposerDisplayDto | undefined): ChatDisplay | undefined => {
   if (!dto || dto.type !== "table") return undefined;
   const columns = dto.columns ?? [];
@@ -48,6 +62,8 @@ const mapDisplay = (dto: ComposerDisplayDto | undefined): ChatDisplay | undefine
     title: dto.title ?? undefined,
     columns,
     rows,
+    columnFormats: mapColumnFormats(dto.column_formats),
+    columnLabels: dto.column_labels ?? undefined,
   };
 };
 
@@ -77,12 +93,16 @@ const mapChart = (dto: ComposerDisplayDto | undefined): ChatChart | undefined =>
   if (!x || !yKey) return undefined;
   const validPoints = rows.filter((row) => isNumericLike(row[yKey])).length;
   if (validPoints < MIN_CHART_DATA_POINTS) return undefined;
+  const yFormat = toColumnFormat(dto.column_formats?.[yKey]);
+  const yLabel = dto.column_labels?.[yKey];
   return {
     kind: spec.kind,
     x,
     y: yKey,
     title: dto.title ?? undefined,
     rows,
+    yFormat,
+    yLabel,
   };
 };
 

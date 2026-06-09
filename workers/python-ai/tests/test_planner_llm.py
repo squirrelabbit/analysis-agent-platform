@@ -147,10 +147,11 @@ class HappyPathTests(unittest.TestCase):
         invocation = client.invocations[0]
         self.assertTrue(invocation["cache_system"], "cache_system must be True for planner calls")
         self.assertGreater(len(invocation["system"]), 500, "system_prompt가 비어 있으면 cache 영역이 깨졌다는 신호")
-        # standard table + skill catalog + examples는 system 안에 있어야 함
+        # standard table + skill catalog + recipe catalog는 system 안에 있어야 함
         self.assertIn("### docs", invocation["system"])
         self.assertIn("### join", invocation["system"])
-        self.assertIn("### 예시 1", invocation["system"])
+        # silverone 2026-06-09 — manual few-shot 제거. recipe catalog(spec 렌더)로 대체.
+        self.assertIn("### period_compare_distribution", invocation["system"])
 
     def test_usage_includes_cache_token_keys(self) -> None:
         client = _FakeClient([

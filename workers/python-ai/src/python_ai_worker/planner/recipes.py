@@ -49,6 +49,10 @@ class RecipeSpec:
     # render_recipe_catalog()가 여기서 use_when/avoid_when을 렌더한다(하드코딩 제거).
     use_when: str = ""
     avoid_when: str = ""
+    # silverone 2026-06-09 — recipe별 대표 질문 예시. prompt md에 manual few-shot을
+    # 박지 않고 spec에서 자동 렌더한다(예시가 catalog보다 강한 신호로 구조를 틀던
+    # 문제 해소). planner가 "이 류 질문 → 이 recipe"를 spec 기준으로 학습.
+    examples: tuple[str, ...] = ()
     implemented: bool = False  # lowering이 구현됐는지
 
 
@@ -68,7 +72,11 @@ DISTRIBUTION_SPEC = RecipeSpec(
     ),
     lowered_skills=("aggregate", "calculate", "present"),
     use_when="긍정/부정/중립 비율, 전반적인 반응 비율, aspect별 비중, 채널별 구성비처럼 각 그룹이 전체에서 차지하는 몫(구성비)을 모든 그룹에 대해 묻는 질문.",
-    avoid_when="단순 건수는 atomic aggregate. 전체 대비 특정 범주 하나의 비율은 aggregate→share_of_total→filter(atomic). 부분집합 중 비율(분자가 분모의 하위조건)은 compare+calculate.ratio. 날짜별 추이는 atomic.",
+    avoid_when="단순 건수는 atomic aggregate. 전체 대비 특정 범주 하나의 비율은 aggregate→share_of_total→filter(atomic). 부분집합 중 비율(분자가 분모의 하위조건)은 compare+calculate.ratio. 날짜별 추이는 atomic. 두 기간 전후 구성비 변화는 period_compare_distribution.",
+    examples=(
+        "전체 긍정/중립/부정 비율을 보여줘",
+        "aspect별 언급 비중을 보여줘",
+    ),
     implemented=True,
 )
 
@@ -87,7 +95,10 @@ EVENT_WINDOW_COUNT_SPEC = RecipeSpec(
     ),
     lowered_skills=("filter", "aggregate", "sort", "present"),
     use_when="축제일/행사일/특정 날짜 전후 N일 문서 발생량을 일자별로 묻는 질문 (D-day 전후).",
-    avoid_when="기간 전체의 단순 총량은 atomic filter+aggregate. week/month bucket은 미지원(필요 시 clarify/unsupported). 기준일이 없으면 추정 말고 clarify.",
+    avoid_when="기간 전체의 단순 총량은 atomic filter+aggregate. week/month bucket은 미지원(필요 시 clarify/unsupported). 기준일이 없으면 추정 말고 clarify. 두 기간의 총량 비교는 period_compare_count.",
+    examples=(
+        "축제일 2025-08-15 전후 7일 게시물 수 추이를 보여줘",
+    ),
     implemented=True,
 )
 
@@ -106,7 +117,11 @@ TOP_N_SPEC = RecipeSpec(
     ),
     lowered_skills=("filter", "aggregate", "sort", "present"),
     use_when="상위 N개/가장 많은/자주 나오는/많이 언급된/랭킹처럼 조건 후 그룹별 count 순위를 묻는 질문. doc-level 필터가 필요하면 먼저 join/filter로 input step을 만든 뒤 top_n.input으로 넘긴다.",
-    avoid_when="전체 대비 비중이 필요하면 distribution. 서로 다른 기간/집단 비교는 atomic compare+calculate.",
+    avoid_when="전체 대비 비중이 필요하면 distribution. 두 기간/집단의 건수 비교는 period_compare_count, 구성비 비교는 period_compare_distribution.",
+    examples=(
+        "부정 후기가 가장 많은 aspect TOP 5를 보여줘",
+        "가장 많이 언급된 aspect 상위 10개",
+    ),
     implemented=True,
 )
 
@@ -127,6 +142,10 @@ SAMPLE_ROWS_SPEC = RecipeSpec(
     lowered_skills=("filter", "sort", "present"),
     use_when="예시/샘플/원문 몇 개/근거 문장/어떤 후기가 있는지처럼 집계가 아니라 실제 row 예시를 묻는 질문. 문서 본문이 필요하면 먼저 join step을 만들고 sample_rows.input으로 넘긴다.",
     avoid_when="건수/비율/비중/순위/추이 등 집계 질문에는 절대 쓰지 않는다(aggregate/distribution/top_n).",
+    examples=(
+        "음식 관련 부정 문장 예시 10개를 보여줘",
+        "가격 관련 부정 의견 원문 샘플을 보여줘",
+    ),
     implemented=True,
 )
 
@@ -150,8 +169,13 @@ PERIOD_COMPARE_COUNT_SPEC = RecipeSpec(
         RecipeParamSpec("title", desc="string|null"),
     ),
     lowered_skills=("filter", "aggregate", "compare", "calculate", "present"),
-    use_when="두 기간(전/후, 작년/올해 등) 사이의 문서 수 증감을 묻는 질문. group_by 없으면 전체 총량 비교, 있으면 그룹별 증감.",
-    avoid_when="단일 기간 총량은 atomic filter+aggregate. 기준일 전후 일자별 추이는 event_window_count. 비율 구성비는 distribution. 기간이 명확하지 않으면 추정 말고 clarify.",
+    use_when="두 기간(전/후, 작년/올해 등) 사이의 문서/언급 건수 증감을 묻는 질문. group_by 없으면 전체 총량 비교, 있으면 그룹별 증감. 구성비(%) 변화가 아니라 건수 변화.",
+    avoid_when="단일 기간 총량은 atomic filter+aggregate. 기준일 전후 일자별 추이는 event_window_count. 단일 기간 구성비는 distribution. 두 기간 구성비(비율) 변화는 period_compare_distribution. 기간이 명확하지 않으면 추정 말고 clarify.",
+    examples=(
+        "축제 전 일주일과 후 일주일의 전체 게시물 수를 비교해줘",
+        "작년과 올해 aspect별 언급량 증감을 보여줘",
+        "축제 전후 aspect별 언급량 증감률을 보여줘",
+    ),
     implemented=True,
 )
 
@@ -181,6 +205,11 @@ PERIOD_COMPARE_DISTRIBUTION_SPEC = RecipeSpec(
     lowered_skills=("filter", "aggregate", "calculate", "compare", "present"),
     use_when="두 기간(전/후, 작년/올해 등) 사이의 그룹별 구성비(비율) 변화를 묻는 질문. 감성 비율 전후 변화, aspect 비중 전후 변화, 부정 의견 비율이 전후로 어떻게 달라졌는지.",
     avoid_when="건수 증감만이면 period_compare_count. 단일 기간 구성비는 distribution. 기준일 전후 일자별 추이는 event_window_count. 기간/그룹 기준이 불명확하면 추정 말고 clarify.",
+    examples=(
+        "2025-08-15 전후 7일 감성 비율이 어떻게 달라졌는지 보여줘",
+        "축제 전후 부정 의견 비율 변화를 보여줘",
+        "축제 전후 aspect 비중 변화를 보여줘",
+    ),
     implemented=True,
 )
 

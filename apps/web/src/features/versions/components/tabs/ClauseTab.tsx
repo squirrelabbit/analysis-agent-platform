@@ -57,9 +57,9 @@ const SENTIMENT_FILTER_OPTIONS: { label: string; value: string | "" }[] = [
 
 function SentimentBadge({ value }: { value: string }) {
   const map: Record<string, string> = {
-    positive: "bg-emerald-50 text-emerald-800 border-emerald-200",
-    neutral: "bg-zinc-100 text-zinc-600 border-zinc-200",
-    negative: "bg-red-50 text-red-800 border-red-200",
+    positive: "bg-emerald-50 text-emerald-600",
+    neutral: "bg-zinc-100 text-zinc-500",
+    negative: "bg-red-50 text-red-600",
   };
   const labels: Record<string, string> = {
     positive: "긍정",
@@ -273,7 +273,7 @@ export function ClauseTab() {
                 "grid grid-cols-[84px_1fr_auto_16px] items-center gap-2.5 rounded-xl border-l-2 px-2 py-2 text-left transition-colors",
                 isAll
                   ? "border-violet-500 bg-violet-50"
-                  : "border-transparent hover:bg-zinc-50",
+                  : "border-transparent hover:bg-zinc-50 hover:cursor-pointer",
               )}
             >
               <span
@@ -308,7 +308,7 @@ export function ClauseTab() {
                     "grid grid-cols-[84px_1fr_auto_16px] items-center gap-2.5 rounded-xl border-l-2 px-2 py-2 text-left transition-colors",
                     sel
                       ? "border-violet-500 bg-violet-50"
-                      : "border-transparent hover:bg-zinc-50",
+                      : "border-transparent hover:bg-zinc-50 hover:cursor-pointer",
                   )}
                 >
                   <span

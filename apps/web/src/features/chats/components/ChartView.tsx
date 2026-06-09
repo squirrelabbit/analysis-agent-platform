@@ -2,25 +2,26 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
+  LabelList,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import type { ChatChart } from "../models";
+import { scaleForChart, unitOf } from "../models";
 import { useTaxonomy } from "@/features/taxonomy/hooks/taxonomy.query";
 import { ASPECT_FIELD, aspectLabelOf } from "@/features/taxonomy/models";
 
-function coerceNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
+// 증감 방향 색 (가치판단 아님 — 한국 증감 관례: 증가=빨강, 감소=파랑).
+const INCREASE_COLOR = "#dc2626";
+const DECREASE_COLOR = "#2563eb";
+// 일반(증감 아님) 막대/선 색.
+const NEUTRAL_COLOR = "#7c3aed";
 
 // ISO datetime (YYYY-MM-DDTHH:MM:SSZ 등)으로 보이면 날짜 부분만 잘라 표시.
 // 그 외(임의 문자열/숫자 등)는 그대로 — 도메인 모를 때 임의 가공 금지.
@@ -33,10 +34,13 @@ export default function ChartView({ chart }: { chart: ChatChart }) {
   // x축이 aspect면 한글 label로 변환 (미매칭/미로딩 시 key 유지).
   const { data: taxonomy } = useTaxonomy();
   const isAspectX = chart.x === ASPECT_FIELD;
-  // numeric만 통과시키고 null/문자열은 건너뛴다 — recharts가 깨지지 않게.
+  const unit = unitOf(chart.yFormat);
+
+  // 백엔드 column_formats(percent/point)면 0~1 비율을 %·%p 스케일(×100)로 올린다.
+  // null/문자열은 건너뛴다 — recharts가 깨지지 않게.
   const data = chart.rows
     .map((row) => {
-      const yValue = coerceNumber(row[chart.y]);
+      const yValue = scaleForChart(row[chart.y], chart.yFormat);
       if (yValue === null) return null;
       const xValue = row[chart.x];
       const rawX = xValue == null ? "—" : String(xValue);
@@ -46,40 +50,66 @@ export default function ChartView({ chart }: { chart: ChatChart }) {
 
   if (data.length === 0) return null;
 
+  // 스케일된 값 표시 — point는 부호+단위, percent는 단위, 그 외 원값.
+  const formatY = (v: number): string => {
+    if (chart.yFormat === "point") return `${v > 0 ? "+" : ""}${v.toFixed(1)}%p`;
+    if (chart.yFormat === "percent") return `${v.toFixed(1)}%`;
+    return String(v);
+  };
+  const yName = chart.yLabel ?? chart.y;
+  const headerText = [chart.title, unit ? `(단위: ${unit})` : ""]
+    .filter(Boolean)
+    .join(" ");
+
+  // 증감(delta) 차트는 0 기준 가로 다이버징 막대로 — 방향이 직관적이고 그룹명/
+  // 수치 라벨이 안 겹친다. point 포맷이거나 음수가 있으면 증감 막대로 본다.
+  const isDelta = chart.yFormat === "point" || data.some((d) => d._y < 0);
+  const barColor = (v: number) => (v < 0 ? DECREASE_COLOR : INCREASE_COLOR);
+  // 가로 다이버징 막대는 그룹 수에 따라 높이를 키운다. 그 외는 고정 240.
+  const chartHeight =
+    chart.kind === "bar" && isDelta ? Math.max(200, data.length * 36 + 48) : 240;
+
+  // 가로 막대 끝에 수치 라벨 — 양수는 오른쪽, 음수는 왼쪽 바깥.
+  const renderValueLabel = (props: {
+    x?: number | string; y?: number | string; width?: number | string; height?: number | string; value?: unknown;
+  }) => {
+    const x = Number(props.x ?? 0);
+    const y = Number(props.y ?? 0);
+    const width = Number(props.width ?? 0);
+    const height = Number(props.height ?? 0);
+    const num = Number(props.value);
+    if (!Number.isFinite(num)) return null;
+    // recharts가 음수 막대를 x=0선 기준 + 음수 width로 줄 수도, x=좌측 + 양수
+    // width로 줄 수도 있어 막대의 실제 좌/우 끝을 min/max로 구해 라벨을 바로
+    // 그 바깥(양수=오른쪽, 음수=왼쪽)에 붙인다.
+    const cy = y + height / 2;
+    const left = Math.min(x, x + width);
+    const right = Math.max(x, x + width);
+    const positive = num >= 0;
+    return (
+      <text
+        x={positive ? right + 4 : left - 4}
+        y={cy}
+        fill="#52525b"
+        fontSize={11}
+        textAnchor={positive ? "start" : "end"}
+        dominantBaseline="central"
+      >
+        {formatY(num)}
+      </text>
+    );
+  };
+
   return (
     <div className="mt-2 rounded-lg border border-zinc-200 bg-white overflow-hidden">
-      {chart.title && (
+      {headerText && (
         <div className="px-3 py-2 border-b border-zinc-100 text-xs font-medium text-zinc-600">
-          {chart.title}
+          {headerText}
         </div>
       )}
       <div className="p-3">
-        <ResponsiveContainer width="100%" height={240}>
-          {chart.kind === "bar" ? (
-            <BarChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" />
-              <XAxis
-                dataKey="_x"
-                tick={{ fontSize: 11, fill: "#71717a" }}
-                tickFormatter={formatXTick}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: "#a1a1aa" }}
-                axisLine={false}
-                tickLine={false}
-                width={48}
-              />
-              <Tooltip
-                cursor={{ fill: "#f4f4f5" }}
-                contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #f4f4f5" }}
-                formatter={(v) => [String(v), chart.y]}
-                labelFormatter={(l) => `${chart.x}: ${String(l)}`}
-              />
-              <Bar dataKey="_y" fill="#7c3aed" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          ) : (
+        <ResponsiveContainer width="100%" height={chartHeight}>
+          {chart.kind === "line" ? (
             <LineChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" />
               <XAxis
@@ -89,25 +119,67 @@ export default function ChartView({ chart }: { chart: ChatChart }) {
                 axisLine={false}
                 tickLine={false}
               />
-              <YAxis
+              <YAxis tick={{ fontSize: 11, fill: "#a1a1aa" }} axisLine={false} tickLine={false} width={48} />
+              <Tooltip
+                contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #f4f4f5" }}
+                formatter={(v) => [formatY(Number(v)), yName]}
+                labelFormatter={(l) => `${chart.x}: ${String(l)}`}
+              />
+              <Line type="monotone" dataKey="_y" stroke={NEUTRAL_COLOR} strokeWidth={2} dot={{ r: 3, fill: NEUTRAL_COLOR }} />
+            </LineChart>
+          ) : isDelta ? (
+            // 가로 다이버징 막대 (pp = x축). 0 기준 +오른쪽(빨강)/−왼쪽(파랑).
+            <BarChart layout="vertical" data={data} margin={{ top: 8, right: 48, bottom: 0, left: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" horizontal={false} />
+              <XAxis
+                type="number"
                 tick={{ fontSize: 11, fill: "#a1a1aa" }}
                 axisLine={false}
                 tickLine={false}
-                width={48}
+                tickFormatter={(v) => formatY(Number(v))}
+              />
+              <YAxis
+                type="category"
+                dataKey="_x"
+                tick={{ fontSize: 11, fill: "#71717a" }}
+                axisLine={false}
+                tickLine={false}
+                width={88}
               />
               <Tooltip
+                cursor={{ fill: "#f4f4f5" }}
                 contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #f4f4f5" }}
-                formatter={(v) => [String(v), chart.y]}
+                formatter={(v) => [formatY(Number(v)), yName]}
                 labelFormatter={(l) => `${chart.x}: ${String(l)}`}
               />
-              <Line
-                type="monotone"
-                dataKey="_y"
-                stroke="#7c3aed"
-                strokeWidth={2}
-                dot={{ r: 3, fill: "#7c3aed" }}
+              <ReferenceLine x={0} stroke="#d4d4d8" />
+              <Bar dataKey="_y" radius={[2, 2, 2, 2]}>
+                {data.map((d, i) => (
+                  <Cell key={i} fill={barColor(d._y)} />
+                ))}
+                <LabelList dataKey="_y" content={renderValueLabel} />
+              </Bar>
+            </BarChart>
+          ) : (
+            // 일반 세로 막대 (증감 아님 — 단일 색).
+            <BarChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" />
+              <XAxis
+                dataKey="_x"
+                tick={{ fontSize: 11, fill: "#71717a" }}
+                tickFormatter={formatXTick}
+                axisLine={false}
+                tickLine={false}
               />
-            </LineChart>
+              <YAxis tick={{ fontSize: 11, fill: "#a1a1aa" }} axisLine={false} tickLine={false} width={48} />
+              <Tooltip
+                cursor={{ fill: "#f4f4f5" }}
+                contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #f4f4f5" }}
+                formatter={(v) => [formatY(Number(v)), yName]}
+                labelFormatter={(l) => `${chart.x}: ${String(l)}`}
+              />
+              <Bar dataKey="_y" fill={NEUTRAL_COLOR} radius={[4, 4, 0, 0]} />
+            </BarChart>
           )}
         </ResponsiveContainer>
       </div>

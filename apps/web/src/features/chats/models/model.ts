@@ -1,10 +1,15 @@
 import type { ChatRole } from "./dto";
+import type { ColumnFormat } from "./format";
 
 export interface ChatTableDisplay {
   type: "table";
   title?: string;
   columns: string[];
   rows: Record<string, unknown>[];
+  // silverone 2026-06-09 — compare 결과 컬럼별 표시 포맷/라벨(백엔드 contract).
+  // 없으면 raw 렌더(기존 동작 유지).
+  columnFormats?: Record<string, ColumnFormat>;
+  columnLabels?: Record<string, string>;
 }
 
 export type ChatDisplay = ChatTableDisplay;
@@ -29,6 +34,10 @@ export interface ChatChart {
   y: string;
   title?: string;
   rows: Record<string, unknown>[];
+  // silverone 2026-06-09 — y 컬럼의 표시 포맷(백엔드 contract). point/percent면
+  // 0~1 비율을 %p/% 스케일로 올려 그리고 단위를 표시한다.
+  yFormat?: ColumnFormat;
+  yLabel?: string;
 }
 
 export type TaxonomyStatus =

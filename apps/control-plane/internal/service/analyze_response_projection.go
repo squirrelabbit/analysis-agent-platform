@@ -19,7 +19,8 @@ import (
 //   - result.composer.assistant_content
 //   - result.composer.metadata.{mode,template,fallback_reason,reason,capability_gap}
 //   - result.composer.display.{type,title,columns,rows,total_rows,
-//     returned_rows,max_rows,truncated,warnings,recommended_view,chart_spec}
+//     returned_rows,max_rows,truncated,warnings,recommended_view,chart_spec,
+//     column_formats,column_labels}
 //   - result.taxonomy_check (전체 객체)
 //
 // Drop set:
@@ -168,9 +169,12 @@ func projectAnalyzeComposer(value any) map[string]any {
 // projectComposerDisplay — display map에서 frontend-safe keep set만 추출.
 // silverone 2026-06-01 — thread detail messages[].display 재사용 위해 분리.
 // keep set: type / title / columns / rows / total_rows / returned_rows /
-// max_rows / truncated / warnings / recommended_view / chart_spec.
+// max_rows / truncated / warnings / recommended_view / chart_spec /
+// column_formats / column_labels.
 // recommended_view + chart_spec은 chart-ready metadata v1 (silverone 2026-06-01)
 // — display.type은 "table" 유지하고 프론트가 차트 렌더링에 활용할 힌트만 추가.
+// column_formats + column_labels는 기간/그룹 비교 결과 표시 contract
+// (silverone 2026-06-09) — 프론트가 %·%p·정수로 렌더하도록 단위 의미 전달.
 func projectComposerDisplay(value any) map[string]any {
 	display, ok := value.(map[string]any)
 	if !ok || len(display) == 0 {
@@ -181,6 +185,7 @@ func projectComposerDisplay(value any) map[string]any {
 		"type", "title", "columns", "rows",
 		"total_rows", "returned_rows", "max_rows", "truncated", "warnings",
 		"recommended_view", "chart_spec",
+		"column_formats", "column_labels",
 	} {
 		if v, exists := display[key]; exists {
 			out[key] = v

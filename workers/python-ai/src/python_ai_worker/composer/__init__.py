@@ -102,6 +102,16 @@ def _compose_safely(
         recommended_view=str(display.get("recommended_view") or ""),
         reuse_metadata=reuse_metadata,
     )
+    # silverone 2026-06-09 — 기간/그룹 구성비 비교는 generic "N건 정리" 대신 핵심
+    # 변화 요약으로 교체(가장 증가/감소/거의 변화 없음). empty/reuse/truncated가
+    # 아닐 때만(=table_normal 류) 적용. 원인 추정은 하지 않는다.
+    if template == "table_normal":
+        change_summary = _compare_distribution_summary(
+            present.get("rows") or [], display.get("columns") or []
+        )
+        if change_summary:
+            content = change_summary
+            template = "compare_distribution_summary"
     context_summary = _build_context_summary(
         user_question=user_question,
         present=present,
@@ -199,7 +209,7 @@ def _build_display(
     # planner 의도(값 정렬 등)를 보존하기 위해 건드리지 않는다.
     if recommended_view == "line" and isinstance(chart_spec, dict):
         rows = _sort_rows_by_x(rows, str(chart_spec.get("x") or ""))
-    return {
+    result: dict[str, Any] = {
         "type": fmt,
         "title": present.get("title"),
         "columns": columns,
@@ -218,6 +228,16 @@ def _build_display(
         "recommended_view": recommended_view,
         "chart_spec": chart_spec,
     }
+    # silverone 2026-06-09 — compare 결과(전/후 + delta)는 count/ratio/pp 단위가
+    # 섞여 raw 값만으론 오해 소지가 크다. 컬럼별 표시 포맷/라벨을 contract로 내려
+    # 프론트가 %·%p·정수로 렌더하게 한다(compare 결과에만 부여).
+    if _has_compare_columns(columns):
+        formats, labels = _compare_column_formats_labels(columns)
+        if formats:
+            result["column_formats"] = formats
+        if labels:
+            result["column_labels"] = labels
+    return result
 
 
 # silverone 2026-05-27 (display-warnings v1) — 사용자 화면 노출 가능한 짧은
@@ -389,6 +409,16 @@ def _build_chart_spec(
     y_cols = _valid_chart_y_columns(rows, columns, exclude={x_col})
     if not y_cols:
         return None
+    # silverone 2026-06-09 — 두 기간/그룹 비교(compare wide-format)는 count/ratio가
+    # 한 행에 섞여 다중 y로는 차트 불가 + 프론트가 단일 series만 렌더(다중 y는 첫
+    # 값으로 좁아져 last_count/a_count만 보이는 오해). 변화량을 1차로 드러내기 위해
+    # headline delta 컬럼 하나만 단일 series bar로 추천한다. distribution=
+    # delta_ratio(pp), count=delta_count. delta가 없으면 차트 철회(table fallback).
+    if _has_compare_columns(columns):
+        headline = _headline_delta_column(y_cols)
+        if headline is None:
+            return None
+        y_cols = [headline]
     # 다중 metric은 단위가 일치하는 compare 그룹만 허용 (count↔ratio 혼합 차단).
     if not _y_columns_chartable_together(y_cols):
         return None
@@ -413,6 +443,11 @@ _MIN_CHART_NUMERIC_VALUES = 2
 # ratio/rate/percent 계열 컬럼명 — count 계열과 같은 y축에 섞으면 단위가 달라
 # 차트 추천을 지양한다.
 _RATIO_LIKE_PATTERNS = ("ratio", "rate", "percent", "pct", "비율", "율", "점유")
+# silverone 2026-06-09 — 두 기간/그룹 비교(compare wide-format)의 "변화"를 단일
+# series bar 1개로 보여줄 때 우선 채택할 delta 컬럼. 프론트가 단일 series만
+# 렌더하므로(다중 y는 첫 값으로 좁혀 last_count만 보이는 오해 발생) 비교 결과는
+# delta 하나만 그린다. distribution은 delta_ratio(pp), count는 delta_count 우선.
+_DELTA_HEADLINE_PRIORITY = ("delta_ratio", "delta_count", "delta_rate")
 
 
 def _is_finite_number(value: Any) -> bool:
@@ -483,6 +518,112 @@ def _y_columns_chartable_together(y_cols: list[str]) -> bool:
     has_ratio = any(_is_ratio_like_column(col) for col in y_cols)
     has_non_ratio = any(not _is_ratio_like_column(col) for col in y_cols)
     return not (has_ratio and has_non_ratio)
+
+
+# silverone 2026-06-09 — compare 결과 컬럼의 표시 포맷/라벨 contract. 백엔드가
+# 의미(단위)를 선언하고 프론트가 렌더한다(프론트의 컬럼명 추측 금지). count/ratio/pp
+# 혼동을 막는다. format enum: percent(0~1→%) / point(0~1→%p) / int(정수) / number.
+_COMPARE_COLUMN_LABELS: dict[str, str] = {
+    "a_count": "이전 건수",
+    "b_count": "이후 건수",
+    "delta_count": "Δ건수",
+    "a_ratio": "이전 비율",
+    "b_ratio": "이후 비율",
+    "delta_ratio": "Δ비율(%p)",
+    "delta_rate": "증감률(%)",
+}
+
+# delta_ratio abs가 이 값 미만이면 요약에서 "거의 변하지 않음"으로 표현 (2%p).
+_NEAR_ZERO_DELTA_RATIO = 0.02
+# 감성 enum → 한글 (요약 문구용 안정 3-value 매핑). 그 외 group 값은 raw 유지.
+_SENTIMENT_LABEL_KO = {"positive": "긍정", "neutral": "중립", "negative": "부정"}
+
+
+def _compare_column_format(col: str) -> str | None:
+    """compare 결과 컬럼명 → 표시 포맷. delta_ratio는 %p(point), 그 외 ratio는 %,
+    rate/percent_change는 %, count는 정수. 해당 없으면 None(포맷 미지정)."""
+    if not isinstance(col, str):
+        return None
+    if col == "delta_ratio":
+        return "point"
+    if col == "percent_change" or col == "delta_rate" or col.endswith("_rate"):
+        return "percent"
+    if col == "ratio" or col.endswith("_ratio"):
+        return "percent"
+    if col == "count" or col.endswith("_count"):
+        return "int"
+    return None
+
+
+def _compare_column_formats_labels(columns: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+    formats: dict[str, str] = {}
+    labels: dict[str, str] = {}
+    for col in columns:
+        fmt = _compare_column_format(col)
+        if fmt:
+            formats[col] = fmt
+        if isinstance(col, str) and col in _COMPARE_COLUMN_LABELS:
+            labels[col] = _COMPARE_COLUMN_LABELS[col]
+    return formats, labels
+
+
+def _group_label_for_summary(value: Any) -> str:
+    if isinstance(value, str) and value in _SENTIMENT_LABEL_KO:
+        return _SENTIMENT_LABEL_KO[value]
+    return "—" if value is None else str(value)
+
+
+def _compare_distribution_summary(rows: list[Any], columns: list[str]) -> str | None:
+    """period_compare_distribution 결과면 핵심 변화 요약 문구를 만든다. 아니면 None.
+
+    규칙(silverone 2026-06-09): delta_ratio 최대(+)=가장 증가, 최소(−)=가장 감소,
+    abs(delta_ratio)가 작은 항목=거의 변화 없음. 원인 추정은 하지 않는다."""
+    if "delta_ratio" not in columns:
+        return None
+    x_col = _first_categorical_column(rows, columns)
+    if not x_col:
+        return None
+    items: list[tuple[Any, float]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        dr = row.get("delta_ratio")
+        if _is_finite_number(dr):
+            items.append((row.get(x_col), float(dr)))
+    if not items:
+        return None
+
+    def pp(value: float) -> str:
+        return f"{value * 100:+.1f}%p"
+
+    inc = max(items, key=lambda t: t[1])
+    dec = min(items, key=lambda t: t[1])
+    near = min(items, key=lambda t: abs(t[1]))
+    parts: list[str] = []
+    if inc[1] > 0:
+        parts.append(f"{_group_label_for_summary(inc[0])} 비율이 가장 크게 증가({pp(inc[1])})")
+    if dec[1] < 0 and dec[0] != inc[0]:
+        parts.append(f"{_group_label_for_summary(dec[0])} 비율은 감소({pp(dec[1])})")
+    if abs(near[1]) < _NEAR_ZERO_DELTA_RATIO and near[0] not in (inc[0], dec[0]):
+        parts.append(f"{_group_label_for_summary(near[0])} 비율은 거의 변하지 않았습니다")
+    if not parts:
+        return None
+    return "두 기간 비교: " + ", ".join(parts) + "."
+
+
+def _headline_delta_column(y_cols: list[str]) -> str | None:
+    """compare wide-format에서 단일 series로 그릴 headline delta 컬럼 선택.
+
+    우선순위: delta_ratio(pp) > delta_count > delta_rate > 기타 delta_*.
+    유효 numeric으로 이미 걸러진 y_cols에서 고른다. delta가 없으면 None
+    (호출부가 차트를 철회하고 table fallback)."""
+    for name in _DELTA_HEADLINE_PRIORITY:
+        if name in y_cols:
+            return name
+    for col in y_cols:
+        if isinstance(col, str) and col.startswith("delta_"):
+            return col
+    return None
 
 
 def _has_compare_columns(columns: list[str]) -> bool:

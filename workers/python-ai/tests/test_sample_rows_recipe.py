@@ -189,13 +189,15 @@ class SampleRowsPromptRoutingLockTest(unittest.TestCase):
         self.assertIn("### sample_rows", cat)
 
     def test_prompt_template_keeps_sample_rows_routing_policy(self):
-        # 라우팅 정책 문장은 prompt md(규칙)에 남는다(세부 params는 catalog).
-        prompt = (
-            Path(__file__).resolve().parents[3]
-            / "config/prompts/planner-v2-anthropic-v1.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("예시", prompt)
-        self.assertIn("sample_rows를 절대 쓰지 않는다", prompt)
+        # silverone 2026-06-09 — 라우팅 정책은 prompt md(규칙)에 하드코딩하지 않고
+        # RecipeSpec.use_when/avoid_when/examples → render_recipe_catalog로 렌더한다.
+        # manual few-shot 제거 후, 정책이 spec→catalog 경로로 살아있는지 잠근다.
+        from python_ai_worker.planner.prompt import render_recipe_catalog
+
+        catalog = render_recipe_catalog()
+        self.assertIn("### sample_rows", catalog)
+        self.assertIn("절대 쓰지 않는다", catalog)
+        self.assertIn("- 예시 질문:", catalog)
 
 
 if __name__ == "__main__":

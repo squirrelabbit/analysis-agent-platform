@@ -38,9 +38,9 @@ const FILTER_OPTIONS: { label: string; value: string }[] = [
 
 export function GenuinenessBadge({ value }: { value: string }) {
   const map: Record<string, string> = {
-    genuine_review: "bg-emerald-50 text-emerald-800 border-emerald-200",
-    non_review: "bg-red-50 text-red-800 border-red-200",
-    uncertain: "bg-zinc-100 text-zinc-400 border-zinc-200",
+    genuine_review: "bg-emerald-50 text-emerald-600",
+    non_review: "bg-red-50 text-red-600",
+    uncertain: "bg-zinc-100 text-zinc-500",
   };
   const labels: Record<string, string> = {
     genuine_review: "진성",
