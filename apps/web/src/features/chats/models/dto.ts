@@ -81,6 +81,11 @@ export interface ComposerDisplayDto {
   warnings?: string[];
   recommended_view?: "table" | "bar" | "line" | null;
   chart_spec?: ChartSpecDto | null;
+  // silverone 2026-06-09 — 기간/그룹 비교 결과의 컬럼별 표시 포맷/라벨 contract.
+  // 백엔드가 단위 의미를 선언하고 프론트가 %·%p·정수로 렌더한다(compare 결과에만 존재).
+  // format enum: percent(0~1→%) | point(0~1→%p) | int(정수) | number.
+  column_formats?: Record<string, string> | null;
+  column_labels?: Record<string, string> | null;
 }
 
 export interface AnalyzeUserQuestionRequest {

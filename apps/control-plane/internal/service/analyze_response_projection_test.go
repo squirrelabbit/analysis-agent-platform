@@ -138,6 +138,36 @@ func TestProjectFrontendAnalyzeResult_KeepFieldsOnly(t *testing.T) {
 	}
 }
 
+func TestProjectComposerDisplay_KeepsCompareColumnContract(t *testing.T) {
+	// silverone 2026-06-09 — 기간/그룹 비교 결과 표시 contract(column_formats /
+	// column_labels)가 frontend-safe projection에서 보존돼야 한다 (suggested_questions
+	// 회귀처럼 whitelist 누락으로 잘리지 않게).
+	display := map[string]any{
+		"type":             "table",
+		"columns":          []any{"sentiment", "a_ratio", "delta_ratio"},
+		"rows":             []any{map[string]any{"sentiment": "positive", "a_ratio": 0.87, "delta_ratio": -0.30}},
+		"recommended_view": "bar",
+		"chart_spec":       map[string]any{"kind": "bar", "x": "sentiment", "y": "delta_ratio", "series": nil},
+		"column_formats":   map[string]any{"a_ratio": "percent", "delta_ratio": "point"},
+		"column_labels":    map[string]any{"a_ratio": "이전 비율", "delta_ratio": "Δ비율(%p)"},
+	}
+	out := projectComposerDisplay(display)
+	formats, ok := out["column_formats"].(map[string]any)
+	if !ok {
+		t.Fatalf("column_formats dropped by projection: %+v", mapKeys(out))
+	}
+	if formats["delta_ratio"] != "point" || formats["a_ratio"] != "percent" {
+		t.Fatalf("column_formats wrong: %v", formats)
+	}
+	labels, ok := out["column_labels"].(map[string]any)
+	if !ok {
+		t.Fatalf("column_labels dropped by projection")
+	}
+	if labels["delta_ratio"] != "Δ비율(%p)" {
+		t.Fatalf("column_labels wrong: %v", labels)
+	}
+}
+
 func TestProjectFrontendAnalyzeResult_EmptyInput(t *testing.T) {
 	if out := projectFrontendAnalyzeResult(nil); out != nil {
 		t.Fatalf("nil input should pass through, got %q", string(out))

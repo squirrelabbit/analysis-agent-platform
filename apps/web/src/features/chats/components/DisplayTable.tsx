@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
-import type { ChatTableDisplay } from "../models";
+import type { ChatTableDisplay, ColumnFormat } from "../models";
+import { formatCellValue } from "../models";
 import { useTaxonomy } from "@/features/taxonomy/hooks/taxonomy.query";
 import { ASPECT_FIELD, aspectLabelOf } from "@/features/taxonomy/models";
 import type { Taxonomy } from "@/features/taxonomy/models";
@@ -8,27 +9,22 @@ const MAX_VISIBLE_ROWS = 100;
 // 20행 이하면 max-height 없이 자연 펼침, 그 이상은 360px 박스 + 내부 스크롤.
 const COMPACT_ROWS_THRESHOLD = 20;
 
-function formatCell(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "number") return String(value);
-  if (typeof value === "string") return value;
-  return JSON.stringify(value);
-}
-
 // aspect 컬럼의 영문 key 셀은 taxonomy 한글 label로 표시 (미매칭/미로딩 시 key 유지).
+// 그 외에는 백엔드 column_formats(%/%p/정수) 기준으로 렌더, 없으면 raw.
 function renderCell(
   col: string,
   value: unknown,
   taxonomy: Taxonomy | undefined,
+  format: ColumnFormat | undefined,
 ): string {
   if (col === ASPECT_FIELD && typeof value === "string") {
     return aspectLabelOf(taxonomy, value);
   }
-  return formatCell(value);
+  return formatCellValue(value, format);
 }
 
 export default function DisplayTable({ display }: { display: ChatTableDisplay }) {
-  const { title, columns, rows } = display;
+  const { title, columns, rows, columnFormats, columnLabels } = display;
   // 조회 실패해도 renderCell이 key로 fallback하므로 화면은 동작한다.
   const { data: taxonomy } = useTaxonomy();
   const totalRows = rows.length;
@@ -57,7 +53,7 @@ export default function DisplayTable({ display }: { display: ChatTableDisplay })
                   key={col}
                   className="text-left px-3 py-2 font-medium text-zinc-500 whitespace-nowrap"
                 >
-                  {col}
+                  {columnLabels?.[col] ?? col}
                 </th>
               ))}
             </tr>
@@ -71,7 +67,7 @@ export default function DisplayTable({ display }: { display: ChatTableDisplay })
                       key={col}
                       className="px-3 py-2 text-zinc-700 whitespace-nowrap align-top"
                     >
-                      {renderCell(col, row[col], taxonomy)}
+                      {renderCell(col, row[col], taxonomy, columnFormats?.[col])}
                     </td>
                   ))}
                 </tr>

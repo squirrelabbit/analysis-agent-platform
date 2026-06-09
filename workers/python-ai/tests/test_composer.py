@@ -626,6 +626,76 @@ class ChartReadyMetadataTests(unittest.TestCase):
         self.assertIsNone(out["display"]["chart_spec"])
 
 
+class CompareColumnContractTests(unittest.TestCase):
+    """silverone 2026-06-09 — compare 결과 표시 포맷/라벨 contract + 변화 요약.
+    프론트가 %·%p·정수로 렌더하도록 백엔드가 column_formats/column_labels를 내린다."""
+
+    def _present(self, rows: list[dict[str, object]]) -> dict[str, object]:
+        from copy import deepcopy
+        return {
+            "total_rows": len(rows), "returned_rows": len(rows), "truncated": False,
+            "format": "table", "title": "감성 비율 전후 변화", "rows": deepcopy(rows),
+        }
+
+    _DIST_ROWS = [
+        {"sentiment": "negative", "a_count": 1, "a_ratio": 0.03, "b_count": 31, "b_ratio": 0.04, "delta_count": 30, "delta_ratio": 0.01},
+        {"sentiment": "neutral", "a_count": 3, "a_ratio": 0.10, "b_count": 277, "b_ratio": 0.39, "delta_count": 274, "delta_ratio": 0.29},
+        {"sentiment": "positive", "a_count": 27, "a_ratio": 0.87, "b_count": 402, "b_ratio": 0.57, "delta_count": 375, "delta_ratio": -0.30},
+    ]
+
+    def test_distribution_emits_column_formats(self) -> None:
+        out = compose_answer(user_question="q", present=self._present(self._DIST_ROWS))
+        fmts = out["display"]["column_formats"]
+        self.assertEqual(fmts["a_ratio"], "percent")
+        self.assertEqual(fmts["b_ratio"], "percent")
+        self.assertEqual(fmts["delta_ratio"], "point")
+        self.assertEqual(fmts["a_count"], "int")
+        self.assertEqual(fmts["delta_count"], "int")
+        self.assertNotIn("sentiment", fmts)  # group_by는 포맷 없음
+
+    def test_distribution_emits_column_labels(self) -> None:
+        out = compose_answer(user_question="q", present=self._present(self._DIST_ROWS))
+        labels = out["display"]["column_labels"]
+        self.assertEqual(labels["a_ratio"], "이전 비율")
+        self.assertEqual(labels["b_ratio"], "이후 비율")
+        self.assertEqual(labels["delta_ratio"], "Δ비율(%p)")
+        self.assertEqual(labels["delta_count"], "Δ건수")
+
+    def test_distribution_change_summary(self) -> None:
+        out = compose_answer(user_question="q", present=self._present(self._DIST_ROWS))
+        content = out["assistant_content"]
+        self.assertEqual(out["metadata"]["template"], "compare_distribution_summary")
+        # 가장 증가=중립(+29.0%p), 가장 감소=긍정(-30.0%p), 거의 변화 없음=부정.
+        self.assertIn("중립", content)
+        self.assertIn("가장 크게 증가", content)
+        self.assertIn("+29.0%p", content)
+        self.assertIn("긍정", content)
+        self.assertIn("감소", content)
+        self.assertIn("부정", content)
+        self.assertIn("거의 변하지 않", content)
+        # 단조로운 generic 문구가 아니어야 함.
+        self.assertNotIn("분석 결과", content)
+
+    def test_count_compare_formats_no_ratio(self) -> None:
+        rows = [
+            {"channel": "a", "a_count": 1, "b_count": 2, "delta_count": 1, "delta_rate": 100.0},
+            {"channel": "b", "a_count": 4, "b_count": 2, "delta_count": -2, "delta_rate": -50.0},
+        ]
+        out = compose_answer(user_question="q", present=self._present(rows))
+        fmts = out["display"]["column_formats"]
+        self.assertEqual(fmts["delta_count"], "int")
+        self.assertEqual(fmts["delta_rate"], "percent")
+        self.assertNotIn("delta_ratio", fmts)
+        # count 비교는 delta_ratio가 없어 distribution 요약을 안 만든다(generic 유지).
+        self.assertNotEqual(out["metadata"]["template"], "compare_distribution_summary")
+
+    def test_non_compare_has_no_column_formats(self) -> None:
+        rows = [{"aspect": "food", "count": 5}, {"aspect": "show", "count": 3}]
+        out = compose_answer(user_question="q", present=self._present(rows))
+        self.assertNotIn("column_formats", out["display"])
+        self.assertNotIn("column_labels", out["display"])
+
+
 class GracefulFallbackTests(unittest.TestCase):
     def test_missing_present_uses_fallback(self) -> None:
         out = compose_answer(user_question="q", present=None)
