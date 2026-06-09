@@ -389,6 +389,16 @@ def _build_chart_spec(
     y_cols = _valid_chart_y_columns(rows, columns, exclude={x_col})
     if not y_cols:
         return None
+    # silverone 2026-06-09 — 두 기간/그룹 비교(compare wide-format)는 count/ratio가
+    # 한 행에 섞여 다중 y로는 차트 불가 + 프론트가 단일 series만 렌더(다중 y는 첫
+    # 값으로 좁아져 last_count/a_count만 보이는 오해). 변화량을 1차로 드러내기 위해
+    # headline delta 컬럼 하나만 단일 series bar로 추천한다. distribution=
+    # delta_ratio(pp), count=delta_count. delta가 없으면 차트 철회(table fallback).
+    if _has_compare_columns(columns):
+        headline = _headline_delta_column(y_cols)
+        if headline is None:
+            return None
+        y_cols = [headline]
     # 다중 metric은 단위가 일치하는 compare 그룹만 허용 (count↔ratio 혼합 차단).
     if not _y_columns_chartable_together(y_cols):
         return None
@@ -413,6 +423,11 @@ _MIN_CHART_NUMERIC_VALUES = 2
 # ratio/rate/percent 계열 컬럼명 — count 계열과 같은 y축에 섞으면 단위가 달라
 # 차트 추천을 지양한다.
 _RATIO_LIKE_PATTERNS = ("ratio", "rate", "percent", "pct", "비율", "율", "점유")
+# silverone 2026-06-09 — 두 기간/그룹 비교(compare wide-format)의 "변화"를 단일
+# series bar 1개로 보여줄 때 우선 채택할 delta 컬럼. 프론트가 단일 series만
+# 렌더하므로(다중 y는 첫 값으로 좁혀 last_count만 보이는 오해 발생) 비교 결과는
+# delta 하나만 그린다. distribution은 delta_ratio(pp), count는 delta_count 우선.
+_DELTA_HEADLINE_PRIORITY = ("delta_ratio", "delta_count", "delta_rate")
 
 
 def _is_finite_number(value: Any) -> bool:
@@ -483,6 +498,21 @@ def _y_columns_chartable_together(y_cols: list[str]) -> bool:
     has_ratio = any(_is_ratio_like_column(col) for col in y_cols)
     has_non_ratio = any(not _is_ratio_like_column(col) for col in y_cols)
     return not (has_ratio and has_non_ratio)
+
+
+def _headline_delta_column(y_cols: list[str]) -> str | None:
+    """compare wide-format에서 단일 series로 그릴 headline delta 컬럼 선택.
+
+    우선순위: delta_ratio(pp) > delta_count > delta_rate > 기타 delta_*.
+    유효 numeric으로 이미 걸러진 y_cols에서 고른다. delta가 없으면 None
+    (호출부가 차트를 철회하고 table fallback)."""
+    for name in _DELTA_HEADLINE_PRIORITY:
+        if name in y_cols:
+            return name
+    for col in y_cols:
+        if isinstance(col, str) and col.startswith("delta_"):
+            return col
+    return None
 
 
 def _has_compare_columns(columns: list[str]) -> bool:
