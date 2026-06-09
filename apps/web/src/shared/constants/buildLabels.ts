@@ -10,6 +10,7 @@ export const BUILD_LABELS: Record<BuildJobType, string> = {
   clean: "데이터 정제",
   doc_genuineness: "진성 분석",
   clause_label: "절 라벨링",
+  keyword: "키워드 분석",
 };
 
 export const buildLabel = (type: BuildJobType): string =>
