@@ -82,8 +82,8 @@ export default function RankingBarView({ chart }: { chart: ChatChart }) {
         <div className="text-xs text-zinc-400">{subtitle}</div>
       </div>
       <div className="px-2 pb-3">
-        <ResponsiveContainer width="100%" height={Math.max(150, data.length * 40 + 16)}>
-          <BarChart layout="vertical" data={data} margin={{ top: 4, right: 12, bottom: 0, left: 8 }} barCategoryGap="30%">
+        <ResponsiveContainer width="100%" height={Math.max(120, data.length * 34 + 16)}>
+          <BarChart layout="vertical" data={data} margin={{ top: 4, right: 12, bottom: 0, left: 8 }} barCategoryGap="22%">
             <XAxis type="number" domain={[0, "dataMax"]} hide />
             <YAxis
               yAxisId="left"
@@ -108,6 +108,7 @@ export default function RankingBarView({ chart }: { chart: ChatChart }) {
               yAxisId="left"
               dataKey="_y"
               radius={[5, 5, 5, 5]}
+              maxBarSize={22}
               background={{ fill: TRACK_COLOR, radius: 5 }}
             >
               {data.map((_, i) => (
