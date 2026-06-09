@@ -500,6 +500,34 @@ class ChartReadyMetadataTests(unittest.TestCase):
         self.assertEqual(spec["y"], "count")
         self.assertIsNone(spec["series"])
 
+    def test_line_event_date_from_between_filter(self) -> None:
+        # silverone 2026-06-09 — 날짜 추이 line은 plan의 between 날짜 필터 중점을
+        # event_date(축제일 기준선)로 chart_spec에 단다.
+        rows = [
+            {"created_at": "2025-08-13T00:00:00Z", "count": 1},
+            {"created_at": "2025-08-15T00:00:00Z", "count": 27},
+            {"created_at": "2025-08-17T00:00:00Z", "count": 11},
+        ]
+        plan = {
+            "plan_version": "v2",
+            "steps": [
+                {"id": "w", "skill": "filter", "params": {"input": "docs", "column": "created_at", "operator": "between", "value": ["2025-08-08", "2025-08-22"]}},
+                {"id": "agg", "skill": "aggregate", "params": {"input": "w", "group_by": ["created_at"], "metrics": [{"name": "count", "function": "count", "column": "*"}]}},
+                {"id": "p", "skill": "present", "params": {"input": "agg"}},
+            ],
+        }
+        spec = self._compose_with_rows(rows, plan=plan)["display"]["chart_spec"]
+        self.assertEqual(spec["kind"], "line")
+        self.assertEqual(spec["event_date"], "2025-08-15")
+
+    def test_line_no_event_date_without_between(self) -> None:
+        rows = [
+            {"created_at": "2026-01", "count": 10},
+            {"created_at": "2026-02", "count": 15},
+        ]
+        spec = self._compose_with_rows(rows)["display"]["chart_spec"]
+        self.assertNotIn("event_date", spec)
+
     def test_year_int_x_axis_line(self) -> None:
         """year 정수 x축 + numeric metric → line (categorical은 정수도 채택)."""
         rows = [

@@ -71,6 +71,8 @@ export interface ChartSpecDto {
   // silverone 2026-06-09 — diverging_bar 계약: 단위(건/%p/%) + 정렬(abs_desc).
   unit?: string | null;
   sort?: string | null;
+  // line — 기준일(축제일) 기준선 (YYYY-MM-DD). 있을 때만.
+  event_date?: string | null;
   // metric (total 비교) — 컬럼명 참조.
   a_value?: string;
   b_value?: string;
