@@ -4,6 +4,8 @@ import type { ChatMessage } from "../models";
 import ChartView from "./ChartView";
 import CollapsibleTable from "./CollapsibleTable";
 import DisplayTable from "./DisplayTable";
+import EvidenceCardList from "./EvidenceCardList";
+import MetricCompareView from "./MetricCompareView";
 import MessageWarnings from "./MessageWarnings";
 import PlanPanel from "./PlanPanel";
 import RunStatus from "./RunStatus";
@@ -19,18 +21,24 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
 
   const display = !isUser ? message.display : undefined;
   const chart = !isUser ? message.chart : undefined;
+  const metric = !isUser ? message.metric : undefined;
+  const evidence = !isUser ? message.evidence : undefined;
   const hasPlan = !isUser && !!message.plan;
   const hasWarnings =
     !isUser &&
     ((message.warnings && message.warnings.length > 0) ||
       (!!message.taxonomyStatus && message.taxonomyStatus !== "ok"));
 
-  const chartMain = !!chart;
-  const tableMain = !chartMain && !!display;
+  // 메인 결과 1개 선택: metric > evidence > chart > table.
+  const metricMain = !!metric;
+  const evidenceMain = !metricMain && !!evidence;
+  const chartMain = !metricMain && !evidenceMain && !!chart;
+  const tableMain = !metricMain && !evidenceMain && !chartMain && !!display;
+  const hasNonTableMain = metricMain || evidenceMain || chartMain;
   const showFallbackNotice =
     !isUser && !chartMain && message.chartFallbackReason === "insufficient_data";
 
-  const isWide = chartMain || tableMain || hasPlan;
+  const isWide = hasNonTableMain || tableMain || hasPlan;
 
   return (
     <div className={cn("flex gap-2.5 items-start", isUser && "flex-row-reverse")}>
@@ -67,12 +75,14 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
           </p>
         )}
 
-        {/* 메인 결과 — chart 우선, 없으면 table */}
-        {chartMain && <ChartView chart={chart} />}
-        {tableMain && <DisplayTable display={display} />}
+        {/* 메인 결과 — metric > evidence > chart > table */}
+        {metricMain && metric && <MetricCompareView metric={metric} />}
+        {evidenceMain && evidence && <EvidenceCardList evidence={evidence} />}
+        {chartMain && chart && <ChartView chart={chart} />}
+        {tableMain && display && <DisplayTable display={display} />}
 
-        {/* chart가 메인일 때 display는 상세 데이터 접이식 */}
-        {chartMain && display && <CollapsibleTable display={display} />}
+        {/* 메인이 table이 아니면 display는 상세 데이터 접이식으로 */}
+        {hasNonTableMain && display && <CollapsibleTable display={display} />}
 
         {hasPlan && <PlanPanel plan={message.plan!} />}
 

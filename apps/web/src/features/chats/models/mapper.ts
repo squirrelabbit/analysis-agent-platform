@@ -11,7 +11,10 @@ import type {
   AnalyzeResult,
   ChatChart,
   ChatDisplay,
+  ChatEvidence,
+  ChatEvidenceItem,
   ChatMessage,
+  ChatMetric,
   ChatPlan,
   ChatThread,
   ChatThreadDetail,
@@ -109,14 +112,63 @@ const mapChart = (dto: ComposerDisplayDto | undefined): ChatChart | undefined =>
   };
 };
 
-// 알려진 view만 좁혀 반환. 정의된 외 값(metric 등 미래 확장)이면 unknown.
+// 알려진 view만 좁혀 반환. 그 외 미래 확장 값은 unknown → table fallback.
+const KNOWN_VIEWS = new Set([
+  "table", "bar", "diverging_bar", "line", "metric", "evidence",
+]);
 const mapRecommendedView = (
   dto: ComposerDisplayDto | undefined,
 ): RecommendedView | undefined => {
   const v = dto?.recommended_view;
   if (!v) return undefined;
-  if (v === "table" || v === "bar" || v === "diverging_bar" || v === "line") return v;
-  return "unknown";
+  return KNOWN_VIEWS.has(v) ? (v as RecommendedView) : "unknown";
+};
+
+const toNum = (v: unknown): number | null => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+};
+
+const mapMetric = (dto: ComposerDisplayDto | undefined): ChatMetric | undefined => {
+  if (!dto || dto.recommended_view !== "metric") return undefined;
+  const spec = dto.chart_spec;
+  if (!spec || spec.kind !== "metric") return undefined;
+  const row = (dto.rows ?? [])[0];
+  if (!row) return undefined;
+  const get = (col?: string) => (col ? toNum(row[col]) : null);
+  return {
+    aValue: get(spec.a_value),
+    bValue: get(spec.b_value),
+    deltaValue: get(spec.delta_value),
+    deltaRate: get(spec.delta_rate),
+    unit: spec.unit ?? "",
+  };
+};
+
+const mapEvidence = (dto: ComposerDisplayDto | undefined): ChatEvidence | undefined => {
+  if (!dto || dto.recommended_view !== "evidence") return undefined;
+  const spec = dto.chart_spec;
+  if (!spec || spec.kind !== "evidence" || !spec.text) return undefined;
+  const rows = dto.rows ?? [];
+  if (rows.length === 0) return undefined;
+  const textCol = spec.text;
+  const chipCols = spec.chips ?? [];
+  const items = rows
+    .map((row): ChatEvidenceItem => ({
+      text: String(row[textCol] ?? "").trim(),
+      sentiment: spec.sentiment ? String(row[spec.sentiment] ?? "").trim() || undefined : undefined,
+      chips: chipCols
+        .map((c) => ({ key: c, value: String(row[c] ?? "").trim() }))
+        .filter((c) => c.value),
+      id: spec.id ? String(row[spec.id] ?? "").trim() || undefined : undefined,
+    }))
+    .filter((it) => it.text);
+  if (items.length === 0) return undefined;
+  return { items, total: rows.length };
 };
 
 const mapRunStatus = (status: string | undefined): RunStatus | undefined => {
@@ -161,6 +213,8 @@ export const mapAnalyzeResponse = (
           createdAt: dto.assistant_message.created_at,
           display: mapDisplay(display),
           chart,
+          metric: mapMetric(display),
+          evidence: mapEvidence(display),
           warnings: display?.warnings?.length ? display.warnings : undefined,
           taxonomyStatus: mapTaxonomyStatus(dto.result?.taxonomy_check),
           plan: mapPlan(dto.result?.plan),
@@ -211,6 +265,8 @@ const mapStoredMessage = (dto: AnalysisMessageDto): ChatMessage => {
     createdAt: dto.created_at,
     display: mapDisplay(dto.display),
     chart,
+    metric: mapMetric(dto.display),
+    evidence: mapEvidence(dto.display),
     warnings: dto.display?.warnings?.length ? dto.display.warnings : undefined,
     recommendedView,
     chartFallbackReason,

@@ -201,7 +201,7 @@ def _build_display(
     )
     # chart_spec 검증(_build_chart_spec)을 통과하지 못하면 차트 추천을 철회하고
     # table로 내린다 — recommended_view와 chart_spec이 항상 일관되도록.
-    if recommended_view in ("bar", "line", "diverging_bar") and chart_spec is None:
+    if recommended_view in ("bar", "line", "diverging_bar", "metric", "evidence") and chart_spec is None:
         recommended_view = "table"
     # silverone 2026-06-02 — line 차트는 x축이 시계열이라 행이 x 기준 정렬돼 있어야
     # 선이 올바르다. planner가 sort step을 넣었는지에 의존하지 않고(예: compare만
@@ -349,6 +349,18 @@ def _recommended_view(
     """
     if not rows or not columns:
         return "table"
+    # evidence — 원문 샘플(sample_rows). 본문 컬럼이 있고 집계(numeric metric)가
+    # 아니면 표 대신 카드로 (silverone 2026-06-09). count/delta 같은 집계가 섞이면
+    # 본문-by-aggregate 같은 케이스라 evidence가 아님(아래 chart/table 로직으로).
+    evidence_text = _evidence_text_column(rows, columns)
+    if evidence_text is not None and not _has_numeric_metric_column(
+        rows, columns, exclude={evidence_text}
+    ):
+        return "evidence"
+    # metric — total 비교 1행(a_count/b_count/delta_count). 1행 표가 가장 어색한
+    # 케이스 → "전 N건 → 후 M건, +x%" 카드.
+    if len(rows) == 1 and _has_metric_compare_columns(columns):
+        return "metric"
     # 1 row만 있으면 차트로서 의미 약함 — 단 다중 group_by + 다중 metric은 추후
     # 가능하지만 v1은 보수적.
     if len(rows) == 1:
@@ -416,9 +428,14 @@ def _build_chart_spec(
       계열이 섞이거나 서로 다른 metric이면 table
     - line은 x축이 ordered 컬럼(날짜/연/월 등)일 때만
     """
-    if recommended_view not in ("bar", "line", "diverging_bar"):
-        return None
     if not rows or not columns:
+        return None
+    # metric / evidence는 x/y 축이 아니라 카드형 spec — 별도 builder (silverone 2026-06-09).
+    if recommended_view == "metric":
+        return _build_metric_spec(columns)
+    if recommended_view == "evidence":
+        return _build_evidence_spec(rows, columns)
+    if recommended_view not in ("bar", "line", "diverging_bar"):
         return None
     x_col = _first_categorical_column(rows, columns)
     if x_col is None or x_col not in columns:
@@ -455,6 +472,68 @@ def _build_chart_spec(
         return None
     y_value: Any = y_cols[0] if len(y_cols) == 1 else y_cols
     return {"kind": recommended_view, "x": x_col, "y": y_value, "series": None}
+
+
+# silverone 2026-06-09 (result view contract 2단계) — metric / evidence.
+# metric: total 기간 비교 1행(a_count/b_count/delta_count). evidence: 원문 샘플
+# (sample_rows) — 자유텍스트 컬럼이 있는 row-level 결과.
+
+
+def _has_metric_compare_columns(columns: list[str]) -> bool:
+    """total 비교 metric card 대상인지 — a_count/b_count/delta_count가 모두 있는지."""
+    return all(c in columns for c in ("a_count", "b_count", "delta_count"))
+
+
+def _build_metric_spec(columns: list[str]) -> dict[str, Any] | None:
+    """metric card spec. 컬럼명을 참조(값 아님). delta_rate는 있을 때만."""
+    if not _has_metric_compare_columns(columns):
+        return None
+    spec: dict[str, Any] = {
+        "kind": "metric",
+        "a_value": "a_count",
+        "b_value": "b_count",
+        "delta_value": "delta_count",
+        "unit": "건",
+    }
+    if "delta_rate" in columns:
+        spec["delta_rate"] = "delta_rate"
+    return spec
+
+
+# 원문(본문) 컬럼 — reserved table의 고정 텍스트 컬럼. evidence 카드의 text 후보.
+# 짧은 절도 있어 길이가 아닌 컬럼명(스키마 계약)으로 판별한다.
+_EVIDENCE_TEXT_COLUMNS = ("clause", "clause_text", "raw_text", "cleaned_text")
+
+
+def _evidence_text_column(rows: list[Any], columns: list[str]) -> str | None:
+    """원문 샘플 카드로 보여줄 본문 컬럼(우선순위순). 없으면 None.
+
+    sample_rows 결과는 집계가 아니라 본문 row projection이라 numeric metric이 없다.
+    호출부(_recommended_view)에서 'numeric metric 없음'까지 확인해 집계 결과를 제외한다."""
+    if not rows or not columns:
+        return None
+    for name in _EVIDENCE_TEXT_COLUMNS:
+        if name in columns:
+            return name
+    return None
+
+
+def _build_evidence_spec(rows: list[Any], columns: list[str]) -> dict[str, Any] | None:
+    """evidence card spec. text(본문) + sentiment/chips(aspect,reason)/id(doc_id)."""
+    text = _evidence_text_column(rows, columns)
+    if text is None:
+        return None
+    spec: dict[str, Any] = {"kind": "evidence", "text": text}
+    if "sentiment" in columns:
+        spec["sentiment"] = "sentiment"
+    chips = [c for c in ("aspect", "reason") if c in columns]
+    if chips:
+        spec["chips"] = chips
+    for id_col in ("doc_id", "clause_id"):
+        if id_col in columns:
+            spec["id"] = id_col
+            break
+    return spec
 
 
 # chart y축으로 쓸 numeric 컬럼이 갖춰야 할 최소 유효 값 개수. 1개뿐이면 차트로서
