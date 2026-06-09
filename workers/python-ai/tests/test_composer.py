@@ -448,7 +448,7 @@ class ChartReadyMetadataTests(unittest.TestCase):
         self.assertEqual(spec["x"], "aspect")
         self.assertEqual(spec["y"], "delta_count")
         self.assertEqual(spec["unit"], "건")
-        self.assertEqual(spec["sort"], "abs_desc")
+        self.assertEqual(spec["sort"], "signed_desc")
         self.assertIsNone(spec["series"])
 
     def test_distribution_compare_uses_delta_ratio(self) -> None:
@@ -468,8 +468,9 @@ class ChartReadyMetadataTests(unittest.TestCase):
         self.assertEqual(spec["x"], "sentiment")
         self.assertEqual(spec["y"], "delta_ratio")
         self.assertEqual(spec["unit"], "%p")
-        # abs_desc 정렬: 가장 큰 변화(긍정 -0.30)가 먼저.
-        self.assertEqual(display["rows"][0]["sentiment"], "positive")
+        # signed_desc 정렬: 증가 큰 순 위 → 감소 아래. 중립(+0.29)이 먼저, 긍정(-0.30) 마지막.
+        self.assertEqual(display["rows"][0]["sentiment"], "neutral")
+        self.assertEqual(display["rows"][-1]["sentiment"], "positive")
 
     def test_compare_without_delta_falls_back_to_table(self) -> None:
         """compare 계열(last_/this_)이지만 delta 컬럼이 없으면 단일 headline을 못 골라
