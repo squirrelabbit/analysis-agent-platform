@@ -432,27 +432,28 @@ class ChartReadyMetadataTests(unittest.TestCase):
         self.assertEqual(out["display"]["recommended_view"], "table")
         self.assertIsNone(out["display"]["chart_spec"])
 
-    def test_compare_columns_bar(self) -> None:
-        """compare wide-format + categorical x → bar. silverone 2026-06-09:
-        프론트가 단일 series만 렌더(다중 y는 첫 값으로 좁혀 last_count만 보임)하므로
-        '변화'를 드러내는 headline delta(delta_count) 하나만 단일 series로 추천한다."""
+    def test_compare_columns_diverging_bar(self) -> None:
+        """compare(건수) + categorical x → diverging_bar. silverone 2026-06-09:
+        0 기준 diverging bar로 변화량(delta_count)을 단일 series로, 단위 '건'."""
         rows = [
             {"aspect": "food", "last_count": 1, "this_count": 2, "delta_count": 1},
             {"aspect": "show", "last_count": 0, "this_count": 1, "delta_count": 1},
         ]
         out = self._compose_with_rows(rows)
         display = out["display"]
-        self.assertEqual(display["recommended_view"], "bar")
+        self.assertEqual(display["recommended_view"], "diverging_bar")
         spec = display["chart_spec"]
         self.assertIsNotNone(spec)
-        self.assertEqual(spec["kind"], "bar")
+        self.assertEqual(spec["kind"], "diverging_bar")
         self.assertEqual(spec["x"], "aspect")
         self.assertEqual(spec["y"], "delta_count")
+        self.assertEqual(spec["unit"], "건")
+        self.assertEqual(spec["sort"], "abs_desc")
         self.assertIsNone(spec["series"])
 
     def test_distribution_compare_uses_delta_ratio(self) -> None:
-        """period_compare_distribution wide-format(count+ratio 혼합) → delta_ratio(pp)
-        단일 series bar. count↔ratio 혼합이라 다중 y는 불가, headline은 delta_ratio 우선."""
+        """period_compare_distribution → delta_ratio(%p) diverging_bar. count↔ratio
+        혼합이라 headline은 delta_ratio 우선, 단위 %p."""
         rows = [
             {"sentiment": "negative", "a_count": 1, "a_ratio": 0.03, "b_count": 31, "b_ratio": 0.04, "delta_count": 30, "delta_ratio": 0.01},
             {"sentiment": "neutral", "a_count": 3, "a_ratio": 0.10, "b_count": 277, "b_ratio": 0.39, "delta_count": 274, "delta_ratio": 0.29},
@@ -460,13 +461,15 @@ class ChartReadyMetadataTests(unittest.TestCase):
         ]
         out = self._compose_with_rows(rows)
         display = out["display"]
-        self.assertEqual(display["recommended_view"], "bar")
+        self.assertEqual(display["recommended_view"], "diverging_bar")
         spec = display["chart_spec"]
         self.assertIsNotNone(spec)
-        self.assertEqual(spec["kind"], "bar")
+        self.assertEqual(spec["kind"], "diverging_bar")
         self.assertEqual(spec["x"], "sentiment")
         self.assertEqual(spec["y"], "delta_ratio")
-        self.assertIsNone(spec["series"])
+        self.assertEqual(spec["unit"], "%p")
+        # abs_desc 정렬: 가장 큰 변화(긍정 -0.30)가 먼저.
+        self.assertEqual(display["rows"][0]["sentiment"], "positive")
 
     def test_compare_without_delta_falls_back_to_table(self) -> None:
         """compare 계열(last_/this_)이지만 delta 컬럼이 없으면 단일 headline을 못 골라
@@ -686,7 +689,7 @@ class CompareColumnContractTests(unittest.TestCase):
     def test_distribution_change_summary(self) -> None:
         out = compose_answer(user_question="q", present=self._present(self._DIST_ROWS))
         content = out["assistant_content"]
-        self.assertEqual(out["metadata"]["template"], "compare_distribution_summary")
+        self.assertEqual(out["metadata"]["template"], "compare_change_summary")
         # 가장 증가=중립(+29.0%p), 가장 감소=긍정(-30.0%p), 거의 변화 없음=부정.
         self.assertIn("중립", content)
         self.assertIn("가장 크게 증가", content)
@@ -722,8 +725,21 @@ class CompareColumnContractTests(unittest.TestCase):
         self.assertEqual(fmts["delta_count"], "int")
         self.assertEqual(fmts["delta_rate"], "percent")
         self.assertNotIn("delta_ratio", fmts)
-        # count 비교는 delta_ratio가 없어 distribution 요약을 안 만든다(generic 유지).
-        self.assertNotEqual(out["metadata"]["template"], "compare_distribution_summary")
+        # silverone 2026-06-09 — count 비교도 변화 요약(건 단위)을 만든다.
+        self.assertEqual(out["metadata"]["template"], "compare_change_summary")
+        self.assertIn("건", out["assistant_content"])
+
+    def test_count_compare_small_base_warning(self) -> None:
+        # 이전 기간 건수(a_count)가 작은데 delta_rate가 크면 증감률 과장 경고.
+        rows = [
+            {"aspect": "food", "a_count": 1, "b_count": 58, "delta_count": 57, "delta_rate": 5700.0},
+            {"aspect": "show_program", "a_count": 3, "b_count": 170, "delta_count": 167, "delta_rate": 5566.0},
+        ]
+        out = compose_answer(user_question="q", present=self._present(rows))
+        warnings = out["display"].get("warnings") or []
+        self.assertTrue(any("증감률" in w for w in warnings), warnings)
+        # 차트는 delta_rate(폭발)가 아니라 delta_count를 headline으로.
+        self.assertEqual(out["display"]["chart_spec"]["y"], "delta_count")
 
     def test_non_compare_has_no_column_formats(self) -> None:
         rows = [{"aspect": "food", "count": 5}, {"aspect": "show", "count": 3}]

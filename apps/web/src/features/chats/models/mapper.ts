@@ -80,12 +80,14 @@ const isNumericLike = (v: unknown): boolean => {
   return false;
 };
 
+const CHART_KINDS = new Set(["bar", "line", "diverging_bar"]);
+
 const mapChart = (dto: ComposerDisplayDto | undefined): ChatChart | undefined => {
   if (!dto) return undefined;
   const view = dto.recommended_view;
   const spec = dto.chart_spec;
-  if (view !== "bar" && view !== "line") return undefined;
-  if (!spec || (spec.kind !== "bar" && spec.kind !== "line")) return undefined;
+  if (view !== "bar" && view !== "line" && view !== "diverging_bar") return undefined;
+  if (!spec || !CHART_KINDS.has(spec.kind)) return undefined;
   const rows = dto.rows ?? [];
   if (rows.length === 0) return undefined;
   const x = spec.x;
@@ -96,13 +98,14 @@ const mapChart = (dto: ComposerDisplayDto | undefined): ChatChart | undefined =>
   const yFormat = toColumnFormat(dto.column_formats?.[yKey]);
   const yLabel = dto.column_labels?.[yKey];
   return {
-    kind: spec.kind,
+    kind: spec.kind as ChatChart["kind"],
     x,
     y: yKey,
     title: dto.title ?? undefined,
     rows,
     yFormat,
     yLabel,
+    unit: spec.unit ?? undefined,
   };
 };
 
@@ -112,7 +115,7 @@ const mapRecommendedView = (
 ): RecommendedView | undefined => {
   const v = dto?.recommended_view;
   if (!v) return undefined;
-  if (v === "table" || v === "bar" || v === "line") return v;
+  if (v === "table" || v === "bar" || v === "diverging_bar" || v === "line") return v;
   return "unknown";
 };
 
