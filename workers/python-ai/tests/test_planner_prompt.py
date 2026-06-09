@@ -204,7 +204,11 @@ class PromptRenderTests(unittest.TestCase):
         )
         self.assertIn("이전 대화 context", user)
         self.assertIn("부정 리뷰에서 큰 이슈는?", user)
-        self.assertIn("주차와 혼잡이 주요 이슈", user)
+        # silverone 2026-06-09 — answer_summary(이전 답변 문구)는 pending_clarification이
+        # 아니면 planner context에 노출하지 않는다 (context hijack 방지). 구조적 참조
+        # (question/present_title/columns/row_count)만 남는다.
+        self.assertNotIn("주차와 혼잡이 주요 이슈", user)
+        self.assertIn("주요 이슈", user)  # present_title은 유지
         # conversation context는 user_prompt에만 있어야 함 — system 캐시 깨뜨리지 않게.
         self.assertNotIn("부정 리뷰에서 큰 이슈는?", system)
         # user 안에서 context 블록이 user_question 태그보다 먼저 등장해야 함.
@@ -226,6 +230,8 @@ class PromptRenderTests(unittest.TestCase):
         ])
         self.assertIn("pending_clarification: true", rendered)
         self.assertIn("축제 전후 일주일 문서발생량", rendered)
+        # pending일 때는 answer_summary(=clarify 질문)가 노출돼야 이어받기가 된다.
+        self.assertIn("축제 날짜(기준일)가 필요합니다.", rendered)
 
     def test_pending_clarification_absent_when_not_set(self) -> None:
         rendered = render_conversation_context([
