@@ -608,6 +608,12 @@ func (t *AnalysisThreadService) tryReusePlan(
 	question string,
 	contextItems []map[string]any,
 ) (ReuseDecision, AnalyzeResponse, bool) {
+	// 0) 기능 토글 (silverone 2026-06-08). 기본 OFF. reuse 경로가 "TOP N" 류 새
+	// 분석 질문을 직전 결과로 오재표시하는 context hijack을 유발해(festival E3→E4
+	// 라이브 재현) 비활성. ANALYSIS_PLAN_REUSE_ENABLED=true일 때만 아래 분류로 진입.
+	if !t.planReuseEnabled {
+		return ReuseDecision{Reused: false, FallbackReason: "reuse_disabled"}, AnalyzeResponse{}, false
+	}
 	// 1) classifier
 	action, params, classified := classifyReuseAction(question)
 	if !classified {

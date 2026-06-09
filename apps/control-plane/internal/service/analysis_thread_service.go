@@ -35,6 +35,9 @@ type threadServiceDeps interface {
 type AnalysisThreadService struct {
 	store store.Repository
 	deps  threadServiceDeps
+	// silverone 2026-06-08 — plan reuse(POC-1) 토글. threads()가 DatasetService의
+	// 값을 복사해 주입한다. 기본 false면 tryReusePlan이 즉시 fallback(reuse 비활성).
+	planReuseEnabled bool
 }
 
 func NewAnalysisThreadService(repo store.Repository, deps threadServiceDeps) *AnalysisThreadService {
@@ -43,7 +46,9 @@ func NewAnalysisThreadService(repo store.Repository, deps threadServiceDeps) *An
 
 // threads — DatasetService가 자신을 deps로 넘겨 AnalysisThreadService를 구성한다.
 func (s *DatasetService) threads() *AnalysisThreadService {
-	return NewAnalysisThreadService(s.store, s)
+	t := NewAnalysisThreadService(s.store, s)
+	t.planReuseEnabled = s.planReuseEnabled
+	return t
 }
 
 // ===== facade (public API 유지 — AnalysisThreadService로 위임) =====

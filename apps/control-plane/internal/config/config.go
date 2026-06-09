@@ -38,6 +38,11 @@ type Config struct {
 	DatasetBuildClusterMaxConcurrent        int
 	AnthropicExecutionTokenCeiling          int
 	PythonAIWorkerHTTPTimeoutSec            int
+	// silverone 2026-06-08 — plan reuse(POC-1) 기능 토글. follow-up 질의를
+	// rule-based로 분류해 이전 plan을 재실행하던 경로가 "TOP N" 류 새 분석 질문을
+	// 직전 결과로 오재표시하는 context hijack을 유발해(검증: festival E3→E4 라이브
+	// 재현) 기본 OFF로 둔다. ANALYSIS_PLAN_REUSE_ENABLED=true로만 활성.
+	PlanReuseEnabled bool
 	// silverone 2026-06-08 — LLOA 모델 화면 표시명. artifact view 응답의
 	// applied.model_display_name을 빌드 재실행 없이 응답 시점에 입히기 위해
 	// control-plane도 이 env를 읽는다. raw model(LLOAModel)이 빌드 당시 summary.model과
@@ -155,9 +160,22 @@ func Load() Config {
 		DatasetBuildClusterMaxConcurrent:        clusterMaxConcurrent,
 		AnthropicExecutionTokenCeiling:          anthropicExecutionTokenCeiling,
 		PythonAIWorkerHTTPTimeoutSec:            pythonAIWorkerHTTPTimeoutSec,
+		PlanReuseEnabled:                        envBool("ANALYSIS_PLAN_REUSE_ENABLED", false),
 		LLOAModel:                               strings.TrimSpace(os.Getenv("LLOA_MODEL")),
 		LLOAModelDisplayName:                    strings.TrimSpace(os.Getenv("LLOA_MODEL_DISPLAY_NAME")),
 	}
+}
+
+func envBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func envNonNegativeInt(key string, fallback int) int {

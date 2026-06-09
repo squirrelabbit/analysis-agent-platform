@@ -1,8 +1,11 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+
+	"analysis-support-platform/control-plane/internal/domain"
 )
 
 // silverone 2026-05-26 (plan reuse POC-1) — classifier + patch builder 단위
@@ -81,6 +84,29 @@ func TestClassifyReuseAction_RejectSignals(t *testing.T) {
 				t.Fatalf("expected no_match for %q, got reuse classification", q)
 			}
 		})
+	}
+}
+
+func TestTryReusePlan_DisabledByDefaultShortCircuits(t *testing.T) {
+	// silverone 2026-06-08 (context hijack 완화) — planReuseEnabled=false면
+	// classifier/store/deps를 건드리지 않고 즉시 fallback(reuse 비활성)이어야 한다.
+	// store/deps가 nil이어도 게이트가 먼저 반환하므로 panic하지 않는다.
+	svc := &AnalysisThreadService{planReuseEnabled: false}
+	decision, _, ok := svc.tryReusePlan(
+		context.Background(),
+		"p1", "d1",
+		domain.AnalysisThread{ThreadID: "t1"},
+		"부정 후기가 가장 많은 aspect TOP 5를 보여줘",
+		nil,
+	)
+	if ok {
+		t.Fatalf("reuse 비활성 시 reuse 흐름을 타면 안 됨")
+	}
+	if decision.Reused {
+		t.Fatalf("decision.Reused는 false여야 함")
+	}
+	if decision.FallbackReason != "reuse_disabled" {
+		t.Fatalf("fallback_reason=reuse_disabled 기대, got %q", decision.FallbackReason)
 	}
 }
 
