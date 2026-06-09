@@ -102,16 +102,16 @@ def _compose_safely(
         recommended_view=str(display.get("recommended_view") or ""),
         reuse_metadata=reuse_metadata,
     )
-    # silverone 2026-06-09 — 기간/그룹 구성비 비교는 generic "N건 정리" 대신 핵심
-    # 변화 요약으로 교체(가장 증가/감소/거의 변화 없음). empty/reuse/truncated가
-    # 아닐 때만(=table_normal 류) 적용. 원인 추정은 하지 않는다.
+    # silverone 2026-06-09 — 기간/그룹 비교(구성비 %p / 건수)는 generic "N건 정리"
+    # 대신 핵심 변화 요약으로 교체(가장 증가/감소). empty/reuse/truncated가 아닐
+    # 때만(=table_normal 류) 적용. 원인 추정은 하지 않는다.
     if template == "table_normal":
-        change_summary = _compare_distribution_summary(
+        change_summary = _compare_change_summary(
             present.get("rows") or [], display.get("columns") or []
         )
         if change_summary:
             content = change_summary
-            template = "compare_distribution_summary"
+            template = "compare_change_summary"
     context_summary = _build_context_summary(
         user_question=user_question,
         present=present,
@@ -201,7 +201,7 @@ def _build_display(
     )
     # chart_spec 검증(_build_chart_spec)을 통과하지 못하면 차트 추천을 철회하고
     # table로 내린다 — recommended_view와 chart_spec이 항상 일관되도록.
-    if recommended_view in ("bar", "line") and chart_spec is None:
+    if recommended_view in ("bar", "line", "diverging_bar") and chart_spec is None:
         recommended_view = "table"
     # silverone 2026-06-02 — line 차트는 x축이 시계열이라 행이 x 기준 정렬돼 있어야
     # 선이 올바르다. planner가 sort step을 넣었는지에 의존하지 않고(예: compare만
@@ -209,6 +209,10 @@ def _build_display(
     # planner 의도(값 정렬 등)를 보존하기 위해 건드리지 않는다.
     if recommended_view == "line" and isinstance(chart_spec, dict):
         rows = _sort_rows_by_x(rows, str(chart_spec.get("x") or ""))
+    # silverone 2026-06-09 — diverging bar는 변화가 큰 항목부터 보이게 abs(delta)
+    # 내림차순 정렬 (chart top-N + 상세 table 동일 순서).
+    if recommended_view == "diverging_bar" and isinstance(chart_spec, dict):
+        rows = _sort_rows_by_abs_delta(rows, str(chart_spec.get("y") or ""))
     result: dict[str, Any] = {
         "type": fmt,
         "title": present.get("title"),
@@ -237,6 +241,15 @@ def _build_display(
             result["column_formats"] = formats
         if labels:
             result["column_labels"] = labels
+        # silverone 2026-06-09 — 증감률(delta_rate)이 있는데 이전 기간 건수가 작으면
+        # 비율이 폭발(예: 1→58 = +5700%)해 오해 소지가 크다. 화면 경고로 노출.
+        if "delta_rate" in columns:
+            base = _min_a_count(rows)
+            if base is not None and base < _DELTA_RATE_MIN_BASE:
+                result["warnings"] = [
+                    *(result.get("warnings") or []),
+                    "이전 기간 건수가 적어 증감률(%) 값이 과장될 수 있습니다 — 증감 건수를 함께 보세요.",
+                ]
     return result
 
 
@@ -340,12 +353,17 @@ def _recommended_view(
     # 가능하지만 v1은 보수적.
     if len(rows) == 1:
         return "table"
-    # compare 결과 — delta_/last_/this_ 컬럼 존재 시 bar 우선.
+    # compare 결과 — 0 기준 diverging bar로 "변화량"을 보여준다 (silverone 2026-06-09).
+    # x축 categorical + headline delta(delta_ratio/count, 또는 base 충분한 delta_rate)가
+    # 있어야 한다. 없으면(예: delta_rate인데 base 작음) table fallback.
     if _has_compare_columns(columns):
-        # x축이 될 categorical group_by 컬럼이 있어야 한다.
-        if _first_categorical_column(rows, columns) is not None:
-            return "bar"
-        return "table"
+        x = _first_categorical_column(rows, columns)
+        if x is None:
+            return "table"
+        headline = _headline_delta_column(
+            _valid_chart_y_columns(rows, columns, exclude={x}), rows
+        )
+        return "diverging_bar" if headline else "table"
     # categorical group_by + numeric metric 조합 확인.
     x_col = _first_categorical_column(rows, columns)
     if x_col is None:
@@ -398,24 +416,34 @@ def _build_chart_spec(
       계열이 섞이거나 서로 다른 metric이면 table
     - line은 x축이 ordered 컬럼(날짜/연/월 등)일 때만
     """
-    if recommended_view not in ("bar", "line"):
+    if recommended_view not in ("bar", "line", "diverging_bar"):
         return None
     if not rows or not columns:
         return None
     x_col = _first_categorical_column(rows, columns)
     if x_col is None or x_col not in columns:
         return None
-    # y 후보: 유효 숫자 값이 충분하고 대부분 null이 아닌 numeric 컬럼만.
     y_cols = _valid_chart_y_columns(rows, columns, exclude={x_col})
     if not y_cols:
         return None
-    # silverone 2026-06-09 — 두 기간/그룹 비교(compare wide-format)는 count/ratio가
-    # 한 행에 섞여 다중 y로는 차트 불가 + 프론트가 단일 series만 렌더(다중 y는 첫
-    # 값으로 좁아져 last_count/a_count만 보이는 오해). 변화량을 1차로 드러내기 위해
-    # headline delta 컬럼 하나만 단일 series bar로 추천한다. distribution=
-    # delta_ratio(pp), count=delta_count. delta가 없으면 차트 철회(table fallback).
+    # silverone 2026-06-09 — 두 기간/그룹 비교는 0 기준 diverging bar. headline
+    # delta(delta_ratio %p / delta_count 건 / base 충분 시 delta_rate %) 하나만
+    # 단일 series로, abs(delta) 내림차순 정렬. unit으로 단위를 명시한다.
+    if recommended_view == "diverging_bar":
+        headline = _headline_delta_column(y_cols, rows)
+        if headline is None:
+            return None
+        return {
+            "kind": "diverging_bar",
+            "x": x_col,
+            "y": headline,
+            "series": None,
+            "unit": _delta_unit(headline),
+            "sort": "abs_desc",
+        }
+    # 일반 compare가 bar/line으로 올 일은 없지만, 방어적으로 headline 단일화 유지.
     if _has_compare_columns(columns):
-        headline = _headline_delta_column(y_cols)
+        headline = _headline_delta_column(y_cols, rows)
         if headline is None:
             return None
         y_cols = [headline]
@@ -425,16 +453,8 @@ def _build_chart_spec(
     # line은 x축이 시계열/ordered여야 의미가 있다.
     if recommended_view == "line" and not _looks_like_time_column(x_col):
         return None
-    # y는 단일 numeric이면 string, 다중(compare)이면 list.
     y_value: Any = y_cols[0] if len(y_cols) == 1 else y_cols
-    return {
-        "kind": recommended_view,
-        "x": x_col,
-        "y": y_value,
-        # v1은 series 추정 안 함 — 단일 dimension만. compare도 같은 row에
-        # last/this/delta가 묶이는 wide-format이라 series 분기 불필요.
-        "series": None,
-    }
+    return {"kind": recommended_view, "x": x_col, "y": y_value, "series": None}
 
 
 # chart y축으로 쓸 numeric 컬럼이 갖춰야 할 최소 유효 값 개수. 1개뿐이면 차트로서
@@ -443,11 +463,6 @@ _MIN_CHART_NUMERIC_VALUES = 2
 # ratio/rate/percent 계열 컬럼명 — count 계열과 같은 y축에 섞으면 단위가 달라
 # 차트 추천을 지양한다.
 _RATIO_LIKE_PATTERNS = ("ratio", "rate", "percent", "pct", "비율", "율", "점유")
-# silverone 2026-06-09 — 두 기간/그룹 비교(compare wide-format)의 "변화"를 단일
-# series bar 1개로 보여줄 때 우선 채택할 delta 컬럼. 프론트가 단일 series만
-# 렌더하므로(다중 y는 첫 값으로 좁혀 last_count만 보이는 오해 발생) 비교 결과는
-# delta 하나만 그린다. distribution은 delta_ratio(pp), count는 delta_count 우선.
-_DELTA_HEADLINE_PRIORITY = ("delta_ratio", "delta_count", "delta_rate")
 
 
 def _is_finite_number(value: Any) -> bool:
@@ -593,57 +608,111 @@ def _group_label_for_summary(value: Any) -> str:
     return "—" if value is None else str(value)
 
 
-def _compare_distribution_summary(rows: list[Any], columns: list[str]) -> str | None:
-    """period_compare_distribution 결과면 핵심 변화 요약 문구를 만든다. 아니면 None.
+def _compare_change_summary(rows: list[Any], columns: list[str]) -> str | None:
+    """기간/그룹 비교 결과의 핵심 변화 요약 문구. 아니면 None.
 
-    규칙(silverone 2026-06-09): delta_ratio 최대(+)=가장 증가, 최소(−)=가장 감소,
-    abs(delta_ratio)가 작은 항목=거의 변화 없음. 원인 추정은 하지 않는다."""
-    if "delta_ratio" not in columns:
+    headline: delta_ratio(%p, 분포 비교) 우선, 없으면 delta_count(건, 건수 비교).
+    규칙(silverone 2026-06-09): 최대(+)=가장 증가, 최소(−)=가장 감소,
+    분포 비교는 abs가 작은 항목=거의 변화 없음 추가. 원인 추정은 하지 않는다."""
+    if "delta_ratio" in columns:
+        col, is_ratio = "delta_ratio", True
+    elif "delta_count" in columns:
+        col, is_ratio = "delta_count", False
+    else:
         return None
     x_col = _first_categorical_column(rows, columns)
     if not x_col:
         return None
     items: list[tuple[Any, float]] = []
     for row in rows:
-        if not isinstance(row, dict):
-            continue
-        dr = row.get("delta_ratio")
-        if _is_finite_number(dr):
-            items.append((row.get(x_col), float(dr)))
+        if isinstance(row, dict) and _is_finite_number(row.get(col)):
+            items.append((row.get(x_col), float(row.get(col))))
     if not items:
         return None
 
-    def pp(value: float) -> str:
-        return f"{value * 100:+.1f}%p"
+    subject = "비율" if is_ratio else "언급"
+
+    def fmt(value: float) -> str:
+        return f"{value * 100:+.1f}%p" if is_ratio else f"{value:+.0f}건"
 
     inc = max(items, key=lambda t: t[1])
     dec = min(items, key=lambda t: t[1])
-    near = min(items, key=lambda t: abs(t[1]))
     parts: list[str] = []
     if inc[1] > 0:
-        parts.append(f"{_group_label_for_summary(inc[0])} 비율이 가장 크게 증가({pp(inc[1])})")
+        verb = "가장 크게 증가" if is_ratio else "가장 많이 증가"
+        parts.append(f"{_group_label_for_summary(inc[0])} {subject}이 {verb}({fmt(inc[1])})")
     if dec[1] < 0 and dec[0] != inc[0]:
-        parts.append(f"{_group_label_for_summary(dec[0])} 비율은 감소({pp(dec[1])})")
-    if abs(near[1]) < _NEAR_ZERO_DELTA_RATIO and near[0] not in (inc[0], dec[0]):
-        parts.append(f"{_group_label_for_summary(near[0])} 비율은 거의 변하지 않았습니다")
+        parts.append(f"{_group_label_for_summary(dec[0])} {subject}은 감소({fmt(dec[1])})")
+    if is_ratio:
+        near = min(items, key=lambda t: abs(t[1]))
+        if abs(near[1]) < _NEAR_ZERO_DELTA_RATIO and near[0] not in (inc[0], dec[0]):
+            parts.append(f"{_group_label_for_summary(near[0])} 비율은 거의 변하지 않았습니다")
     if not parts:
         return None
     return "두 기간 비교: " + ", ".join(parts) + "."
 
 
-def _headline_delta_column(y_cols: list[str]) -> str | None:
-    """compare wide-format에서 단일 series로 그릴 headline delta 컬럼 선택.
+# delta_rate(증감률 %)를 차트 headline으로 쓰려면 기준값(a_count)이 이 정도는 돼야
+# 안전하다. 작으면 비율이 폭발(예: 1→58 = +5700%)해 차트가 오해를 부른다 →
+# headline에서 제외하고 table/warning으로만 노출 (silverone 2026-06-09).
+_DELTA_RATE_MIN_BASE = 20
 
-    우선순위: delta_ratio(pp) > delta_count > delta_rate > 기타 delta_*.
-    유효 numeric으로 이미 걸러진 y_cols에서 고른다. delta가 없으면 None
-    (호출부가 차트를 철회하고 table fallback)."""
-    for name in _DELTA_HEADLINE_PRIORITY:
-        if name in y_cols:
-            return name
+
+def _min_a_count(rows: list[Any]) -> float | None:
+    """compare 결과 각 행의 a_count(이전 기간 건수) 최솟값. 없으면 None."""
+    nums = [
+        float(row.get("a_count"))
+        for row in rows
+        if isinstance(row, dict) and _is_finite_number(row.get("a_count"))
+    ]
+    return min(nums) if nums else None
+
+
+def _delta_unit(col: str) -> str:
+    """headline delta 컬럼 → 표시 단위. delta_ratio %p / delta_rate % / 건수 건."""
+    if col == "delta_ratio":
+        return "%p"
+    if col == "delta_rate":
+        return "%"
+    if col == "delta_count" or col.endswith("_count"):
+        return "건"
+    return ""
+
+
+def _headline_delta_column(y_cols: list[str], rows: list[Any]) -> str | None:
+    """compare wide-format에서 단일 series diverging bar로 그릴 headline delta 선택.
+
+    우선순위: delta_ratio(%p) > delta_count(건) > delta_rate(%, base 충분할 때만).
+    delta_rate는 이전 기간 건수(a_count)가 작으면 비율이 폭발해 차트가 오해를
+    부르므로 headline에서 제외(None → table fallback + warning)."""
+    if "delta_ratio" in y_cols:
+        return "delta_ratio"
+    if "delta_count" in y_cols:
+        return "delta_count"
+    if "delta_rate" in y_cols:
+        base = _min_a_count(rows)
+        if base is not None and base >= _DELTA_RATE_MIN_BASE:
+            return "delta_rate"
+        return None
     for col in y_cols:
         if isinstance(col, str) and col.startswith("delta_"):
             return col
     return None
+
+
+def _sort_rows_by_abs_delta(rows: list[Any], col: str) -> list[Any]:
+    """diverging bar용 — abs(delta) 내림차순 (변화 큰 항목 먼저). 비교 불가 시 원순서."""
+    if not col or not isinstance(rows, list) or len(rows) < 2:
+        return rows
+
+    def key(row: Any) -> float:
+        value = row.get(col) if isinstance(row, dict) else None
+        return abs(float(value)) if _is_finite_number(value) else -1.0
+
+    try:
+        return sorted(rows, key=key, reverse=True)
+    except TypeError:
+        return rows
 
 
 def _has_compare_columns(columns: list[str]) -> bool:

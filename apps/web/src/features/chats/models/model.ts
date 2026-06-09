@@ -28,7 +28,7 @@ export interface ChatPlan {
 }
 
 export interface ChatChart {
-  kind: "bar" | "line";
+  kind: "bar" | "line" | "diverging_bar";
   x: string;
   // 1차 구현: 단일 numeric series 우선. 응답이 array면 매퍼에서 첫 값으로 좁힌다.
   y: string;
@@ -38,6 +38,8 @@ export interface ChatChart {
   // 0~1 비율을 %p/% 스케일로 올려 그리고 단위를 표시한다.
   yFormat?: ColumnFormat;
   yLabel?: string;
+  // silverone 2026-06-09 — diverging_bar 단위(건/%p/%). 백엔드 chart_spec.unit.
+  unit?: string;
 }
 
 export type TaxonomyStatus =
@@ -48,7 +50,7 @@ export type TaxonomyStatus =
 
 // 메인 렌더 view. 백엔드가 새 타입(metric, stacked_bar 등)을 추가할 수 있어
 // 알려진 값만 좁히고 그 외는 "unknown"으로 떨어뜨려 table fallback한다.
-export type RecommendedView = "table" | "bar" | "line" | "unknown";
+export type RecommendedView = "table" | "bar" | "diverging_bar" | "line" | "unknown";
 
 export type RunStatus = "running" | "completed" | "failed";
 
