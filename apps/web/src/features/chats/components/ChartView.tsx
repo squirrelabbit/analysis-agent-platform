@@ -68,6 +68,11 @@ export default function ChartView({ chart }: { chart: ChatChart }) {
   // 가로 다이버징 막대는 그룹 수에 따라 높이를 키운다. 그 외는 고정 240.
   const chartHeight =
     chart.kind === "bar" && isDelta ? Math.max(200, data.length * 36 + 48) : 240;
+  // 0 기준 대칭 domain에 여유(헤드룸)를 둬, 가장 긴 막대의 바깥 값 라벨이 y축
+  // 카테고리 라벨과 겹치지 않게 한다 (silverone 2026-06-09). 막대는 최대 ~67%
+  // 폭만 차지 → 나머지가 라벨 공간.
+  const maxAbs = data.reduce((m, d) => Math.max(m, Math.abs(d._y)), 0);
+  const axisBound = maxAbs > 0 ? maxAbs * 1.5 : 1;
 
   // 가로 막대 끝에 수치 라벨 — 양수는 오른쪽, 음수는 왼쪽 바깥.
   const renderValueLabel = (props: {
@@ -133,6 +138,7 @@ export default function ChartView({ chart }: { chart: ChatChart }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#f4f4f5" horizontal={false} />
               <XAxis
                 type="number"
+                domain={[-axisBound, axisBound]}
                 tick={{ fontSize: 11, fill: "#a1a1aa" }}
                 axisLine={false}
                 tickLine={false}
