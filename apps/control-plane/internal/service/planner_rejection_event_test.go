@@ -85,6 +85,14 @@ func TestRejectionEventFromResult_OutOfScopeNotStored(t *testing.T) {
 	}
 }
 
+// silverone 2026-06-10 — clarification_required는 정상 확인 흐름이라 적재하지 않는다.
+func TestRejectionEventFromResult_ClarificationNotStored(t *testing.T) {
+	raw := json.RawMessage(`{"composer":{"assistant_content":"기준 날짜와 전후 며칠을 알려주세요","metadata":{"mode":"rejected","reason":"clarification_required"}}}`)
+	if _, ok := rejectionEventFromResult("p1", "d1", "t1", "m1", "축제 전후 게시물 수 비교해줘", raw); ok {
+		t.Errorf("clarification_required must NOT be stored")
+	}
+}
+
 func TestRejectionEventFromResult_NormalResultNotStored(t *testing.T) {
 	// 정상 답변(mode=deterministic, reason 없음) → 적재 안 함.
 	raw := json.RawMessage(`{"composer":{"assistant_content":"분석 결과 9건","metadata":{"mode":"deterministic"}}}`)

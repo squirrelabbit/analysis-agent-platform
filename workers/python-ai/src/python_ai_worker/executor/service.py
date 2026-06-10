@@ -316,6 +316,13 @@ def plan_and_execute_analyze(
     # advertised=queryable: 실제 docs view에 있는 컬럼만 planner에 노출(병합/삭제된
     # source 컬럼이 prompt에 새어 Binder Error 나는 것 차단). silverone 2026-06-05.
     docs_extra_columns = _filter_docs_extra_columns(docs_extra_columns, artifact_paths)
+    # clause_keywords artifact가 실제로 있을 때만 planner에 해당 reserved table을 노출한다
+    # (없는데 노출하면 planner가 없는 table로 plan을 짜 executor에서 실패). silverone 2026-06-10.
+    include_clause_keywords = (
+        artifact_paths is not None
+        and artifact_paths.clause_keywords is not None
+        and Path(artifact_paths.clause_keywords).exists()
+    )
     try:
         planner_result = generate_plan(
             user_question=user_question,
@@ -323,6 +330,7 @@ def plan_and_execute_analyze(
             docs_extra_columns=docs_extra_columns,
             conversation_context=conversation_context,
             prompt_version=prompt_version,
+            include_clause_keywords=include_clause_keywords,
         )
         execution_response = execute_analyze_plan(
             dataset_version_id,
@@ -430,10 +438,13 @@ def coerce_artifact_paths_payload(payload: Any) -> ArtifactPaths | None:
     missing = [key for key in ("docs", "clauses", "genuineness") if not str(payload.get(key) or "").strip()]
     if missing:
         raise ValueError(f"artifact_paths missing keys: {', '.join(missing)}")
+    # clause_keywords는 optional — 없는 버전이 대부분이라 키 부재를 에러로 보지 않는다.
+    clause_keywords_raw = str(payload.get("clause_keywords") or "").strip()
     return ArtifactPaths(
         docs=Path(str(payload["docs"])).expanduser(),
         clauses=Path(str(payload["clauses"])).expanduser(),
         genuineness=Path(str(payload["genuineness"])).expanduser(),
+        clause_keywords=Path(clause_keywords_raw).expanduser() if clause_keywords_raw else None,
     )
 
 

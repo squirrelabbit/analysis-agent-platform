@@ -32,6 +32,32 @@ class TableSchemaRendererTests(unittest.TestCase):
         self.assertIn("### clauses", rendered)
         self.assertIn("### genuineness", rendered)
 
+    def test_table_contract_rendered(self) -> None:
+        # silverone 2026-06-10 — 키워드 규칙 하드코딩 대신 테이블 계약(grain/coverage/
+        # counting_unit/use_for)을 prompt로 전달. planner가 docs vs clauses를 의미로
+        # 고를 근거가 본문에 있어야 한다.
+        rendered = render_table_schemas()
+        for token in ("grain:", "coverage:", "counting_unit:", "use_for:"):
+            with self.subTest(token=token):
+                self.assertIn(token, rendered)
+
+    def test_docs_vs_clauses_contract_disambiguates(self) -> None:
+        rendered = render_table_schemas()
+        # docs는 문서 단위, clauses는 절 단위 + 전체 문서 아님 + 문서 수 회피.
+        self.assertIn("document(문서/게시물)", rendered)            # docs counting_unit
+        self.assertIn("clause/mention(절·언급)", rendered)          # clauses counting_unit
+        self.assertIn("non_review 문서는 미포함", rendered)          # clauses coverage
+        self.assertIn("문서 수는 docs를 쓴다", rendered)            # clauses avoid_for
+
+    def test_clause_keywords_contract_when_available(self) -> None:
+        from python_ai_worker.planner.prompt import render_reserved_extra_tables
+        rendered = render_reserved_extra_tables(include_clause_keywords=True)
+        self.assertIn("keyword occurrence(키워드 언급)", rendered)   # counting_unit
+        self.assertIn("키워드가 추출된 절만", rendered)              # coverage
+        self.assertIn("COUNT(DISTINCT doc_id)", rendered)            # avoid_for 문서수
+        # 미가용 시엔 노출 안 됨.
+        self.assertNotIn("keyword occurrence", render_reserved_extra_tables(include_clause_keywords=False))
+
     def test_docs_invariant_columns_present(self) -> None:
         rendered = render_table_schemas()
         for col in ("doc_id", "row_id", "raw_text", "cleaned_text", "created_at"):

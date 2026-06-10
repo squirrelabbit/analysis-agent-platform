@@ -128,3 +128,46 @@ func (s *Server) handleCreateClauseLabelJob(w stdhttp.ResponseWriter, r *stdhttp
 	// GET /dataset_build_jobs/{job_id} 또는 /versions/{version_id}/build_jobs.
 	writeJSON(w, stdhttp.StatusAccepted, response.AsAccepted())
 }
+
+// silverone 2026-06-10 — clause_keywords 대시보드/조회 (화면 polling용).
+// summary(KPI/aspect/sentiment/top5) + 필터(aspect/sentiment/q)·페이징된 item table.
+func (s *Server) handleGetClauseKeywordsView(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	limit, offset := parseArtifactPagination(r)
+	aspect := strings.TrimSpace(r.URL.Query().Get("aspect"))
+	sentiment := strings.TrimSpace(r.URL.Query().Get("sentiment"))
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	view, err := s.datasetService.GetClauseKeywordsView(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		limit, offset,
+		aspect, sentiment, q,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, view)
+}
+
+// silverone 2026-06-10 — 수동 keyword build. precondition clause_label ready.
+func (s *Server) handleCreateClauseKeywordsJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetClauseKeywordsBuildRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreateClauseKeywordsJob(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		payload,
+		"api",
+		obs.RequestIDFromContext(r.Context()),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusAccepted, response.AsAccepted())
+}

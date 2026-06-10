@@ -78,6 +78,7 @@ def render_planner_prompt(
     template_override: str = "",
     today: str = "",
     timezone: str = "",
+    include_clause_keywords: bool = False,
 ) -> tuple[str, str, str]:
     """planner v2 prompt 렌더. ``(prompt_version, system_prompt, user_prompt)``
     3-tuple 반환.
@@ -119,6 +120,9 @@ def render_planner_prompt(
             "table_schemas": render_table_schemas(),
             "dataset_specific_columns": render_dataset_specific_columns(
                 dataset_specific_columns or []
+            ),
+            "reserved_extra_tables": render_reserved_extra_tables(
+                include_clause_keywords=include_clause_keywords
             ),
             "skill_catalog": render_skill_catalog(),
             "recipe_catalog": render_recipe_catalog(),
@@ -175,6 +179,30 @@ def render_dataset_specific_columns(
             f"| `{column.name}` | {column.type} | {label} | {source} |"
         )
     return "\n".join(lines)
+
+
+def render_reserved_extra_tables(*, include_clause_keywords: bool) -> str:
+    """optional reserved table을 user(동적) 영역에 렌더한다.
+
+    silverone 2026-06-10 — ``clause_keywords``는 키워드 artifact가 있는 dataset에만
+    존재하므로 system(cache) 영역의 standard table에 넣지 않고, artifact가 실제로
+    있을 때만 여기서 노출한다. 없는데 노출하면 planner가 없는 table로 plan을 짜
+    executor에서 실패한다.
+
+    빈 경우 sentinel 한 줄만 렌더한다."""
+
+    if not include_clause_keywords:
+        return "이 dataset에는 추가 reserved table이 없다."
+    schema_md = _render_standard_table(TABLE_SCHEMAS["clause_keywords"])
+    return (
+        "분석용 추가 reserved table (이 dataset에서만 사용 가능):\n\n"
+        f"{schema_md}\n\n"
+        "키워드 TOP / 주요 단어 / 많이 나온 단어 / 키워드 순위 / 키워드별 언급량 같은 "
+        "질문은 위 `clause_keywords` table을 `keyword` 컬럼 기준으로 집계한다 "
+        "(top_n / aggregate(group_by=[\"keyword\"]) / filter / sample_rows). 절 본문(clauses)이 "
+        "아니라 절-키워드 long table이다. aspect/sentiment 컬럼도 있어 '음식 부정 키워드' 같은 "
+        "조건도 filter로 바로 된다."
+    )
 
 
 def render_skill_catalog() -> str:
@@ -287,9 +315,27 @@ def _render_standard_table(table: TableSchema) -> str:
         "",
         table.description,
         "",
+    ]
+    # silverone 2026-06-10 — 테이블 계약(row grain/coverage/use_for 등). planner가
+    # 같은 질문에도 의미가 다른 table(docs vs clauses vs clause_keywords)을 올바로
+    # 고르게 한다. 키워드 규칙을 본문에 하드코딩하지 않고 스키마로 전달.
+    contract = [
+        ("grain", table.grain),
+        ("coverage", table.coverage),
+        ("counting_unit", table.counting_unit),
+        ("use_for", table.use_for),
+        ("avoid_for", table.avoid_for),
+    ]
+    has_contract = any(value for _, value in contract)
+    for label, value in contract:
+        if value:
+            lines.append(f"- {label}: {value}")
+    if has_contract:
+        lines.append("")
+    lines.extend([
         "| column | type | description |",
         "| --- | --- | --- |",
-    ]
+    ])
     for column in table.columns:
         lines.append(_row(column.name, column.type, column.description))
     return "\n".join(lines)

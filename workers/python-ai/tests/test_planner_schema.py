@@ -33,12 +33,20 @@ class PlanV2VersionAndReservedNamesTests(unittest.TestCase):
         self.assertEqual(PLAN_VERSION, "v2")
 
     def test_reserved_input_names_locked(self) -> None:
-        self.assertEqual(RESERVED_INPUT_NAMES, frozenset({"docs", "clauses", "genuineness"}))
+        # silverone 2026-06-10 — clause_keywords(optional artifact) 예약 추가.
+        self.assertEqual(
+            RESERVED_INPUT_NAMES,
+            frozenset({"docs", "clauses", "genuineness", "clause_keywords"}),
+        )
 
 
 class PlanV2TableSchemaTests(unittest.TestCase):
-    def test_table_schemas_exactly_three(self) -> None:
-        self.assertEqual(set(TABLE_SCHEMAS.keys()), {"docs", "clauses", "genuineness"})
+    def test_table_schemas_locked(self) -> None:
+        # silverone 2026-06-10 — clause_keywords(optional) 추가. core 3 + optional 1.
+        self.assertEqual(
+            set(TABLE_SCHEMAS.keys()),
+            {"docs", "clauses", "genuineness", "clause_keywords"},
+        )
 
     def test_table_names_match_reserved_names(self) -> None:
         self.assertEqual(set(TABLE_SCHEMAS.keys()), set(RESERVED_INPUT_NAMES))
@@ -283,10 +291,11 @@ class PlanV2ColumnTypeClassificationTests(unittest.TestCase):
                     f"{table_name}.{col.name} type mismatch with TABLE_SCHEMAS",
                 )
 
-    def test_reserved_column_tables_cover_three_standard(self) -> None:
+    def test_reserved_column_tables_cover_all_schemas(self) -> None:
+        # silverone 2026-06-10 — clause_keywords(optional) 포함.
         self.assertEqual(
             set(RESERVED_COLUMN_TYPES.keys()),
-            {"docs", "clauses", "genuineness"},
+            {"docs", "clauses", "genuineness", "clause_keywords"},
         )
 
     def test_docs_created_at_classified_as_timestamp(self) -> None:

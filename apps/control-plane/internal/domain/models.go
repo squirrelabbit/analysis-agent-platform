@@ -586,6 +586,12 @@ type DatasetClauseLabelBuildRequest struct {
 	Force              *bool    `json:"force,omitempty"`
 }
 
+// silverone 2026-06-10 — 수동 keyword build 요청. clause_label_ref 존재가 precondition.
+// LLOA 호출 없는 결정론적 Kiwi 추출이라 입력 최소(선택 keyword_min_len).
+type DatasetClauseKeywordsBuildRequest struct {
+	KeywordMinLen *int `json:"keyword_min_len,omitempty"`
+}
+
 type DatasetBuildJob struct {
 	JobID            string         `json:"job_id"`
 	ProjectID        string         `json:"project_id"`

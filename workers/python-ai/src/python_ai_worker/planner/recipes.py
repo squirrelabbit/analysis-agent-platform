@@ -82,7 +82,14 @@ DISTRIBUTION_SPEC = RecipeSpec(
 
 EVENT_WINDOW_COUNT_SPEC = RecipeSpec(
     name="event_window_count",
-    description="기준일(event_date) 전후 N일 문서 발생량. 축제일 기준 전/후 일주일 등.",
+    description=(
+        "기준일(event_date) 전후 N일 문서 발생량. 축제일 기준 전/후 일주일 등. "
+        "date window contract: before_days/after_days=7은 기준일을 포함해 D-7부터 D+7까지를 "
+        "의미한다(총 15일). 날짜 필터는 내부적으로 end-exclusive next-day를 쓴다. "
+        "예: event_date=2025-08-15, before/after=7 → created_at >= 2025-08-08 AND created_at < 2025-08-23 "
+        "(표시는 2025-08-08 ~ 2025-08-22, 8/22 종일 포함). 경계는 recipe가 결정적으로 계산하므로 "
+        "planner가 날짜를 직접 만들지 않는다."
+    ),
     params=(
         RecipeParamSpec("input", required=True, desc="table_or_step_id"),
         RecipeParamSpec("event_date", required=True, desc="YYYY-MM-DD 기준일"),
@@ -341,11 +348,14 @@ def lower_distribution(step: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def lower_event_window_count(step: dict[str, Any]) -> list[dict[str, Any]]:
-    """event_window_count recipe → [filter(between), aggregate(by date), sort(asc), present].
+    """event_window_count recipe → [filter(gte), filter(lt), aggregate(by date), sort(asc), present].
 
-    grain=day만 지원(모듈 docstring 정책 참조). window 경계는 inclusive 양끝.
-    event_date ± days를 결정적으로 계산해 between 경계로 넣는다 — planner가 매번
-    틀리던 날짜 경계를 고정한다. step id는 recipe id에서 파생."""
+    grain=day만 지원(모듈 docstring 정책 참조). date window contract (silverone 2026-06-10):
+    before/after_days=7은 event_date를 포함해 D-7~D+7(총 15일). 날짜 필터는 end-exclusive
+    next-day로, ``created_at >= event-before AND created_at < event+after+1day``. 예: event
+    2025-08-15, 7/7 → ``>= 2025-08-08 AND < 2025-08-23`` (표시 2025-08-08~2025-08-22, 8/22 종일
+    포함). between(inclusive ``<=``)은 timestamp 컬럼에서 D+7 종일을 누락하므로 gte+lt로 분리.
+    경계는 결정적으로 계산해 planner가 날짜를 직접 만들지 않게 한다."""
     params = step.get("params") or {}
     if not isinstance(params, dict):
         raise RecipeError("event_window_count.params must be an object")
@@ -369,23 +379,36 @@ def lower_event_window_count(step: dict[str, Any]) -> list[dict[str, Any]]:
 
     before_days = _opt_nonneg_int(params, "event_window_count", "before_days", 7)
     after_days = _opt_nonneg_int(params, "event_window_count", "after_days", 7)
+    # date window contract: [event-before, event+after] inclusive(표시) → 필터는 end-exclusive
+    # next-day. lower(inclusive) + end_exclusive = event+after+1day (D+after 종일 포함).
     lower_bound = (event - timedelta(days=before_days)).isoformat()
-    upper_bound = (event + timedelta(days=after_days)).isoformat()
+    end_exclusive = (event + timedelta(days=after_days + 1)).isoformat()
 
     title = params.get("title")
 
+    from_id = f"{base}_from"
     window_id = f"{base}_window"
     by_date_id = f"{base}_by_date"
     sorted_id = f"{base}_sorted"
     steps: list[dict[str, Any]] = [
         {
-            "id": window_id,
+            "id": from_id,
             "skill": "filter",
             "params": {
                 "input": input_ref,
                 "column": date_column,
-                "operator": "between",
-                "value": [lower_bound, upper_bound],
+                "operator": "gte",
+                "value": lower_bound,
+            },
+        },
+        {
+            "id": window_id,
+            "skill": "filter",
+            "params": {
+                "input": from_id,
+                "column": date_column,
+                "operator": "lt",
+                "value": end_exclusive,
             },
         },
         {

@@ -91,6 +91,22 @@ class CrossTableLineageTests(unittest.TestCase):
         )
         self.assertNotIn("params.column_not_in_input", _codes(plan))
 
+    def test_clause_keywords_provides_sentiment_aspect(self):
+        # silverone 2026-06-10 — clause_keywords는 sentiment/aspect/clause를 비정규화해
+        # 보유한다(clauses 파생). filter(input=clause_keywords, column=sentiment/aspect)는
+        # 정당하므로 lineage가 오탐(column_not_in_input)으로 잡으면 안 된다.
+        plan = _plan(
+            {"id": "fk", "skill": "filter",
+             "params": {"input": "clause_keywords", "column": "aspect", "operator": "eq", "value": "food"}},
+            {"id": "fk2", "skill": "filter",
+             "params": {"input": "fk", "column": "sentiment", "operator": "eq", "value": "negative"}},
+            {"id": "agg", "skill": "aggregate",
+             "params": {"input": "fk2", "group_by": ["keyword"],
+                        "metrics": [{"name": "count", "function": "count", "column": "*"}]}},
+            {"id": "p", "skill": "present", "params": {"input": "agg", "columns": ["keyword", "count"]}},
+        )
+        self.assertNotIn("params.column_not_in_input", _codes(plan))
+
 
 if __name__ == "__main__":
     unittest.main()

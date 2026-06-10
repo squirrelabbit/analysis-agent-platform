@@ -10,6 +10,9 @@ dependencies = [
   "duckdb>=1.1,<2.0",
   "psycopg[binary]>=3.2,<3.3",
   "structlog>=24,<26",
+  # 한국어 명사 추출 (Kiwi, JVM 불필요). runtime.common._extract_noun_tokens 및
+  # clause_keywords build가 사용. 미설치 시 regex_fallback(josa 포함 저품질)로 떨어짐.
+  "kiwipiepy>=0.23,<0.24",
 ]
 
 [build-system]

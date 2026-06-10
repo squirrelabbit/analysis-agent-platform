@@ -41,12 +41,25 @@ UNSUPPORTED_SKILL = {
 }
 
 
+CLARIFICATION_REQUIRED = {
+    "plan_version": "v2",
+    "answerable": False,
+    "reason": "clarification_required",
+    "message": "기준 날짜와 전후 며칠을 알려주세요. (예: 2025-08-15 전후 7일)",
+    "steps": [],
+}
+
+
 class RejectPlanValidatorTests(unittest.TestCase):
     def test_out_of_dataset_scope_valid(self) -> None:
         self.assertEqual(collect_plan_issues(OUT_OF_SCOPE), [])
 
     def test_unsupported_skill_with_capability_gap_valid(self) -> None:
         self.assertEqual(collect_plan_issues(UNSUPPORTED_SKILL), [])
+
+    def test_clarification_required_valid(self) -> None:
+        # silverone 2026-06-10 — 기간/기준 모호 거절. capability_gap 없이 valid.
+        self.assertEqual(collect_plan_issues(CLARIFICATION_REQUIRED), [])
 
     def test_invalid_reason_rejected(self) -> None:
         plan = {**OUT_OF_SCOPE, "reason": "nope"}
