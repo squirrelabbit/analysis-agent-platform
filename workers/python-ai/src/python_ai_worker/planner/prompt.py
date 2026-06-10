@@ -224,7 +224,11 @@ def render_conversation_context(items: list[dict[str, Any]]) -> str:
         lines.append(f"{index}.")
         if question:
             lines.append(f"   - question: {question}")
-        if answer:
+        # silverone 2026-06-09 — answer_summary(사용자용 답변 문구)는 clarify 이어받기에만
+        # 노출한다. 일반 답변 문구(예: "중립이 +29.3%p 증가…")를 planner context에 넣으면
+        # 다음 턴 planner가 이전 '답'을 데이터 사실로 끌어와 hijack될 수 있다. 구조적
+        # 참조(question/title/columns/row_count)만 남기고, answer_summary는 pending일 때만.
+        if answer and pending:
             lines.append(f"   - answer_summary: {answer}")
         if pending:
             # silverone 2026-06-02 — 직전 turn이 분석에 필요한 값을 user에게 요청한
