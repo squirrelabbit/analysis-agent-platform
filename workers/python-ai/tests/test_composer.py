@@ -194,6 +194,15 @@ class RejectClarifyContextTests(unittest.TestCase):
         out = self._reject("unsupported_skill", message="클러스터링은 아직 지원하지 않습니다.")
         self.assertNotIn("pending_clarification", out["context_summary"])
 
+    def test_clarification_required_sets_pending_clarification(self) -> None:
+        # silverone 2026-06-10 — 기간/기준 모호 거절도 다음 턴 이어받기 신호를 남긴다.
+        out = self._reject("clarification_required", message="기준 날짜와 전후 며칠을 알려주세요.")
+        summary = out["context_summary"]
+        self.assertTrue(summary.get("pending_clarification"))
+        self.assertEqual(summary["answer_summary"], "기준 날짜와 전후 며칠을 알려주세요.")
+        self.assertEqual(out["metadata"]["reason"], "clarification_required")
+        self.assertIsNone(out["display"])
+
 
 class LineChartSortTests(unittest.TestCase):
     """silverone 2026-06-02 — line 차트는 x(시계열) 기준 정렬돼야 한다. planner가

@@ -289,9 +289,13 @@ PRESENT_FORMATS: frozenset[str] = frozenset({"table", "chart", "json"})
 #                             (클러스터링/원인 설명 등). capability_gap 동반 → skill
 #                             backlog 저장 후보(PR2).
 #   missing_data_or_artifact — 지원 분석 유형이지만 필요한 컬럼/아티팩트/build 부재
-# 후속 후보: ambiguous_question / unsafe_or_disallowed / planner_failed.
+#   clarification_required  — 데이터셋/분석 의도는 맞으나 기간/기준/범위가 모호해 바로
+#                             실행하면 임의 해석이 되는 경우(전후/이전/이후/비교인데
+#                             event_date·start/end·window 부족). 확인 질문 후 이어감.
+#                             "데이터 없음(missing)"과 구분해야 후속 대화 품질이 산다.
+# 후속 후보: unsafe_or_disallowed / planner_failed.
 REJECT_REASONS: frozenset[str] = frozenset(
-    {"out_of_dataset_scope", "unsupported_skill", "missing_data_or_artifact"}
+    {"out_of_dataset_scope", "unsupported_skill", "missing_data_or_artifact", "clarification_required"}
 )
 
 # silverone 2026-06-09 — system이 생성하는 거절 사유(planner가 emit하지 않음).

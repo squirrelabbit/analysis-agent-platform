@@ -2808,11 +2808,11 @@ components:
             채워진다.
         reason:
           type: string
-          enum: [out_of_dataset_scope, unsupported_skill, missing_data_or_artifact]
+          enum: [out_of_dataset_scope, unsupported_skill, missing_data_or_artifact, clarification_required]
           description: |
             `answerable=false`일 때 거절 사유. out_of_dataset_scope(데이터셋 무관
             외부/일반 질문), unsupported_skill(데이터셋 관련이나 현 skill 미지원),
-            missing_data_or_artifact(필요 컬럼/아티팩트 부재).
+            missing_data_or_artifact(필요 컬럼/아티팩트 부재). clarification_required(기간/기준/범위 모호 — 확인 질문).
         message:
           type: string
           description: "`answerable=false`일 때 사용자에게 보여줄 거절 사유 문구."
@@ -3117,7 +3117,7 @@ components:
           description: mode != deterministic일 때 진단용 사유. 정상이면 null.
         reason:
           type: string
-          enum: [out_of_dataset_scope, unsupported_skill, missing_data_or_artifact]
+          enum: [out_of_dataset_scope, unsupported_skill, missing_data_or_artifact, clarification_required]
           description: |
             (PR1) mode=rejected일 때 거절 사유 taxonomy. plan.reason과 동일 값.
             프론트 reason별 처리 / 운영 rejection event(PR2) 집계에 사용.
