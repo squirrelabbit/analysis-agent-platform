@@ -520,6 +520,27 @@ class ChartReadyMetadataTests(unittest.TestCase):
         self.assertEqual(spec["kind"], "line")
         self.assertEqual(spec["event_date"], "2025-08-15")
 
+    def test_line_event_date_from_gte_lt_window(self) -> None:
+        # silverone 2026-06-10 — event_window_count는 end-exclusive 계약으로 gte+lt 두
+        # 필터로 펼쳐진다. inclusive window [08-08, 08-22](= lt 08-23 -1day) 중점 = 08-15.
+        rows = [
+            {"created_at": "2025-08-13T00:00:00Z", "count": 1},
+            {"created_at": "2025-08-15T00:00:00Z", "count": 27},
+            {"created_at": "2025-08-22T23:00:00Z", "count": 3},
+        ]
+        plan = {
+            "plan_version": "v2",
+            "steps": [
+                {"id": "from", "skill": "filter", "params": {"input": "docs", "column": "created_at", "operator": "gte", "value": "2025-08-08"}},
+                {"id": "w", "skill": "filter", "params": {"input": "from", "column": "created_at", "operator": "lt", "value": "2025-08-23"}},
+                {"id": "agg", "skill": "aggregate", "params": {"input": "w", "group_by": ["created_at"], "metrics": [{"name": "count", "function": "count", "column": "*"}]}},
+                {"id": "p", "skill": "present", "params": {"input": "agg"}},
+            ],
+        }
+        spec = self._compose_with_rows(rows, plan=plan)["display"]["chart_spec"]
+        self.assertEqual(spec["kind"], "line")
+        self.assertEqual(spec["event_date"], "2025-08-15")
+
     def test_line_no_event_date_without_between(self) -> None:
         rows = [
             {"created_at": "2026-01", "count": 10},

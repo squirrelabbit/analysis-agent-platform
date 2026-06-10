@@ -6,7 +6,7 @@ ADR-020 §5 deterministic v1 정책의 5 템플릿을 한 함수로 구현.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from ..planner.schema import ALL_REJECT_REASONS
@@ -508,32 +508,55 @@ def _build_chart_spec(
 
 
 def _event_date_from_plan(plan: dict[str, Any] | None, x_col: str) -> str | None:
-    """날짜 추이 line의 기준일(축제일) 도출 — plan의 between 날짜 필터 중점(YYYY-MM-DD).
+    """날짜 추이 line의 기준일(축제일) 도출 — plan의 날짜 window 중점(YYYY-MM-DD).
 
-    event_window_count는 [event-N, event+N] between 필터로 펼쳐지므로 중점이 기준일.
-    between 날짜 필터가 정확히 1개일 때만 반환(애매하면 None → 기준선 생략)."""
+    event_window_count는 (silverone 2026-06-10) end-exclusive next-day 계약으로 같은 컬럼에
+    ``gte lower`` + ``lt end_exclusive`` 두 필터로 펼쳐진다. inclusive window는
+    [lower, end_exclusive - 1day], 그 중점이 기준일. 옛 between 필터([lo, hi] inclusive)도
+    하위호환으로 인식. 날짜 window가 정확히 1개일 때만 반환(애매하면 None → 기준선 생략)."""
     if not isinstance(plan, dict):
         return None
-    found: list[tuple[date, date]] = []
+    windows: list[tuple[date, date]] = []
+    gte_by_col: dict[str, date] = {}
+    lt_by_col: dict[str, date] = {}
     for step in plan.get("steps") or []:
         if not isinstance(step, dict) or step.get("skill") != "filter":
             continue
         params = step.get("params") or {}
-        if not isinstance(params, dict) or params.get("operator") != "between":
+        if not isinstance(params, dict):
             continue
+        op = params.get("operator")
+        column = str(params.get("column") or "")
         value = params.get("value")
-        if not (isinstance(value, list) and len(value) == 2):
+        if op == "between" and isinstance(value, list) and len(value) == 2:
+            try:
+                lo = date.fromisoformat(str(value[0])[:10])
+                hi = date.fromisoformat(str(value[1])[:10])
+            except ValueError:
+                continue
+            if lo <= hi:
+                windows.append((lo, hi))
+        elif op == "gte" and column:
+            try:
+                gte_by_col[column] = date.fromisoformat(str(value)[:10])
+            except (ValueError, TypeError):
+                continue
+        elif op == "lt" and column:
+            try:
+                lt_by_col[column] = date.fromisoformat(str(value)[:10])
+            except (ValueError, TypeError):
+                continue
+    # gte+lt 쌍(같은 컬럼) → inclusive window [lower, end_exclusive - 1day].
+    for column, lower in gte_by_col.items():
+        end_exclusive = lt_by_col.get(column)
+        if end_exclusive is None:
             continue
-        try:
-            lo = date.fromisoformat(str(value[0])[:10])
-            hi = date.fromisoformat(str(value[1])[:10])
-        except ValueError:
-            continue
-        if lo <= hi:
-            found.append((lo, hi))
-    if len(found) != 1:
+        hi = end_exclusive - timedelta(days=1)
+        if lower <= hi:
+            windows.append((lower, hi))
+    if len(windows) != 1:
         return None
-    lo, hi = found[0]
+    lo, hi = windows[0]
     return (lo + (hi - lo) // 2).isoformat()
 
 
