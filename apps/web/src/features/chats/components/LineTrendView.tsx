@@ -10,9 +10,7 @@ import {
 } from "recharts";
 import type { ChatChart } from "../models";
 import { scaleForChart } from "../models";
-
-const LINE_COLOR = "#3b82f6";
-const EVENT_COLOR = "#d9a05b";
+import { SERIES_LINE as LINE_COLOR, EVENT_LINE as EVENT_COLOR } from "../models/theme";
 
 // ISO datetime이면 날짜 부분만. 그 외(월 등)는 그대로.
 function dateShort(s: string): string {
