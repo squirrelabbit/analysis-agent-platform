@@ -23,6 +23,13 @@ function renderCell(
   return formatCellValue(value, format);
 }
 
+// 숫자 셀 판정 (number 또는 숫자 문자열).
+function isNumericValue(v: unknown): boolean {
+  if (typeof v === "number") return Number.isFinite(v);
+  if (typeof v === "string") return v.trim() !== "" && Number.isFinite(Number(v));
+  return false;
+}
+
 export default function DisplayTable({ display }: { display: ChatTableDisplay }) {
   const { title, columns, rows, columnFormats, columnLabels } = display;
   // 조회 실패해도 renderCell이 key로 fallback하므로 화면은 동작한다.
@@ -32,6 +39,26 @@ export default function DisplayTable({ display }: { display: ChatTableDisplay })
   const truncated = totalRows > MAX_VISIBLE_ROWS;
   const hasRows = totalRows > 0;
   const compact = totalRows <= COMPACT_ROWS_THRESHOLD;
+
+  // 합계 행 — 숫자 컬럼(모든 값이 숫자/널)을 전체 rows 기준으로 합산. 2행 이상 +
+  // 숫자 컬럼이 1개 이상일 때만 표시. 합은 표시된 100행이 아니라 전체 rows 기준.
+  // 첫 컬럼(보통 범주)은 "합계" 라벨, 그 외 숫자 컬럼은 같은 column_format으로 렌더.
+  const numericCols = columns.filter(
+    (col) =>
+      col !== columns[0] &&
+      rows.some((r) => isNumericValue(r[col])) &&
+      rows.every((r) => r[col] == null || isNumericValue(r[col])),
+  );
+  const showTotals = hasRows && totalRows >= 2 && numericCols.length > 0;
+  const totals: Record<string, number> = {};
+  if (showTotals) {
+    for (const col of numericCols) {
+      totals[col] = rows.reduce(
+        (acc, r) => acc + (isNumericValue(r[col]) ? Number(r[col]) : 0),
+        0,
+      );
+    }
+  }
   return (
     <div className="mt-2 rounded-lg border border-zinc-200 bg-white overflow-hidden">
       {(title || truncated) && (
@@ -83,6 +110,21 @@ export default function DisplayTable({ display }: { display: ChatTableDisplay })
               </tr>
             )}
           </tbody>
+          {showTotals && (
+            <tfoot className="sticky bottom-0 z-10 bg-zinc-50 border-t border-zinc-200">
+              <tr className="font-medium text-zinc-700">
+                {columns.map((col, i) => (
+                  <td key={col} className="px-3 py-2 whitespace-nowrap">
+                    {i === 0
+                      ? "합계"
+                      : col in totals
+                        ? formatCellValue(totals[col], columnFormats?.[col])
+                        : ""}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>
