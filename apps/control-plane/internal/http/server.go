@@ -144,6 +144,8 @@ func (s *Server) routes() {
 	// silverone 2026-06-10 — 수동 keyword build endpoint. precondition clause_label ready.
 	// 운영자 API/script 실행용 (UI 버튼은 보고서/탭 작업 때 추가).
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_keywords", s.handleCreateClauseKeywordsJob)
+	// 같은 path GET — clause_keywords 대시보드/조회 (summary + 필터·페이징 item table).
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_keywords", s.handleGetClauseKeywordsView)
 	// ADR-017 / 5/19 결정 — clean 직후 doc-level 3-tier 진성 분류 endpoint.
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness", s.handleCreateDocGenuinenessJob)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness", s.handleGetDocGenuinenessView)
