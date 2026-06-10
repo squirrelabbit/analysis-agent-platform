@@ -1,6 +1,9 @@
 package service
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // analyze 데이터 계약(요청/응답 타입) 모음. silverone 2026-06-04 — 구조 파악
 // 난이도를 낮추기 위해 analyze.go(로직)에서 데이터 계약 타입만 이 파일로 분리했다.
@@ -40,16 +43,23 @@ type AnalyzeResponse struct {
 }
 
 // analyzeArtifactPaths — Python worker에 inject되는 path map.
+// ClauseKeywords는 optional — 키워드 build이 돈 버전에만 존재. 비어 있으면 payload에서 생략.
 type analyzeArtifactPaths struct {
-	Docs        string
-	Clauses     string
-	Genuineness string
+	Docs           string
+	Clauses        string
+	Genuineness    string
+	ClauseKeywords string
 }
 
 func (p analyzeArtifactPaths) asPayload() map[string]string {
-	return map[string]string{
+	out := map[string]string{
 		"docs":        p.Docs,
 		"clauses":     p.Clauses,
 		"genuineness": p.Genuineness,
 	}
+	// optional — 있을 때만 주입(없으면 worker가 clause_keywords view를 안 만든다).
+	if strings.TrimSpace(p.ClauseKeywords) != "" {
+		out["clause_keywords"] = p.ClauseKeywords
+	}
+	return out
 }

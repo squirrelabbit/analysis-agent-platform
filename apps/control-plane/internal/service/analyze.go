@@ -175,6 +175,12 @@ func (a *AnalyzeService) resolveAnalyzeArtifactPaths(version domain.DatasetVersi
 	if genuineness == "" {
 		genuineness = strings.TrimSpace(metadataString(version.Metadata, "doc_genuineness_uri", ""))
 	}
+	// silverone 2026-06-10 — clause_keywords는 optional artifact(키워드 build이 돈 버전에만
+	// 존재). 없으면 required 검증/주입에서 빠지고, 있으면 readable 검증 후 worker에 inject.
+	clauseKeywords := strings.TrimSpace(metadataString(version.Metadata, "clause_keywords_ref", ""))
+	if clauseKeywords == "" {
+		clauseKeywords = strings.TrimSpace(metadataString(version.Metadata, "clause_keywords_uri", ""))
+	}
 
 	missing := make([]string, 0, 3)
 	if docs == "" {
@@ -209,7 +215,19 @@ func (a *AnalyzeService) resolveAnalyzeArtifactPaths(version domain.DatasetVersi
 		}
 	}
 
-	return analyzeArtifactPaths{Docs: docs, Clauses: clauses, Genuineness: genuineness}, nil
+	// optional clause_keywords — ref가 있으면 readable 검증, 깨졌으면 차단(없는 것과 구분).
+	if clauseKeywords != "" {
+		if err := validateArtifactReadable("clause_keywords", clauseKeywords, artifactJSONL); err != nil {
+			return analyzeArtifactPaths{}, err
+		}
+	}
+
+	return analyzeArtifactPaths{
+		Docs:           docs,
+		Clauses:        clauses,
+		Genuineness:    genuineness,
+		ClauseKeywords: clauseKeywords,
+	}, nil
 }
 
 // postPythonAITask — Python worker에 task payload를 POST하고 응답 body를 raw로

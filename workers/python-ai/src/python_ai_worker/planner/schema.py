@@ -28,9 +28,13 @@ PLAN_VERSION = "v2"
 # metadata 기반 동적 lookup으로 전환 예정 — 현재는 single taxonomy 고정.
 _FESTIVAL_TAXONOMY = load_taxonomy("festival-v2")
 
-# step id로 사용 금지. multi-table input ``input`` 필드와의 충돌을 방지하기
-# 위해 ``docs`` / ``clauses`` / ``genuineness`` 세 이름을 예약한다.
-RESERVED_INPUT_NAMES: frozenset[str] = frozenset({"docs", "clauses", "genuineness"})
+# step id로 사용 금지. multi-table input ``input`` 필드와의 충돌을 방지하기 위해
+# 예약한다. clause_keywords는 optional artifact(키워드 build이 돈 dataset에만 존재)지만
+# 이름 충돌 방지를 위해 항상 예약어로 둔다. 실제 prompt 노출은 artifact가 있을 때만
+# (render_reserved_extra_tables) — 없는 dataset에서 planner가 쓰지 않게.
+RESERVED_INPUT_NAMES: frozenset[str] = frozenset(
+    {"docs", "clauses", "genuineness", "clause_keywords"}
+)
 
 
 @dataclass(frozen=True)
@@ -112,6 +116,23 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
             ColumnSpec("reason", "string", "분류 사유 (LLM 출력)"),
             ColumnSpec("prompt_version", "string", "분류에 사용된 prompt 버전"),
             ColumnSpec("source", "string", "분류 호출 식별자"),
+        ),
+        dynamic_columns=False,
+    ),
+    # optional — dataset_clause_keywords build이 돈 dataset/버전에만 존재. long-format
+    # (절-키워드 1행). system(cache) 영역 standard table에는 넣지 않고, artifact가 있을
+    # 때만 user 영역에서 노출(render_reserved_extra_tables). silverone 2026-06-10.
+    "clause_keywords": TableSchema(
+        name="clause_keywords",
+        description="clause_keywords 단계 결과. 절-키워드 long-format(한 행 = 한 절의 한 키워드). 키워드 집계/순위용.",
+        columns=(
+            ColumnSpec("doc_id", "string", "docs.doc_id와 join 가능"),
+            ColumnSpec("clause_id", "string", "clauses.clause_id와 동일 규칙 — 절 단위 식별자"),
+            ColumnSpec("clause", "string", "키워드가 추출된 절 본문"),
+            ColumnSpec("sentiment", "string", "positive | neutral | negative (절 sentiment)"),
+            ColumnSpec("aspect", "string", " | ".join(_FESTIVAL_TAXONOMY.aspect_keys)),
+            ColumnSpec("keyword", "string", "절에서 추출된 핵심 명사 키워드 (집계 대상)"),
+            ColumnSpec("extractor_version", "string", "키워드 추출기 버전"),
         ),
         dynamic_columns=False,
     ),

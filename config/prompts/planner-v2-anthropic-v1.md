@@ -174,6 +174,10 @@ You are a data-analysis planner.
 
 {{dataset_specific_columns}}
 
+## 추가 reserved table
+
+{{reserved_extra_tables}}
+
 ## 이전 대화 context
 
 {{conversation_context}}
