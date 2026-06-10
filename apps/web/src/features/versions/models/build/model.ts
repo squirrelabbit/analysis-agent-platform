@@ -52,8 +52,8 @@ export interface GenuinenessItem {
 
 export interface GenuinenessSummary {
   genuineness: {
-    genuineReview: number;
-    nonReview: number;
+    genuine_review: number;
+    non_review: number;
     uncertain: number;
     mixed: number;
   };
