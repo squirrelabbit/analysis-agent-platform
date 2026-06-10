@@ -141,6 +141,9 @@ func (s *Server) routes() {
 	// 2026-05-21 — clause_label / doc_genuineness 산출물 CSV 다운로드. jsonl
 	// artifact를 DuckDB로 즉시 변환해 UTF-8 BOM CSV로 스트림.
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label_download", s.handleDownloadClauseLabelDataset)
+	// silverone 2026-06-10 — 수동 keyword build endpoint. precondition clause_label ready.
+	// 운영자 API/script 실행용 (UI 버튼은 보고서/탭 작업 때 추가).
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_keywords", s.handleCreateClauseKeywordsJob)
 	// ADR-017 / 5/19 결정 — clean 직후 doc-level 3-tier 진성 분류 endpoint.
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness", s.handleCreateDocGenuinenessJob)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness", s.handleGetDocGenuinenessView)

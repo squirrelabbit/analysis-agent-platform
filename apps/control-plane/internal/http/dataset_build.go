@@ -128,3 +128,25 @@ func (s *Server) handleCreateClauseLabelJob(w stdhttp.ResponseWriter, r *stdhttp
 	// GET /dataset_build_jobs/{job_id} 또는 /versions/{version_id}/build_jobs.
 	writeJSON(w, stdhttp.StatusAccepted, response.AsAccepted())
 }
+
+// silverone 2026-06-10 — 수동 keyword build. precondition clause_label ready.
+func (s *Server) handleCreateClauseKeywordsJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DatasetClauseKeywordsBuildRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreateClauseKeywordsJob(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		payload,
+		"api",
+		obs.RequestIDFromContext(r.Context()),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusAccepted, response.AsAccepted())
+}

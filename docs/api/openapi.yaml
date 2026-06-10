@@ -919,6 +919,40 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_keywords:
+    post:
+      tags: [Datasets]
+      summary: clause_keywords build job 큐잉 (수동 키워드 추출)
+      description: |
+        clause_label 결과에서 Kiwi 명사 키워드를 추출해 long-format
+        `clause_keywords` artifact(절-키워드 1행)를 만든다. LLOA 호출 없는 결정론적
+        단계. precondition: clause_label ready (`clause_label_ref` 존재). 완료 시
+        version metadata에 `clause_keywords_status`/`clause_keywords_ref`/
+        `clause_keywords_summary`/`clause_keywords_completed_at`가 저장되고, 이후
+        analyze가 키워드 질문(키워드 TOP/aspect별 키워드)에 이 테이블을 쓴다.
+        운영자가 API/script로 실행 (UI 버튼은 후속).
+      operationId: createClauseKeywordsJob
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetClauseKeywordsBuildRequest"
+      responses:
+        "202":
+          description: clause_keywords build job 큐잉 완료 (slim shape)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetBuildJobAccepted"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label:
     post:
       tags: [Datasets]
@@ -3512,6 +3546,13 @@ components:
         force:
           type: boolean
           default: false
+    DatasetClauseKeywordsBuildRequest:
+      type: object
+      description: "silverone 2026-06-10 — clause_label 결과에서 Kiwi 명사 키워드를 추출해 long-format clause_keywords artifact를 만드는 수동 build payload. LLOA 호출 없음. 입력 최소(선택 keyword_min_len). precondition: clause_label ready. body는 생략 가능(`{}`)."
+      properties:
+        keyword_min_len:
+          type: integer
+          description: "키워드 최소 길이(글자). 미지정 시 worker default 2."
     DatasetClauseLabelBuildRequest:
       type: object
       description: "ADR-017 / 5/19 + 5/20 — cleaned doc 단위 LLOA 한 호출 절 분리 + sentiment + aspect 라벨링 build payload. prompt v3 schema (clause/sentiment/aspect 3 필드). 5/20 결정으로 output_path/batch_size/max_tokens/aspect_taxonomy_version 제거 — worker default 사용 + default include_genuineness=[\"genuine_review\",\"mixed\"]."

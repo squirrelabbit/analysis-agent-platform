@@ -18,6 +18,8 @@ const (
 	datasetBuildTypeClauseLabel = "clause_label"
 	// ADR-017 / 5/19 결정 — clean 직후 doc-level 3-tier 진성 분류.
 	datasetBuildTypeDocGenuineness = "doc_genuineness"
+	// silverone 2026-06-10 — clause_label 이후 Kiwi 키워드 추출(수동 build).
+	datasetBuildTypeClauseKeywords = "clause_keywords"
 )
 
 func (s *DatasetService) CreateCleanJob(projectID, datasetID, datasetVersionID string, input domain.DatasetCleanRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
@@ -479,6 +481,57 @@ func (s *DatasetService) CreateClauseLabelJob(projectID, datasetID, datasetVersi
 	}
 	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
 		_, err := s.BuildClauseLabel(projectID, datasetID, datasetVersionID, input)
+		return err
+	}); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	return job, nil
+}
+
+// CreateClauseKeywordsJob — silverone 2026-06-10. 수동 keyword build job. precondition은
+// clause_label ready(clause_keywords는 clause_label artifact를 입력으로 받음). LLOA
+// 없는 결정론적 단계라 빠르지만, 일관성을 위해 다른 build와 동일한 job 추적을 쓴다.
+func (s *DatasetService) CreateClauseKeywordsJob(projectID, datasetID, datasetVersionID string, input domain.DatasetClauseKeywordsBuildRequest, triggeredBy, requestID string) (domain.DatasetBuildJob, error) {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	clauseRef := strings.TrimSpace(metadataString(version.Metadata, "clause_label_ref", ""))
+	if clauseRef == "" {
+		clauseRef = strings.TrimSpace(metadataString(version.Metadata, "clause_label_uri", ""))
+	}
+	if clauseRef == "" {
+		return domain.DatasetBuildJob{}, ErrInvalidArgument{Message: "clause_label must be ready before clause_keywords"}
+	}
+	if active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, datasetBuildTypeClauseKeywords); err != nil {
+		return domain.DatasetBuildJob{}, err
+	} else if active != nil {
+		return *active, nil
+	}
+
+	job := domain.DatasetBuildJob{
+		JobID:            id.New(),
+		ProjectID:        projectID,
+		DatasetID:        datasetID,
+		DatasetVersionID: datasetVersionID,
+		BuildType:        datasetBuildTypeClauseKeywords,
+		Status:           "queued",
+		Request:          requestToMap(input),
+		TriggeredBy:      normalizeTriggeredBy(triggeredBy),
+		CreatedAt:        time.Now().UTC(),
+	}
+	if version.Metadata == nil {
+		version.Metadata = map[string]any{}
+	}
+	version.Metadata["clause_keywords_status"] = "queued"
+	if err := s.store.SaveDatasetVersion(version); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := s.store.SaveDatasetBuildJob(job); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
+	if err := s.dispatchDatasetBuildJob(job, requestID, func() error {
+		_, err := s.BuildClauseKeywords(projectID, datasetID, datasetVersionID, input)
 		return err
 	}); err != nil {
 		return domain.DatasetBuildJob{}, err
