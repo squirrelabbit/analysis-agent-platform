@@ -49,6 +49,8 @@ type DatasetBuildRunner interface {
 	BuildClauseLabel(projectID, datasetID, datasetVersionID string, input domain.DatasetClauseLabelBuildRequest) (domain.DatasetVersion, error)
 	// ADR-017 / 5/19 결정 — clean 직후 doc-level 3-tier 진성 분류.
 	BuildDocGenuineness(projectID, datasetID, datasetVersionID string, input domain.DatasetDocGenuinenessBuildRequest) (domain.DatasetVersion, error)
+	// silverone 2026-06-10 — clause_label 이후 Kiwi 키워드 추출(수동).
+	BuildClauseKeywords(projectID, datasetID, datasetVersionID string, input domain.DatasetClauseKeywordsBuildRequest) (domain.DatasetVersion, error)
 }
 
 type WaitingExecutionResumer interface {
@@ -290,6 +292,13 @@ func (a *DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, inp
 			return temporal.NewNonRetryableApplicationError(err.Error(), "invalid_request", err)
 		}
 		_, err = a.Builder.BuildDocGenuineness(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
+		return classifyDatasetBuildError(err)
+	case "clause_keywords":
+		request, err := decodeBuildRequest[domain.DatasetClauseKeywordsBuildRequest](job.Request)
+		if err != nil {
+			return temporal.NewNonRetryableApplicationError(err.Error(), "invalid_request", err)
+		}
+		_, err = a.Builder.BuildClauseKeywords(job.ProjectID, job.DatasetID, job.DatasetVersionID, request)
 		return classifyDatasetBuildError(err)
 	default:
 		return temporal.NewNonRetryableApplicationError(

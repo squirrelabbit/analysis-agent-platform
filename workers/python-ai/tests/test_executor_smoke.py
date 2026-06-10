@@ -473,7 +473,7 @@ class RecipeExecutionTests(unittest.TestCase):
             resp = execute_analyze_plan("v1", plan, artifact_paths=paths)
             self.assertEqual(
                 [s["skill"] for s in resp["plan"]["steps"]],
-                ["filter", "aggregate", "sort", "present"],
+                ["filter", "filter", "aggregate", "sort", "present"],
             )
             rows = resp["present"]["rows"]
             self.assertEqual(

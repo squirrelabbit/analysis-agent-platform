@@ -43,8 +43,10 @@ export interface ChatChart {
   // silverone 2026-06-09 — distribution(비중) 막대 라벨 보조 건수 컬럼.
   // y=비중(%)일 때 막대 라벨에 "(N건)"으로 붙인다. 백엔드 chart_spec.count_col.
   countKey?: string;
-  // line — 기준일(축제일) 기준선 (YYYY-MM-DD). 백엔드 chart_spec.event_date.
+  // line — 기준일 기준선 (YYYY-MM-DD). 백엔드 chart_spec.event_date.
   eventDate?: string;
+  // 기준선 라벨(백엔드 chart_spec.event_label). 없으면 뷰가 "기준일" fallback.
+  eventLabel?: string;
 }
 
 export type TaxonomyStatus =

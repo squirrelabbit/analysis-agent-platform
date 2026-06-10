@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .dataset_build import (
+    run_dataset_clause_keywords,
     run_dataset_clause_label,
     run_dataset_clean,
     run_dataset_doc_genuineness,
@@ -102,6 +103,7 @@ def supported_capabilities() -> list[TaskCapability]:
         TaskCapability(name="dataset_clean", description="Clean uploaded dataset rows via deterministic regex + noise scrub."),
         TaskCapability(name="dataset_doc_genuineness", description="LLOA-based doc-level 3-tier genuineness classification."),
         TaskCapability(name="dataset_clause_label", description="LLOA-based clause split + sentiment + aspect labelling."),
+        TaskCapability(name="dataset_clause_keywords", description="Kiwi-based clause keyword extraction → long-format clause_keywords artifact (no LLOA)."),
         TaskCapability(name=_PLAN_TASK_NAME, description="plan_v2 LLM planner — generate plan from user_question (debug entrypoint)."),
         TaskCapability(name=_ANALYZE_TASK_NAME, description="plan_v2 executor — plan or user_question + artifact_paths → result."),
         TaskCapability(name="prompt_options", description="List prompt versions/default/label for a task-folder prompt (read-only)."),
@@ -114,6 +116,7 @@ def task_handlers() -> dict[str, Any]:
         "dataset_clean": run_dataset_clean,
         "dataset_doc_genuineness": run_dataset_doc_genuineness,
         "dataset_clause_label": run_dataset_clause_label,
+        "dataset_clause_keywords": run_dataset_clause_keywords,
         "prompt_options": _run_prompt_options,
         "taxonomy": _run_taxonomy,
     }

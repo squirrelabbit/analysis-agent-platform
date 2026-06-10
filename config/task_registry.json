@@ -85,6 +85,20 @@
       "result_scope_policy": "static"
     },
     {
+      "task_name": "dataset_clause_keywords",
+      "engine": "python-ai",
+      "task_path": "/tasks/dataset_clause_keywords",
+      "kind": "dataset_build",
+      "visibility": "internal",
+      "description": "clause_label 결과에서 Kiwi 명사 키워드를 추출해 long-format clause_keywords artifact 생성 (절-키워드 1행). LLOA 호출 없음. 키워드 TOP/aspect별 키워드 질의를 기존 atomic skill로 가능하게 한다.",
+      "dataset_source": "clause_label",
+      "result_kind": "dataset_artifact",
+      "result_scope": "full_dataset",
+      "fallback_policy": "none",
+      "quality_tier": "deterministic",
+      "result_scope_policy": "static"
+    },
+    {
       "task_name": "dataset_embedding_cluster",
       "engine": "python-ai",
       "task_path": "/tasks/dataset_embedding_cluster",

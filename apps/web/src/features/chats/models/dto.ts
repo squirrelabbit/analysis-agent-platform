@@ -74,8 +74,10 @@ export interface ChartSpecDto {
   // silverone 2026-06-09 — distribution(비중) 막대: y=비중(%), count_col=건수
   // 라벨 보조("X.X% (N건)").
   count_col?: string;
-  // line — 기준일(축제일) 기준선 (YYYY-MM-DD). 있을 때만.
+  // line — 기준일 기준선 (YYYY-MM-DD). 있을 때만.
   event_date?: string | null;
+  // 기준선 라벨(도메인별). 없으면 프론트가 "기준일"로 fallback.
+  event_label?: string | null;
   // metric (total 비교) — 컬럼명 참조.
   a_value?: string;
   b_value?: string;

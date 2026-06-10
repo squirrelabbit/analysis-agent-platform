@@ -6,7 +6,7 @@ ADR-020 §5 deterministic v1 정책의 5 템플릿을 한 함수로 구현.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from ..planner.schema import ALL_REJECT_REASONS
@@ -504,36 +504,67 @@ def _build_chart_spec(
         event_date = _event_date_from_plan(plan, x_col)
         if event_date:
             spec["event_date"] = event_date
+            # silverone 2026-06-11 — 기준선 라벨을 chart_spec 계약으로 내린다(프론트
+            # 하드코딩 "축제일" 제거). composer는 도메인을 모르므로 generic 기본값.
+            # 추후 recipe/planner가 도메인 라벨(예: "축제일")을 제공하면 그 값으로 대체.
+            spec["event_label"] = _DEFAULT_EVENT_LABEL
     return spec
 
 
-def _event_date_from_plan(plan: dict[str, Any] | None, x_col: str) -> str | None:
-    """날짜 추이 line의 기준일(축제일) 도출 — plan의 between 날짜 필터 중점(YYYY-MM-DD).
+# 날짜 추이 line 기준선 기본 라벨. 도메인 중립(festival "축제일" 하드코딩 회피).
+_DEFAULT_EVENT_LABEL = "기준일"
 
-    event_window_count는 [event-N, event+N] between 필터로 펼쳐지므로 중점이 기준일.
-    between 날짜 필터가 정확히 1개일 때만 반환(애매하면 None → 기준선 생략)."""
+
+def _event_date_from_plan(plan: dict[str, Any] | None, x_col: str) -> str | None:
+    """날짜 추이 line의 기준일(축제일) 도출 — plan의 날짜 window 중점(YYYY-MM-DD).
+
+    event_window_count는 (silverone 2026-06-10) end-exclusive next-day 계약으로 같은 컬럼에
+    ``gte lower`` + ``lt end_exclusive`` 두 필터로 펼쳐진다. inclusive window는
+    [lower, end_exclusive - 1day], 그 중점이 기준일. 옛 between 필터([lo, hi] inclusive)도
+    하위호환으로 인식. 날짜 window가 정확히 1개일 때만 반환(애매하면 None → 기준선 생략)."""
     if not isinstance(plan, dict):
         return None
-    found: list[tuple[date, date]] = []
+    windows: list[tuple[date, date]] = []
+    gte_by_col: dict[str, date] = {}
+    lt_by_col: dict[str, date] = {}
     for step in plan.get("steps") or []:
         if not isinstance(step, dict) or step.get("skill") != "filter":
             continue
         params = step.get("params") or {}
-        if not isinstance(params, dict) or params.get("operator") != "between":
+        if not isinstance(params, dict):
             continue
+        op = params.get("operator")
+        column = str(params.get("column") or "")
         value = params.get("value")
-        if not (isinstance(value, list) and len(value) == 2):
+        if op == "between" and isinstance(value, list) and len(value) == 2:
+            try:
+                lo = date.fromisoformat(str(value[0])[:10])
+                hi = date.fromisoformat(str(value[1])[:10])
+            except ValueError:
+                continue
+            if lo <= hi:
+                windows.append((lo, hi))
+        elif op == "gte" and column:
+            try:
+                gte_by_col[column] = date.fromisoformat(str(value)[:10])
+            except (ValueError, TypeError):
+                continue
+        elif op == "lt" and column:
+            try:
+                lt_by_col[column] = date.fromisoformat(str(value)[:10])
+            except (ValueError, TypeError):
+                continue
+    # gte+lt 쌍(같은 컬럼) → inclusive window [lower, end_exclusive - 1day].
+    for column, lower in gte_by_col.items():
+        end_exclusive = lt_by_col.get(column)
+        if end_exclusive is None:
             continue
-        try:
-            lo = date.fromisoformat(str(value[0])[:10])
-            hi = date.fromisoformat(str(value[1])[:10])
-        except ValueError:
-            continue
-        if lo <= hi:
-            found.append((lo, hi))
-    if len(found) != 1:
+        hi = end_exclusive - timedelta(days=1)
+        if lower <= hi:
+            windows.append((lower, hi))
+    if len(windows) != 1:
         return None
-    lo, hi = found[0]
+    lo, hi = windows[0]
     return (lo + (hi - lo) // 2).isoformat()
 
 
@@ -1077,17 +1108,19 @@ def _reject_payload(*, user_question: str | None, plan: dict[str, Any]) -> dict[
     if isinstance(capability_gap, dict) and capability_gap:
         metadata["capability_gap"] = capability_gap
 
-    # silverone 2026-06-02 — 멀티턴 clarify. reason=missing_data_or_artifact는
-    # "분석은 가능하나 값(예: 축제 기준일)이 필요"한 clarify 요청이다. 이때 다음
-    # 턴 planner가 짧은 후속 답("2024-08-15 야")을 직전 질문의 답으로 이어붙이도록
-    # context_summary에 pending_clarification 신호 + 요청 문구(answer_summary)를
-    # 남긴다. out_of_dataset_scope / unsupported_skill은 값 입력으로 풀리지 않으므로
-    # 신호를 남기지 않는다 (후속 메시지를 잘못 끌어다 붙이지 않게).
+    # silverone 2026-06-02 — 멀티턴 clarify. 다음 두 reason은 "분석은 가능하나 값/기준이
+    # 필요"한 clarify 요청이다. 다음 턴 planner가 짧은 후속 답("2024-08-15 야")을 직전
+    # 질문의 답으로 이어붙이도록 context_summary에 pending_clarification + 요청 문구
+    # (answer_summary)를 남긴다:
+    #   - missing_data_or_artifact: 값(예: 축제 기준일)이 필요
+    #   - clarification_required (silverone 2026-06-10): 기간/기준/범위가 모호
+    # out_of_dataset_scope / unsupported_skill은 값 입력으로 풀리지 않으므로 신호를
+    # 남기지 않는다 (후속 메시지를 잘못 끌어다 붙이지 않게).
     context_summary: dict[str, Any] = {}
     question_text = (user_question or "").strip()
     if question_text:
         context_summary["question"] = question_text
-    if reason == "missing_data_or_artifact":
+    if reason in ("missing_data_or_artifact", "clarification_required"):
         context_summary["pending_clarification"] = True
         if message:
             context_summary["answer_summary"] = message

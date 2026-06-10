@@ -22,11 +22,15 @@ class ArtifactPaths:
     - ``docs``: cleaned parquet (dataset_clean 출력)
     - ``clauses``: clause_label jsonl (dataset_clause_label 출력)
     - ``genuineness``: doc_genuineness jsonl (dataset_doc_genuineness 출력)
+    - ``clause_keywords`` (optional): clause_keywords jsonl (dataset_clause_keywords
+      출력, long-format). 없는 dataset/버전이 대부분이므로 optional — 있을 때만
+      ``clause_keywords`` view를 등록한다.
     """
 
     docs: Path
     clauses: Path
     genuineness: Path
+    clause_keywords: Path | None = None
 
 
 class ExecutorContextError(RuntimeError):
@@ -47,6 +51,7 @@ class ExecutorContext:
             self._validate_docs_created_at()
             self._register_clauses()
             self._register_genuineness()
+            self._register_clause_keywords()
         except Exception:
             self._con.close()
             raise
@@ -96,6 +101,34 @@ class ExecutorContext:
               aspect,
               prompt_version,
               source
+            FROM read_json('{literal}', format='newline_delimited')
+            """
+        )
+
+    def _register_clause_keywords(self) -> None:
+        # optional — clause_keywords artifact가 있을 때만 view 등록. 없으면 조용히
+        # skip(대부분 dataset/버전은 키워드 artifact가 없다). long-format이라 clause_id가
+        # 이미 들어 있어 별도 생성 없이 그대로 노출한다.
+        path = self._artifact_paths.clause_keywords
+        if path is None:
+            return
+        resolved = Path(path)
+        if not resolved.exists():
+            return
+        literal = self._escape_path_literal(str(resolved.resolve()))
+        self._con.execute(
+            f"""
+            CREATE OR REPLACE VIEW clause_keywords AS
+            SELECT
+              doc_id,
+              clause_id,
+              clause,
+              aspect,
+              sentiment,
+              keyword,
+              source,
+              extractor_version,
+              keyword_rank_in_clause
             FROM read_json('{literal}', format='newline_delimited')
             """
         )

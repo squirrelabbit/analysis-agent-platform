@@ -80,6 +80,7 @@ def generate_plan(
     prompt_version: str = "",
     today: str = "",
     timezone: str = "",
+    include_clause_keywords: bool = False,
 ) -> PlannerResult:
     """user_question에서 plan_v2를 만든다.
 
@@ -115,6 +116,7 @@ def generate_plan(
         version=prompt_version,
         today=today,
         timezone=timezone,
+        include_clause_keywords=include_clause_keywords,
     )
 
     attempts: list[dict[str, Any]] = []

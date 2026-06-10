@@ -919,6 +919,69 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_keywords:
+    post:
+      tags: [Datasets]
+      summary: clause_keywords build job 큐잉 (수동 키워드 추출)
+      description: |
+        clause_label 결과에서 Kiwi 명사 키워드를 추출해 long-format
+        `clause_keywords` artifact(절-키워드 1행)를 만든다. LLOA 호출 없는 결정론적
+        단계. precondition: clause_label ready (`clause_label_ref` 존재). 완료 시
+        version metadata에 `clause_keywords_status`/`clause_keywords_ref`/
+        `clause_keywords_summary`/`clause_keywords_completed_at`가 저장되고, 이후
+        analyze가 키워드 질문(키워드 TOP/aspect별 키워드)에 이 테이블을 쓴다.
+        운영자가 API/script로 실행 (UI 버튼은 후속).
+      operationId: createClauseKeywordsJob
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetClauseKeywordsBuildRequest"
+      responses:
+        "202":
+          description: clause_keywords build job 큐잉 완료 (slim shape)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetBuildJobAccepted"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      tags: [Datasets]
+      summary: clause_keywords 대시보드/조회 (status + summary + 필터·페이징 item table)
+      description: |
+        clause_keywords long-format artifact를 DuckDB on-demand 집계로 읽어
+        대시보드 summary와 item table을 반환한다. summary: total_keyword_rows /
+        unique_keywords / clauses_with_keywords KPI + aspect별·sentiment별 count +
+        top_keywords_positive/negative(각 5) + (aspect 필터 시) selected_aspect_sentiment.
+        items: 필터(aspect/sentiment/q)·페이징된 절-키워드 rows. artifact가 없으면
+        status만 채운 빈 view. 응답 shape은 다른 build view와 동일(DatasetArtifactView).
+      operationId: getClauseKeywordsView
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - { name: aspect, in: query, required: false, schema: { type: string }, description: "aspect 필터 + 선택 aspect sentiment 분포 트리거" }
+        - { name: sentiment, in: query, required: false, schema: { type: string }, description: "sentiment 필터 (positive|neutral|negative)" }
+        - { name: q, in: query, required: false, schema: { type: string }, description: "keyword/clause 부분일치 검색" }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 100 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: clause_keywords view (status + summary + items)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClauseKeywordsView"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label:
     post:
       tags: [Datasets]
@@ -2745,11 +2808,11 @@ components:
             채워진다.
         reason:
           type: string
-          enum: [out_of_dataset_scope, unsupported_skill, missing_data_or_artifact]
+          enum: [out_of_dataset_scope, unsupported_skill, missing_data_or_artifact, clarification_required]
           description: |
             `answerable=false`일 때 거절 사유. out_of_dataset_scope(데이터셋 무관
             외부/일반 질문), unsupported_skill(데이터셋 관련이나 현 skill 미지원),
-            missing_data_or_artifact(필요 컬럼/아티팩트 부재).
+            missing_data_or_artifact(필요 컬럼/아티팩트 부재). clarification_required(기간/기준/범위 모호 — 확인 질문).
         message:
           type: string
           description: "`answerable=false`일 때 사용자에게 보여줄 거절 사유 문구."
@@ -2959,7 +3022,9 @@ components:
             view별 렌더 spec (silverone 2026-06-09). recommended_view에 따라 shape이
             다르며 `kind`로 구분한다. `recommended_view`가 `table`이면 null.
             - bar/line/diverging_bar: `{kind, x, y, series, [unit, sort]}`
-              (diverging_bar는 unit=건/%p/%, sort=abs_desc)
+              (diverging_bar는 unit=건/%p/%, sort=abs_desc). line은 날짜 window가
+              1개면 `event_date`(기준선 YYYY-MM-DD) + `event_label`(기준선 라벨,
+              기본 "기준일")을 추가로 내릴 수 있다.
             - metric: `{kind:"metric", a_value, b_value, delta_value, [delta_rate], unit}`
               — 값이 아니라 컬럼명 참조.
             - evidence: `{kind:"evidence", text, [sentiment], [chips], [id]}`
@@ -3054,7 +3119,7 @@ components:
           description: mode != deterministic일 때 진단용 사유. 정상이면 null.
         reason:
           type: string
-          enum: [out_of_dataset_scope, unsupported_skill, missing_data_or_artifact]
+          enum: [out_of_dataset_scope, unsupported_skill, missing_data_or_artifact, clarification_required]
           description: |
             (PR1) mode=rejected일 때 거절 사유 taxonomy. plan.reason과 동일 값.
             프론트 reason별 처리 / 운영 rejection event(PR2) 집계에 사용.
@@ -3233,6 +3298,94 @@ components:
                       - "null"
             pagination:
               $ref: "#/components/schemas/ArtifactPagination"
+    ClauseKeywordsView:
+      allOf:
+        - $ref: "#/components/schemas/ArtifactViewCommon"
+        - type: object
+          description: |
+            GET /versions/{vid}/clause_keywords 응답 (silverone 2026-06-10). long-format
+            (절-키워드 1행) artifact를 DuckDB on-demand 집계로 읽은 대시보드 + item table.
+          properties:
+            applied:
+              type: object
+              properties:
+                extractor_version:
+                  type: string
+                  description: "키워드 추출기 버전(예: kiwi-noun-v2). build summary snapshot."
+            summary:
+              type: object
+              description: "대시보드 KPI + 분포 + top 키워드. 필터와 무관하게 전체 기준."
+              properties:
+                total_keyword_count: { type: integer, description: "총 언급(절-키워드 행) 수" }
+                unique_keyword_count: { type: integer, description: "고유 키워드 수" }
+                clause_count: { type: integer, description: "키워드가 1개 이상인 절 수(distinct clause_id)" }
+                aspect:
+                  type: object
+                  additionalProperties: { type: integer }
+                  description: "aspect별 언급 수"
+                sentiment:
+                  type: object
+                  additionalProperties: { type: integer }
+                  description: "sentiment별 언급 수"
+                top_keywords_positive:
+                  type: array
+                  description: "긍정 절 키워드 빈도 top 5 [{keyword, count}]"
+                  items: { type: object }
+                top_keywords_negative:
+                  type: array
+                  description: "부정 절 키워드 빈도 top 5 [{keyword, count}]"
+                  items: { type: object }
+                aspect_sentiment_keywords:
+                  type: object
+                  description: |
+                    aspect별 워드클라우드용. {aspect: {positive:[…], negative:[…]}}.
+                    각 list는 그 aspect·sentiment의 상위 30 키워드(count desc), neutral 제외.
+                    항목 {keyword, count, weight}. weight=count/list내최대count(0~1, 최상위 1.0).
+                    화면 왼쪽 aspect 클릭 → 오른쪽 워드클라우드 즉시 전환용. query와 무관(전체 기준).
+                  additionalProperties:
+                    type: object
+                    properties:
+                      positive:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            keyword: { type: string }
+                            count: { type: integer }
+                            weight: { type: number, description: "0~1 정규화 가중치" }
+                      negative:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            keyword: { type: string }
+                            count: { type: integer }
+                            weight: { type: number }
+                selected_aspect:
+                  type: string
+                  description: "aspect 필터가 있을 때만. 선택된 aspect."
+                selected_aspect_total:
+                  type: integer
+                  description: "선택 aspect의 언급 수 (aspect 필터 시)"
+                selected_aspect_sentiment:
+                  type: object
+                  additionalProperties: { type: integer }
+                  description: "선택 aspect 안의 sentiment별 언급 수 (aspect 필터 시)"
+            items:
+              type: array
+              description: |
+                필터(aspect/sentiment/q)·페이징된 **키워드 집계 행**. 한 행 = 한 키워드.
+                pagination.total은 distinct keyword 수. 필터는 집계 전 행에 적용.
+              items:
+                type: object
+                properties:
+                  keyword: { type: string }
+                  count: { type: integer, description: "언급(절-키워드 행) 수" }
+                  document_count: { type: integer, description: "이 키워드가 등장한 문서 수(distinct doc_id)" }
+                  dominant_sentiment: { type: string, description: "이 키워드의 우세 감성(최빈)" }
+                  dominant_sentiment_ratio: { type: number, description: "우세 감성 비율(0~1)" }
+                  top_aspect: { type: string, description: "이 키워드의 대표 aspect(최빈)" }
+                  representative_clause: { type: string, description: "대표 절(키워드 포함 절 중 최장)" }
     ClauseLabelView:
       allOf:
         - $ref: "#/components/schemas/ArtifactViewCommon"
@@ -3512,6 +3665,13 @@ components:
         force:
           type: boolean
           default: false
+    DatasetClauseKeywordsBuildRequest:
+      type: object
+      description: "silverone 2026-06-10 — clause_label 결과에서 Kiwi 명사 키워드를 추출해 long-format clause_keywords artifact를 만드는 수동 build payload. LLOA 호출 없음. 입력 최소(선택 keyword_min_len). precondition: clause_label ready. body는 생략 가능(`{}`)."
+      properties:
+        keyword_min_len:
+          type: integer
+          description: "키워드 최소 길이(글자). 미지정 시 worker default 2."
     DatasetClauseLabelBuildRequest:
       type: object
       description: "ADR-017 / 5/19 + 5/20 — cleaned doc 단위 LLOA 한 호출 절 분리 + sentiment + aspect 라벨링 build payload. prompt v3 schema (clause/sentiment/aspect 3 필드). 5/20 결정으로 output_path/batch_size/max_tokens/aspect_taxonomy_version 제거 — worker default 사용 + default include_genuineness=[\"genuine_review\",\"mixed\"]."

@@ -13,6 +13,7 @@ clean, doc_genuineness, clause_label.
 
 from .. import runtime as rt  # 테스트 호환: python_ai_worker.dataset_build.rt 경로
 
+from .clause_keywords import run_dataset_clause_keywords
 from .clause_label import run_dataset_clause_label
 from .clean import (
     _apply_noise_scrub,
@@ -22,6 +23,7 @@ from .clean import (
 from .doc_genuineness import run_dataset_doc_genuineness
 
 __all__ = [
+    "run_dataset_clause_keywords",
     "run_dataset_clause_label",
     "run_dataset_clean",
     "run_dataset_doc_genuineness",

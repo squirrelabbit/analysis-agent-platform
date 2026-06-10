@@ -532,15 +532,40 @@ def _check_columns_on_table(
 # 같은 공유 컬럼이나 docs 추가 컬럼은 판단 보류.
 
 
+# lineage owner 산출에서 제외할 optional/derived reserved table. clause_keywords는
+# clauses에서 파생돼 sentiment/aspect/clause 등을 중복 보유하므로, 포함하면 그 공유
+# 컬럼들의 유일 소유성이 깨져 lineage 검사가 무력화된다. 공유 컬럼의 canonical owner는
+# clauses로 유지하고, clause_keywords 전용 컬럼(keyword)은 owner 추적 대상에서 뺀다.
+# (clause_keywords는 optional artifact라 input 미스라우팅 시 executor가 잡는다.)
+_LINEAGE_OWNER_EXCLUDE_TABLES: frozenset[str] = frozenset({"clause_keywords"})
+
+
 def _build_column_owner() -> dict[str, str]:
     owners: dict[str, set[str]] = {}
     for table_name, schema in TABLE_SCHEMAS.items():
+        if table_name in _LINEAGE_OWNER_EXCLUDE_TABLES:
+            continue
         for column in schema.columns:
             owners.setdefault(column.name, set()).add(table_name)
     return {col: next(iter(tables)) for col, tables in owners.items() if len(tables) == 1}
 
 
 _COLUMN_OWNER: dict[str, str] = _build_column_owner()
+
+
+# 컬럼 → 그 컬럼을 제공하는 모든 reserved table (clause_keywords 포함). owner는
+# "유일 소유"라 검사를 *트리거*하는 데 쓰고, 실제 통과 판정은 이 providers로 한다 —
+# clause_keywords는 sentiment/aspect/clause 등을 clauses에서 비정규화해 보유하므로,
+# filter(input=clause_keywords, column=sentiment)는 정당하다(owner=clauses여도 허용).
+def _build_column_providers() -> dict[str, set[str]]:
+    providers: dict[str, set[str]] = {}
+    for table_name, schema in TABLE_SCHEMAS.items():
+        for column in schema.columns:
+            providers.setdefault(column.name, set()).add(table_name)
+    return providers
+
+
+_COLUMN_PROVIDERS: dict[str, set[str]] = _build_column_providers()
 
 
 def _infer_contributing_tables(
@@ -670,7 +695,10 @@ def _check_cross_table_column_refs(skill: str, params: dict[str, Any], ctx: _Ste
             continue
         seen.add(key)
         tables = _infer_contributing_tables(ref, ctx.step_lookup, visiting=set())
-        if tables is None or owner in tables:
+        # 기여 테이블 중 이 컬럼을 제공하는 table이 하나라도 있으면 통과(clause_keywords가
+        # sentiment/aspect를 보유하는 케이스 허용). 없으면 owner 누락으로 reject.
+        providers = _COLUMN_PROVIDERS.get(name, {owner})
+        if tables is None or (tables & providers):
             continue
         ctx.issue(
             code="params.column_not_in_input",

@@ -494,8 +494,9 @@ func composerContextSummary(raw json.RawMessage) map[string]any {
 // rejectableRejectionReasons — planner_rejection_events에 적재할 거절 reason.
 // silverone 2026-06-01 (PR2): unsupported_skill / missing_data_or_artifact (skill
 // upgrade backlog). silverone 2026-06-08: planner_validation_error / execution_error
-// 추가 — "못 만든/못 실행한 복잡 질의"를 고도화 재료로 자동 적재(D3/D4 류). 일반
-// clarification / out_of_dataset_scope는 제외(저장하지 않는다).
+// 추가 — "못 만든/못 실행한 복잡 질의"를 고도화 재료로 자동 적재(D3/D4 류).
+// clarification_required(질문 모호 → 정상 확인 흐름) / out_of_dataset_scope는 제외
+// (저장하지 않는다 — allowlist에 없으면 자동 제외). silverone 2026-06-10.
 var rejectableRejectionReasons = map[string]bool{
 	"unsupported_skill":        true,
 	"missing_data_or_artifact": true,

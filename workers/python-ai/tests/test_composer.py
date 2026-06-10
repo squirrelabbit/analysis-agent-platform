@@ -194,6 +194,15 @@ class RejectClarifyContextTests(unittest.TestCase):
         out = self._reject("unsupported_skill", message="클러스터링은 아직 지원하지 않습니다.")
         self.assertNotIn("pending_clarification", out["context_summary"])
 
+    def test_clarification_required_sets_pending_clarification(self) -> None:
+        # silverone 2026-06-10 — 기간/기준 모호 거절도 다음 턴 이어받기 신호를 남긴다.
+        out = self._reject("clarification_required", message="기준 날짜와 전후 며칠을 알려주세요.")
+        summary = out["context_summary"]
+        self.assertTrue(summary.get("pending_clarification"))
+        self.assertEqual(summary["answer_summary"], "기준 날짜와 전후 며칠을 알려주세요.")
+        self.assertEqual(out["metadata"]["reason"], "clarification_required")
+        self.assertIsNone(out["display"])
+
 
 class LineChartSortTests(unittest.TestCase):
     """silverone 2026-06-02 — line 차트는 x(시계열) 기준 정렬돼야 한다. planner가
@@ -512,6 +521,29 @@ class ChartReadyMetadataTests(unittest.TestCase):
             "plan_version": "v2",
             "steps": [
                 {"id": "w", "skill": "filter", "params": {"input": "docs", "column": "created_at", "operator": "between", "value": ["2025-08-08", "2025-08-22"]}},
+                {"id": "agg", "skill": "aggregate", "params": {"input": "w", "group_by": ["created_at"], "metrics": [{"name": "count", "function": "count", "column": "*"}]}},
+                {"id": "p", "skill": "present", "params": {"input": "agg"}},
+            ],
+        }
+        spec = self._compose_with_rows(rows, plan=plan)["display"]["chart_spec"]
+        self.assertEqual(spec["kind"], "line")
+        self.assertEqual(spec["event_date"], "2025-08-15")
+        # silverone 2026-06-11 — 기준선 라벨도 chart_spec 계약으로 내린다(generic 기본값).
+        self.assertEqual(spec["event_label"], "기준일")
+
+    def test_line_event_date_from_gte_lt_window(self) -> None:
+        # silverone 2026-06-10 — event_window_count는 end-exclusive 계약으로 gte+lt 두
+        # 필터로 펼쳐진다. inclusive window [08-08, 08-22](= lt 08-23 -1day) 중점 = 08-15.
+        rows = [
+            {"created_at": "2025-08-13T00:00:00Z", "count": 1},
+            {"created_at": "2025-08-15T00:00:00Z", "count": 27},
+            {"created_at": "2025-08-22T23:00:00Z", "count": 3},
+        ]
+        plan = {
+            "plan_version": "v2",
+            "steps": [
+                {"id": "from", "skill": "filter", "params": {"input": "docs", "column": "created_at", "operator": "gte", "value": "2025-08-08"}},
+                {"id": "w", "skill": "filter", "params": {"input": "from", "column": "created_at", "operator": "lt", "value": "2025-08-23"}},
                 {"id": "agg", "skill": "aggregate", "params": {"input": "w", "group_by": ["created_at"], "metrics": [{"name": "count", "function": "count", "column": "*"}]}},
                 {"id": "p", "skill": "present", "params": {"input": "agg"}},
             ],

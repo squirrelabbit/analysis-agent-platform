@@ -148,16 +148,27 @@ def _event_window_step(**param_overrides):
 
 class EventWindowCountLoweringTests(unittest.TestCase):
     def test_lowers_to_expected_atomic_steps(self) -> None:
+        # silverone 2026-06-10 — date window contract: gte(lower) + lt(end-exclusive next-day).
         steps = lower_recipe(_event_window_step())
         self.assertEqual(steps, [
             {
-                "id": "festival_window_count_window",
+                "id": "festival_window_count_from",
                 "skill": "filter",
                 "params": {
                     "input": "docs",
                     "column": "created_at",
-                    "operator": "between",
-                    "value": ["2024-08-08", "2024-08-22"],
+                    "operator": "gte",
+                    "value": "2024-08-08",
+                },
+            },
+            {
+                "id": "festival_window_count_window",
+                "skill": "filter",
+                "params": {
+                    "input": "festival_window_count_from",
+                    "column": "created_at",
+                    "operator": "lt",
+                    "value": "2024-08-23",
                 },
             },
             {
@@ -186,14 +197,19 @@ class EventWindowCountLoweringTests(unittest.TestCase):
             },
         ])
 
-    def test_inclusive_boundary_15_days(self) -> None:
-        # before=after=7 → [event-7, event+7] inclusive = 08-08 .. 08-22 (기준일 포함 15일)
+    def test_window_contract_end_exclusive_15_days(self) -> None:
+        # before=after=7 → 표시 [08-08, 08-22](기준일 포함 15일). 필터는 gte 08-08 + lt 08-23.
         steps = lower_recipe(_event_window_step())
-        self.assertEqual(steps[0]["params"]["value"], ["2024-08-08", "2024-08-22"])
+        self.assertEqual(steps[0]["params"]["operator"], "gte")
+        self.assertEqual(steps[0]["params"]["value"], "2024-08-08")
+        self.assertEqual(steps[1]["params"]["operator"], "lt")
+        self.assertEqual(steps[1]["params"]["value"], "2024-08-23")  # end-exclusive(08-22 종일 포함)
 
     def test_asymmetric_window(self) -> None:
+        # before=3, after=1 → gte event-3=08-12, lt event+1+1=08-17.
         steps = lower_recipe(_event_window_step(before_days=3, after_days=1))
-        self.assertEqual(steps[0]["params"]["value"], ["2024-08-12", "2024-08-16"])
+        self.assertEqual(steps[0]["params"]["value"], "2024-08-12")
+        self.assertEqual(steps[1]["params"]["value"], "2024-08-17")
 
     def test_lowered_plan_passes_validator(self) -> None:
         steps = lower_recipe(_event_window_step())
@@ -207,7 +223,8 @@ class EventWindowCountLoweringTests(unittest.TestCase):
         del step["params"]["before_days"]
         del step["params"]["after_days"]
         steps = lower_recipe(step)
-        self.assertEqual(steps[0]["params"]["value"], ["2024-08-08", "2024-08-22"])
+        self.assertEqual(steps[0]["params"]["value"], "2024-08-08")
+        self.assertEqual(steps[1]["params"]["value"], "2024-08-23")
 
     def test_title_optional(self) -> None:
         steps = lower_event_window_count(_event_window_step(title=None))
@@ -391,7 +408,8 @@ class ExpandRecipesTests(unittest.TestCase):
     def test_event_window_count_recipe_expanded_and_valid(self) -> None:
         plan = {"plan_version": "v2", "steps": [_event_window_step()]}
         out = expand_recipes(plan)
-        self.assertEqual([s["skill"] for s in out["steps"]], ["filter", "aggregate", "sort", "present"])
+        # gte + lt 두 filter (end-exclusive window contract).
+        self.assertEqual([s["skill"] for s in out["steps"]], ["filter", "filter", "aggregate", "sort", "present"])
         self.assertEqual(collect_plan_issues(out), [])
         self.assertEqual(plan["steps"][0]["skill"], "event_window_count")
 
