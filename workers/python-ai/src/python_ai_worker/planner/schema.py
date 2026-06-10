@@ -243,6 +243,16 @@ REJECT_REASONS: frozenset[str] = frozenset(
     {"out_of_dataset_scope", "unsupported_skill", "missing_data_or_artifact"}
 )
 
+# silverone 2026-06-09 — system이 생성하는 거절 사유(planner가 emit하지 않음).
+#   planner_validation_error — planner가 repair 후에도 유효 plan 실패 (raw 500 대신 거절)
+#   execution_error          — executor(DuckDB) 실행 실패를 graceful 거절로 렌더
+# validator는 planner-emitted(REJECT_REASONS)만 검증하고, composer 거절 렌더는
+# ALL_REJECT_REASONS(둘의 합집합)를 단일 source로 쓴다.
+SYSTEM_REJECT_REASONS: frozenset[str] = frozenset(
+    {"planner_validation_error", "execution_error"}
+)
+ALL_REJECT_REASONS: frozenset[str] = REJECT_REASONS | SYSTEM_REJECT_REASONS
+
 
 # validator R3 (2026-05-27) — column type 분류 단일 source.
 #
@@ -298,4 +308,6 @@ __all__ = [
     "SORT_ORDERS",
     "PRESENT_FORMATS",
     "REJECT_REASONS",
+    "SYSTEM_REJECT_REASONS",
+    "ALL_REJECT_REASONS",
 ]

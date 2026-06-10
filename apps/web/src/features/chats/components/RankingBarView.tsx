@@ -8,17 +8,11 @@ import {
 } from "recharts";
 import type { ChatChart } from "../models";
 import { scaleForChart } from "../models";
+import { SERIES_BAR as BAR_COLOR, SERIES_TRACK as TRACK_COLOR, SENTIMENT_LABEL } from "../models/theme";
 import { useTaxonomy } from "@/features/taxonomy/hooks/taxonomy.query";
 import { ASPECT_FIELD, aspectLabelOf } from "@/features/taxonomy/models";
 
-const BAR_COLOR = "#8b7cf6";
-const TRACK_COLOR = "#f1f0fb";
 const MAX_CHART_ITEMS = 10;
-const SENTIMENT_LABEL: Record<string, string> = {
-  positive: "긍정",
-  neutral: "중립",
-  negative: "부정",
-};
 
 // 가로 랭킹 막대 — 집계 결과(count/비율)를 큰 순으로. 트랙 배경 + 우측 값 컬럼.
 export default function RankingBarView({ chart }: { chart: ChatChart }) {

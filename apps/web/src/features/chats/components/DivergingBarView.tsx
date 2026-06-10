@@ -9,20 +9,12 @@ import {
 } from "recharts";
 import type { ChatChart } from "../models";
 import { scaleForChart } from "../models";
+import { CHANGE_UP as INCREASE_COLOR, CHANGE_DOWN as DECREASE_COLOR, SENTIMENT_LABEL } from "../models/theme";
 import { useTaxonomy } from "@/features/taxonomy/hooks/taxonomy.query";
 import { ASPECT_FIELD, aspectLabelOf } from "@/features/taxonomy/models";
 
-// 증가/감소 방향 색 (가치판단 아님 — 증감 표현). 증가=초록, 감소=빨강.
-const INCREASE_COLOR = "#3f9e6a";
-const DECREASE_COLOR = "#d65a5a";
 // 카드로 보여줄 최대 항목 수. 나머지는 상세 데이터에서 본다.
 const MAX_CHART_ITEMS = 7;
-// 감성 enum → 한글 (차트 축 라벨용).
-const SENTIMENT_LABEL: Record<string, string> = {
-  positive: "긍정",
-  neutral: "중립",
-  negative: "부정",
-};
 
 // 0 기준 가로 다이버징 막대 — 증가 큰 순(위) → 감소(아래) signed 정렬(백엔드).
 // 값은 오른쪽 컬럼에 정렬, 단위는 서브타이틀, 0 점선 + 범례.

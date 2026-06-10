@@ -1,8 +1,9 @@
 import axios from 'axios'
 
 export const apiClient = axios.create({
-  // dev: vite proxy(/api) 경유로 CORS 회피, prod: 빌드 시 주입된 절대주소
-  baseURL: import.meta.env.DEV ? '/api' : import.meta.env.VITE_API_BASE_URL,
+  // dev: vite proxy(/api) 경유로 CORS 회피, prod: 빌드 시 주입값(미주입 시 동일출처
+  // 프록시 경로 `/api`로 fallback — 절대주소 미설정 이미지가 127.0.0.1을 때리지 않게).
+  baseURL: import.meta.env.DEV ? '/api' : (import.meta.env.VITE_API_BASE_URL || '/api'),
   timeout: 10_000,
   // headers: { 'Content-Type': 'application/json' },
 })

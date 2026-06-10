@@ -1,21 +1,15 @@
 import type { ChatEvidence, ChatEvidenceChip } from "../models";
+import {
+  SENTIMENT_LABEL,
+  SENTIMENT_BADGE_CLASS as SENTIMENT_CLASS,
+  SENTIMENT_BADGE_FALLBACK,
+} from "../models/theme";
 import { useTaxonomy } from "@/features/taxonomy/hooks/taxonomy.query";
 import { ASPECT_FIELD, aspectLabelOf } from "@/features/taxonomy/models";
 import type { Taxonomy } from "@/features/taxonomy/models";
 
 // 카드로 보여줄 최대 원문 수. 나머지는 상세 데이터에서 본다.
 const MAX_EVIDENCE_CARDS = 5;
-
-const SENTIMENT_LABEL: Record<string, string> = {
-  positive: "긍정",
-  neutral: "중립",
-  negative: "부정",
-};
-const SENTIMENT_CLASS: Record<string, string> = {
-  positive: "bg-emerald-50 text-emerald-700",
-  neutral: "bg-zinc-100 text-zinc-600",
-  negative: "bg-rose-50 text-rose-700",
-};
 
 function chipLabel(chip: ChatEvidenceChip, taxonomy: Taxonomy | undefined): string {
   if (chip.key === ASPECT_FIELD) return aspectLabelOf(taxonomy, chip.value);
@@ -32,7 +26,7 @@ export default function EvidenceCardList({ evidence }: { evidence: ChatEvidence 
   return (
     <div className="mt-2 flex flex-col gap-2">
       {cards.map((item, idx) => {
-        const sentClass = item.sentiment ? SENTIMENT_CLASS[item.sentiment] ?? "bg-zinc-100 text-zinc-600" : "";
+        const sentClass = item.sentiment ? SENTIMENT_CLASS[item.sentiment] ?? SENTIMENT_BADGE_FALLBACK : "";
         return (
           <div key={item.id ?? idx} className="rounded-lg border border-zinc-200 bg-white p-3">
             <p className="text-sm text-zinc-800 whitespace-pre-wrap break-words">{item.text}</p>

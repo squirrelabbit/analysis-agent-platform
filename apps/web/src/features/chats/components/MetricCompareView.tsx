@@ -1,8 +1,7 @@
 import type { ChatMetric } from "../models";
+import { CHANGE_UP_TEXT as INCREASE_COLOR, CHANGE_DOWN_TEXT as DECREASE_COLOR } from "../models/theme";
 
-// 증감 방향 색 (한국 증감 관례: 증가=빨강, 감소=파랑).
-const INCREASE_COLOR = "text-red-600";
-const DECREASE_COLOR = "text-blue-600";
+// 증감 방향 색은 앱 canonical(증가=초록/감소=빨강, theme.ts)을 따른다 — diverging 차트와 통일.
 
 function fmtCount(v: number | null, unit: string): string {
   if (v === null) return "—";
