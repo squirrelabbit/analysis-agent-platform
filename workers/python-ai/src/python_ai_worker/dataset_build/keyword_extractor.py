@@ -31,10 +31,21 @@ FESTIVAL_STOPWORDS: frozenset[str] = frozenset(
         # 축제 문서에서 반복되지만 분석 의미 없는 단어
         "후기", "방문", "축제", "행사", "강릉", "문화", "유산", "야행",
         "느낌", "생각", "기억", "사진", "영상", "블로그", "포스팅",
+        # silverone 2026-06-10 — 1차 확장. festival 전체 5529절 빈도 상위에서 키워드
+        # TOP을 오염시키는 고빈도 '일반/동사성 명사'(내용 키워드 아님). 비교 데이터
+        # (data/keyword_compare/kiwi_freq_full.csv) 기반 선별.
+        "다양", "진행", "사람", "시간", "구경", "모습", "시작", "준비", "처음",
+        "제공", "곳곳", "장소", "가능", "이곳", "저곳", "여기", "거기", "하나",
+        "정도", "부분", "경우", "자체", "이용", "동안", "다음", "때문", "정보",
+        "관련", "위해", "모두", "각각", "서로",
     }
 )
 
-KIWI_EXTRACTOR_VERSION = "kiwi-noun-v1"
+# Kiwi POS 중 키워드로 쓸 태그 — 일반명사(NNG)·고유명사(NNP)만. 의존명사(NNB)·
+# 대명사(NP: 여기/이곳)·수사(NR: 하나)는 구조적으로 제외해 노이즈를 줄인다.
+KEYWORD_POS_PREFIXES: tuple[str, ...] = ("NNG", "NNP")
+
+KIWI_EXTRACTOR_VERSION = "kiwi-noun-v2"
 
 
 @runtime_checkable
@@ -71,12 +82,12 @@ class KiwiKeywordExtractor:
     def extract(self, text: str) -> list[str]:
         if not text or not str(text).strip():
             return []
-        tokens, _engine = _extract_noun_tokens(
+        tokens, _ = _extract_noun_tokens(
             text,
             stopwords=self._stopwords,
             user_dictionary_path=self._user_dictionary_path,
             min_token_length=self._min_len,
-            allowed_pos_prefixes=["N"],
+            allowed_pos_prefixes=list(KEYWORD_POS_PREFIXES),
         )
         seen: set[str] = set()
         keywords: list[str] = []

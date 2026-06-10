@@ -71,7 +71,8 @@ class RunClauseKeywordsTests(unittest.TestCase):
             # clause_id가 doc_id__N 규칙
             self.assertTrue(all(r["clause_id"].startswith("d1__") for r in rows))
             # extractor_version + source 메타
-            self.assertTrue(all(r["extractor_version"] == "kiwi-noun-v1" for r in rows))
+            from python_ai_worker.dataset_build.keyword_extractor import KIWI_EXTRACTOR_VERSION
+            self.assertTrue(all(r["extractor_version"] == KIWI_EXTRACTOR_VERSION for r in rows))
             # 반환 artifact contract
             art = result["artifact"]
             self.assertEqual(art["clause_keywords_ref"], str(out))
