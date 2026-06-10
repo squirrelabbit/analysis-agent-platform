@@ -1,7 +1,6 @@
-# silverone 2026-06-01 — web(Vite+React SPA) 빌드 + nginx 정적 serve (Option A).
-# 브라우저는 control-plane(18080)을 직접 호출하고 CORS는 control-plane 기본
-# 허용 origin(127.0.0.1:5173 / localhost:5173)을 사용한다. reverse-proxy/Go
-# embed 없이 정적 serve만 한다.
+# silverone 2026-06-01 — web(Vite+React SPA) 빌드 + nginx 정적 serve.
+# 브라우저는 web 컨테이너만 호출하는 동일출처 구조다 — axios baseURL을 `/api`로
+# 빌드하고 nginx가 `/api/*`를 control-plane으로 프록시한다 (nginx.conf 참조).
 #
 # build context는 ./apps/web (compose.dev.yml의 web 서비스 참조).
 
@@ -11,8 +10,10 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-# 빌드 시점에 axios baseURL(prod)로 박히는 control-plane 주소. compose에서 주입.
-ARG VITE_API_BASE_URL=http://127.0.0.1:18080
+# 빌드 시점에 axios baseURL(prod)로 박히는 값. 기본 `/api` = nginx 동일출처
+# 프록시 경로. compose 밖에서 빌드해도 사용자 PC(127.0.0.1)를 때리지 않는다.
+# 절대주소가 필요한 배포만 build-arg로 덮는다.
+ARG VITE_API_BASE_URL=/api
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
