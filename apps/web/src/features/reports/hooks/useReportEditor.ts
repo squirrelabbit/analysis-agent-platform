@@ -10,7 +10,7 @@ import {
   type ReportState,
 } from "../models/editor";
 
-const LS_KEY = "report_editor_v1";
+const LS_KEY = "report_editor";
 
 let uidc = 100;
 function newUid(): string {
@@ -21,13 +21,13 @@ type Action =
   | { type: "setTitle"; title: string }
   | { type: "setMode"; mode: ReportMode }
   | { type: "select"; uid: string | null }
-  | { type: "addBlock"; libId: string; atIdx?: number }
-  | { type: "moveBlock"; from: number; to: number }
+  | { type: "addBlock"; libId: string; atIdx?: number; newRow?: boolean }
+  | { type: "moveBlock"; from: number; to: number; newRow?: boolean }
   | { type: "deleteBlock"; uid: string }
   | { type: "setBlockTitle"; uid: string; title: string }
   | { type: "setBlockInterp"; uid: string; interp: string }
   | { type: "toggleOpt"; uid: string; key: keyof BlockOpts }
-  | { type: "setWidth"; uid: string; width: number | null }
+  | { type: "setSpan"; uid: string; span: number }
   | { type: "reset" };
 
 function reducer(state: ReportState, action: Action): ReportState {
@@ -52,7 +52,8 @@ function reducer(state: ReportState, action: Action): ReportState {
         title: null,
         interp: "",
         opts: { q: true, detail: !!lib.detail, plan: false },
-        width: null,
+        span: 12,
+        newRow: action.newRow ?? true,
       };
       const blocks = [...state.blocks];
       if (action.atIdx == null || action.atIdx >= blocks.length)
@@ -62,9 +63,19 @@ function reducer(state: ReportState, action: Action): ReportState {
     }
     case "moveBlock": {
       let { from, to } = action;
-      if (from === to || from === to - 1) return state;
+      // 위치 변화 없이 newRow(나란히/한 줄)만 바뀌는 경우도 처리.
+      if (from === to || from === to - 1) {
+        if (action.newRow == null) return state;
+        return {
+          ...state,
+          blocks: state.blocks.map((b, i) =>
+            i === from ? { ...b, newRow: action.newRow! } : b,
+          ),
+        };
+      }
       const blocks = [...state.blocks];
       const [item] = blocks.splice(from, 1);
+      if (action.newRow != null) item.newRow = action.newRow;
       if (to > from) to--;
       blocks.splice(to, 0, item);
       return { ...state, blocks };
@@ -98,11 +109,11 @@ function reducer(state: ReportState, action: Action): ReportState {
             : b,
         ),
       };
-    case "setWidth":
+    case "setSpan":
       return {
         ...state,
         blocks: state.blocks.map((b) =>
-          b.uid === action.uid ? { ...b, width: action.width } : b,
+          b.uid === action.uid ? { ...b, span: action.span } : b,
         ),
       };
     case "reset":

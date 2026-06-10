@@ -9,7 +9,13 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { BlockOpts, LibraryItem, ReportBlock } from "../models/editor";
+import {
+  GRID_COLS,
+  spanLabel,
+  type BlockOpts,
+  type LibraryItem,
+  type ReportBlock,
+} from "../models/editor";
 
 const PANEL_W = 300;
 
@@ -80,7 +86,7 @@ export function BlockPopover({
   onSetTitle,
   onSetInterp,
   onToggleOpt,
-  onResetWidth,
+  onResetSpan,
   onDelete,
 }: {
   block: ReportBlock;
@@ -89,7 +95,7 @@ export function BlockPopover({
   onSetTitle: (title: string) => void;
   onSetInterp: (interp: string) => void;
   onToggleOpt: (key: keyof BlockOpts) => void;
-  onResetWidth: () => void;
+  onResetSpan: () => void;
   onDelete: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -133,7 +139,7 @@ export function BlockPopover({
       window.removeEventListener("resize", compute);
       window.removeEventListener("scroll", compute, true);
     };
-  }, [block.uid, block.width]);
+  }, [block.uid, block.span]);
 
   const title = block.title != null ? block.title : lib.title;
 
@@ -207,12 +213,12 @@ export function BlockPopover({
 
         <Label>너비</Label>
         <div className="flex items-center gap-2.5">
-          <span className="text-[13px] font-bold tabular-nums text-zinc-900">
-            {block.width ? `${block.width}px` : "전체 너비"}
+          <span className="text-[13px] font-bold text-zinc-900">
+            {spanLabel(block.span)}
           </span>
           <button
-            disabled={!block.width}
-            onClick={onResetWidth}
+            disabled={block.span >= GRID_COLS}
+            onClick={onResetSpan}
             className="ml-auto rounded-lg border border-zinc-200 px-2.75 py-1.5 text-xs font-bold text-zinc-600 transition enabled:hover:border-zinc-300 enabled:hover:text-zinc-900 disabled:opacity-40"
           >
             전체 너비로
