@@ -504,7 +504,15 @@ def _build_chart_spec(
         event_date = _event_date_from_plan(plan, x_col)
         if event_date:
             spec["event_date"] = event_date
+            # silverone 2026-06-11 — 기준선 라벨을 chart_spec 계약으로 내린다(프론트
+            # 하드코딩 "축제일" 제거). composer는 도메인을 모르므로 generic 기본값.
+            # 추후 recipe/planner가 도메인 라벨(예: "축제일")을 제공하면 그 값으로 대체.
+            spec["event_label"] = _DEFAULT_EVENT_LABEL
     return spec
+
+
+# 날짜 추이 line 기준선 기본 라벨. 도메인 중립(festival "축제일" 하드코딩 회피).
+_DEFAULT_EVENT_LABEL = "기준일"
 
 
 def _event_date_from_plan(plan: dict[str, Any] | None, x_col: str) -> str | None:

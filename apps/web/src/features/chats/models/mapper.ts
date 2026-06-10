@@ -111,6 +111,7 @@ const mapChart = (dto: ComposerDisplayDto | undefined): ChatChart | undefined =>
     unit: spec.unit ?? undefined,
     countKey: spec.count_col ?? undefined,
     eventDate: spec.event_date ?? undefined,
+    eventLabel: spec.event_label ?? undefined,
   };
 };
 

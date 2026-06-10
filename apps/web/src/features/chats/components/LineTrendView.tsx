@@ -103,7 +103,7 @@ export default function LineTrendView({ chart }: { chart: ChatChart }) {
                 x={eventShort}
                 stroke={EVENT_COLOR}
                 strokeDasharray="5 3"
-                label={{ value: "축제일", position: "top", fill: "#b9772f", fontSize: 11, fontWeight: 600 }}
+                label={{ value: chart.eventLabel ?? "기준일", position: "top", fill: "#b9772f", fontSize: 11, fontWeight: 600 }}
               />
             )}
             <Area
