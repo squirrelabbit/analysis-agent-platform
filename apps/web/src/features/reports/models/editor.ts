@@ -105,9 +105,47 @@ export interface ReportBlock {
   /** 해석 문구 */
   interp: string;
   opts: BlockOpts;
-  /** px 단위 너비(null이면 전체 너비) */
-  width: number | null;
+  /**
+   * 12컬럼 그리드 기준 차지 컬럼 수(span). 12=전체, 6=½, 4=⅓, 8=⅔, 3=¼, 9=¾.
+   * 그리드라 같은 span끼리 너비가 정확히 같고 gap도 자동 정렬된다.
+   */
+  span: number;
+  /**
+   * true면 새 줄에서 시작(한 줄 차지). false면 앞 블록과 같은 줄에 이어 배치(나란히).
+   * 자동 packing은 하지 않으며, 옆에 드롭할 때만 false로 설정된다.
+   */
+  newRow: boolean;
 }
+
+// 보고서 캔버스 그리드 컬럼 수.
+export const GRID_COLS = 12;
+// 리사이즈가 스냅되는 span 후보(¼/⅓/½/⅔/¾/전체).
+export const BLOCK_SPANS = [3, 4, 6, 8, 9, 12];
+// span → 분수 라벨.
+export const BLOCK_SPAN_LABEL: Record<number, string> = {
+  3: "¼",
+  4: "⅓",
+  6: "½",
+  8: "⅔",
+  9: "¾",
+  12: "전체",
+};
+export const spanLabel = (span: number): string =>
+  BLOCK_SPAN_LABEL[span] ?? `${span}/${GRID_COLS}`;
+// 가장 가까운 후보 span으로 스냅(동률이면 더 큰 쪽).
+export const snapSpan = (raw: number): number => {
+  const s = Math.min(GRID_COLS, Math.max(BLOCK_SPANS[0], Math.round(raw)));
+  let best = BLOCK_SPANS[0];
+  let bestDist = Infinity;
+  for (const cand of BLOCK_SPANS) {
+    const d = Math.abs(cand - s);
+    if (d < bestDist || (d === bestDist && cand > best)) {
+      bestDist = d;
+      best = cand;
+    }
+  }
+  return best;
+};
 
 export type ReportMode = "edit" | "preview";
 
@@ -356,7 +394,8 @@ export const DEFAULT_STATE = (): ReportState => ({
       interp:
         "부정 의견은 음식·교통 영역에 집중됐습니다. 특히 음식은 2위 대비 1.3배 많아 우선 개선 대상입니다.",
       opts: { q: true, detail: true, plan: false },
-      width: null,
+      span: 12,
+      newRow: true,
     },
     {
       uid: "b2",
@@ -364,7 +403,18 @@ export const DEFAULT_STATE = (): ReportState => ({
       title: null,
       interp: "",
       opts: { q: true, detail: false, plan: false },
-      width: 520,
+      span: 6,
+      newRow: true,
+    },
+    {
+      uid: "b3",
+      libId: "donut",
+      title: null,
+      interp: "",
+      opts: { q: true, detail: false, plan: false },
+      span: 6,
+      // b2와 같은 줄(나란히) — 명시적 side-by-side 예시.
+      newRow: false,
     },
   ],
 });
