@@ -528,6 +528,8 @@ class ChartReadyMetadataTests(unittest.TestCase):
         spec = self._compose_with_rows(rows, plan=plan)["display"]["chart_spec"]
         self.assertEqual(spec["kind"], "line")
         self.assertEqual(spec["event_date"], "2025-08-15")
+        # silverone 2026-06-11 — 기준선 라벨도 chart_spec 계약으로 내린다(generic 기본값).
+        self.assertEqual(spec["event_label"], "기준일")
 
     def test_line_event_date_from_gte_lt_window(self) -> None:
         # silverone 2026-06-10 — event_window_count는 end-exclusive 계약으로 gte+lt 두

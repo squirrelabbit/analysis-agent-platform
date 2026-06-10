@@ -3022,7 +3022,9 @@ components:
             view별 렌더 spec (silverone 2026-06-09). recommended_view에 따라 shape이
             다르며 `kind`로 구분한다. `recommended_view`가 `table`이면 null.
             - bar/line/diverging_bar: `{kind, x, y, series, [unit, sort]}`
-              (diverging_bar는 unit=건/%p/%, sort=abs_desc)
+              (diverging_bar는 unit=건/%p/%, sort=abs_desc). line은 날짜 window가
+              1개면 `event_date`(기준선 YYYY-MM-DD) + `event_label`(기준선 라벨,
+              기본 "기준일")을 추가로 내릴 수 있다.
             - metric: `{kind:"metric", a_value, b_value, delta_value, [delta_rate], unit}`
               — 값이 아니라 컬럼명 참조.
             - evidence: `{kind:"evidence", text, [sentiment], [chips], [id]}`
