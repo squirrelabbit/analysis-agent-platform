@@ -1,13 +1,13 @@
-import { Database, Check, Minus, Percent } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { StatCard } from "@/components/common/cards/StatCard";
+import { Database, Check, Minus, Percent, type LucideIcon } from "lucide-react";
+import { StatCard, type StatTone } from "@/components/common/cards/StatCard";
+import { BarRow } from "@/components/common/charts";
 import type { CleanBuild } from "../../models/build";
 import { useBuildVersion } from "../../hooks/build.query";
 import {
+  BuildMetaBar,
   BuildRunningBanner,
   BuildTabEmpty,
   BuildTabLoading,
-  BuildTimerChip,
   isBuildRunning,
 } from "../BuildStatusMeta";
 
@@ -46,6 +46,43 @@ export default function CleanTab() {
     (cleanReducedCharCount / sourceInputCharCount) * 100,
   );
 
+  // 처리 현황 카드 (값은 표시 문자열로 미리 포맷 — 건수는 천단위, 정제율은 %).
+  const stats: {
+    value: string;
+    label: string;
+    icon: LucideIcon;
+    tone: StatTone;
+    valueColor?: string;
+  }[] = [
+    {
+      value: inputRowCount.toLocaleString(),
+      label: "입력 행",
+      icon: Database,
+      tone: "neutral",
+    },
+    {
+      value: keptCount.toLocaleString(),
+      label: "유지",
+      icon: Check,
+      tone: "ok",
+      valueColor: "text-emerald-600",
+    },
+    {
+      value: droppedCount.toLocaleString(),
+      label: "제거",
+      icon: Minus,
+      tone: droppedCount > 0 ? "danger" : "muted",
+      valueColor: droppedCount > 0 ? "text-red-500" : undefined,
+    },
+    {
+      value: `${cleanedPct}%`,
+      label: "정제율",
+      icon: Percent,
+      tone: "blue",
+      valueColor: "text-blue-600",
+    },
+  ];
+
   const bars: {
     label: string;
     value: number;
@@ -75,41 +112,22 @@ export default function CleanTab() {
   return (
     <div className="space-y-5">
       {/* 메타 */}
-      <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-        <BuildTimerChip status={status} durationSeconds={durationSeconds} />
-      </div>
+      <BuildMetaBar status={status} durationSeconds={durationSeconds} />
 
       <BuildRunningBanner status={status} progress={progress} hasPrevious />
 
       {/* 처리 현황 */}
       <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
-        <StatCard
-          value={inputRowCount?.toLocaleString()}
-          label="입력 행"
-          icon={Database}
-          tone="neutral"
-        />
-        <StatCard
-          value={keptCount?.toLocaleString()}
-          label="유지"
-          icon={Check}
-          tone="ok"
-          valueColor="text-emerald-600"
-        />
-        <StatCard
-          value={droppedCount?.toLocaleString()}
-          label="제거"
-          icon={Minus}
-          tone={droppedCount > 0 ? "danger" : "muted"}
-          valueColor={droppedCount > 0 ? "text-red-500" : undefined}
-        />
-        <StatCard
-          value={`${cleanedPct}%`}
-          label="정제율"
-          icon={Percent}
-          tone="blue"
-          valueColor="text-blue-600"
-        />
+        {stats.map((s) => (
+          <StatCard
+            key={s.label}
+            value={s.value}
+            label={s.label}
+            icon={s.icon}
+            tone={s.tone}
+            valueColor={s.valueColor}
+          />
+        ))}
       </div>
 
       {/* 문서 수 변화 */}
@@ -122,26 +140,13 @@ export default function CleanTab() {
         </div>
         <div className="mt-5 flex flex-col gap-4">
           {bars.map(({ label, value, max, color }) => (
-            <div
+            <BarRow
               key={label}
-              className="grid grid-cols-[64px_1fr_auto] items-center gap-3.5"
-            >
-              <span className="text-[13px] font-semibold text-zinc-500">
-                {label}
-              </span>
-              <div className="h-3 overflow-hidden rounded-full bg-zinc-100">
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-all duration-700",
-                    color,
-                  )}
-                  style={{ width: `${Math.round((value / max) * 100)}%` }}
-                />
-              </div>
-              <span className="min-w-21.5 text-right text-[13.5px] font-bold tabular-nums text-zinc-800">
-                {value?.toLocaleString()}
-              </span>
-            </div>
+              label={label}
+              value={value}
+              max={max}
+              fillClassName={color}
+            />
           ))}
         </div>
       </div>

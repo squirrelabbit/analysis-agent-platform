@@ -3,7 +3,7 @@
 // 채팅에서 저장된 차트·표·원문 결과를 골라 블록으로 추가하고, 드래그 정렬·너비 조절·
 // 해석 문구·표시 옵션을 편집한 뒤 PDF/HTML로 내보낸다.
 // NOTE: LIBRARY와 영속(localStorage)은 디자인 샘플. 실제 결과 저장/조회·보고서 저장 API 연동 필요.
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText } from "lucide-react";
 import Breadcrumbs from "@/components/common/Breadcrumbs";
 import { cn } from "@/lib/utils";
@@ -24,6 +24,11 @@ import {
   REPORT_EXPORT_ROOT_ID,
 } from "../utils/exportReport";
 
+// 드롭 삽입 지점 표시 막대(컨테이너 기준 좌표). 같은 행 사이=세로(v), 행 경계=가로(h).
+type DropMarker =
+  | { orient: "v"; left: number; top: number; height: number }
+  | { orient: "h"; left: number; top: number; width: number };
+
 export default function ReportPage() {
   const { projectId } = useProjectParams();
   const { data: project } = useProjectDetail(projectId);
@@ -33,6 +38,7 @@ export default function ReportPage() {
   const libDragId = useRef<string | null>(null);
   const gripDragUid = useRef<string | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
+  const [dropMarker, setDropMarker] = useState<DropMarker | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastT = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 드래그 중 캔버스 가장자리 자동 스크롤.
@@ -53,20 +59,126 @@ export default function ReportPage() {
     toastT.current = setTimeout(() => setToast(null), 1900);
   };
 
-  const addBlock = (libId: string, atIdx?: number) => {
-    dispatch({ type: "addBlock", libId, atIdx });
+  const addBlock = (libId: string, atIdx?: number, sameRow = false) => {
+    dispatch({ type: "addBlock", libId, atIdx, newRow: !sameRow });
     showToast(`"${libById(libId)?.title}" 추가됨`);
   };
 
-  // 드롭 위치 계산 — 캔버스 블록들의 중앙선 기준 가장 가까운 삽입 인덱스.
-  const nearestDropIdx = (y: number): number => {
+  // 드롭 위치 계산 — 포인터에서 가장 가까운 카드 중심 기준 앞/뒤 삽입.
+  // 가로(나란히)·세로(쌓기) 플로우를 모두 대응(2D 거리).
+  const nearestDropIdx = (x: number, y: number): number => {
     const cards = blocksRef.current?.querySelectorAll("[data-card]");
-    if (!cards) return state.blocks.length;
-    for (let i = 0; i < cards.length; i++) {
-      const r = cards[i].getBoundingClientRect();
-      if (y < r.top + r.height / 2) return i;
+    if (!cards || cards.length === 0) return state.blocks.length;
+    let best = state.blocks.length;
+    let bestDist = Infinity;
+    cards.forEach((card, i) => {
+      const r = card.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const d = (x - cx) ** 2 + (y - cy) ** 2;
+      if (d < bestDist) {
+        bestDist = d;
+        best = x < cx ? i : i + 1;
+      }
+    });
+    return best;
+  };
+
+  // 삽입 위치 해석 → { idx, sameRow(나란히 여부), marker(표시 막대) }.
+  // sameRow=true면 세로 막대(앞 블록과 같은 줄), false면 가로선(새 줄).
+  const resolveDrop = (
+    x: number,
+    y: number,
+  ): { idx: number; sameRow: boolean; marker: DropMarker | null } => {
+    const idx = nearestDropIdx(x, y);
+    const cont = blocksRef.current;
+    const cards = cont?.querySelectorAll("[data-card]");
+    if (!cont || !cards || cards.length === 0)
+      return { idx, sameRow: false, marker: null };
+    const cr = cont.getBoundingClientRect();
+    const gap = 12;
+    const left = idx > 0 ? cards[idx - 1].getBoundingClientRect() : null;
+    const right = idx < cards.length ? cards[idx].getBoundingClientRect() : null;
+    // 두 카드가 세로로 겹치면 같은 행으로 간주.
+    const inSameRow = (a: DOMRect, b: DOMRect) =>
+      a.top < b.bottom - 1 && b.top < a.bottom - 1;
+    // 부분폭(전체 너비가 아님) + 오른쪽에 한 칸 들어갈 여유.
+    const partial = (r: DOMRect) => r.right - r.left < cr.width - 1;
+    const roomRight = (r: DOMRect) => r.right < cr.right - gap - 4;
+
+    if (left && right && inSameRow(left, right)) {
+      // 같은 행 두 카드 사이 → 세로 막대 + 나란히.
+      return {
+        idx,
+        sameRow: true,
+        marker: {
+          orient: "v",
+          left: (left.right + right.left) / 2 - cr.left,
+          top: Math.min(left.top, right.top) - cr.top,
+          height:
+            Math.max(left.bottom, right.bottom) - Math.min(left.top, right.top),
+        },
+      };
     }
-    return cards.length;
+    if (
+      left &&
+      partial(left) &&
+      roomRight(left) &&
+      y >= left.top &&
+      y <= left.bottom &&
+      x > left.left
+    ) {
+      // 부분폭 블록 행의 오른쪽 빈 공간에 드롭 → 그 블록 뒤에 나란히.
+      return {
+        idx,
+        sameRow: true,
+        marker: {
+          orient: "v",
+          left: left.right - cr.left + gap / 2,
+          top: left.top - cr.top,
+          height: left.height,
+        },
+      };
+    }
+    if (right) {
+      // 행 시작(위쪽 행과 경계) → 대상 행 위에 가로선 + 새 줄.
+      return {
+        idx,
+        sameRow: false,
+        marker: {
+          orient: "h",
+          left: 0,
+          top: right.top - cr.top - gap / 2,
+          width: cr.width,
+        },
+      };
+    }
+    if (left) {
+      // 맨 끝. 마지막 행이 꽉 찼으면 아래 가로선(새 줄), 남는 공간 있으면 오른쪽 세로 막대(나란히).
+      const rowFull = left.right >= cr.right - gap - 4;
+      if (rowFull)
+        return {
+          idx,
+          sameRow: false,
+          marker: {
+            orient: "h",
+            left: 0,
+            top: left.bottom - cr.top + gap / 2,
+            width: cr.width,
+          },
+        };
+      return {
+        idx,
+        sameRow: true,
+        marker: {
+          orient: "v",
+          left: left.right - cr.left + gap / 2,
+          top: left.top - cr.top,
+          height: left.height,
+        },
+      };
+    }
+    return { idx, sameRow: false, marker: null };
   };
 
   // 스크롤 컨테이너 위/아래 가장자리에 가까우면 매 프레임 자동 스크롤.
@@ -112,24 +224,28 @@ export default function ReportPage() {
     if (libDragId.current == null && gripDragUid.current == null) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = libDragId.current ? "copy" : "move";
-    setDropIdx(nearestDropIdx(e.clientY));
+    const { idx, marker } = resolveDrop(e.clientX, e.clientY);
+    setDropIdx(idx);
+    setDropMarker(marker);
     updateAutoScroll(e.clientY);
   };
 
   const onCanvasDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const idx = nearestDropIdx(e.clientY);
+    const { idx, sameRow } = resolveDrop(e.clientX, e.clientY);
     if (libDragId.current) {
-      addBlock(libDragId.current, idx);
+      addBlock(libDragId.current, idx, sameRow);
       libDragId.current = null;
     } else if (gripDragUid.current) {
       const from = state.blocks.findIndex(
         (b) => b.uid === gripDragUid.current,
       );
-      if (from >= 0) dispatch({ type: "moveBlock", from, to: idx });
+      if (from >= 0)
+        dispatch({ type: "moveBlock", from, to: idx, newRow: !sameRow });
       gripDragUid.current = null;
     }
     setDropIdx(null);
+    setDropMarker(null);
     stopAutoScroll();
   };
 
@@ -157,11 +273,6 @@ export default function ReportPage() {
     }, 220);
   };
 
-  const dropLine = (i: number) =>
-    dropIdx === i ? (
-      <div className="my-0.75 h-0.75 rounded-full bg-violet-600 shadow-[0_0_0_3px] shadow-violet-100" />
-    ) : null;
-
   return (
     <div className="flex h-full">
       {isEdit && (
@@ -174,6 +285,7 @@ export default function ReportPage() {
           onDragEnd={() => {
             libDragId.current = null;
             setDropIdx(null);
+            setDropMarker(null);
             stopAutoScroll();
           }}
         />
@@ -250,7 +362,7 @@ export default function ReportPage() {
 
               <div
                 ref={blocksRef}
-                className="mt-6 flex flex-col gap-3"
+                className="relative mt-6 grid grid-cols-12 items-start gap-3"
                 onDragOver={onCanvasDragOver}
                 onDrop={onCanvasDrop}
               >
@@ -261,39 +373,58 @@ export default function ReportPage() {
                     const lib = libById(b.libId);
                     if (!lib) return null;
                     return (
-                      <Fragment key={b.uid}>
-                        {dropLine(i)}
-                        <ReportBlock
-                          block={b}
-                          lib={lib}
-                          index={i}
-                          mode={state.mode}
-                          selected={state.selected === b.uid}
-                          sheetRef={blocksRef}
-                          onSelect={(uid) => dispatch({ type: "select", uid })}
-                          onEdit={(uid) => dispatch({ type: "select", uid })}
-                          onGripDragStart={(uid) => {
-                            gripDragUid.current = uid;
-                          }}
-                          onGripDragEnd={() => {
-                            gripDragUid.current = null;
-                            setDropIdx(null);
-                            stopAutoScroll();
-                          }}
-                          onSetWidth={(uid, width) =>
-                            dispatch({ type: "setWidth", uid, width })
-                          }
-                        />
-                      </Fragment>
+                      <ReportBlock
+                        key={b.uid}
+                        block={b}
+                        lib={lib}
+                        index={i}
+                        mode={state.mode}
+                        selected={state.selected === b.uid}
+                        sheetRef={blocksRef}
+                        onEdit={(uid) => dispatch({ type: "select", uid })}
+                        onGripDragStart={(uid) => {
+                          gripDragUid.current = uid;
+                        }}
+                        onGripDragEnd={() => {
+                          gripDragUid.current = null;
+                          setDropIdx(null);
+                          setDropMarker(null);
+                          stopAutoScroll();
+                        }}
+                        onSetSpan={(uid, span) =>
+                          dispatch({ type: "setSpan", uid, span })
+                        }
+                      />
                     );
                   })
                 )}
-                {state.blocks.length > 0 && dropLine(state.blocks.length)}
+
+                {/* 드롭 삽입 위치 막대(그리드 위 absolute) — 세로/가로 자동 */}
+                {dropMarker &&
+                  (dropMarker.orient === "v" ? (
+                    <div
+                      className="pointer-events-none absolute z-20 w-0.75 -translate-x-1/2 rounded-full bg-violet-600 shadow-[0_0_0_3px] shadow-violet-100"
+                      style={{
+                        left: dropMarker.left,
+                        top: dropMarker.top,
+                        height: dropMarker.height,
+                      }}
+                    />
+                  ) : (
+                    <div
+                      className="pointer-events-none absolute z-20 h-0.75 -translate-y-1/2 rounded-full bg-violet-600 shadow-[0_0_0_3px] shadow-violet-100"
+                      style={{
+                        left: dropMarker.left,
+                        top: dropMarker.top,
+                        width: dropMarker.width,
+                      }}
+                    />
+                  ))}
 
                 {isEdit && (
                   <div
                     className={cn(
-                      "mt-2 rounded-2xl border-2 border-dashed px-6 py-7 text-center text-sm font-semibold transition-colors",
+                      "col-span-full rounded-2xl border-2 border-dashed px-6 py-7 text-center text-sm font-semibold transition-colors",
                       dropIdx === state.blocks.length
                         ? "border-violet-500 bg-violet-50 text-violet-700"
                         : "border-zinc-300 text-zinc-400",
@@ -324,8 +455,8 @@ export default function ReportPage() {
           onToggleOpt={(key) =>
             dispatch({ type: "toggleOpt", uid: selectedBlock.uid, key })
           }
-          onResetWidth={() =>
-            dispatch({ type: "setWidth", uid: selectedBlock.uid, width: null })
+          onResetSpan={() =>
+            dispatch({ type: "setSpan", uid: selectedBlock.uid, span: 6 })
           }
           onDelete={() => {
             dispatch({ type: "deleteBlock", uid: selectedBlock.uid });
@@ -346,7 +477,7 @@ export default function ReportPage() {
 
 function EmptyReport() {
   return (
-    <div className="py-15 text-center text-zinc-400">
+    <div className="col-span-full py-15 text-center text-zinc-400">
       <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl border border-zinc-100 bg-white shadow-sm">
         <FileText className="h-6.5 w-6.5 text-zinc-400" />
       </div>
