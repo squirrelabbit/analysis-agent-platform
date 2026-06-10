@@ -48,12 +48,22 @@ class ColumnSpec:
 
 @dataclass(frozen=True)
 class TableSchema:
-    """standard input table 정의. plan step의 ``input``에서 이름으로 직접 참조."""
+    """standard input table 정의. plan step의 ``input``에서 이름으로 직접 참조.
+
+    silverone 2026-06-10 — 테이블 *계약* 메타데이터(grain/coverage/counting_unit/
+    use_for/avoid_for)를 추가. planner가 "게시물 수=docs / 절 수=clauses / 키워드
+    언급=clause_keywords"를 키워드 규칙 하드코딩 없이 **스키마 의미**로 고르게 한다.
+    row grain과 coverage를 prompt에 명시하는 게 핵심."""
 
     name: str
     description: str
     columns: tuple[ColumnSpec, ...]
     dynamic_columns: bool = False  # True면 dataset마다 추가 컬럼이 있음 (runtime 주입)
+    grain: str = ""          # 한 행이 무엇인지 (row grain)
+    coverage: str = ""       # 어떤 모집단을 담는지/안 담는지
+    counting_unit: str = ""  # COUNT(*)가 세는 단위
+    use_for: str = ""        # 적합한 질문 유형
+    avoid_for: str = ""      # 부적합한 질문 유형(흔한 오용)
 
 
 @dataclass(frozen=True)
@@ -73,6 +83,11 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
     "docs": TableSchema(
         name="docs",
         description="clean 단계 결과. doc 단위. dataset별 원본 컬럼이 추가로 보존된다.",
+        grain="한 행 = 원본 문서/게시물 1건",
+        coverage="clean된 전체 입력 문서/행 (모든 source 문서)",
+        counting_unit="document(문서/게시물)",
+        use_for="문서/게시물 수, 날짜별 추이(created_at), source 메타 분석",
+        avoid_for="",
         columns=(
             ColumnSpec("doc_id", "string", "doc 고유 식별자"),
             ColumnSpec("row_id", "string", "source row id (dataset_version_id 포함)"),
@@ -92,7 +107,12 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
     # 추가 시점에는 lock test도 같이 갱신.
     "clauses": TableSchema(
         name="clauses",
-        description="clause_label 단계 결과. doc 단위 LLOA 호출로 절 분리 + sentiment + aspect 라벨링.",
+        description="clause_label 단계 결과. doc 단위 LLOA 호출로 절 분리 + sentiment + aspect 라벨링. 진성/혼합(genuine_review/mixed) 문서에서 추출된 절만 포함하며 전체 문서가 아니다.",
+        grain="한 행 = 진성/혼합 문서에서 추출된 절(문장) 1개",
+        coverage="clause_label이 만든 절만 — non_review 문서는 미포함. 전체 source 문서가 아니다",
+        counting_unit="clause/mention(절·언급)",
+        use_for="sentiment, aspect, 절 단위 근거(evidence), 언급 수",
+        avoid_for="전체 문서/게시물 수 (문서 수는 docs를 쓴다)",
         columns=(
             ColumnSpec("doc_id", "string", "docs.doc_id와 join 가능"),
             # clause_label artifact에는 ``clause_id``가 없다. executor가 적재 시
@@ -110,6 +130,11 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
     "genuineness": TableSchema(
         name="genuineness",
         description="doc_genuineness 단계 결과. doc-level 3-tier 진성 분류.",
+        grain="한 행 = 원본 문서/게시물 1건",
+        coverage="진성 평가된 문서",
+        counting_unit="document(문서/게시물)",
+        use_for="genuine/non_review 필터링, 문서 단위 진성 분포",
+        avoid_for="",
         columns=(
             ColumnSpec("doc_id", "string", "docs.doc_id와 join 가능"),
             ColumnSpec("genuineness", "string", "genuine_review | mixed | non_review"),
@@ -124,7 +149,12 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
     # 때만 user 영역에서 노출(render_reserved_extra_tables). silverone 2026-06-10.
     "clause_keywords": TableSchema(
         name="clause_keywords",
-        description="clause_keywords 단계 결과. 절-키워드 long-format(한 행 = 한 절의 한 키워드). 키워드 집계/순위용.",
+        description="clause_keywords 단계 결과. 절-키워드 long-format(한 행 = 한 절의 한 키워드). 키워드 언급량 기준이며 문서 수가 아니다 — 문서 수가 필요하면 COUNT(DISTINCT doc_id)를 쓴다.",
+        grain="한 행 = 한 절에서 추출된 키워드 1개(occurrence)",
+        coverage="키워드가 추출된 절만 (clauses의 부분집합)",
+        counting_unit="keyword occurrence(키워드 언급)",
+        use_for="키워드 빈도/순위, 키워드 근거, aspect·sentiment별 키워드",
+        avoid_for="문서/게시물 수 (필요 시 COUNT(DISTINCT doc_id))",
         columns=(
             ColumnSpec("doc_id", "string", "docs.doc_id와 join 가능"),
             ColumnSpec("clause_id", "string", "clauses.clause_id와 동일 규칙 — 절 단위 식별자"),

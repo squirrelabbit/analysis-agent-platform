@@ -315,9 +315,27 @@ def _render_standard_table(table: TableSchema) -> str:
         "",
         table.description,
         "",
+    ]
+    # silverone 2026-06-10 — 테이블 계약(row grain/coverage/use_for 등). planner가
+    # 같은 질문에도 의미가 다른 table(docs vs clauses vs clause_keywords)을 올바로
+    # 고르게 한다. 키워드 규칙을 본문에 하드코딩하지 않고 스키마로 전달.
+    contract = [
+        ("grain", table.grain),
+        ("coverage", table.coverage),
+        ("counting_unit", table.counting_unit),
+        ("use_for", table.use_for),
+        ("avoid_for", table.avoid_for),
+    ]
+    has_contract = any(value for _, value in contract)
+    for label, value in contract:
+        if value:
+            lines.append(f"- {label}: {value}")
+    if has_contract:
+        lines.append("")
+    lines.extend([
         "| column | type | description |",
         "| --- | --- | --- |",
-    ]
+    ])
     for column in table.columns:
         lines.append(_row(column.name, column.type, column.description))
     return "\n".join(lines)
