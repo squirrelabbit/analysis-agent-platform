@@ -96,6 +96,49 @@ export interface ClauseSummary {
   total: number;
 }
 
+// 감성별 키워드 한 건 (긍/부정 랭킹·aspect별 키워드 공용).
+export interface KeywordSentiment {
+  keyword: string;
+  count: number;
+  weight: number;
+}
+
+export interface KeywordItem {
+  keyword: string;
+  count: number;
+  documentCount: number;
+  dominantSentiment: string;
+  dominantSentimentRatio: number;
+  topAspect: string;
+  representativeClause: string;
+}
+
+// 선택 aspect의 긍/부정 키워드 묶음.
+export interface AspectSentimentKeywords {
+  positive: KeywordSentiment[];
+  negative: KeywordSentiment[];
+}
+
+export interface KeywordSummary {
+  totalKeywordCount: number;
+  uniqueKeywordCount: number;
+  clauseCount: number;
+  // aspect key(snake_case, taxonomy 기반) → 건수. ClauseSummary.aspect와 동일 기준.
+  aspect: Record<string, number>;
+  sentiment: {
+    positive: number;
+    negative: number;
+    neutral: number;
+  };
+  topKeywordsPositive: Record<string, string>[];
+  topKeywordsNegative: Record<string, string>[];
+  // aspect key → 해당 aspect의 긍/부정 키워드.
+  aspectSentimentKeywords: Record<string, AspectSentimentKeywords>;
+  selectedAspect: string;
+  selectedAspectTotal: string;
+  selectedAspectSentiment: Record<string, number>;
+}
+
 export type CleanBuild = BuildBase<"clean", CleanSummary>;
 export type GenuinenessBuild = BuildBase<
   "doc_genuineness",
@@ -104,8 +147,14 @@ export type GenuinenessBuild = BuildBase<
   PaginatedSummary<GenuinenessItem>;
 export type ClauseBuild = BuildBase<"clause_label", ClauseSummary> &
   PaginatedSummary<ClauseItem>;
+export type KeywordBuild = BuildBase<"clause_keywords", KeywordSummary> &
+  PaginatedSummary<KeywordItem>;
 
-export type Build = CleanBuild | GenuinenessBuild | ClauseBuild;
+export type Build =
+  | CleanBuild
+  | GenuinenessBuild
+  | ClauseBuild
+  | KeywordBuild;
 
 export interface VersionBuild<T> {
   status: string;
@@ -116,3 +165,4 @@ export interface VersionBuild<T> {
 export type CleanVersionBuild = VersionBuild<CleanSummary>;
 export type GenuinenessVersionBuild = VersionBuild<GenuinenessSummary>;
 export type ClauseVersionBuild = VersionBuild<ClauseSummary>;
+export type KeywordVersionBuild = VersionBuild<KeywordSummary>;

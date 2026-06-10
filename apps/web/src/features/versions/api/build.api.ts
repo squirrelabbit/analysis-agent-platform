@@ -7,6 +7,8 @@ export interface BuildViewParams {
   aspect?: string;
   sentiment?: string;
   genuineness?: string;
+  // 키워드/절 부분일치 검색 (clause_keywords 등).
+  q?: string;
 }
 
 export const buildApi = {

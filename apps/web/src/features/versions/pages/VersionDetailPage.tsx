@@ -30,7 +30,7 @@ export default function VersionDetailPage() {
 
   const current = versions.find((v) => v.id === versionId);
 
-  const builds = ["clean", "doc_genuineness", "clause_label", 'keyword'] as BuildJobType[];
+  const builds = ["clean", "doc_genuineness", "clause_label", 'clause_keywords'] as BuildJobType[];
 
   return (
     <div className="p-8">
@@ -119,7 +119,7 @@ export default function VersionDetailPage() {
           <ClauseTab />
         </TabsContent>
         <TabsContent
-          value="keyword"
+          value="clause_keywords"
           className="animate-in fade-in duration-300"
         >
           <KeywordTab />

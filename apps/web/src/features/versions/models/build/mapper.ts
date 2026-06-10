@@ -11,6 +11,11 @@ import type {
   GenuinenessItemDto,
   GenuinenessSummaryDto,
   GenuinenessVersionBuildDto,
+  KeywordBuildResponse,
+  KeywordItemDto,
+  KeywordSentimentDto,
+  KeywordSummaryDto,
+  KeywordVersionBuildDto,
   ProgressDto,
 } from "./dto";
 import type {
@@ -26,6 +31,11 @@ import type {
   GenuinenessItem,
   GenuinenessSummary,
   GenuinenessVersionBuild,
+  KeywordBuild,
+  KeywordItem,
+  KeywordSentiment,
+  KeywordSummary,
+  KeywordVersionBuild,
   ProgressType,
 } from "./model";
 
@@ -40,9 +50,11 @@ export const mapProgress = (dto: ProgressDto): ProgressType => ({
 
 // applied snake_case → camelCase. raw model(snapshot)과 화면 표시명(응답 시점 env)을
 // 함께 매핑한다. 옛 응답엔 model/model_display_name이 없을 수 있어 optional.
-const mapApplied = (
-  dto?: { prompt_version?: string; model?: string; model_display_name?: string },
-): { promptVersion: string; model?: string; modelDisplayName?: string } => ({
+const mapApplied = (dto?: {
+  prompt_version?: string;
+  model?: string;
+  model_display_name?: string;
+}): { promptVersion: string; model?: string; modelDisplayName?: string } => ({
   promptVersion: dto?.prompt_version ?? "",
   model: dto?.model,
   modelDisplayName: dto?.model_display_name,
@@ -107,6 +119,60 @@ export const mapClauseSummary = (dto: ClauseSummaryDto): ClauseSummary => ({
   total: dto.total ?? 0,
 });
 
+// 백엔드가 count/weight를 문자열로 보내므로 number로 변환.
+const mapKeywordSentiment = (dto: KeywordSentimentDto): KeywordSentiment => ({
+  keyword: dto.keyword,
+  count: Number(dto.count ?? 0),
+  weight: Number(dto.weight ?? 0),
+});
+
+const mapKeywordItem = (dto: KeywordItemDto): KeywordItem => ({
+  keyword: dto.keyword,
+  count: Number(dto.count ?? 0),
+  documentCount: Number(dto.document_count ?? 0),
+  dominantSentiment: dto.dominant_sentiment,
+  dominantSentimentRatio: Number(dto.dominant_sentiment_ratio ?? 0),
+  topAspect: dto.top_aspect,
+  representativeClause: dto.representative_clause,
+});
+
+export const mapKeywordSummary = (dto: KeywordSummaryDto): KeywordSummary => ({
+  totalKeywordCount: Number(dto.total_keyword_count ?? 0),
+  uniqueKeywordCount: Number(dto.unique_keyword_count ?? 0),
+  clauseCount: Number(dto.clause_count ?? 0),
+  // aspect key는 taxonomy(config) 기반이므로 snake_case 그대로 보존 (ClauseSummary와 동일).
+  aspect: Object.fromEntries(
+    Object.entries(dto.aspect ?? {}).map(([key, value]) => [
+      key,
+      Number(value ?? 0),
+    ]),
+  ),
+  sentiment: {
+    positive: Number(dto.sentiment?.positive ?? 0),
+    negative: Number(dto.sentiment?.negative ?? 0),
+    neutral: Number(dto.sentiment?.neutral ?? 0),
+  },
+  topKeywordsPositive: dto.top_keywords_positive ?? [],
+  topKeywordsNegative: dto.top_keywords_negative ?? [],
+  aspectSentimentKeywords: Object.fromEntries(
+    Object.entries(dto.aspect_sentiment_keywords ?? {}).map(([key, group]) => [
+      key,
+      {
+        positive: (group.positive ?? []).map(mapKeywordSentiment),
+        negative: (group.negative ?? []).map(mapKeywordSentiment),
+      },
+    ]),
+  ),
+  selectedAspect: dto.selected_aspect ?? "",
+  selectedAspectTotal: dto.selected_aspect_total ?? "",
+  selectedAspectSentiment: Object.fromEntries(
+    Object.entries(dto.selected_aspect_sentiment ?? {}).map(([key, value]) => [
+      key,
+      Number(value ?? 0),
+    ]),
+  ),
+});
+
 export const mapCleanBuild = (dto: CleanBuildResponse): CleanBuild => ({
   buildType: dto.build_type,
   status: dto.status,
@@ -136,9 +202,7 @@ export const mapGenuinenessBuild = (
   items: dto.items?.map(mapGenuinenessItem) ?? [],
 });
 
-export const mapClauseLabelBuild = (
-  dto: ClauseBuildResponse,
-): ClauseBuild => ({
+export const mapClauseLabelBuild = (dto: ClauseBuildResponse): ClauseBuild => ({
   buildType: dto.build_type,
   status: dto.status,
   jobId: dto.job_id,
@@ -153,6 +217,21 @@ export const mapClauseLabelBuild = (
   items: dto.items?.map(mapClauseItem) ?? [],
 });
 
+export const mapKeywordBuild = (dto: KeywordBuildResponse): KeywordBuild => ({
+  buildType: dto.build_type,
+  status: dto.status,
+  jobId: dto.job_id,
+  startedAt: dto.started_at ?? "",
+  completedAt: dto.completed_at ?? "",
+  durationSeconds: dto.duration_seconds ?? 0,
+  errorMessage: dto.error_message ?? "",
+  progress: dto.progress ? mapProgress(dto.progress) : undefined,
+  summary: dto.summary ? mapKeywordSummary(dto.summary) : undefined,
+  pagination: dto.pagination,
+  applied: mapApplied(dto.applied),
+  items: dto.items?.map(mapKeywordItem) ?? [],
+});
+
 export const mapBuild = (dto: BuildResponse): Build => {
   switch (dto.build_type) {
     case "clean":
@@ -161,6 +240,8 @@ export const mapBuild = (dto: BuildResponse): Build => {
       return mapGenuinenessBuild(dto);
     case "clause_label":
       return mapClauseLabelBuild(dto);
+    case "clause_keywords":
+      return mapKeywordBuild(dto);
   }
 };
 
@@ -186,4 +267,12 @@ export const mapClauseLabelVersionBuild = (
   status: dto.status,
   completedAt: dto.completed_at,
   summary: dto.summary ? mapClauseSummary(dto.summary) : undefined,
+});
+
+export const mapKeywordVersionBuild = (
+  dto: KeywordVersionBuildDto,
+): KeywordVersionBuild => ({
+  status: dto.status,
+  completedAt: dto.completed_at ?? "",
+  summary: dto.summary ? mapKeywordSummary(dto.summary) : undefined,
 });

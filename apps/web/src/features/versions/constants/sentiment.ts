@@ -27,3 +27,10 @@ export const SENTIMENT_BADGE: Record<Sentiment, string> = {
   neutral: "bg-zinc-100 text-zinc-500",
   negative: "bg-red-50 text-red-600",
 };
+
+export const SENTIMENT_FILTER_OPTIONS: { label: string; value: string }[] = [
+  { label: "전체", value: "" },
+  { label: "긍정", value: "positive" },
+  { label: "중립", value: "neutral" },
+  { label: "부정", value: "negative" },
+];

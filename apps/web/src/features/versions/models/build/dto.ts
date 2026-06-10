@@ -2,6 +2,12 @@ import type { Pagination } from "@/shared/models/common";
 import type { BuildJobType } from "@/shared/types/common";
 import type { AspectSentiment } from "./model";
 
+// 감성별 키워드 raw. 백엔드가 count/weight를 문자열로 보내므로 mapper에서 number 변환.
+export interface KeywordSentimentDto {
+  keyword: string;
+  count: string | number;
+  weight: string | number;
+}
 
 export interface ProgressDto {
   percent: number;
@@ -29,7 +35,11 @@ export interface PaginatedSummaryDto<T> {
   pagination: Pagination;
   // model: 빌드 당시 raw model id snapshot. model_display_name: control-plane이 응답
   // 시점에 env로 입히는 화면 표시명(불일치/미설정 시 생략). 옛 응답엔 없을 수 있어 optional.
-  applied: { prompt_version: string; model?: string; model_display_name?: string };
+  applied: {
+    prompt_version: string;
+    model?: string;
+    model_display_name?: string;
+  };
 }
 
 export interface CleanSummaryDto {
@@ -73,7 +83,7 @@ export interface ClauseItemDto {
 
 export interface ClauseSummaryDto {
   aspect: Record<string, number>;
-  aspect_sentiment: Record<string, AspectSentiment>
+  aspect_sentiment: Record<string, AspectSentiment>;
   sentiment: {
     positive?: number;
     negative?: number;
@@ -82,40 +92,72 @@ export interface ClauseSummaryDto {
   total: number;
 }
 
-/**
-| Aspect             | 설명 |
-|--------------------|------|
-| show_program       | 공연, 퍼레이드, 드론쇼, 불꽃놀이, 버스킹 등 관람형 콘텐츠에 대한 평가 |
-| experience_booth   | 체험 부스, 만들기, 스탬프 투어 등 참여형 프로그램에 대한 평가 |
-| ambiance_scenery   | 축제장의 분위기, 조명, 포토존, 야경 등 감성적 환경 요소에 대한 평가 | 
-| food               | 음식 및 음료의 맛, 메뉴 구성, 다양성에 대한 평가 (가격 제외) |
-| price_cost         | 음식, 체험, 기념품 등 축제 내 가격 및 가성비에 대한 평가 | 
-| facility_crowd     | 화장실, 쉼터, 청결도, 인파, 혼잡도 등 편의시설 및 환경에 대한 평가 |
-| access_traffic     | 교통, 주차, 셔틀버스 등 축제장 접근성에 대한 평가 | 
-| operation_service  | 스태프, 안내, 운영 방식, 기획력, 결제 시스템 등 운영 전반에 대한 평가 |
-| etc                | 축제와 관련되어 있으나 위 8개 항목에 해당하지 않는 것 | 
- */
 
+export interface KeywordItemDto {
+  keyword: string;
+  count: number;
+  document_count: number;
+  dominant_sentiment: string;
+  dominant_sentiment_ratio: number;
+  top_aspect: string;
+  representative_clause: string;
+}
 
-/**
-- positive : 긍정적 감정 및 평가
-- negative : 부정적 감정 및 평가
-- neutral  : 감정 없는 사실 서술
- */
+export interface KeywordSummaryDto {
+  total_keyword_count: number;
+  unique_keyword_count: number;
+  clause_count: number;
+
+  aspect: Record<string, number>;
+  sentiment: {
+    positive?: number;
+    negative?: number;
+    neutral?: number;
+  };
+
+  top_keywords_positive: Record<string, string>[];
+  top_keywords_negative: Record<string, string>[];
+
+  aspect_sentiment_keywords: Record<
+    string,
+    { positive: KeywordSentimentDto[]; negative: KeywordSentimentDto[] }
+  >;
+
+  selected_aspect: string;
+  selected_aspect_total: string;
+  selected_aspect_sentiment: Record<string, number>;
+}
 
 export type CleanBuildResponse = BuildBaseDto<"clean", CleanSummaryDto>;
-export type GenuinenessBuildResponse = BuildBaseDto<"doc_genuineness", GenuinenessSummaryDto> & PaginatedSummaryDto<GenuinenessItemDto>;
-export type ClauseBuildResponse = BuildBaseDto<"clause_label", ClauseSummaryDto> & PaginatedSummaryDto<ClauseItemDto>;
+export type GenuinenessBuildResponse = BuildBaseDto<
+  "doc_genuineness",
+  GenuinenessSummaryDto
+> &
+  PaginatedSummaryDto<GenuinenessItemDto>;
+export type ClauseBuildResponse = BuildBaseDto<
+  "clause_label",
+  ClauseSummaryDto
+> &
+  PaginatedSummaryDto<ClauseItemDto>;
+export type KeywordBuildResponse = BuildBaseDto<
+  "clause_keywords",
+  KeywordSummaryDto
+> &
+  PaginatedSummaryDto<KeywordItemDto>;
 
-export type BuildResponse = CleanBuildResponse | GenuinenessBuildResponse | ClauseBuildResponse;
-
+export type BuildResponse =
+  | CleanBuildResponse
+  | GenuinenessBuildResponse
+  | ClauseBuildResponse
+  | KeywordBuildResponse;
 
 export interface VersionBuildDto<T> {
-  status: string,
-  completed_at?: string,
-  summary?: T
+  status: string;
+  completed_at?: string;
+  summary?: T;
 }
 
 export type CleanVersionBuildDto = VersionBuildDto<CleanSummaryDto>;
 export type GenuinenessVersionBuildDto = VersionBuildDto<GenuinenessSummaryDto>;
 export type ClauseVersionBuildDto = VersionBuildDto<ClauseSummaryDto>;
+export type KeywordVersionBuildDto = VersionBuildDto<KeywordSummaryDto>;
