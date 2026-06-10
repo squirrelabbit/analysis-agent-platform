@@ -66,6 +66,57 @@ const PAGE_SIZE = 10;
 // 나머지는 아래 "키워드 상세" 표에서 전체 확인.
 const ASPECT_KEYWORD_LIMIT = 5;
 
+// ── 워드클라우드 ──────────────────────────────────────────────
+// 글자 크기 = 출현 빈도 · 색 = 대표 감성.
+const CLOUD_MAX_WORDS = 26; // 너무 많으면 덩어리가 흐트러지므로 상위만.
+const CLOUD_MIN_PX = 16;
+const CLOUD_MAX_PX = 52;
+// 가운데 줄에 큰 단어가 모이고 위·아래로 작은 단어가 퍼지도록 한 행별 단어 수(top→bottom).
+const CLOUD_ROW_PLAN = [4, 5, 4, 3, 4, 5, 3];
+
+const CLOUD_COLOR: Record<Sentiment, string> = {
+  positive: "text-emerald-500",
+  neutral: "text-zinc-400",
+  negative: "text-red-500",
+};
+
+type CloudWord = KeywordTableItem & { px: number };
+
+// 출현수 내림차순 items를 타원형 실루엣 행 배열로 변환.
+// 중앙 행부터 큰 단어를 채워 가운데가 크고 위·아래로 작아지는 덩어리를 만든다.
+function buildCloud(items: KeywordTableItem[]): CloudWord[][] {
+  const words = items.slice(0, CLOUD_MAX_WORDS);
+  if (words.length === 0) return [];
+
+  // sqrt 스케일로 빈도 → 글자 크기(px). 큰 차이를 완만하게.
+  const counts = words.map((w) => w.count);
+  const sqMax = Math.sqrt(Math.max(...counts));
+  const sqMin = Math.sqrt(Math.min(...counts));
+  const sized: CloudWord[] = words.map((w) => {
+    const t = sqMax === sqMin ? 1 : (Math.sqrt(w.count) - sqMin) / (sqMax - sqMin);
+    return { ...w, px: Math.round(CLOUD_MIN_PX + t * (CLOUD_MAX_PX - CLOUD_MIN_PX)) };
+  });
+
+  // 중앙 행부터 채우는 순서 (가운데와의 거리 오름차순).
+  const rowCount = CLOUD_ROW_PLAN.length;
+  const mid = (rowCount - 1) / 2;
+  const fillOrder = [...Array(rowCount).keys()].sort(
+    (a, b) => Math.abs(a - mid) - Math.abs(b - mid),
+  );
+
+  const rows: CloudWord[][] = Array.from({ length: rowCount }, () => []);
+  let idx = 0;
+  for (const row of fillOrder) {
+    const slice = sized.slice(idx, idx + CLOUD_ROW_PLAN[row]);
+    idx += slice.length;
+    // 행 안에서도 큰 단어가 가운데 오도록 center-out 배치.
+    const centered: CloudWord[] = [];
+    slice.forEach((w, i) => (i % 2 === 0 ? centered.push(w) : centered.unshift(w)));
+    rows[row] = centered;
+  }
+  return rows.filter((r) => r.length > 0);
+}
+
 // 칭찬/불만 랭킹 한 컬럼. tone에 따라 색만 다르다.
 function RankList({
   title,
@@ -144,6 +195,9 @@ export function KeywordTab() {
       ),
     [items, sentiment, search],
   );
+
+  // 워드클라우드 행 배열 (출현수 내림차순 items 기준).
+  const cloudRows = useMemo(() => buildCloud(items), [items]);
 
   if (isLoading) {
     return (
@@ -470,6 +524,49 @@ export function KeywordTab() {
           items={negativeTop}
           tone="negative"
         />
+      </div>
+
+      {/* 워드클라우드 — 글자 크기 = 출현 빈도 · 색 = 대표 감성 */}
+      <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
+        <div className="mb-1 flex items-center justify-between">
+          <div className="text-[15px] font-bold">워드클라우드</div>
+          <div className="flex items-center gap-3 text-[11px] font-semibold">
+            <span className="inline-flex items-center gap-1 text-emerald-600">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />긍정
+            </span>
+            <span className="inline-flex items-center gap-1 text-zinc-400">
+              <span className="h-2 w-2 rounded-full bg-zinc-300" />중립
+            </span>
+            <span className="inline-flex items-center gap-1 text-red-500">
+              <span className="h-2 w-2 rounded-full bg-red-500" />부정
+            </span>
+          </div>
+        </div>
+        <div className="flex flex-col items-center justify-center gap-y-1.5 rounded-2xl bg-zinc-50/60 px-6 py-10 leading-none">
+          {cloudRows.map((row, ri) => (
+            <div
+              key={ri}
+              className="flex flex-wrap items-baseline justify-center gap-x-5"
+            >
+              {row.map((w) => (
+                <span
+                  key={w.term}
+                  className={cn(
+                    CLOUD_COLOR[w.sentiment],
+                    w.px >= 40
+                      ? "font-extrabold"
+                      : w.px >= 24
+                        ? "font-bold"
+                        : "font-semibold",
+                  )}
+                  style={{ fontSize: `${w.px}px` }}
+                >
+                  {w.term}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* 상세 테이블 — 출현수 내림차순 */}
