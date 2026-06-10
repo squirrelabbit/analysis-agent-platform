@@ -75,8 +75,8 @@ export const mapGenuinenessSummary = (
   // pagination:{},
   // applied: { promptVersion: dto.applied.prompt_version ?? "" },
   genuineness: {
-    genuineReview: dto.genuineness?.genuine_review ?? 0,
-    nonReview: dto.genuineness?.non_review ?? 0,
+    genuine_review: dto.genuineness?.genuine_review ?? 0,
+    non_review: dto.genuineness?.non_review ?? 0,
     mixed: dto.genuineness?.mixed ?? 0,
     uncertain: dto.genuineness?.uncertain ?? 0,
   },
