@@ -15,6 +15,13 @@ export interface GenuinenessItemDto {
   reason: string;
   source: string;
   cleaned_text: string;
+  // silverone 2026-06-11 — 수동 보정 overlay. genuineness/reason은 effective 값,
+  // 아래는 원본/보정 구분용(보정된 행에만).
+  original_genuineness?: string;
+  original_reason?: string;
+  override_genuineness?: string;
+  override_reason?: string;
+  is_overridden?: boolean;
 }
 
 export interface GenuinenessSummaryDto {
@@ -25,6 +32,9 @@ export interface GenuinenessSummaryDto {
     uncertain?: number;
   };
   total: number;
+  // silverone 2026-06-11 — 수동 보정 메타.
+  override_count?: number;
+  downstream_rerun_recommended?: boolean;
 }
 
 export type GenuinenessBuildResponse = BuildBaseDto<
@@ -42,6 +52,12 @@ export interface GenuinenessItem {
   reason: string;
   source: string;
   cleanedText: string;
+  // silverone 2026-06-11 — 수동 보정 overlay (보정된 행에만).
+  originalGenuineness?: string;
+  originalReason?: string;
+  overrideGenuineness?: string;
+  overrideReason?: string;
+  isOverridden?: boolean;
 }
 
 export interface GenuinenessSummary {
@@ -52,6 +68,9 @@ export interface GenuinenessSummary {
     mixed: number;
   };
   total: number;
+  // silverone 2026-06-11 — 수동 보정 메타.
+  overrideCount?: number;
+  downstreamRerunRecommended?: boolean;
 }
 
 export type GenuinenessBuild = BuildBase<
@@ -68,6 +87,11 @@ const mapGenuinenessItem = (dto: GenuinenessItemDto): GenuinenessItem => ({
   reason: dto.reason,
   source: dto.source,
   cleanedText: dto.cleaned_text,
+  originalGenuineness: dto.original_genuineness,
+  originalReason: dto.original_reason,
+  overrideGenuineness: dto.override_genuineness,
+  overrideReason: dto.override_reason,
+  isOverridden: dto.is_overridden,
 });
 
 export const mapGenuinenessSummary = (
@@ -80,6 +104,8 @@ export const mapGenuinenessSummary = (
     uncertain: dto.genuineness?.uncertain ?? 0,
   },
   total: dto.total ?? 0,
+  overrideCount: dto.override_count,
+  downstreamRerunRecommended: dto.downstream_rerun_recommended,
 });
 
 export const mapGenuinenessBuild = (

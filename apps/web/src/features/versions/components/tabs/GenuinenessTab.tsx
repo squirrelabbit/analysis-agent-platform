@@ -1,6 +1,16 @@
-import { Check, FileText, Minus, X, type LucideIcon } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  FileText,
+  Loader2,
+  Minus,
+  Pencil,
+  RotateCcw,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import type { GenuinenessBuild, GenuinenessItem } from "../../models/build";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { StatCard, type StatTone } from "@/components/common/cards/StatCard";
 import { DonutChart, DistributionLegend } from "@/components/common/charts";
@@ -12,10 +22,18 @@ import {
   type Genuineness,
 } from "@/features/versions/constants/genuineness";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useBuildVersion } from "../../hooks/build.query";
+import { useGenuinenessOverride } from "../../hooks/build.mutation";
 import {
   DataTable,
-  DocIdCell,
   ExpandableTextCell,
   FilterPills,
   type Column,
@@ -37,49 +55,255 @@ const FILTER_OPTIONS: { label: string; value: string }[] = [
   })),
 ];
 
+function labelOf(value: string): string {
+  return GENUINENESS_LABELS[value as Genuineness] ?? value;
+}
+function badgeClassOf(value: string): string {
+  return GENUINENESS_BADGE[value as Genuineness] ?? "bg-zinc-100 text-zinc-500";
+}
+
 export function GenuinenessBadge({ value }: { value: string }) {
   // min-w-14로 가장 긴 라벨(비진성/불확실, 3글자) 폭에 맞춰 동일 폭 + 가운데 정렬.
-  // 진성(2글자)도 같은 폭이 되고, 더 긴 텍스트면 늘어나 clip 안 됨.
   return (
-    <Badge className={cn("min-w-14", GENUINENESS_BADGE[value as Genuineness])}>
-      {GENUINENESS_LABELS[value as Genuineness]}
-    </Badge>
+    <Badge className={cn("min-w-14", badgeClassOf(value))}>{labelOf(value)}</Badge>
   );
 }
 
-const COLUMNS: Column<GenuinenessItem>[] = [
-  {
-    header: "문서 ID",
-    headerClassName: "w-48",
-    cell: (item) => <DocIdCell id={item.docId} />,
-  },
-  {
-    header: "정제 텍스트",
-    cell: (item) => <ExpandableTextCell text={item.cleanedText} />,
-  },
-  {
-    header: "판별 결과",
-    headerClassName: "w-36 text-center",
-    cell: (item) => (
-      <td className="px-4 py-3 text-center">
-        <GenuinenessBadge value={item.genuineness} />
-      </td>
-    ),
-  },
-  {
-    header: "사유",
-    cell: (item) => (
-      <td className="px-4 py-3 text-xs text-zinc-500 leading-relaxed max-w-sm">
-        {item.reason}
-      </td>
-    ),
-  },
-];
+// 인라인 라벨 드롭다운 — 편집 중 판별 결과 셀에 노출.
+function GenuinenessSelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: Genuineness;
+  onChange: (v: Genuineness) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Select
+      value={value}
+      onValueChange={(v) => onChange(v as Genuineness)}
+      disabled={disabled}
+    >
+      <SelectTrigger className="mx-auto h-7 w-24 text-xs">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {GENUINENESS_ORDER.map((tier) => (
+          <SelectItem key={tier} value={tier} className="text-xs">
+            {GENUINENESS_LABELS[tier]}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+// 액션 컬럼 아이콘 버튼.
+function IconBtn({
+  onClick,
+  title,
+  disabled,
+  className,
+  children,
+}: {
+  onClick: () => void;
+  title: string;
+  disabled?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      disabled={disabled}
+      className={cn(
+        "inline-grid h-7 w-7 place-items-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-40",
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
 
 export default function GenuinenessTab() {
   const [filter, setFilter] = useState<string>("");
   const [page, setPage] = useState(1);
   const pageSize = 10;
+
+  // 진성 라벨 수동 보정 — row 단위 inline edit. editingDocId가 편집 중 row,
+  // draft*는 입력값, savingDocId는 저장 진행 중(연타·중복 방지).
+  const override = useGenuinenessOverride();
+  const [editingDocId, setEditingDocId] = useState<string | null>(null);
+  const [draftGenuineness, setDraftGenuineness] =
+    useState<Genuineness>("genuine_review");
+  const [draftReason, setDraftReason] = useState("");
+  const [savingDocId, setSavingDocId] = useState<string | null>(null);
+
+  function startEdit(item: GenuinenessItem) {
+    if (savingDocId) return;
+    setEditingDocId(item.docId);
+    setDraftGenuineness((item.genuineness as Genuineness) ?? "genuine_review");
+    setDraftReason(item.overrideReason ?? "");
+  }
+  function cancelEdit() {
+    setEditingDocId(null);
+    setDraftReason("");
+  }
+  async function saveEdit(docId: string) {
+    if (savingDocId) return;
+    setSavingDocId(docId);
+    try {
+      await override.set.mutateAsync({
+        docId,
+        genuineness: draftGenuineness,
+        reason: draftReason.trim() || undefined,
+      });
+      setEditingDocId(null);
+      setDraftReason("");
+    } finally {
+      setSavingDocId(null);
+    }
+  }
+  async function revertOverride(docId: string) {
+    if (savingDocId) return;
+    setSavingDocId(docId);
+    try {
+      await override.remove.mutateAsync({ docId });
+      if (editingDocId === docId) setEditingDocId(null);
+    } finally {
+      setSavingDocId(null);
+    }
+  }
+
+  const columns: Column<GenuinenessItem>[] = [
+    {
+      header: "정제 텍스트",
+      cell: (item) => <ExpandableTextCell text={item.cleanedText} />,
+    },
+    {
+      header: "판별 결과",
+      headerClassName: "w-48 text-center",
+      cell: (item) => {
+        const editing = editingDocId === item.docId;
+        return (
+          <td className="px-4 py-3 text-center">
+            {editing ? (
+              <GenuinenessSelect
+                value={draftGenuineness}
+                onChange={setDraftGenuineness}
+                disabled={savingDocId === item.docId}
+              />
+            ) : (
+              <div className="flex items-center justify-center gap-1.5">
+                <GenuinenessBadge value={item.genuineness} />
+                {item.isOverridden && (
+                  <span
+                    title={
+                      item.originalGenuineness
+                        ? `원본: ${labelOf(item.originalGenuineness)}`
+                        : "수동 수정됨"
+                    }
+                    className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600"
+                  >
+                    수정됨
+                  </span>
+                )}
+              </div>
+            )}
+          </td>
+        );
+      },
+    },
+    {
+      header: "사유",
+      cell: (item) => {
+        const editing = editingDocId === item.docId;
+        if (editing) {
+          return (
+            <td className="px-4 py-3">
+              <Input
+                value={draftReason}
+                onChange={(e) => setDraftReason(e.target.value)}
+                placeholder="수정 사유 (선택 · 비우면 '운영자 수동 수정')"
+                disabled={savingDocId === item.docId}
+                className="h-8 text-xs"
+              />
+            </td>
+          );
+        }
+        return (
+          <td className="px-4 py-3 text-xs leading-relaxed max-w-sm">
+            <div className="text-zinc-600">{item.reason}</div>
+            {item.isOverridden && item.originalReason && (
+              <div className="mt-1 text-[11px] text-zinc-400">
+                원본 판정: {item.originalReason}
+              </div>
+            )}
+          </td>
+        );
+      },
+    },
+    {
+      header: "",
+      headerClassName: "w-20 text-right",
+      cell: (item) => {
+        const editing = editingDocId === item.docId;
+        const saving = savingDocId === item.docId;
+        return (
+          <td className="px-4 py-3">
+            <div className="flex items-center justify-end gap-0.5">
+              {editing ? (
+                <>
+                  <IconBtn
+                    onClick={() => saveEdit(item.docId)}
+                    title="저장"
+                    disabled={saving}
+                    className="text-violet-600 hover:bg-violet-50 hover:text-violet-700"
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Check className="h-4 w-4" />
+                    )}
+                  </IconBtn>
+                  <IconBtn onClick={cancelEdit} title="취소" disabled={saving}>
+                    <X className="h-4 w-4" />
+                  </IconBtn>
+                </>
+              ) : (
+                <>
+                  <IconBtn
+                    onClick={() => startEdit(item)}
+                    title="진성 라벨 수정"
+                    disabled={!!savingDocId}
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Pencil className="h-4 w-4" />
+                    )}
+                  </IconBtn>
+                  {item.isOverridden && (
+                    <IconBtn
+                      onClick={() => revertOverride(item.docId)}
+                      title="원본 판정으로 되돌리기"
+                      disabled={!!savingDocId}
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                    </IconBtn>
+                  )}
+                </>
+              )}
+            </div>
+          </td>
+        );
+      },
+    },
+  ];
 
   // 서버 페이징 + 서버 필터: 표는 서버가 필터/페이징해 준 현재 페이지(items)만 렌더.
   const { data, isLoading, isPlaceholderData } = useBuildVersion(
@@ -217,9 +441,22 @@ export default function GenuinenessTab() {
         </div>
       </div>
 
+      {/* 수동 보정이 clause_label 포함 경계를 넘고 후속 단계가 이미 생성돼 있으면
+          재실행 권장 (자동 재실행은 하지 않음). */}
+      {summary.downstreamRerunRecommended && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            진성 라벨을 수정해 후속 분석 대상이 바뀌었습니다. 절·감성·키워드
+            분석에 반영하려면 <b>절 라벨링(clause_label)을 다시 실행</b>하세요.
+            (수정 사항은 자동 재실행되지 않습니다.)
+          </span>
+        </div>
+      )}
+
       {/* Table */}
       <DataTable
-        columns={COLUMNS}
+        columns={columns}
         items={items}
         rowKey={(item) => item.docId}
         title={`판별 결과 상세`}
