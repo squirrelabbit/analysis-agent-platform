@@ -1739,6 +1739,88 @@ func (s *PostgresStore) DeleteReport(projectID, reportID string) error {
 	return nil
 }
 
+// ── 진성 라벨 수동 보정 overlay (silverone 2026-06-11) ──
+
+func (s *PostgresStore) UpsertDocGenuinenessOverride(o domain.DocGenuinenessOverride) error {
+	now := o.UpdatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO doc_genuineness_overrides (
+			project_id, dataset_id, dataset_version_id, doc_id,
+			original_genuineness, original_reason, override_genuineness, override_reason, created_at, updated_at
+		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $9)
+		ON CONFLICT (dataset_version_id, doc_id) DO UPDATE
+		SET original_genuineness = EXCLUDED.original_genuineness,
+		    original_reason = EXCLUDED.original_reason,
+		    override_genuineness = EXCLUDED.override_genuineness,
+		    override_reason = EXCLUDED.override_reason,
+		    updated_at = EXCLUDED.updated_at`,
+		o.ProjectID,
+		o.DatasetID,
+		o.DatasetVersionID,
+		o.DocID,
+		nullableEmptyString(o.OriginalGenuineness),
+		nullableEmptyString(o.OriginalReason),
+		o.OverrideGenuineness,
+		nullableEmptyString(o.OverrideReason),
+		now,
+	)
+	return err
+}
+
+func (s *PostgresStore) DeleteDocGenuinenessOverride(projectID, datasetVersionID, docID string) error {
+	res, err := s.db.Exec(
+		`DELETE FROM doc_genuineness_overrides
+		 WHERE project_id = $1::uuid AND dataset_version_id = $2 AND doc_id = $3`,
+		projectID,
+		datasetVersionID,
+		docID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *PostgresStore) ListDocGenuinenessOverrides(projectID, datasetVersionID string) ([]domain.DocGenuinenessOverride, error) {
+	rows, err := s.db.Query(
+		`SELECT project_id::text, dataset_id::text, dataset_version_id, doc_id,
+		        COALESCE(original_genuineness, ''), COALESCE(original_reason, ''),
+		        override_genuineness, COALESCE(override_reason, ''), created_at, updated_at
+		 FROM doc_genuineness_overrides
+		 WHERE project_id = $1::uuid AND dataset_version_id = $2
+		 ORDER BY doc_id`,
+		projectID,
+		datasetVersionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.DocGenuinenessOverride, 0)
+	for rows.Next() {
+		var o domain.DocGenuinenessOverride
+		if err := rows.Scan(
+			&o.ProjectID, &o.DatasetID, &o.DatasetVersionID, &o.DocID,
+			&o.OriginalGenuineness, &o.OriginalReason, &o.OverrideGenuineness, &o.OverrideReason,
+			&o.CreatedAt, &o.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, o)
+	}
+	return items, rows.Err()
+}
+
 // silverone 2026-06-01 — project 사이드바 채팅 count. dataset 단위 합산이
 // 아닌 단일 COUNT 쿼리(analysis_threads.project_id 인덱스 활용)로 처리.
 // project가 없거나 thread 0건이면 0 반환 (ErrNotFound 아님).
@@ -2439,6 +2521,26 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS reports_project_idx
 		  ON reports(project_id, updated_at DESC)`,
+		// silverone 2026-06-11 — 진성 라벨 수동 보정 overlay. artifact JSONL은
+		// 원본 유지, 보정값만 여기 저장하고 진성 분석 GET이 effective로 합성.
+		// (version, doc) 1건만 — 재보정은 upsert.
+		`CREATE TABLE IF NOT EXISTS doc_genuineness_overrides (
+			project_id UUID NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+			dataset_id UUID NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+			dataset_version_id TEXT NOT NULL REFERENCES dataset_versions(dataset_version_id) ON DELETE CASCADE,
+			doc_id TEXT NOT NULL,
+			original_genuineness TEXT,
+			original_reason TEXT,
+			override_genuineness TEXT NOT NULL,
+			override_reason TEXT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (dataset_version_id, doc_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS doc_genuineness_overrides_scope_idx
+		  ON doc_genuineness_overrides(project_id, dataset_version_id)`,
+		// 기존 테이블에 original_reason 추가 (CREATE TABLE IF NOT EXISTS는 컬럼 안 더함).
+		`ALTER TABLE doc_genuineness_overrides ADD COLUMN IF NOT EXISTS original_reason TEXT`,
 		// silverone 2026-05-27 (Codex adversarial review fix-1) — 옛 schema
 		// (report_drafts / executions / skill_plans / analysis_requests) DROP을
 		// boot-time ensureSchema에서 제거. 운영/감사 이력이 들어있을 수 있는

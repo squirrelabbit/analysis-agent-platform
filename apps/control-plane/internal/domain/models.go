@@ -334,6 +334,31 @@ type ReportListResponse struct {
 	Items []ReportSummary `json:"items"`
 }
 
+// DocGenuinenessOverride — 전처리 진성 분석 화면에서 운영자가 수동으로 보정한
+// 진성 라벨 (silverone 2026-06-11). artifact JSONL은 LLOA 원본 그대로 두고
+// 보정값을 별도 overlay로 저장한다 — 진성 분석 GET이 effective label로 합성하고
+// 감사/재현/재실행 추적이 가능하게 한다. OriginalGenuineness는 보정 시점의
+// artifact 라벨 snapshot(summary effective 재집계의 기준). version 스코프.
+type DocGenuinenessOverride struct {
+	ProjectID           string    `json:"project_id"`
+	DatasetID           string    `json:"dataset_id"`
+	DatasetVersionID    string    `json:"dataset_version_id"`
+	DocID               string    `json:"doc_id"`
+	OriginalGenuineness string    `json:"original_genuineness"`
+	OriginalReason      string    `json:"original_reason,omitempty"`
+	OverrideGenuineness string    `json:"override_genuineness"`
+	OverrideReason      string    `json:"override_reason,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+// DocGenuinenessOverrideRequest — 보정 요청. genuineness는 effective로 적용할
+// 라벨. reason은 선택(운영 메모).
+type DocGenuinenessOverrideRequest struct {
+	Genuineness string `json:"genuineness"`
+	Reason      string `json:"reason,omitempty"`
+}
+
 type AnalysisThreadCreateRequest struct {
 	Title string `json:"title,omitempty"`
 }

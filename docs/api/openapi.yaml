@@ -886,6 +886,67 @@ paths:
                 $ref: "#/components/schemas/DocGenuinenessView"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness/{doc_id}:
+    patch:
+      tags: [Datasets]
+      summary: 진성 라벨 수동 보정 (set)
+      description: |
+        전처리 진성 분석 화면에서 운영자가 문서의 진성 라벨을 수동 보정한다.
+        artifact JSONL(LLOA 원본)은 그대로 두고 보정값만 overlay 테이블에 저장하며,
+        GET doc_genuineness 응답이 effective label로 합성한다. original 라벨/사유는
+        서버가 artifact에서 직접 조회해 snapshot한다. 수정 사유(`reason`)가 비면
+        "운영자 수동 수정" 기본값으로 저장한다. 보정 해제는 DELETE override 사용.
+
+        **주의**: 진성 라벨을 바꿔도 이미 생성된 clause_label/clause_keywords는
+        자동 재실행되지 않는다. clause_label 포함 경계(genuine_review/mixed ↔
+        non_review/uncertain)를 넘는 보정이고 후속 artifact가 ready면, GET 응답의
+        `summary.downstream_rerun_recommended=true`로 재실행 권장을 노출한다.
+      operationId: setDocGenuinenessOverride
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: doc_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocGenuinenessOverrideRequest"
+      responses:
+        "200":
+          description: 보정 결과(원본/보정 라벨·사유 포함)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocGenuinenessOverride"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness/{doc_id}/override:
+    delete:
+      tags: [Datasets]
+      summary: 진성 라벨 보정 되돌리기 (원본 LLOA 판정으로 복귀)
+      operationId: deleteDocGenuinenessOverride
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: doc_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: 보정 삭제 완료
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness_download:
     get:
       tags: [Datasets]
@@ -2640,6 +2701,43 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReportSummary"
+    DocGenuinenessOverrideRequest:
+      type: object
+      required: [genuineness]
+      properties:
+        genuineness:
+          type: string
+          description: effective로 적용할 라벨
+          enum: [genuine_review, non_review, uncertain, mixed]
+        reason:
+          type: string
+          description: (선택) 보정 사유 메모
+    DocGenuinenessOverride:
+      type: object
+      description: 진성 라벨 수동 보정 결과. original은 보정 시점 artifact 라벨 snapshot.
+      properties:
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        doc_id:
+          type: string
+        original_genuineness:
+          type: string
+        original_reason:
+          type: string
+        override_genuineness:
+          type: string
+        override_reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     AnalysisThread:
       type: object
       properties:
