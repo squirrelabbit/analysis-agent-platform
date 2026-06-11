@@ -1,5 +1,4 @@
 import {
-  mapApplied,
   mapProgress,
   type BuildBase,
   type BuildBaseDto,
@@ -173,7 +172,7 @@ export const mapKeywordBuild = (dto: KeywordBuildResponse): KeywordBuild => ({
   progress: dto.progress ? mapProgress(dto.progress) : undefined,
   summary: dto.summary ? mapKeywordSummary(dto.summary) : undefined,
   pagination: dto.pagination,
-  applied: mapApplied(dto.applied),
+  applied: dto.applied ?? {},
   items: dto.items?.map(mapKeywordItem) ?? [],
 });
 

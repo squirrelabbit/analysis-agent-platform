@@ -1,5 +1,4 @@
 import {
-  mapApplied,
   mapProgress,
   type BuildBase,
   type BuildBaseDto,
@@ -115,7 +114,7 @@ export const mapClauseLabelBuild = (dto: ClauseBuildResponse): ClauseBuild => ({
   progress: dto.progress ? mapProgress(dto.progress) : undefined,
   summary: dto.summary ? mapClauseSummary(dto.summary) : undefined,
   pagination: dto.pagination,
-  applied: mapApplied(dto.applied),
+  applied: dto.applied ?? {},
   items: dto.items?.map(mapClauseItem) ?? [],
 });
 

@@ -1,5 +1,4 @@
 import {
-  mapApplied,
   mapProgress,
   type BuildBase,
   type BuildBaseDto,
@@ -96,7 +95,7 @@ export const mapGenuinenessBuild = (
   progress: dto.progress ? mapProgress(dto.progress) : undefined,
   summary: dto.summary ? mapGenuinenessSummary(dto.summary) : undefined,
   pagination: dto.pagination,
-  applied: mapApplied(dto.applied),
+  applied: dto.applied ?? {},
   items: dto.items?.map(mapGenuinenessItem) ?? [],
 });
 

@@ -26,16 +26,13 @@ export interface BuildBaseDto<TType extends BuildJobType, TSummary> {
   summary?: TSummary;
 }
 
+// applied는 분석마다 키가 다르다(LLM: prompt_version/model/model_display_name,
+// 키워드: extractor_version). 타입을 고정하지 않고 snake_case 그대로 통과시킨 뒤
+// 화면(BuildMetaBar)에서 있는 키만 골라 보여준다.
 export interface PaginatedSummaryDto<T> {
   items: T[];
   pagination: Pagination;
-  // model: 빌드 당시 raw model id snapshot. model_display_name: control-plane이 응답
-  // 시점에 env로 입히는 화면 표시명(불일치/미설정 시 생략). 옛 응답엔 없을 수 있어 optional.
-  applied: {
-    prompt_version: string;
-    model?: string;
-    model_display_name?: string;
-  };
+  applied: Record<string, string>;
 }
 
 export interface VersionBuildDto<T> {
@@ -66,12 +63,11 @@ export interface BuildBase<TType extends BuildJobType, TSummary> {
   summary?: TSummary;
 }
 
+// applied는 DTO와 동일하게 snake_case Record로 통과시킨다(BuildMetaBar에서 키별 렌더).
 export interface PaginatedSummary<T> {
   items: T[];
   pagination: Pagination;
-  // model: 빌드 당시 raw model id. modelDisplayName: 응답 시점 env 기반 화면 표시명.
-  // 표시값은 modelDisplayName || model. 옛 응답엔 없을 수 있어 optional.
-  applied: { promptVersion: string; model?: string; modelDisplayName?: string };
+  applied: Record<string, string>;
 }
 
 export interface VersionBuild<T> {
@@ -88,16 +84,4 @@ export const mapProgress = (dto: ProgressDto): ProgressType => ({
   etaSeconds: dto.eta_seconds,
   message: dto.message ?? "",
   updatedAt: dto.updated_at,
-});
-
-// applied snake_case → camelCase. raw model(snapshot)과 화면 표시명(응답 시점 env)을
-// 함께 매핑한다. 옛 응답엔 model/model_display_name이 없을 수 있어 optional.
-export const mapApplied = (dto?: {
-  prompt_version?: string;
-  model?: string;
-  model_display_name?: string;
-}): { promptVersion: string; model?: string; modelDisplayName?: string } => ({
-  promptVersion: dto?.prompt_version ?? "",
-  model: dto?.model,
-  modelDisplayName: dto?.model_display_name,
 });
