@@ -49,6 +49,10 @@ export default function BuildCleanForm({
   return (
     <form id={formId} onSubmit={handleSubmit(handleFormSubmit)}>
       <FieldGroup className="px-3">
+        <p className="text-sm text-zinc-500">
+          선택한 텍스트 컬럼의 원문을 정제해 이후 분석에 사용할 본문을
+          만듭니다.
+        </p>
         <Field>
           <div className="flex items-center justify-between mb-1">
             <FieldLabel className="text-xs">
