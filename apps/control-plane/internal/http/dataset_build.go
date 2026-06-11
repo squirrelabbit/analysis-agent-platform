@@ -123,6 +123,41 @@ func (s *Server) handleGetClauseLabelView(w stdhttp.ResponseWriter, r *stdhttp.R
 	writeJSON(w, stdhttp.StatusOK, view)
 }
 
+// silverone 2026-06-11 — 절 라벨링 aspect/sentiment 수동 보정. PATCH로 set,
+// DELETE override로 되돌리기. effective는 GET clause_label 응답에서 합성된다.
+func (s *Server) handleSetClauseLabelOverride(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ClauseLabelOverrideRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	override, err := s.datasetService.SetClauseLabelOverride(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		r.PathValue("clause_id"),
+		payload,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, override)
+}
+
+func (s *Server) handleDeleteClauseLabelOverride(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.datasetService.DeleteClauseLabelOverride(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		r.PathValue("clause_id"),
+	); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
 // parseArtifactPagination — ?limit=&offset= query 파싱. 잘못된 값은 default로
 // fallback (service 쪽 normalize와 이중 안전).
 func parseArtifactPagination(r *stdhttp.Request) (int, int) {

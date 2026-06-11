@@ -298,6 +298,14 @@ func (s *DatasetService) GetClauseLabelView(
 	}
 	view.Items = items
 	view.Pagination.Total = total
+
+	// silverone 2026-06-11 — 운영자 수동 보정 overlay. artifact 원본은 그대로 두고
+	// effective aspect/sentiment로 합성하고 summary(분포/교차)도 재집계한다.
+	clauseOverrides, ovErr := s.store.ListClauseLabelOverrides(projectID, version.DatasetVersionID)
+	if ovErr != nil {
+		return domain.DatasetArtifactView{}, ovErr
+	}
+	applyClauseLabelOverrides(&view, clauseOverrides)
 	return view, nil
 }
 

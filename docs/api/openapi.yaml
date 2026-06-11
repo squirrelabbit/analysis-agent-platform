@@ -1118,6 +1118,64 @@ paths:
                 $ref: "#/components/schemas/ClauseLabelView"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label/{clause_id}:
+    patch:
+      tags: [Datasets]
+      summary: 절 aspect/sentiment 수동 보정 (set)
+      description: |
+        전처리 절 라벨링 화면에서 운영자가 절(clause)의 aspect/sentiment를 수동
+        보정한다. artifact JSONL(LLOA 원본)은 그대로 두고 보정값만 overlay 테이블에
+        저장하며, GET clause_label 응답이 effective aspect/sentiment로 합성하고
+        summary(sentiment/aspect/aspect_sentiment)도 재집계한다. aspect/sentiment는
+        둘 다 선택이며 보낸 것만 바뀌고 나머지는 원본 유지(둘 다 비면 400). 수정
+        사유(`reason`)가 비면 "운영자 수동 수정" 기본값. 보정 해제는 DELETE override.
+        clause_id는 GET clause_label 응답 item의 clause_id.
+      operationId: setClauseLabelOverride
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: clause_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClauseLabelOverrideRequest"
+      responses:
+        "200":
+          description: 보정 결과(원본/보정 aspect·sentiment 포함)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClauseLabelOverride"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label/{clause_id}/override:
+    delete:
+      tags: [Datasets]
+      summary: 절 aspect/sentiment 보정 되돌리기 (원본 LLOA 라벨로 복귀)
+      operationId: deleteClauseLabelOverride
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: clause_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: 보정 삭제 완료
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label_download:
     get:
       tags: [Datasets]
@@ -3806,6 +3864,35 @@ components:
                   dominant_sentiment_ratio: { type: number, description: "우세 감성 비율(0~1)" }
                   top_aspect: { type: string, description: "이 키워드의 대표 aspect(최빈)" }
                   representative_clause: { type: string, description: "대표 절(키워드 포함 절 중 최장)" }
+    ClauseLabelOverrideRequest:
+      type: object
+      description: aspect/sentiment 중 보낸 것만 effective로 바뀌고 나머지는 원본 유지(둘 다 비면 400).
+      properties:
+        aspect:
+          type: string
+          description: effective로 적용할 aspect 키(taxonomy aspect)
+        sentiment:
+          type: string
+          description: effective로 적용할 감성
+          enum: [positive, negative, neutral]
+        reason:
+          type: string
+          description: (선택) 보정 사유. 비면 "운영자 수동 수정"
+    ClauseLabelOverride:
+      type: object
+      description: 절 aspect/sentiment 수동 보정 결과. original_*는 보정 시점 artifact snapshot.
+      properties:
+        project_id: { type: string }
+        dataset_id: { type: string }
+        dataset_version_id: { type: string }
+        clause_id: { type: string }
+        original_aspect: { type: string }
+        original_sentiment: { type: string }
+        override_aspect: { type: string }
+        override_sentiment: { type: string }
+        override_reason: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     ClauseLabelView:
       allOf:
         - $ref: "#/components/schemas/ArtifactViewCommon"
