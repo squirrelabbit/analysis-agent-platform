@@ -66,4 +66,32 @@ export const buildApi = {
         `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/doc_genuineness/${encodeURIComponent(docId)}/override`,
       )
       .then(() => undefined),
+
+  // silverone 2026-06-11 — 절 aspect/sentiment 수동 보정. PATCH로 set, DELETE
+  // override로 되돌리기. effective는 GET clause_label 응답에서 합성된다.
+  setClauseLabelOverride: (
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+    clauseId: string,
+    req: { aspect?: string; sentiment?: string; reason?: string },
+  ) =>
+    apiClient
+      .patch(
+        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/clause_label/${encodeURIComponent(clauseId)}`,
+        req,
+      )
+      .then(({ data }) => data),
+
+  deleteClauseLabelOverride: (
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+    clauseId: string,
+  ) =>
+    apiClient
+      .delete(
+        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/clause_label/${encodeURIComponent(clauseId)}/override`,
+      )
+      .then(() => undefined),
 };
