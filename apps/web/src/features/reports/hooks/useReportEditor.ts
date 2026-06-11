@@ -3,7 +3,6 @@
 import { useEffect, useReducer } from "react";
 import {
   DEFAULT_STATE,
-  libById,
   type BlockOpts,
   type ReportBlock,
   type ReportMode,
@@ -21,7 +20,14 @@ type Action =
   | { type: "setTitle"; title: string }
   | { type: "setMode"; mode: ReportMode }
   | { type: "select"; uid: string | null }
-  | { type: "addBlock"; libId: string; atIdx?: number; newRow?: boolean }
+  | {
+      type: "addBlock";
+      libId: string;
+      atIdx?: number;
+      newRow?: boolean;
+      // 보관함 항목에 상세표가 있는지(추가 시 detail 폴드 기본 표시 여부). 호출부에서 전달.
+      hasDetail?: boolean;
+    }
   | { type: "moveBlock"; from: number; to: number; newRow?: boolean }
   | { type: "deleteBlock"; uid: string }
   | { type: "setBlockTitle"; uid: string; title: string }
@@ -44,14 +50,12 @@ function reducer(state: ReportState, action: Action): ReportState {
     case "select":
       return { ...state, selected: action.uid };
     case "addBlock": {
-      const lib = libById(action.libId);
-      if (!lib) return state;
       const blk: ReportBlock = {
         uid: newUid(),
         libId: action.libId,
         title: null,
         interp: "",
-        opts: { q: true, detail: !!lib.detail, plan: false },
+        opts: { q: true, detail: !!action.hasDetail, plan: false },
         span: 12,
         newRow: action.newRow ?? true,
       };
@@ -62,7 +66,8 @@ function reducer(state: ReportState, action: Action): ReportState {
       return { ...state, blocks, selected: blk.uid };
     }
     case "moveBlock": {
-      let { from, to } = action;
+      const { from } = action;
+      let { to } = action;
       // 위치 변화 없이 newRow(나란히/한 줄)만 바뀌는 경우도 처리.
       if (from === to || from === to - 1) {
         if (action.newRow == null) return state;

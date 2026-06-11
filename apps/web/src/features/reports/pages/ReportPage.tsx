@@ -9,7 +9,9 @@ import Breadcrumbs from "@/components/common/Breadcrumbs";
 import { cn } from "@/lib/utils";
 import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { useProjectDetail } from "@/features/projects/hooks/project.query";
-import { libById } from "../models/editor";
+import { savedResultToLibraryItem } from "../models/library";
+import { useSavedResults } from "../hooks/report.query";
+import { useDeleteSavedResult } from "../hooks/report.mutation";
 import { useReportEditor } from "../hooks/useReportEditor";
 import { ReportLibrary } from "../components/ReportLibrary";
 import { ReportBlock } from "../components/ReportBlock";
@@ -33,6 +35,19 @@ export default function ReportPage() {
   const { projectId } = useProjectParams();
   const { data: project } = useProjectDetail(projectId);
   const { state, dispatch } = useReportEditor();
+  const deleteSaved = useDeleteSavedResult(projectId);
+
+  // 보관함(saved_results) 실데이터 → 에디터 뷰모델(LibraryItem) + id 조회 맵.
+  const { data: saved } = useSavedResults(projectId);
+  const library = useMemo(
+    () => (saved ?? []).map(savedResultToLibraryItem),
+    [saved],
+  );
+  const libMap = useMemo(
+    () => new Map(library.map((l) => [l.id, l])),
+    [library],
+  );
+  const libById = (id: string) => libMap.get(id);
 
   const blocksRef = useRef<HTMLDivElement>(null);
   const libDragId = useRef<string | null>(null);
@@ -60,8 +75,27 @@ export default function ReportPage() {
   };
 
   const addBlock = (libId: string, atIdx?: number, sameRow = false) => {
-    dispatch({ type: "addBlock", libId, atIdx, newRow: !sameRow });
+    // 메인이 표가 아니면(metric/evidence/chart) display를 상세 데이터 폴드로 보여줄 수 있다.
+    const r = libById(libId)?.result;
+    const hasDetail =
+      !!r && (!!r.metric || !!r.evidence || !!r.chart) && !!r.display;
+    dispatch({ type: "addBlock", libId, atIdx, newRow: !sameRow, hasDetail });
     showToast(`"${libById(libId)?.title}" 추가됨`);
+  };
+
+  // 보관함에서 결과 삭제. 삭제 확인은 보관함 카드의 DeleteDialog가 담당.
+  // 성공 시 삭제된 결과를 참조하던 블록도 함께 정리한다.
+  const deleteLib = (libId: string) => {
+    const title = libById(libId)?.title ?? "결과";
+    deleteSaved.mutate(libId, {
+      onSuccess: () => {
+        state.blocks
+          .filter((b) => b.libId === libId)
+          .forEach((b) => dispatch({ type: "deleteBlock", uid: b.uid }));
+        showToast(`"${title}" 삭제됨`);
+      },
+      onError: () => showToast("삭제에 실패했어요"),
+    });
   };
 
   // 드롭 위치 계산 — 포인터에서 가장 가까운 카드 중심 기준 앞/뒤 삽입.
@@ -277,8 +311,10 @@ export default function ReportPage() {
     <div className="flex h-full">
       {isEdit && (
         <ReportLibrary
+          items={library}
           usedIds={usedIds}
           onAdd={(libId) => addBlock(libId)}
+          onDelete={deleteLib}
           onDragStart={(libId) => {
             libDragId.current = libId;
           }}

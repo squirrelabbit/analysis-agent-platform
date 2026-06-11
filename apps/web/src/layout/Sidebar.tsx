@@ -10,15 +10,31 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { LIBRARY } from "@/features/reports/models/editor";
+
+const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
 
 export default function Sidebar({ project }: { project: Project }) {
   const { pathname } = useLocation();
   const basePath = `/projects/${project.id}`;
 
   // 수동 접힘 상태 + 화면이 sm 이하면 강제 접힘.
-  const [collapsed, setCollapsed] = useState(false);
+  // 수동 상태는 localStorage에 저장해 새로고침 후에도 유지.
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
   const [isSmall, setIsSmall] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
+    } catch {
+      /* ignore */
+    }
+  }, [collapsed]);
 
   useEffect(() => {
     // Tailwind sm 브레이크포인트(640px) 미만이면 자동 접기.
@@ -54,7 +70,6 @@ export default function Sidebar({ project }: { project: Project }) {
       name: "보고서",
       path: `${basePath}/reports`,
       icon: FileText,
-      badge: LIBRARY.length,
     },
   ];
 
