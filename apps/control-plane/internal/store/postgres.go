@@ -1821,6 +1821,92 @@ func (s *PostgresStore) ListDocGenuinenessOverrides(projectID, datasetVersionID 
 	return items, rows.Err()
 }
 
+// ── 절 라벨링 aspect/sentiment 수동 보정 overlay (silverone 2026-06-11) ──
+
+func (s *PostgresStore) UpsertClauseLabelOverride(o domain.ClauseLabelOverride) error {
+	now := o.UpdatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO clause_label_overrides (
+			project_id, dataset_id, dataset_version_id, clause_id,
+			original_aspect, original_sentiment, override_aspect, override_sentiment,
+			override_reason, created_at, updated_at
+		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+		ON CONFLICT (dataset_version_id, clause_id) DO UPDATE
+		SET original_aspect = EXCLUDED.original_aspect,
+		    original_sentiment = EXCLUDED.original_sentiment,
+		    override_aspect = EXCLUDED.override_aspect,
+		    override_sentiment = EXCLUDED.override_sentiment,
+		    override_reason = EXCLUDED.override_reason,
+		    updated_at = EXCLUDED.updated_at`,
+		o.ProjectID,
+		o.DatasetID,
+		o.DatasetVersionID,
+		o.ClauseID,
+		nullableEmptyString(o.OriginalAspect),
+		nullableEmptyString(o.OriginalSentiment),
+		nullableEmptyString(o.OverrideAspect),
+		nullableEmptyString(o.OverrideSentiment),
+		nullableEmptyString(o.OverrideReason),
+		now,
+	)
+	return err
+}
+
+func (s *PostgresStore) DeleteClauseLabelOverride(projectID, datasetVersionID, clauseID string) error {
+	res, err := s.db.Exec(
+		`DELETE FROM clause_label_overrides
+		 WHERE project_id = $1::uuid AND dataset_version_id = $2 AND clause_id = $3`,
+		projectID,
+		datasetVersionID,
+		clauseID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *PostgresStore) ListClauseLabelOverrides(projectID, datasetVersionID string) ([]domain.ClauseLabelOverride, error) {
+	rows, err := s.db.Query(
+		`SELECT project_id::text, dataset_id::text, dataset_version_id, clause_id,
+		        COALESCE(original_aspect, ''), COALESCE(original_sentiment, ''),
+		        COALESCE(override_aspect, ''), COALESCE(override_sentiment, ''),
+		        COALESCE(override_reason, ''), created_at, updated_at
+		 FROM clause_label_overrides
+		 WHERE project_id = $1::uuid AND dataset_version_id = $2
+		 ORDER BY clause_id`,
+		projectID,
+		datasetVersionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.ClauseLabelOverride, 0)
+	for rows.Next() {
+		var o domain.ClauseLabelOverride
+		if err := rows.Scan(
+			&o.ProjectID, &o.DatasetID, &o.DatasetVersionID, &o.ClauseID,
+			&o.OriginalAspect, &o.OriginalSentiment, &o.OverrideAspect, &o.OverrideSentiment,
+			&o.OverrideReason, &o.CreatedAt, &o.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, o)
+	}
+	return items, rows.Err()
+}
+
 // silverone 2026-06-01 — project 사이드바 채팅 count. dataset 단위 합산이
 // 아닌 단일 COUNT 쿼리(analysis_threads.project_id 인덱스 활용)로 처리.
 // project가 없거나 thread 0건이면 0 반환 (ErrNotFound 아님).
@@ -2541,6 +2627,25 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		  ON doc_genuineness_overrides(project_id, dataset_version_id)`,
 		// 기존 테이블에 original_reason 추가 (CREATE TABLE IF NOT EXISTS는 컬럼 안 더함).
 		`ALTER TABLE doc_genuineness_overrides ADD COLUMN IF NOT EXISTS original_reason TEXT`,
+		// silverone 2026-06-11 — 절 라벨링 aspect/sentiment 수동 보정 overlay.
+		// artifact JSONL 원본 불변, 보정값만 저장하고 절 라벨링 GET이 effective로
+		// 합성. (version, clause_id) 1건만 — 재보정은 upsert.
+		`CREATE TABLE IF NOT EXISTS clause_label_overrides (
+			project_id UUID NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+			dataset_id UUID NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+			dataset_version_id TEXT NOT NULL REFERENCES dataset_versions(dataset_version_id) ON DELETE CASCADE,
+			clause_id TEXT NOT NULL,
+			original_aspect TEXT,
+			original_sentiment TEXT,
+			override_aspect TEXT,
+			override_sentiment TEXT,
+			override_reason TEXT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (dataset_version_id, clause_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS clause_label_overrides_scope_idx
+		  ON clause_label_overrides(project_id, dataset_version_id)`,
 		// silverone 2026-05-27 (Codex adversarial review fix-1) — 옛 schema
 		// (report_drafts / executions / skill_plans / analysis_requests) DROP을
 		// boot-time ensureSchema에서 제거. 운영/감사 이력이 들어있을 수 있는

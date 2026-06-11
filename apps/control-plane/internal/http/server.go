@@ -138,6 +138,9 @@ func (s *Server) routes() {
 	// 2026-05-21 — 화면 polling용 GET. status + applied + summary + items 페이지 반환.
 	// POST와 같은 path에 method routing.
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label", s.handleGetClauseLabelView)
+	// 절 라벨링 aspect/sentiment 수동 보정 (silverone 2026-06-11).
+	s.mux.HandleFunc("PATCH /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label/{clause_id}", s.handleSetClauseLabelOverride)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label/{clause_id}/override", s.handleDeleteClauseLabelOverride)
 	// 2026-05-21 — clause_label / doc_genuineness 산출물 CSV 다운로드. jsonl
 	// artifact를 DuckDB로 즉시 변환해 UTF-8 BOM CSV로 스트림.
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label_download", s.handleDownloadClauseLabelDataset)

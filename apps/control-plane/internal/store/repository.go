@@ -84,6 +84,12 @@ type Repository interface {
 	DeleteDocGenuinenessOverride(projectID, datasetVersionID, docID string) error
 	ListDocGenuinenessOverrides(projectID, datasetVersionID string) ([]domain.DocGenuinenessOverride, error)
 
+	// silverone 2026-06-11 — 절 라벨링 aspect/sentiment 수동 보정 overlay.
+	// (version, clause_id) upsert, ListByVersion은 절 라벨링 GET overlay·summary 재집계용.
+	UpsertClauseLabelOverride(override domain.ClauseLabelOverride) error
+	DeleteClauseLabelOverride(projectID, datasetVersionID, clauseID string) error
+	ListClauseLabelOverrides(projectID, datasetVersionID string) ([]domain.ClauseLabelOverride, error)
+
 	// silverone 2026-05-27 (Codex adversarial review fix-2) — control-plane
 	// 재기동 시 reconciliation에서 사용. status가 queued/running으로 남아 있는
 	// in-flight row를 모두 가져온다. project_id 무관 — 전체 system 단위.

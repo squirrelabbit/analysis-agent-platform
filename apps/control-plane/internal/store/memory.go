@@ -34,6 +34,7 @@ type MemoryStore struct {
 	savedResults         map[string]domain.ReportSavedResult     // key: result_id (보고서 보관함)
 	reports              map[string]domain.Report                // key: report_id (보고서 문서)
 	genuinenessOverrides map[string]domain.DocGenuinenessOverride // key: versionID\x00docID
+	clauseOverrides      map[string]domain.ClauseLabelOverride    // key: versionID\x00clauseID
 	// document_cluster_profile build / confirmation 관련 필드는 β2 (5/19) 결정으로 제거.
 	// scenarios / requests / plans / executions / reports 필드는 δ-3 (5/21) plan_v2 도입에 따라 제거.
 }
@@ -55,6 +56,7 @@ func NewMemoryStore() *MemoryStore {
 		savedResults:         make(map[string]domain.ReportSavedResult),
 		reports:              make(map[string]domain.Report),
 		genuinenessOverrides: make(map[string]domain.DocGenuinenessOverride),
+		clauseOverrides:      make(map[string]domain.ClauseLabelOverride),
 	}
 }
 
@@ -954,6 +956,55 @@ func (s *MemoryStore) ListDocGenuinenessOverrides(projectID, datasetVersionID st
 		}
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].DocID < items[j].DocID })
+	return items, nil
+}
+
+// ── 절 라벨링 aspect/sentiment 수동 보정 overlay (silverone 2026-06-11) ──
+
+func clauseOverrideKey(versionID, clauseID string) string {
+	return versionID + "\x00" + clauseID
+}
+
+func (s *MemoryStore) UpsertClauseLabelOverride(o domain.ClauseLabelOverride) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := o.UpdatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	key := clauseOverrideKey(o.DatasetVersionID, o.ClauseID)
+	if existing, ok := s.clauseOverrides[key]; ok {
+		o.CreatedAt = existing.CreatedAt
+	} else if o.CreatedAt.IsZero() {
+		o.CreatedAt = now
+	}
+	o.UpdatedAt = now
+	s.clauseOverrides[key] = o
+	return nil
+}
+
+func (s *MemoryStore) DeleteClauseLabelOverride(projectID, datasetVersionID, clauseID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := clauseOverrideKey(datasetVersionID, clauseID)
+	o, ok := s.clauseOverrides[key]
+	if !ok || o.ProjectID != projectID {
+		return ErrNotFound
+	}
+	delete(s.clauseOverrides, key)
+	return nil
+}
+
+func (s *MemoryStore) ListClauseLabelOverrides(projectID, datasetVersionID string) ([]domain.ClauseLabelOverride, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.ClauseLabelOverride, 0)
+	for _, o := range s.clauseOverrides {
+		if o.ProjectID == projectID && o.DatasetVersionID == datasetVersionID {
+			items = append(items, o)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ClauseID < items[j].ClauseID })
 	return items, nil
 }
 
