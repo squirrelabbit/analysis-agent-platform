@@ -16,6 +16,13 @@ export interface ClauseItemDto {
   doc_id: string;
   sentiment: string;
   source: string;
+  // silverone 2026-06-11 — 수동 보정 overlay. aspect/sentiment는 effective 값,
+  // 아래는 원본/보정 구분용(보정된 행에만).
+  original_aspect?: string;
+  original_sentiment?: string;
+  override_aspect?: string;
+  override_sentiment?: string;
+  is_overridden?: boolean;
 }
 
 export interface ClauseSummaryDto {
@@ -44,6 +51,12 @@ export interface ClauseItem {
   docId: string;
   sentiment: string;
   source: string;
+  // silverone 2026-06-11 — 수동 보정 overlay (보정된 행에만).
+  originalAspect?: string;
+  originalSentiment?: string;
+  overrideAspect?: string;
+  overrideSentiment?: string;
+  isOverridden?: boolean;
 }
 
 export interface SentimentCount {
@@ -86,6 +99,11 @@ const mapClauseItem = (dto: ClauseItemDto): ClauseItem => ({
   docId: dto.doc_id,
   sentiment: dto.sentiment,
   source: dto.source,
+  originalAspect: dto.original_aspect,
+  originalSentiment: dto.original_sentiment,
+  overrideAspect: dto.override_aspect,
+  overrideSentiment: dto.override_sentiment,
+  isOverridden: dto.is_overridden,
 });
 
 export const mapClauseSummary = (dto: ClauseSummaryDto): ClauseSummary => ({

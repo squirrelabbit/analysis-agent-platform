@@ -55,3 +55,42 @@ export const useGenuinenessOverride = () => {
 
   return { set, remove };
 };
+
+// silverone 2026-06-11 — 절 aspect/sentiment 수동 보정. set/되돌리기 후
+// clause_label view를 invalidate해 effective 값·summary를 다시 받는다.
+export const useClauseLabelOverride = () => {
+  const { projectId, datasetId, versionId } = useVersionParams();
+  const queryClient = useQueryClient();
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: buildKeys.build(versionId, "clause_label"),
+    });
+
+  const set = useMutation({
+    mutationFn: ({
+      clauseId,
+      aspect,
+      sentiment,
+      reason,
+    }: {
+      clauseId: string;
+      aspect?: string;
+      sentiment?: string;
+      reason?: string;
+    }) =>
+      buildApi.setClauseLabelOverride(projectId, datasetId, versionId, clauseId, {
+        aspect,
+        sentiment,
+        reason,
+      }),
+    onSuccess: invalidate,
+  });
+
+  const remove = useMutation({
+    mutationFn: ({ clauseId }: { clauseId: string }) =>
+      buildApi.deleteClauseLabelOverride(projectId, datasetId, versionId, clauseId),
+    onSuccess: invalidate,
+  });
+
+  return { set, remove };
+};
