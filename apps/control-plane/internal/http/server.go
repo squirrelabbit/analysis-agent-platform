@@ -174,6 +174,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/saved_results", s.handleCreateSavedResult)
 	s.mux.HandleFunc("GET /projects/{project_id}/saved_results", s.handleListSavedResults)
 	s.mux.HandleFunc("DELETE /projects/{project_id}/saved_results/{result_id}", s.handleDeleteSavedResult)
+	// 보고서 문서 CRUD (silverone 2026-06-11) — project 스코프.
+	s.mux.HandleFunc("POST /projects/{project_id}/reports", s.handleCreateReport)
+	s.mux.HandleFunc("GET /projects/{project_id}/reports", s.handleListReports)
+	s.mux.HandleFunc("GET /projects/{project_id}/reports/{report_id}", s.handleGetReport)
+	s.mux.HandleFunc("PUT /projects/{project_id}/reports/{report_id}", s.handleUpdateReport)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/reports/{report_id}", s.handleDeleteReport)
 }
 
 func (s *Server) withCORS(next stdhttp.Handler) stdhttp.Handler {
@@ -1001,6 +1007,71 @@ func (s *Server) handleDeleteSavedResult(w stdhttp.ResponseWriter, r *stdhttp.Re
 	if err := s.datasetService.DeleteSavedResult(
 		r.PathValue("project_id"),
 		r.PathValue("result_id"),
+	); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
+// 보고서 문서 CRUD (silverone 2026-06-11). project 스코프.
+func (s *Server) handleCreateReport(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ReportCreateRequest
+	if err := decodeJSONAllowEmpty(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreateReport(r.PathValue("project_id"), payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+func (s *Server) handleListReports(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.ListReports(r.PathValue("project_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleGetReport(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.GetReport(
+		r.PathValue("project_id"),
+		r.PathValue("report_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleUpdateReport(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ReportUpdateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.UpdateReport(
+		r.PathValue("project_id"),
+		r.PathValue("report_id"),
+		payload,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDeleteReport(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.datasetService.DeleteReport(
+		r.PathValue("project_id"),
+		r.PathValue("report_id"),
 	); err != nil {
 		s.writeServiceError(w, err)
 		return

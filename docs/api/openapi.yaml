@@ -1450,6 +1450,105 @@ paths:
           description: 삭제 완료
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/reports:
+    post:
+      tags: [Reports]
+      summary: 보고서 문서 생성
+      description: |
+        saved_results(보관함)를 조합한 보고서 문서를 생성한다. blocks는 작성
+        당시 snapshot을 복제해 담는 opaque JSON 배열로, control-plane은 영속만
+        책임지고 블록 contract는 프론트(보고서 에디터)가 소유한다. blocks
+        미지정 시 빈 배열로 저장. 1차는 CRUD만 — 공유/재생성/export는 후속.
+      operationId: createReport
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportCreateRequest"
+      responses:
+        "201":
+          description: 생성된 보고서
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      tags: [Reports]
+      summary: 보고서 목록 (project 스코프, 최신순)
+      description: blocks 본문은 제외한 경량 summary(제목·블록 수·시각)만 반환한다.
+      operationId: listReports
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: 보고서 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/reports/{report_id}:
+    get:
+      tags: [Reports]
+      summary: 보고서 단건 조회 (blocks 포함)
+      operationId: getReport
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReportId"
+      responses:
+        "200":
+          description: 보고서 상세
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    put:
+      tags: [Reports]
+      summary: 보고서 전체 갱신 (title + blocks 교체)
+      description: title과 blocks를 통째로 교체한다(부분 patch 아님).
+      operationId: updateReport
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReportId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportUpdateRequest"
+      responses:
+        "200":
+          description: 갱신된 보고서
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Reports]
+      summary: 보고서 삭제
+      operationId: deleteReport
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReportId"
+      responses:
+        "204":
+          description: 삭제 완료
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
 components:
   responses:
     ErrorResponse:
@@ -1485,6 +1584,12 @@ components:
         type: string
     RunId:
       name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+    ReportId:
+      name: report_id
       in: path
       required: true
       schema:
@@ -2446,6 +2551,95 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReportSavedResult"
+    ReportBlock:
+      type: object
+      description: |
+        보고서 블록. control-plane은 구조를 강제하지 않는 opaque object로
+        저장하며, contract는 프론트(보고서 에디터)가 소유한다. 아래는 권장
+        형태(provenance + 작성 당시 snapshot 복제)로, 추가 필드를 허용한다.
+      additionalProperties: true
+      properties:
+        block_id:
+          type: string
+        type:
+          type: string
+          description: chart | table | text 등
+        title:
+          type: string
+        source_result_id:
+          type: string
+          description: 출처 saved_result id (provenance만 — 삭제돼도 보고서 불변)
+        source_dataset_id:
+          type: string
+        source_version_id:
+          type: string
+        snapshot:
+          type: object
+          description: 작성 당시 결과 스냅샷(display/summary/rows 등)
+          additionalProperties: true
+    Report:
+      type: object
+      properties:
+        report_id:
+          type: string
+        project_id:
+          type: string
+        title:
+          type: string
+        blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportBlock"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ReportSummary:
+      type: object
+      description: 목록용 경량 projection. blocks 본문 대신 개수만.
+      properties:
+        report_id:
+          type: string
+        project_id:
+          type: string
+        title:
+          type: string
+        block_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ReportCreateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          description: 미지정 시 "제목 없는 보고서"
+        blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportBlock"
+    ReportUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportBlock"
+    ReportListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportSummary"
     AnalysisThread:
       type: object
       properties:

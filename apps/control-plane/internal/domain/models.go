@@ -290,6 +290,50 @@ type ReportSavedResultListResponse struct {
 	Items []ReportSavedResult `json:"items"`
 }
 
+// Report — 보고서 문서 (silverone 2026-06-11). saved_results(분석 결과 보관함)를
+// 조합해 만든 별도 문서. blocks는 작성 당시 상태로 고정하기 위해 각 블록 안에
+// snapshot(display/summary/rows)을 복제해 담는다 — source_result_id는 provenance
+// 로만 보관하므로 원본 saved_result가 삭제/변경돼도 보고서는 깨지지 않는다.
+//
+// Blocks는 control-plane이 구조를 강제하지 않는 opaque JSON 배열이다. 블록
+// contract(type/title/source_*/snapshot)는 프론트(보고서 에디터)가 소유하고
+// 백엔드는 영속만 책임진다 — analysis_runs.result_json과 같은 정책. 1차는
+// CRUD만 닫고 공유/재생성/export는 후속.
+type Report struct {
+	ReportID  string          `json:"report_id"`
+	ProjectID string          `json:"project_id"`
+	Title     string          `json:"title"`
+	Blocks    json.RawMessage `json:"blocks"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// ReportSummary — 목록용 경량 projection. blocks 본문 대신 개수만(목록이
+// 무거워지지 않게). analysis_thread 목록과 같은 패턴.
+type ReportSummary struct {
+	ReportID   string    `json:"report_id"`
+	ProjectID  string    `json:"project_id"`
+	Title      string    `json:"title"`
+	BlockCount int       `json:"block_count"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// ReportCreateRequest / ReportUpdateRequest — blocks 미지정 시 빈 배열로 저장.
+type ReportCreateRequest struct {
+	Title  string          `json:"title"`
+	Blocks json.RawMessage `json:"blocks,omitempty"`
+}
+
+type ReportUpdateRequest struct {
+	Title  string          `json:"title"`
+	Blocks json.RawMessage `json:"blocks,omitempty"`
+}
+
+type ReportListResponse struct {
+	Items []ReportSummary `json:"items"`
+}
+
 type AnalysisThreadCreateRequest struct {
 	Title string `json:"title,omitempty"`
 }

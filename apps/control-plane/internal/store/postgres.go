@@ -1609,6 +1609,136 @@ func nullableJSONMap(value map[string]any) (any, error) {
 	return marshalJSON(value)
 }
 
+// ── 보고서 문서 CRUD (silverone 2026-06-11) ──
+
+// reportBlocksJSON — blocks가 비어있으면 '[]'로 정규화. 항상 JSON 배열을 보장.
+func reportBlocksJSON(blocks json.RawMessage) []byte {
+	if len(blocks) == 0 || string(blocks) == "null" {
+		return []byte("[]")
+	}
+	return blocks
+}
+
+func (s *PostgresStore) CreateReport(report domain.Report) error {
+	now := report.CreatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	updated := report.UpdatedAt
+	if updated.IsZero() {
+		updated = now
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO reports (report_id, project_id, title, blocks_json, created_at, updated_at)
+		 VALUES ($1, $2::uuid, $3, $4::jsonb, $5, $6)`,
+		report.ReportID,
+		report.ProjectID,
+		report.Title,
+		reportBlocksJSON(report.Blocks),
+		now,
+		updated,
+	)
+	return err
+}
+
+func (s *PostgresStore) UpdateReport(report domain.Report) error {
+	updated := report.UpdatedAt
+	if updated.IsZero() {
+		updated = time.Now().UTC()
+	}
+	res, err := s.db.Exec(
+		`UPDATE reports SET title = $3, blocks_json = $4::jsonb, updated_at = $5
+		 WHERE project_id = $1::uuid AND report_id = $2`,
+		report.ProjectID,
+		report.ReportID,
+		report.Title,
+		reportBlocksJSON(report.Blocks),
+		updated,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *PostgresStore) ListReports(projectID string) ([]domain.ReportSummary, error) {
+	rows, err := s.db.Query(
+		`SELECT report_id, project_id::text, title,
+		        COALESCE(jsonb_array_length(blocks_json), 0)::int AS block_count,
+		        created_at, updated_at
+		 FROM reports
+		 WHERE project_id = $1::uuid
+		 ORDER BY updated_at DESC, report_id DESC`,
+		projectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.ReportSummary, 0)
+	for rows.Next() {
+		var r domain.ReportSummary
+		if err := rows.Scan(
+			&r.ReportID, &r.ProjectID, &r.Title, &r.BlockCount,
+			&r.CreatedAt, &r.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+func (s *PostgresStore) GetReport(projectID, reportID string) (domain.Report, error) {
+	row := s.db.QueryRow(
+		`SELECT report_id, project_id::text, title, blocks_json, created_at, updated_at
+		 FROM reports
+		 WHERE project_id = $1::uuid AND report_id = $2`,
+		projectID,
+		reportID,
+	)
+	var r domain.Report
+	var blocksRaw []byte
+	if err := row.Scan(
+		&r.ReportID, &r.ProjectID, &r.Title, &blocksRaw, &r.CreatedAt, &r.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Report{}, ErrNotFound
+		}
+		return domain.Report{}, err
+	}
+	if len(blocksRaw) > 0 {
+		r.Blocks = append(json.RawMessage(nil), blocksRaw...)
+	}
+	return r, nil
+}
+
+func (s *PostgresStore) DeleteReport(projectID, reportID string) error {
+	res, err := s.db.Exec(
+		`DELETE FROM reports WHERE project_id = $1::uuid AND report_id = $2`,
+		projectID,
+		reportID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // silverone 2026-06-01 — project 사이드바 채팅 count. dataset 단위 합산이
 // 아닌 단일 COUNT 쿼리(analysis_threads.project_id 인덱스 활용)로 처리.
 // project가 없거나 thread 0건이면 0 반환 (ErrNotFound 아님).
@@ -2297,6 +2427,18 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS report_saved_results_project_idx
 		  ON report_saved_results(project_id, dataset_id, created_at DESC)`,
+		// silverone 2026-06-11 — 보고서 문서. blocks는 작성 당시 snapshot을 복제해
+		// 담는 opaque JSON 배열(블록 contract는 프론트 소유). 1차 CRUD only.
+		`CREATE TABLE IF NOT EXISTS reports (
+			report_id TEXT PRIMARY KEY,
+			project_id UUID NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+			title TEXT NOT NULL,
+			blocks_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS reports_project_idx
+		  ON reports(project_id, updated_at DESC)`,
 		// silverone 2026-05-27 (Codex adversarial review fix-1) — 옛 schema
 		// (report_drafts / executions / skill_plans / analysis_requests) DROP을
 		// boot-time ensureSchema에서 제거. 운영/감사 이력이 들어있을 수 있는
