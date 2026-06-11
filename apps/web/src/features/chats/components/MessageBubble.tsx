@@ -8,7 +8,11 @@ import EvidenceCardList from "./EvidenceCardList";
 import MetricCompareView from "./MetricCompareView";
 import MessageWarnings from "./MessageWarnings";
 import PlanPanel from "./PlanPanel";
+import ResultCardActions, { type ReportSaveState } from "./ResultCardActions";
 import RunStatus from "./RunStatus";
+
+// 결과 카드 저장 상태 타입은 ResultCardActions가 소유. 호환을 위해 재노출.
+export type { ReportSaveState };
 
 // 메시지 하나에 chart/table을 동시에 펼치지 않는다 — recommended_view 기준
 // 단일 메인 결과 + 필요 시 상세 데이터 접이식.
@@ -16,7 +20,22 @@ import RunStatus from "./RunStatus";
 //   bar/line 추천했지만 데이터 부족 → chart 생략, 안내 + display 메인
 //   recommended_view = table or unknown or 없음 → display 메인
 //   display도 없으면 텍스트만
-export default function MessageBubble({ message }: { message: ChatMessage }) {
+interface MessageBubbleProps {
+  message: ChatMessage;
+  // 보고서 보관함 저장 — assistant 결과 메시지에만 연결. 핸들러가 없으면
+  // 저장 아이콘만 빠지고 나머지 결과 액션은 그대로(이력 로딩 중·user 메시지 등).
+  onSaveToReport?: () => void;
+  saveState?: ReportSaveState;
+  // 결과 액션(복사/다운로드/스텁) 피드백 토스트.
+  onToast?: (message: string) => void;
+}
+
+export default function MessageBubble({
+  message,
+  onSaveToReport,
+  saveState = "idle",
+  onToast,
+}: MessageBubbleProps) {
   const isUser = message.role === "user";
 
   const display = !isUser ? message.display : undefined;
@@ -39,6 +58,11 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
     !isUser && !chartMain && message.chartFallbackReason === "insufficient_data";
 
   const isWide = hasNonTableMain || tableMain || hasPlan;
+
+  // 결과 액션바는 실제 결과(표/차트/지표/원문)가 있는 assistant 메시지에만.
+  // 텍스트만 있는 거절/안내 응답엔 액션이 의미 없어 노출하지 않는다.
+  const hasResult = !!display || !!chart || !!metric || !!evidence;
+  const showActions = !isUser && hasResult;
 
   return (
     <div className={cn("flex gap-2.5 items-start", isUser && "flex-row-reverse")}>
@@ -90,6 +114,15 @@ export default function MessageBubble({ message }: { message: ChatMessage }) {
           <MessageWarnings
             warnings={message.warnings}
             taxonomyStatus={message.taxonomyStatus}
+          />
+        )}
+
+        {showActions && (
+          <ResultCardActions
+            message={message}
+            onSave={onSaveToReport}
+            saveState={saveState}
+            onToast={onToast ?? (() => {})}
           />
         )}
       </div>

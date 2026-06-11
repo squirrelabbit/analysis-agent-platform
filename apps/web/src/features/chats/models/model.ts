@@ -113,6 +113,9 @@ export interface ChatMessage {
   // 표시되지 않는다 (사용자 정책).
   runStatus?: RunStatus;
   runError?: string;
+  // silverone 2026-06-10 — 보고서 보관함 저장에 필요한 run id. assistant
+  // 메시지에만, POST 응답·thread detail 양쪽에서 채워진다(스냅샷 대상 식별).
+  runId?: string;
 }
 
 export interface ChatThread {
