@@ -98,7 +98,7 @@ export default function PipelineCard({ versionId, type }: PipelineCardProps) {
 
         <ProgressBar percent={percent} />
         <div className="flex gap-2">
-          {status === "completed" && (
+          {(status === "completed" && buildType !== 'clause_keywords') && (
             <Button
               size="sm"
               variant="outline"

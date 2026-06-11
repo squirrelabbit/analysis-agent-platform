@@ -12,6 +12,7 @@ import {
   SENTIMENT_ORDER,
   SENTIMENT_BADGE,
   type Sentiment,
+  SENTIMENT_FILTER_OPTIONS,
 } from "@/features/versions/constants/sentiment";
 import type { ClauseBuild, ClauseItem } from "../../models/build";
 import { Badge } from "@/components/ui/badge";
@@ -42,13 +43,6 @@ import {
 
 // 드릴다운 selector의 "전체" 항목 sentinel key (실제 aspect key와 충돌 방지).
 const ALL_KEY = "__all__";
-
-const SENTIMENT_FILTER_OPTIONS: { label: string; value: string | "" }[] = [
-  { label: "전체", value: "" },
-  { label: "긍정", value: "positive" },
-  { label: "중립", value: "neutral" },
-  { label: "부정", value: "negative" },
-];
 
 function SentimentBadge({ value }: { value: string }) {
   return (

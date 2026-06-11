@@ -94,33 +94,55 @@ export function BuildMetaBar({
 }: {
   status: BuildStatus;
   durationSeconds?: number;
-  applied?: {
-    promptVersion?: string;
-    model?: string;
-    modelDisplayName?: string;
-  };
+  // applied는 분석별로 키가 다른 snake_case map. 있는 키만 골라 칩으로 보여준다.
+  // LLM: prompt_version/model/model_display_name, 키워드: extractor_version.
+  applied?: Record<string, string>;
 }) {
+  const promptVersion = applied?.prompt_version;
+  const model = applied?.model;
+  const modelDisplay = applied?.model_display_name || model;
+  const extractorVersion = applied?.extractor_version;
+
   return (
     <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
       <BuildTimerChip status={status} durationSeconds={durationSeconds} />
-      {applied && (
+
+      {promptVersion && (
         <>
           <span className="h-3 w-px bg-zinc-200" />
           <span className="inline-flex items-center gap-1.5 font-medium">
             <FileText className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
             프롬프트
             <code className="rounded-md bg-violet-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-violet-700">
-              {applied.promptVersion ?? "-"}
+              {promptVersion}
             </code>
           </span>
+        </>
+      )}
+
+      {modelDisplay && (
+        <>
           <span className="h-3 w-px bg-zinc-200" />
           <span className="inline-flex items-center gap-1.5 font-medium">
             <Box className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
             모델
             {/* 표시명 우선, 없으면 raw model. raw model id는 title(tooltip)로 확인. */}
-            <b className="font-bold text-zinc-800" title={applied.model}>
-              {applied.modelDisplayName || applied.model || "-"}
+            <b className="font-bold text-zinc-800" title={model}>
+              {modelDisplay}
             </b>
+          </span>
+        </>
+      )}
+
+      {extractorVersion && (
+        <>
+          <span className="h-3 w-px bg-zinc-200" />
+          <span className="inline-flex items-center gap-1.5 font-medium">
+            <Box className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.8} />
+            추출기
+            <code className="rounded-md bg-violet-50 px-2 py-0.5 font-mono text-[11px] font-semibold text-violet-700">
+              {extractorVersion}
+            </code>
           </span>
         </>
       )}
