@@ -149,6 +149,9 @@ func (s *Server) routes() {
 	// ADR-017 / 5/19 결정 — clean 직후 doc-level 3-tier 진성 분류 endpoint.
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness", s.handleCreateDocGenuinenessJob)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness", s.handleGetDocGenuinenessView)
+	// 진성 라벨 수동 보정 (silverone 2026-06-11) — PATCH로 set, DELETE override로 되돌리기.
+	s.mux.HandleFunc("PATCH /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness/{doc_id}", s.handleSetDocGenuinenessOverride)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness/{doc_id}/override", s.handleDeleteDocGenuinenessOverride)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness_download", s.handleDownloadDocGenuinenessDataset)
 	// Phase 3 (2026-05-22) — /versions/{vid}/build_jobs list 제거. 화면이
 	// build job 이력을 직접 조회할 필요가 사라졌다 (view endpoint가 최신 job의

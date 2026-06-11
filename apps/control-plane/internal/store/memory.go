@@ -33,6 +33,7 @@ type MemoryStore struct {
 	rejectionEvents      map[string]domain.PlannerRejectionEvent // key: message_id (PR2 dedup)
 	savedResults         map[string]domain.ReportSavedResult     // key: result_id (보고서 보관함)
 	reports              map[string]domain.Report                // key: report_id (보고서 문서)
+	genuinenessOverrides map[string]domain.DocGenuinenessOverride // key: versionID\x00docID
 	// document_cluster_profile build / confirmation 관련 필드는 β2 (5/19) 결정으로 제거.
 	// scenarios / requests / plans / executions / reports 필드는 δ-3 (5/21) plan_v2 도입에 따라 제거.
 }
@@ -53,6 +54,7 @@ func NewMemoryStore() *MemoryStore {
 		rejectionEvents:      make(map[string]domain.PlannerRejectionEvent),
 		savedResults:         make(map[string]domain.ReportSavedResult),
 		reports:              make(map[string]domain.Report),
+		genuinenessOverrides: make(map[string]domain.DocGenuinenessOverride),
 	}
 }
 
@@ -904,6 +906,55 @@ func (s *MemoryStore) DeleteReport(projectID, reportID string) error {
 	}
 	delete(s.reports, reportID)
 	return nil
+}
+
+// ── 진성 라벨 수동 보정 overlay (silverone 2026-06-11) ──
+
+func genuinenessOverrideKey(versionID, docID string) string {
+	return versionID + "\x00" + docID
+}
+
+func (s *MemoryStore) UpsertDocGenuinenessOverride(o domain.DocGenuinenessOverride) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := o.UpdatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	key := genuinenessOverrideKey(o.DatasetVersionID, o.DocID)
+	if existing, ok := s.genuinenessOverrides[key]; ok {
+		o.CreatedAt = existing.CreatedAt
+	} else if o.CreatedAt.IsZero() {
+		o.CreatedAt = now
+	}
+	o.UpdatedAt = now
+	s.genuinenessOverrides[key] = o
+	return nil
+}
+
+func (s *MemoryStore) DeleteDocGenuinenessOverride(projectID, datasetVersionID, docID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := genuinenessOverrideKey(datasetVersionID, docID)
+	o, ok := s.genuinenessOverrides[key]
+	if !ok || o.ProjectID != projectID {
+		return ErrNotFound
+	}
+	delete(s.genuinenessOverrides, key)
+	return nil
+}
+
+func (s *MemoryStore) ListDocGenuinenessOverrides(projectID, datasetVersionID string) ([]domain.DocGenuinenessOverride, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.DocGenuinenessOverride, 0)
+	for _, o := range s.genuinenessOverrides {
+		if o.ProjectID == projectID && o.DatasetVersionID == datasetVersionID {
+			items = append(items, o)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].DocID < items[j].DocID })
+	return items, nil
 }
 
 // countReportBlocks — blocks JSON 배열 길이(파싱 실패/비배열이면 0). 목록 summary용.

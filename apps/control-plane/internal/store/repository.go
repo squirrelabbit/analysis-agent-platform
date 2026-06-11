@@ -78,6 +78,12 @@ type Repository interface {
 	GetReport(projectID, reportID string) (domain.Report, error)
 	DeleteReport(projectID, reportID string) error
 
+	// silverone 2026-06-11 — 진성 라벨 수동 보정 overlay. (version, doc) upsert,
+	// ListByVersion은 진성 GET overlay·summary 재집계용.
+	UpsertDocGenuinenessOverride(override domain.DocGenuinenessOverride) error
+	DeleteDocGenuinenessOverride(projectID, datasetVersionID, docID string) error
+	ListDocGenuinenessOverrides(projectID, datasetVersionID string) ([]domain.DocGenuinenessOverride, error)
+
 	// silverone 2026-05-27 (Codex adversarial review fix-2) — control-plane
 	// 재기동 시 reconciliation에서 사용. status가 queued/running으로 남아 있는
 	// in-flight row를 모두 가져온다. project_id 무관 — 전체 system 단위.
