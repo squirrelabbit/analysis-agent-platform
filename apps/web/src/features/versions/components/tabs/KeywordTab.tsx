@@ -20,7 +20,13 @@ import {
   FilterPills,
   type Column,
 } from "../DataTable";
-import { BuildTabEmpty, isBuildRunning } from "../BuildStatusMeta";
+import {
+  BuildMetaBar,
+  BuildRunningBanner,
+  BuildTabEmpty,
+  BuildTabLoading,
+  isBuildRunning,
+} from "../BuildStatusMeta";
 import {
   Select,
   SelectContent,
@@ -133,8 +139,12 @@ function buildCloud(keywords: CloudInput[]): CloudWord[][] {
   const sqMax = Math.sqrt(Math.max(...counts));
   const sqMin = Math.sqrt(Math.min(...counts));
   const sized: CloudWord[] = words.map((w) => {
-    const t = sqMax === sqMin ? 1 : (Math.sqrt(w.count) - sqMin) / (sqMax - sqMin);
-    return { ...w, px: Math.round(CLOUD_MIN_PX + t * (CLOUD_MAX_PX - CLOUD_MIN_PX)) };
+    const t =
+      sqMax === sqMin ? 1 : (Math.sqrt(w.count) - sqMin) / (sqMax - sqMin);
+    return {
+      ...w,
+      px: Math.round(CLOUD_MIN_PX + t * (CLOUD_MAX_PX - CLOUD_MIN_PX)),
+    };
   });
 
   // 중앙 행부터 채우는 순서 (가운데와의 거리 오름차순).
@@ -151,7 +161,9 @@ function buildCloud(keywords: CloudInput[]): CloudWord[][] {
     idx += slice.length;
     // 행 안에서도 큰 단어가 가운데 오도록 center-out 배치.
     const centered: CloudWord[] = [];
-    slice.forEach((w, i) => (i % 2 === 0 ? centered.push(w) : centered.unshift(w)));
+    slice.forEach((w, i) =>
+      i % 2 === 0 ? centered.push(w) : centered.unshift(w),
+    );
     rows[row] = centered;
   }
   return rows.filter((r) => r.length > 0);
@@ -245,30 +257,34 @@ export function KeywordTab() {
       limit: PAGE_SIZE,
       offset: (page - 1) * PAGE_SIZE,
     },
-  );
-  const build = data as KeywordBuild | undefined;
+  ) as {
+    data: KeywordBuild | undefined;
+    isLoading: boolean;
+    isPlaceholderData: boolean;
+  };
+  const {
+    summary,
+    items = [],
+    applied,
+    status,
+    progress,
+    durationSeconds,
+    pagination,
+  } = data || {};
   // taxonomy 조회 실패해도 aspectLabelOf가 key로 fallback하므로 화면은 동작.
   const { data: taxonomy } = useTaxonomy();
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-20 text-sm text-zinc-400">
-        결과를 불러오는 중…
-      </div>
-    );
-  }
+  if (isLoading) return  <BuildTabLoading />
 
-  const summary = build?.summary;
-  const status = build?.status;
-
-  // 키워드 분석은 절 라벨링 결과에 의존. summary 없으면 안내.
   if (!summary) {
     return isBuildRunning(status) ? (
-      <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 text-sm font-medium text-blue-700">
-        절 라벨링이 진행 중입니다. 완료되면 키워드 분석이 표시됩니다.
-      </div>
+      <BuildRunningBanner
+        status={status}
+        progress={progress}
+        hasPrevious={false}
+      />
     ) : (
-      <BuildTabEmpty type="clause_label" status={status} />
+      <BuildTabEmpty type="clause_keywords" status={status} />
     );
   }
 
@@ -300,8 +316,7 @@ export function KeywordTab() {
   }));
 
   // 상세 표 = 서버 페이지(KeywordItem). pagination.total = (필터 적용) 전체 건수.
-  const items = build?.items ?? [];
-  const totalCount = build?.pagination?.total ?? 0;
+  const totalCount = pagination?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   // 최다 출현 키워드 — 전역 필드가 없어 현재 페이지 상위로 근사 (page 1·무필터에서 정확).
@@ -369,6 +384,12 @@ export function KeywordTab() {
 
   return (
     <div className="space-y-5">
+      {/* 메타 */}
+      <BuildMetaBar
+        status={status}
+        durationSeconds={durationSeconds}
+        applied={applied}
+      />
       {/* 요약 통계 */}
       <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
         <StatCard
@@ -606,7 +627,7 @@ export function KeywordTab() {
         loading={isPlaceholderData}
         toolbar={
           <>
-          <div className="relative">
+            <div className="relative">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
               <input
                 value={search}
@@ -615,7 +636,7 @@ export function KeywordTab() {
                 className="h-7 w-40 rounded-lg border border-zinc-200 pl-7 pr-2.5 text-xs outline-none focus:border-violet-400"
               />
             </div>
-            
+
             {/* Aspect 필터 — 상세 표 전용(서버 호출). 상단 칩과 독립. "전체"면 aspect 해제 */}
             <Select
               value={activeAspect ?? "all"}
@@ -636,7 +657,7 @@ export function KeywordTab() {
                 ))}
               </SelectContent>
             </Select>
-            
+
             <FilterPills
               options={SENTIMENT_FILTER_OPTIONS}
               value={sentiment}

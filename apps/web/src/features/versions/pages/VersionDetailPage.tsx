@@ -90,7 +90,7 @@ export default function VersionDetailPage() {
         ))}
       </div>
       <Tabs value={tab} onValueChange={(v) => setTab(v as BuildJobType)}>
-        <TabsList variant="line" className="my-6">
+        <TabsList variant="line" className="mt-6 mb-3">
           {builds.map((build) => (
             <TabsTrigger
               key={build}

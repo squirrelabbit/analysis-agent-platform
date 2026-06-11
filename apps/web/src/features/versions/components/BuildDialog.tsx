@@ -19,9 +19,11 @@ import type {
   BuildClauseFormValues,
   BuildCleanFormValues,
   BuildGenuinenessFormValues,
+  BuildKeywordFormValues,
 } from "../schemas/build.schema";
 import { BuildClauseForm } from "./forms/BuildClauseForm";
 import type { BuildJobType } from "@/shared/types/common";
+import BuildKeywordForm from "./forms/BuildKeywordForm";
 
 export default function BuildDialog({
   formId,
@@ -117,6 +119,20 @@ export default function BuildDialog({
                   req: compactObject({
                     clause_label_prompt_version: data.promptVersion,
                     include_genuineness: data.includeGenuineness,
+                  }),
+                });
+              }}
+              onSuccess={close}
+            />
+          )}
+          {stage == "clause_keywords" && (
+            <BuildKeywordForm
+              formId={formId}
+              onSubmit={async (data: BuildKeywordFormValues) => {
+                await mutateAsync({
+                  type: "clause_keywords",
+                  req: compactObject({
+                    keyword_min_len: data.keywordMinLen,
                   }),
                 });
               }}
