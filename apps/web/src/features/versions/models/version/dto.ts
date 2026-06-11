@@ -3,7 +3,7 @@ import type {
   ClauseVersionBuildDto,
   CleanVersionBuildDto,
   GenuinenessVersionBuildDto,
-} from "../build/dto";
+} from "../build";
 
 export interface VersionResponse {
   dataset_version_id: string;
