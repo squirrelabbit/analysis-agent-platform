@@ -67,6 +67,8 @@ tags:
     description: dataset / dataset version / build / 다운로드
   - name: Analysis
     description: 저장형 analysis thread / message / run + plan replay
+  - name: Reports
+    description: 보고서 보관함 — 분석 결과 스냅샷 저장/조회
 paths:
   /health:
     get:
@@ -1375,6 +1377,178 @@ paths:
                 $ref: "#/components/schemas/DatasetBuildJob"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/saved_results:
+    post:
+      tags: [Reports]
+      summary: 분석 결과를 보고서 보관함에 저장 (스냅샷)
+      description: |
+        채팅에서 완료된 분석 결과(`run_id`)를 보고서 보관함에 저장한다.
+        저장 시점의 `composer.display` / `plan` / `assistant_content`를
+        스냅샷으로 박제해 보존한다 — 이후 같은 질문을 재실행하거나 thread를
+        지워도 보관함 항목은 변하지 않는다. project / dataset / version은 run에서
+        유도한다. `title` 미지정 시 display.title → question 순으로 서버가 유도.
+
+        completed 상태가 아니거나 result_json이 없으면 400.
+      operationId: createSavedResult
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportSavedResultCreateRequest"
+      responses:
+        "201":
+          description: 저장된 보관함 항목
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportSavedResult"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      tags: [Reports]
+      summary: 보고서 보관함 목록 (project 스코프, 최신순)
+      description: |
+        project의 저장된 분석 결과 목록을 최신순으로 반환한다.
+        `dataset_id` query로 특정 dataset만 필터할 수 있다(미지정 시 전체).
+      operationId: listSavedResults
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: dataset_id
+          in: query
+          required: false
+          description: 특정 dataset의 항목만 필터 (미지정 시 project 전체)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 보관함 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportSavedResultListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/saved_results/{result_id}:
+    delete:
+      tags: [Reports]
+      summary: 보고서 보관함 항목 삭제
+      operationId: deleteSavedResult
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: result_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: 삭제 완료
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/reports:
+    post:
+      tags: [Reports]
+      summary: 보고서 문서 생성
+      description: |
+        saved_results(보관함)를 조합한 보고서 문서를 생성한다. blocks는 작성
+        당시 snapshot을 복제해 담는 opaque JSON 배열로, control-plane은 영속만
+        책임지고 블록 contract는 프론트(보고서 에디터)가 소유한다. blocks
+        미지정 시 빈 배열로 저장. 1차는 CRUD만 — 공유/재생성/export는 후속.
+      operationId: createReport
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportCreateRequest"
+      responses:
+        "201":
+          description: 생성된 보고서
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    get:
+      tags: [Reports]
+      summary: 보고서 목록 (project 스코프, 최신순)
+      description: blocks 본문은 제외한 경량 summary(제목·블록 수·시각)만 반환한다.
+      operationId: listReports
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: 보고서 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/reports/{report_id}:
+    get:
+      tags: [Reports]
+      summary: 보고서 단건 조회 (blocks 포함)
+      operationId: getReport
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReportId"
+      responses:
+        "200":
+          description: 보고서 상세
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    put:
+      tags: [Reports]
+      summary: 보고서 전체 갱신 (title + blocks 교체)
+      description: title과 blocks를 통째로 교체한다(부분 patch 아님).
+      operationId: updateReport
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReportId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportUpdateRequest"
+      responses:
+        "200":
+          description: 갱신된 보고서
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    delete:
+      tags: [Reports]
+      summary: 보고서 삭제
+      operationId: deleteReport
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReportId"
+      responses:
+        "204":
+          description: 삭제 완료
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
 components:
   responses:
     ErrorResponse:
@@ -1410,6 +1584,12 @@ components:
         type: string
     RunId:
       name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+    ReportId:
+      name: report_id
       in: path
       required: true
       schema:
@@ -2318,6 +2498,148 @@ components:
             예시 `"게시일"`. 명시 안 하면 `created_at` 컬럼은 모두 null. parse 실패 / Invalid date /
             빈 값은 row별 null로 처리 (전체 row는 유지). 분리형 date(`pub_year` / `month` / `day`)
             지원은 후속 PR (`date_parts`).
+    ReportSavedResultCreateRequest:
+      type: object
+      required: [run_id]
+      properties:
+        run_id:
+          type: string
+          description: 스냅샷할 완료된 분석 run id
+        thread_id:
+          type: string
+          description: (선택) 검증용 — run의 thread와 일치해야 한다
+        title:
+          type: string
+          description: (선택) 표시 제목. 미지정 시 서버가 display.title→question에서 유도
+    ReportSavedResult:
+      type: object
+      description: |
+        보고서 보관함 항목. 저장 시점의 분석 결과 스냅샷.
+        display/plan은 채팅의 composer.display / plan과 동일 shape.
+      properties:
+        result_id:
+          type: string
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        thread_id:
+          type: string
+        run_id:
+          type: string
+        source_message_id:
+          type: string
+        title:
+          type: string
+        question:
+          type: string
+        assistant_content:
+          type: string
+        display:
+          $ref: "#/components/schemas/ComposerDisplay"
+        plan:
+          $ref: "#/components/schemas/AnalyzePlanView"
+        created_at:
+          type: string
+          format: date-time
+    ReportSavedResultListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportSavedResult"
+    ReportBlock:
+      type: object
+      description: |
+        보고서 블록. control-plane은 구조를 강제하지 않는 opaque object로
+        저장하며, contract는 프론트(보고서 에디터)가 소유한다. 아래는 권장
+        형태(provenance + 작성 당시 snapshot 복제)로, 추가 필드를 허용한다.
+      additionalProperties: true
+      properties:
+        block_id:
+          type: string
+        type:
+          type: string
+          description: chart | table | text 등
+        title:
+          type: string
+        source_result_id:
+          type: string
+          description: 출처 saved_result id (provenance만 — 삭제돼도 보고서 불변)
+        source_dataset_id:
+          type: string
+        source_version_id:
+          type: string
+        snapshot:
+          type: object
+          description: 작성 당시 결과 스냅샷(display/summary/rows 등)
+          additionalProperties: true
+    Report:
+      type: object
+      properties:
+        report_id:
+          type: string
+        project_id:
+          type: string
+        title:
+          type: string
+        blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportBlock"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ReportSummary:
+      type: object
+      description: 목록용 경량 projection. blocks 본문 대신 개수만.
+      properties:
+        report_id:
+          type: string
+        project_id:
+          type: string
+        title:
+          type: string
+        block_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ReportCreateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          description: 미지정 시 "제목 없는 보고서"
+        blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportBlock"
+    ReportUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportBlock"
+    ReportListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportSummary"
     AnalysisThread:
       type: object
       properties:

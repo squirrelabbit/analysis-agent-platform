@@ -13,10 +13,15 @@ import {
 import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { createClientId } from "@/shared/utils/id";
 import { useDatasets } from "@/features/datasets/hooks/dataset.query";
-import { useAnalysisChat, useDeleteChatThread } from "../hooks/chat.mutation";
+import {
+  useAnalysisChat,
+  useDeleteChatThread,
+  useSaveReportResult,
+} from "../hooks/chat.mutation";
 import { useChatThread, useChatThreads } from "../hooks/chat.query";
 import type { ChatMessage } from "../models";
 import MessageBubble from "../components/MessageBubble";
+import ChatToast from "../components/ChatToast";
 import ThreadList from "../components/ThreadList";
 
 function extractErrorMessage(err: unknown): string {
@@ -47,6 +52,28 @@ export function ChatPage() {
   const threadDetail = useChatThread(projectId, activeDatasetId, threadId);
   const chat = useAnalysisChat(projectId, activeDatasetId);
   const deleteThread = useDeleteChatThread(projectId, activeDatasetId);
+  const saveResult = useSaveReportResult(projectId);
+  // 보고서 보관함 저장 상태 — run_id 기준(스냅샷 단위). 저장 성공은 누적 보존,
+  // 진행 중은 단건만(연타 방지).
+  const [savedRunIds, setSavedRunIds] = useState<Set<string>>(
+    () => new Set<string>(),
+  );
+  const [savingRunId, setSavingRunId] = useState<string | null>(null);
+  // 결과 액션 토스트 — 1.6초 후 자동 숨김.
+  const [toast, setToast] = useState<{ msg: string; visible: boolean }>({
+    msg: "",
+    visible: false,
+  });
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showToast(msg: string) {
+    setToast({ msg, visible: true });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(
+      () => setToast((t) => ({ ...t, visible: false })),
+      1600,
+    );
+  }
   const isLoading = chat.isPending;
   const deletingThreadId = deleteThread.isPending
     ? (deleteThread.variables ?? null)
@@ -201,6 +228,32 @@ export function ChatPage() {
     }
   }
 
+  async function handleSaveToReport(msg: ChatMessage) {
+    const runId = msg.runId;
+    if (!runId || savingRunId || savedRunIds.has(runId)) return;
+    setErrorMsg(null);
+    setSavingRunId(runId);
+    try {
+      await saveResult.mutateAsync({
+        runId,
+        threadId: threadId ?? undefined,
+      });
+      setSavedRunIds((prev) => new Set(prev).add(runId));
+      showToast("보고서에 저장했습니다");
+    } catch (err) {
+      setErrorMsg(extractErrorMessage(err));
+    } finally {
+      setSavingRunId(null);
+    }
+  }
+
+  function reportSaveStateFor(msg: ChatMessage) {
+    if (!msg.runId) return "idle" as const;
+    if (savedRunIds.has(msg.runId)) return "saved" as const;
+    if (savingRunId === msg.runId) return "saving" as const;
+    return "idle" as const;
+  }
+
   const threads = threadsQuery.data ?? [];
   const isDetailLoading = !!threadId && threadDetail.isLoading;
   const hasContent = messages.length > 0;
@@ -268,7 +321,17 @@ export function ChatPage() {
             )}
 
             {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                onSaveToReport={
+                  msg.role === "assistant" && msg.runId
+                    ? () => handleSaveToReport(msg)
+                    : undefined
+                }
+                saveState={reportSaveStateFor(msg)}
+                onToast={showToast}
+              />
             ))}
 
             {isLoading && (
@@ -327,6 +390,8 @@ export function ChatPage() {
           </div>
         </div>
       </div>
+
+      <ChatToast message={toast.msg} visible={toast.visible} />
     </div>
   );
 }

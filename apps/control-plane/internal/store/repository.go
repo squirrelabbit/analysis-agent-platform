@@ -63,6 +63,21 @@ type Repository interface {
 	// message_id UNIQUE로 중복 무시(idempotent). skill upgrade backlog 축적용.
 	SaveRejectionEvent(event domain.PlannerRejectionEvent) error
 
+	// silverone 2026-06-10 — 보고서 보관함. 분석 결과 스냅샷 저장/조회/삭제.
+	// ListReportSavedResults는 datasetID가 빈 문자열이면 project 전체를 반환한다.
+	SaveReportSavedResult(result domain.ReportSavedResult) error
+	ListReportSavedResults(projectID, datasetID string) ([]domain.ReportSavedResult, error)
+	GetReportSavedResult(projectID, resultID string) (domain.ReportSavedResult, error)
+	DeleteReportSavedResult(projectID, resultID string) error
+
+	// silverone 2026-06-11 — 보고서 문서 CRUD. CreateReport는 INSERT,
+	// UpdateReport는 UPDATE(없으면 ErrNotFound). ListReports는 경량 summary.
+	CreateReport(report domain.Report) error
+	UpdateReport(report domain.Report) error
+	ListReports(projectID string) ([]domain.ReportSummary, error)
+	GetReport(projectID, reportID string) (domain.Report, error)
+	DeleteReport(projectID, reportID string) error
+
 	// silverone 2026-05-27 (Codex adversarial review fix-2) — control-plane
 	// 재기동 시 reconciliation에서 사용. status가 queued/running으로 남아 있는
 	// in-flight row를 모두 가져온다. project_id 무관 — 전체 system 단위.

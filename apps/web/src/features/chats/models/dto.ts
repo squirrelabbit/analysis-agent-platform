@@ -149,3 +149,20 @@ export interface AnalysisMessageDto {
 export interface AnalysisThreadDetailDto extends AnalysisThreadDto {
   messages: AnalysisMessageDto[];
 }
+
+// silverone 2026-06-10 — 보고서 보관함 저장. 채팅 쪽에서는 저장 요청 + 최소
+// 응답(식별/제목)만 사용한다. 보고서 탭의 전체 보관함 조회 계약(display/plan
+// 포함)은 보고서 탭 API 연동 시 별도로 다룬다.
+export interface ReportSavedResultCreateRequestDto {
+  run_id: string;
+  thread_id?: string;
+  title?: string;
+}
+
+export interface ReportSavedResultDto {
+  result_id: string;
+  title: string;
+  run_id?: string;
+  thread_id?: string;
+  created_at: string;
+}

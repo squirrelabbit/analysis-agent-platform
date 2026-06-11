@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"sort"
 	"sync"
@@ -30,6 +31,8 @@ type MemoryStore struct {
 	analysisMessages     map[string]domain.AnalysisMessage
 	analysisRuns         map[string]domain.AnalysisRun
 	rejectionEvents      map[string]domain.PlannerRejectionEvent // key: message_id (PR2 dedup)
+	savedResults         map[string]domain.ReportSavedResult     // key: result_id (보고서 보관함)
+	reports              map[string]domain.Report                // key: report_id (보고서 문서)
 	// document_cluster_profile build / confirmation 관련 필드는 β2 (5/19) 결정으로 제거.
 	// scenarios / requests / plans / executions / reports 필드는 δ-3 (5/21) plan_v2 도입에 따라 제거.
 }
@@ -48,6 +51,8 @@ func NewMemoryStore() *MemoryStore {
 		analysisMessages:     make(map[string]domain.AnalysisMessage),
 		analysisRuns:         make(map[string]domain.AnalysisRun),
 		rejectionEvents:      make(map[string]domain.PlannerRejectionEvent),
+		savedResults:         make(map[string]domain.ReportSavedResult),
+		reports:              make(map[string]domain.Report),
 	}
 }
 
@@ -746,6 +751,171 @@ func (s *MemoryStore) SaveRejectionEvent(event domain.PlannerRejectionEvent) err
 	event.CapabilityGap = cloneAnyMap(event.CapabilityGap)
 	s.rejectionEvents[event.MessageID] = event
 	return nil
+}
+
+// silverone 2026-06-10 — 보고서 보관함 (memory). display/plan은 deep clone로
+// 저장·반환해 caller 변형이 내부 상태를 오염시키지 않게 한다.
+func (s *MemoryStore) SaveReportSavedResult(result domain.ReportSavedResult) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if result.CreatedAt.IsZero() {
+		result.CreatedAt = time.Now().UTC()
+	}
+	result.Display = cloneAnyMap(result.Display)
+	result.Plan = cloneAnyMap(result.Plan)
+	s.savedResults[result.ResultID] = result
+	return nil
+}
+
+func (s *MemoryStore) ListReportSavedResults(projectID, datasetID string) ([]domain.ReportSavedResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.ReportSavedResult, 0)
+	for _, result := range s.savedResults {
+		if result.ProjectID != projectID {
+			continue
+		}
+		if datasetID != "" && result.DatasetID != datasetID {
+			continue
+		}
+		clone := result
+		clone.Display = cloneAnyMap(result.Display)
+		clone.Plan = cloneAnyMap(result.Plan)
+		items = append(items, clone)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ResultID > items[j].ResultID
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	return items, nil
+}
+
+func (s *MemoryStore) GetReportSavedResult(projectID, resultID string) (domain.ReportSavedResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result, ok := s.savedResults[resultID]
+	if !ok || result.ProjectID != projectID {
+		return domain.ReportSavedResult{}, ErrNotFound
+	}
+	result.Display = cloneAnyMap(result.Display)
+	result.Plan = cloneAnyMap(result.Plan)
+	return result, nil
+}
+
+func (s *MemoryStore) DeleteReportSavedResult(projectID, resultID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result, ok := s.savedResults[resultID]
+	if !ok || result.ProjectID != projectID {
+		return ErrNotFound
+	}
+	delete(s.savedResults, resultID)
+	return nil
+}
+
+// ── 보고서 문서 CRUD (silverone 2026-06-11) ──
+
+func cloneRawJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return json.RawMessage("[]")
+	}
+	return append(json.RawMessage(nil), raw...)
+}
+
+func (s *MemoryStore) CreateReport(report domain.Report) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := report.CreatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if report.UpdatedAt.IsZero() {
+		report.UpdatedAt = now
+	}
+	report.CreatedAt = now
+	report.Blocks = cloneRawJSON(report.Blocks)
+	s.reports[report.ReportID] = report
+	return nil
+}
+
+func (s *MemoryStore) UpdateReport(report domain.Report) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing, ok := s.reports[report.ReportID]
+	if !ok || existing.ProjectID != report.ProjectID {
+		return ErrNotFound
+	}
+	existing.Title = report.Title
+	existing.Blocks = cloneRawJSON(report.Blocks)
+	if report.UpdatedAt.IsZero() {
+		existing.UpdatedAt = time.Now().UTC()
+	} else {
+		existing.UpdatedAt = report.UpdatedAt
+	}
+	s.reports[report.ReportID] = existing
+	return nil
+}
+
+func (s *MemoryStore) ListReports(projectID string) ([]domain.ReportSummary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.ReportSummary, 0)
+	for _, r := range s.reports {
+		if r.ProjectID != projectID {
+			continue
+		}
+		items = append(items, domain.ReportSummary{
+			ReportID:   r.ReportID,
+			ProjectID:  r.ProjectID,
+			Title:      r.Title,
+			BlockCount: countReportBlocks(r.Blocks),
+			CreatedAt:  r.CreatedAt,
+			UpdatedAt:  r.UpdatedAt,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
+			return items[i].ReportID > items[j].ReportID
+		}
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
+	return items, nil
+}
+
+func (s *MemoryStore) GetReport(projectID, reportID string) (domain.Report, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r, ok := s.reports[reportID]
+	if !ok || r.ProjectID != projectID {
+		return domain.Report{}, ErrNotFound
+	}
+	r.Blocks = cloneRawJSON(r.Blocks)
+	return r, nil
+}
+
+func (s *MemoryStore) DeleteReport(projectID, reportID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.reports[reportID]
+	if !ok || r.ProjectID != projectID {
+		return ErrNotFound
+	}
+	delete(s.reports, reportID)
+	return nil
+}
+
+// countReportBlocks — blocks JSON 배열 길이(파싱 실패/비배열이면 0). 목록 summary용.
+func countReportBlocks(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return 0
+	}
+	return len(arr)
 }
 
 func (s *MemoryStore) GetAnalysisRun(projectID, runID string) (domain.AnalysisRun, error) {

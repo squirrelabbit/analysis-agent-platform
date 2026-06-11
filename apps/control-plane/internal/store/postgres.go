@@ -1465,6 +1465,280 @@ func (s *PostgresStore) ListAnalysisThreads(projectID, datasetID string) ([]doma
 	return items, rows.Err()
 }
 
+// silverone 2026-06-10 — 보고서 보관함 저장. display/plan은 빈 map이면 NULL로
+// 저장한다(스냅샷에 표/계획이 없는 경우). result_id는 호출자가 부여.
+func (s *PostgresStore) SaveReportSavedResult(result domain.ReportSavedResult) error {
+	displayJSON, err := nullableJSONMap(result.Display)
+	if err != nil {
+		return err
+	}
+	planJSON, err := nullableJSONMap(result.Plan)
+	if err != nil {
+		return err
+	}
+	createdAt := result.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	_, err = s.db.Exec(
+		`INSERT INTO report_saved_results (
+			result_id, project_id, dataset_id, dataset_version_id, thread_id, run_id,
+			source_message_id, title, question, assistant_content, display_json, plan_json, created_at
+		) VALUES (
+			$1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13
+		)`,
+		result.ResultID,
+		result.ProjectID,
+		result.DatasetID,
+		result.DatasetVersionID,
+		nullIfEmpty(result.ThreadID),
+		nullIfEmpty(result.RunID),
+		nullIfEmpty(result.SourceMessageID),
+		result.Title,
+		nullableEmptyString(result.Question),
+		nullableEmptyString(result.AssistantContent),
+		displayJSON,
+		planJSON,
+		createdAt,
+	)
+	return err
+}
+
+// ListReportSavedResults — datasetID가 빈 문자열이면 project 전체, 아니면 해당
+// dataset만. 최신순.
+func (s *PostgresStore) ListReportSavedResults(projectID, datasetID string) ([]domain.ReportSavedResult, error) {
+	query := `SELECT result_id, project_id::text, dataset_id::text, dataset_version_id,
+	          COALESCE(thread_id, ''), COALESCE(run_id, ''), COALESCE(source_message_id, ''),
+	          title, COALESCE(question, ''), COALESCE(assistant_content, ''),
+	          display_json, plan_json, created_at
+	   FROM report_saved_results
+	   WHERE project_id = $1::uuid`
+	args := []any{projectID}
+	if strings.TrimSpace(datasetID) != "" {
+		query += ` AND dataset_id = $2::uuid`
+		args = append(args, datasetID)
+	}
+	query += ` ORDER BY created_at DESC, result_id DESC`
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.ReportSavedResult, 0)
+	for rows.Next() {
+		result, err := scanReportSavedResult(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, result)
+	}
+	return items, rows.Err()
+}
+
+func (s *PostgresStore) GetReportSavedResult(projectID, resultID string) (domain.ReportSavedResult, error) {
+	row := s.db.QueryRow(
+		`SELECT result_id, project_id::text, dataset_id::text, dataset_version_id,
+		        COALESCE(thread_id, ''), COALESCE(run_id, ''), COALESCE(source_message_id, ''),
+		        title, COALESCE(question, ''), COALESCE(assistant_content, ''),
+		        display_json, plan_json, created_at
+		 FROM report_saved_results
+		 WHERE project_id = $1::uuid AND result_id = $2`,
+		projectID,
+		resultID,
+	)
+	return scanReportSavedResult(row)
+}
+
+func (s *PostgresStore) DeleteReportSavedResult(projectID, resultID string) error {
+	res, err := s.db.Exec(
+		`DELETE FROM report_saved_results WHERE project_id = $1::uuid AND result_id = $2`,
+		projectID,
+		resultID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func scanReportSavedResult(row interface{ Scan(...any) error }) (domain.ReportSavedResult, error) {
+	var result domain.ReportSavedResult
+	var displayRaw []byte
+	var planRaw []byte
+	if err := row.Scan(
+		&result.ResultID,
+		&result.ProjectID,
+		&result.DatasetID,
+		&result.DatasetVersionID,
+		&result.ThreadID,
+		&result.RunID,
+		&result.SourceMessageID,
+		&result.Title,
+		&result.Question,
+		&result.AssistantContent,
+		&displayRaw,
+		&planRaw,
+		&result.CreatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.ReportSavedResult{}, ErrNotFound
+		}
+		return domain.ReportSavedResult{}, err
+	}
+	if err := unmarshalJSON(displayRaw, &result.Display, map[string]any(nil)); err != nil {
+		return domain.ReportSavedResult{}, err
+	}
+	if err := unmarshalJSON(planRaw, &result.Plan, map[string]any(nil)); err != nil {
+		return domain.ReportSavedResult{}, err
+	}
+	return result, nil
+}
+
+// nullableJSONMap — 빈/nil map은 NULL로, 그 외에는 jsonb 바이트로 직렬화.
+func nullableJSONMap(value map[string]any) (any, error) {
+	if len(value) == 0 {
+		return nil, nil
+	}
+	return marshalJSON(value)
+}
+
+// ── 보고서 문서 CRUD (silverone 2026-06-11) ──
+
+// reportBlocksJSON — blocks가 비어있으면 '[]'로 정규화. 항상 JSON 배열을 보장.
+func reportBlocksJSON(blocks json.RawMessage) []byte {
+	if len(blocks) == 0 || string(blocks) == "null" {
+		return []byte("[]")
+	}
+	return blocks
+}
+
+func (s *PostgresStore) CreateReport(report domain.Report) error {
+	now := report.CreatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	updated := report.UpdatedAt
+	if updated.IsZero() {
+		updated = now
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO reports (report_id, project_id, title, blocks_json, created_at, updated_at)
+		 VALUES ($1, $2::uuid, $3, $4::jsonb, $5, $6)`,
+		report.ReportID,
+		report.ProjectID,
+		report.Title,
+		reportBlocksJSON(report.Blocks),
+		now,
+		updated,
+	)
+	return err
+}
+
+func (s *PostgresStore) UpdateReport(report domain.Report) error {
+	updated := report.UpdatedAt
+	if updated.IsZero() {
+		updated = time.Now().UTC()
+	}
+	res, err := s.db.Exec(
+		`UPDATE reports SET title = $3, blocks_json = $4::jsonb, updated_at = $5
+		 WHERE project_id = $1::uuid AND report_id = $2`,
+		report.ProjectID,
+		report.ReportID,
+		report.Title,
+		reportBlocksJSON(report.Blocks),
+		updated,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *PostgresStore) ListReports(projectID string) ([]domain.ReportSummary, error) {
+	rows, err := s.db.Query(
+		`SELECT report_id, project_id::text, title,
+		        COALESCE(jsonb_array_length(blocks_json), 0)::int AS block_count,
+		        created_at, updated_at
+		 FROM reports
+		 WHERE project_id = $1::uuid
+		 ORDER BY updated_at DESC, report_id DESC`,
+		projectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.ReportSummary, 0)
+	for rows.Next() {
+		var r domain.ReportSummary
+		if err := rows.Scan(
+			&r.ReportID, &r.ProjectID, &r.Title, &r.BlockCount,
+			&r.CreatedAt, &r.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+func (s *PostgresStore) GetReport(projectID, reportID string) (domain.Report, error) {
+	row := s.db.QueryRow(
+		`SELECT report_id, project_id::text, title, blocks_json, created_at, updated_at
+		 FROM reports
+		 WHERE project_id = $1::uuid AND report_id = $2`,
+		projectID,
+		reportID,
+	)
+	var r domain.Report
+	var blocksRaw []byte
+	if err := row.Scan(
+		&r.ReportID, &r.ProjectID, &r.Title, &blocksRaw, &r.CreatedAt, &r.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Report{}, ErrNotFound
+		}
+		return domain.Report{}, err
+	}
+	if len(blocksRaw) > 0 {
+		r.Blocks = append(json.RawMessage(nil), blocksRaw...)
+	}
+	return r, nil
+}
+
+func (s *PostgresStore) DeleteReport(projectID, reportID string) error {
+	res, err := s.db.Exec(
+		`DELETE FROM reports WHERE project_id = $1::uuid AND report_id = $2`,
+		projectID,
+		reportID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // silverone 2026-06-01 — project 사이드바 채팅 count. dataset 단위 합산이
 // 아닌 단일 COUNT 쿼리(analysis_threads.project_id 인덱스 활용)로 처리.
 // project가 없거나 thread 0건이면 0 반환 (ErrNotFound 아님).
@@ -2132,6 +2406,39 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS planner_rejection_events_reason_idx
 		  ON planner_rejection_events(reason, created_at DESC)`,
+		// silverone 2026-06-10 — 보고서 보관함. 채팅 분석 결과를 저장 시점의
+		// display/plan/assistant_content 스냅샷으로 보존한다. thread/run이 지워져도
+		// 보고서에 박제된 결과가 살아있도록 thread_id는 ON DELETE SET NULL,
+		// run_id는 FK 없는 참조 문자열(run은 thread와 함께 cascade 삭제됨).
+		`CREATE TABLE IF NOT EXISTS report_saved_results (
+			result_id TEXT PRIMARY KEY,
+			project_id UUID NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+			dataset_id UUID NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+			dataset_version_id TEXT NOT NULL,
+			thread_id TEXT REFERENCES analysis_threads(thread_id) ON DELETE SET NULL,
+			run_id TEXT,
+			source_message_id TEXT,
+			title TEXT NOT NULL,
+			question TEXT,
+			assistant_content TEXT,
+			display_json JSONB,
+			plan_json JSONB,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS report_saved_results_project_idx
+		  ON report_saved_results(project_id, dataset_id, created_at DESC)`,
+		// silverone 2026-06-11 — 보고서 문서. blocks는 작성 당시 snapshot을 복제해
+		// 담는 opaque JSON 배열(블록 contract는 프론트 소유). 1차 CRUD only.
+		`CREATE TABLE IF NOT EXISTS reports (
+			report_id TEXT PRIMARY KEY,
+			project_id UUID NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+			title TEXT NOT NULL,
+			blocks_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS reports_project_idx
+		  ON reports(project_id, updated_at DESC)`,
 		// silverone 2026-05-27 (Codex adversarial review fix-1) — 옛 schema
 		// (report_drafts / executions / skill_plans / analysis_requests) DROP을
 		// boot-time ensureSchema에서 제거. 운영/감사 이력이 들어있을 수 있는
