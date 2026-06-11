@@ -170,6 +170,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/analysis_threads/{thread_id}/messages", s.handlePostAnalysisThreadMessage)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/analysis_runs/{run_id}", s.handleGetAnalysisRun)
 	s.mux.HandleFunc("GET /projects/{project_id}/dataset_build_jobs/{job_id}", s.handleGetDatasetBuildJob)
+	// 보고서 보관함 (silverone 2026-06-10) — project 스코프.
+	s.mux.HandleFunc("POST /projects/{project_id}/saved_results", s.handleCreateSavedResult)
+	s.mux.HandleFunc("GET /projects/{project_id}/saved_results", s.handleListSavedResults)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/saved_results/{result_id}", s.handleDeleteSavedResult)
 }
 
 func (s *Server) withCORS(next stdhttp.Handler) stdhttp.Handler {
@@ -958,6 +962,45 @@ func (s *Server) handleDeleteAnalysisThread(w stdhttp.ResponseWriter, r *stdhttp
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
 		r.PathValue("thread_id"),
+	); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
+// 보고서 보관함 (silverone 2026-06-10). 채팅 분석 결과를 스냅샷 저장/조회/삭제.
+// project 스코프 — 보고서 탭이 project 단위(/projects/{id}/reports)이기 때문.
+func (s *Server) handleCreateSavedResult(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ReportSavedResultCreateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreateSavedResult(r.PathValue("project_id"), payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+func (s *Server) handleListSavedResults(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.ListSavedResults(
+		r.PathValue("project_id"),
+		r.URL.Query().Get("dataset_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
+}
+
+func (s *Server) handleDeleteSavedResult(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.datasetService.DeleteSavedResult(
+		r.PathValue("project_id"),
+		r.PathValue("result_id"),
 	); err != nil {
 		s.writeServiceError(w, err)
 		return
