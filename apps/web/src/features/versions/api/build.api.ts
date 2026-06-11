@@ -38,4 +38,32 @@ export const buildApi = {
         `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/${type}`, req,
       )
       .then(({ data }) => data),
+
+  // silverone 2026-06-11 — 진성 라벨 수동 보정. PATCH로 set, DELETE override로
+  // 되돌리기. effective genuineness/reason은 GET doc_genuineness 응답에서 합성된다.
+  setGenuinenessOverride: (
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+    docId: string,
+    req: { genuineness: string; reason?: string },
+  ) =>
+    apiClient
+      .patch(
+        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/doc_genuineness/${encodeURIComponent(docId)}`,
+        req,
+      )
+      .then(({ data }) => data),
+
+  deleteGenuinenessOverride: (
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+    docId: string,
+  ) =>
+    apiClient
+      .delete(
+        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/doc_genuineness/${encodeURIComponent(docId)}/override`,
+      )
+      .then(() => undefined),
 };
