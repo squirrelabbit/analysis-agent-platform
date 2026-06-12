@@ -35,6 +35,10 @@ type MemoryStore struct {
 	reports              map[string]domain.Report                // key: report_id (보고서 문서)
 	genuinenessOverrides map[string]domain.DocGenuinenessOverride // key: versionID\x00docID
 	clauseOverrides      map[string]domain.ClauseLabelOverride    // key: versionID\x00clauseID
+	// 인증/RBAC (ADR-025). lazy-init (memory_auth.go ensureAuthMaps).
+	users          map[string]domain.User          // key: user_id
+	sessions       map[string]domain.Session       // key: session_id
+	projectMembers map[string]domain.ProjectMember // key: projectID\x00userID
 	// document_cluster_profile build / confirmation 관련 필드는 β2 (5/19) 결정으로 제거.
 	// scenarios / requests / plans / executions / reports 필드는 δ-3 (5/21) plan_v2 도입에 따라 제거.
 }

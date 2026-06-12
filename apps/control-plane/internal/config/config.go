@@ -49,6 +49,19 @@ type Config struct {
 	// 일치할 때만 LLOAModelDisplayName을 노출한다(하드코딩 매핑 없음, env 기반).
 	LLOAModel            string
 	LLOAModelDisplayName string
+
+	// 인증/RBAC (ADR-025, silverone 2026-06-12). AuthEnabled가 false면 auth
+	// 미들웨어가 통과(7/30 사내망 격리 단계 호환). Google OIDC 설정 +
+	// 허용 도메인 + 초기 admin 이메일 + 세션 TTL.
+	AuthEnabled         bool
+	AuthGoogleClientID  string
+	AuthGoogleSecret    string
+	AuthRedirectURL     string   // 예: https://staging/api/auth/google/callback
+	AuthPostLoginURL    string   // 로그인 후 프론트 redirect (기본 "/")
+	AuthAllowedDomain   string   // 회사 도메인 (hd / email suffix), 비면 도메인 제한 없음
+	AuthAdminEmails     []string // 첫 로그인 시 global_role=admin 부여
+	AuthSessionTTLHours int
+	AuthCookieSecure    bool // 쿠키 Secure 플래그 (https 환경 true)
 }
 
 func Load() Config {
@@ -163,7 +176,23 @@ func Load() Config {
 		PlanReuseEnabled:                        envBool("ANALYSIS_PLAN_REUSE_ENABLED", false),
 		LLOAModel:                               strings.TrimSpace(os.Getenv("LLOA_MODEL")),
 		LLOAModelDisplayName:                    strings.TrimSpace(os.Getenv("LLOA_MODEL_DISPLAY_NAME")),
+		AuthEnabled:                             envBool("AUTH_ENABLED", false),
+		AuthGoogleClientID:                      strings.TrimSpace(os.Getenv("AUTH_GOOGLE_CLIENT_ID")),
+		AuthGoogleSecret:                        strings.TrimSpace(os.Getenv("AUTH_GOOGLE_CLIENT_SECRET")),
+		AuthRedirectURL:                         strings.TrimSpace(os.Getenv("AUTH_REDIRECT_URL")),
+		AuthPostLoginURL:                        envString("AUTH_POST_LOGIN_URL", "/"),
+		AuthAllowedDomain:                       strings.TrimSpace(os.Getenv("AUTH_ALLOWED_DOMAIN")),
+		AuthAdminEmails:                         splitCommaSeparated(os.Getenv("AUTH_ADMIN_EMAILS"), nil),
+		AuthSessionTTLHours:                     envPositiveInt("AUTH_SESSION_TTL_HOURS", 168),
+		AuthCookieSecure:                        envBool("AUTH_COOKIE_SECURE", false),
 	}
+}
+
+func envString(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func envBool(key string, fallback bool) bool {

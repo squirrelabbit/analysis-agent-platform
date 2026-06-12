@@ -69,7 +69,130 @@ tags:
     description: 저장형 analysis thread / message / run + plan replay
   - name: Reports
     description: 보고서 보관함 — 분석 결과 스냅샷 저장/조회
+  - name: Auth
+    description: Google OIDC 로그인 + 서버 세션 쿠키 + 프로젝트 RBAC (ADR-025)
 paths:
+  /auth/google/start:
+    get:
+      tags: [Auth]
+      summary: Google 로그인 시작 (Google OAuth로 redirect)
+      description: CSRF용 state 쿠키(asp_oauth_state)를 심고 Google 동의 화면으로 302 redirect.
+      operationId: authGoogleStart
+      responses:
+        "302":
+          description: Google authorization URL로 redirect
+  /auth/google/callback:
+    get:
+      tags: [Auth]
+      summary: Google OAuth callback
+      description: |
+        code를 Google token endpoint와 교환→id_token 검증→email_verified/도메인 확인
+        →user upsert→세션 생성→HttpOnly `asp_session` 쿠키 발급 후 프론트로 redirect.
+      operationId: authGoogleCallback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "302":
+          description: 로그인 성공 → 프론트로 redirect (asp_session 쿠키)
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/ErrorResponse"
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: 현재 로그인 사용자 + 프로젝트 role
+      description: 세션 쿠키 기준 현재 user와 project_id→role 매핑 반환. 미로그인 시 401.
+      operationId: authMe
+      responses:
+        "200":
+          description: 현재 사용자
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthMeResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: 로그아웃 (세션 삭제 + 쿠키 만료)
+      operationId: authLogout
+      responses:
+        "204":
+          description: 로그아웃 완료
+  /projects/{project_id}/members:
+    get:
+      tags: [Auth]
+      summary: 프로젝트 멤버(RBAC) 목록 — admin/owner
+      operationId: listProjectMembers
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: 멤버 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProjectMember" }
+        "401": { $ref: "#/components/responses/ErrorResponse" }
+        "403": { $ref: "#/components/responses/ErrorResponse" }
+  /projects/{project_id}/members/{user_id}:
+    put:
+      tags: [Auth]
+      summary: 프로젝트 멤버 role 부여/변경 — admin/owner
+      operationId: upsertProjectMember
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+                  enum: [owner, editor, viewer]
+      responses:
+        "204": { description: 적용 완료 }
+        "400": { $ref: "#/components/responses/ErrorResponse" }
+        "401": { $ref: "#/components/responses/ErrorResponse" }
+        "403": { $ref: "#/components/responses/ErrorResponse" }
+        "404": { $ref: "#/components/responses/ErrorResponse" }
+    delete:
+      tags: [Auth]
+      summary: 프로젝트 멤버 제거 — admin/owner
+      operationId: deleteProjectMember
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: 제거 완료 }
+        "401": { $ref: "#/components/responses/ErrorResponse" }
+        "403": { $ref: "#/components/responses/ErrorResponse" }
+        "404": { $ref: "#/components/responses/ErrorResponse" }
   /health:
     get:
       tags: [System]
@@ -2759,6 +2882,37 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReportSummary"
+    User:
+      type: object
+      description: Google OIDC로 인증된 사용자 (ADR-025). external_id = Google sub.
+      properties:
+        user_id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        avatar_url: { type: string }
+        auth_provider: { type: string, example: google }
+        external_id: { type: string }
+        global_role: { type: string, enum: [admin, user] }
+        status: { type: string, enum: [active, disabled] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        last_login_at: { type: string, format: date-time }
+    AuthMeResponse:
+      type: object
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        project_roles:
+          type: object
+          additionalProperties: { type: string }
+          description: project_id → role(owner/editor/viewer). admin은 비어도 전 프로젝트 접근.
+    ProjectMember:
+      type: object
+      properties:
+        project_id: { type: string }
+        user_id: { type: string }
+        role: { type: string, enum: [owner, editor, viewer] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     DocGenuinenessOverrideRequest:
       type: object
       required: [genuineness]

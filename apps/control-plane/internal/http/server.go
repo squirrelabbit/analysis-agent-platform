@@ -27,6 +27,7 @@ type Server struct {
 	mux            *stdhttp.ServeMux
 	projectService *service.ProjectService
 	datasetService *service.DatasetService
+	authService    *service.AuthService
 }
 
 func NewServer(cfg config.Config) *Server {
@@ -44,6 +45,17 @@ func NewServer(cfg config.Config) *Server {
 		mux:            mux,
 		projectService: service.NewProjectService(repository, cfg.UploadRoot, cfg.ArtifactRoot),
 		datasetService: service.NewDatasetService(repository, cfg.PythonAIWorkerURL, cfg.UploadRoot, cfg.ArtifactRoot),
+		authService: service.NewAuthService(
+			repository,
+			service.NewGoogleAuthenticator(cfg.AuthGoogleClientID, cfg.AuthGoogleSecret, cfg.AuthRedirectURL),
+			service.AuthConfig{
+				ClientID:      cfg.AuthGoogleClientID,
+				RedirectURL:   cfg.AuthRedirectURL,
+				AllowedDomain: cfg.AuthAllowedDomain,
+				AdminEmails:   cfg.AuthAdminEmails,
+				SessionTTL:    time.Duration(cfg.AuthSessionTTLHours) * time.Hour,
+			},
+		),
 	}
 	if err := server.datasetService.SetDatasetProfilesPath(cfg.DatasetProfilesPath); err != nil {
 		panic(err)
@@ -58,7 +70,7 @@ func NewServer(cfg config.Config) *Server {
 }
 
 func (s *Server) Handler() stdhttp.Handler {
-	return obs.Middleware(s.withCORS(s.mux))
+	return obs.Middleware(s.withCORS(s.authMiddleware(s.mux)))
 }
 
 // ReconcileStartup — silverone 2026-05-27 (Codex adversarial review fix-2).
@@ -98,6 +110,15 @@ func (s *Server) routes() {
 	// δ-4 (5/21) — /skills route 제거. analyze가 planner + executor로
 	// LLM이 plan_v2를 직접 생성하므로 고정 skill catalog 노출이 의미를 잃었다.
 	// plan_v2 8 skill catalog는 planner/schema.py의 SKILL_CATALOG로 잠금.
+	// 인증/RBAC (ADR-025). google/* 는 public, me/logout은 세션 필요.
+	s.mux.HandleFunc("GET /auth/google/start", s.handleAuthGoogleStart)
+	s.mux.HandleFunc("GET /auth/google/callback", s.handleAuthGoogleCallback)
+	s.mux.HandleFunc("GET /auth/me", s.handleAuthMe)
+	s.mux.HandleFunc("POST /auth/logout", s.handleAuthLogout)
+	// 프로젝트 멤버(RBAC) 관리 — admin/owner. 권한 부여/회수/조회.
+	s.mux.HandleFunc("GET /projects/{project_id}/members", s.handleListProjectMembers)
+	s.mux.HandleFunc("PUT /projects/{project_id}/members/{user_id}", s.handleUpsertProjectMember)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/members/{user_id}", s.handleDeleteProjectMember)
 	s.mux.HandleFunc("POST /projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /projects", s.handleListProjects)
 	s.mux.HandleFunc("GET /projects/{project_id}", s.handleGetProject)
@@ -1172,9 +1193,15 @@ func (s *Server) writeServiceError(w stdhttp.ResponseWriter, err error) {
 	var invalid service.ErrInvalidArgument
 	var conflict service.ErrConflict
 	var missing service.ErrNotFound
+	var unauthorized service.ErrUnauthorized
+	var forbidden service.ErrForbidden
 	switch {
 	case errors.As(err, &invalid):
 		writeError(w, stdhttp.StatusBadRequest, invalid.Error())
+	case errors.As(err, &unauthorized):
+		writeError(w, stdhttp.StatusUnauthorized, unauthorized.Error())
+	case errors.As(err, &forbidden):
+		writeError(w, stdhttp.StatusForbidden, forbidden.Error())
 	case errors.As(err, &conflict):
 		writeError(w, stdhttp.StatusConflict, conflict.Error())
 	case errors.As(err, &missing):
