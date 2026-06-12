@@ -101,6 +101,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /lloa_model_options:
+    get:
+      tags: [System]
+      summary: 전처리 빌드 모델 선택지 (LLOA allowlist)
+      description: |
+        빌드 재실행 다이얼로그(doc_genuineness / clause_label)의 모델 select용
+        목록 (2026-06-12 모델 선택). env `LLOA_MODELS` allowlist 기반이며
+        `default`는 worker default 모델(LLOA_MODEL) 일치 항목. 항목이 1개
+        이하면 프론트는 select를 노출하지 않는다 (env default 사용). 선택값은
+        빌드 POST body의 `model_id`로 전달한다.
+      operationId: getLLOAModelOptions
+      responses:
+        "200":
+          description: 모델 선택지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LLOAModelOptionsResponse"
   /projects:
     get:
       tags: [Projects]
@@ -468,6 +486,31 @@ components:
         description:
           type: string
       required: [key, label, description]
+    LLOAModelOption:
+      type: object
+      description: 전처리 빌드에 선택 가능한 LLOA 모델 항목 (LLOA_MODELS allowlist).
+      properties:
+        model_id:
+          type: string
+          description: LLOA 모델 id (빌드 요청 model_id로 그대로 전달).
+          example: wisenut/wise-lloa-max-v1.2.1
+        label:
+          type: string
+          description: 화면 표시용 라벨. allowlist에 라벨 생략 시 model_id와 동일.
+          example: LLOA Max 1.2.1
+        default:
+          type: boolean
+          description: LLOA_MODEL(worker default)과 일치하는 항목에 true.
+      required: [model_id, label, default]
+    LLOAModelOptionsResponse:
+      type: object
+      description: GET /lloa_model_options 응답.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LLOAModelOption"
+      required: [items]
     TaxonomyResponse:
       type: object
       description: GET /taxonomy 응답. aspect key→한글 label 매핑 등 taxonomy 정의.

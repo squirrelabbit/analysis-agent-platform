@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"analysis-support-platform/control-plane/internal/domain"
 )
 
 type Config struct {
@@ -49,6 +51,10 @@ type Config struct {
 	// 일치할 때만 LLOAModelDisplayName을 노출한다(하드코딩 매핑 없음, env 기반).
 	LLOAModel            string
 	LLOAModelDisplayName string
+	// silverone 2026-06-12 — 전처리 빌드(doc_genuineness/clause_label) 모델 선택
+	// allowlist. LLOA_MODELS="id=라벨,id2=라벨2" 형식. 미설정이면 LLOA_MODEL
+	// 단일 항목으로 fallback. Default는 LLOA_MODEL(worker default) 일치 항목.
+	LLOAModelOptions []domain.LLOAModelOption
 
 	// 인증/RBAC (ADR-025, silverone 2026-06-12). AuthEnabled가 false면 auth
 	// 미들웨어가 통과(7/30 사내망 격리 단계 호환). Google OIDC 설정 +
@@ -142,6 +148,8 @@ func Load() Config {
 	// adds first-token latency). Default 120s gives Anthropic + worker
 	// retry budget without making the dev loop intolerably slow.
 	pythonAIWorkerHTTPTimeoutSec := envPositiveInt("PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC", 120)
+	lloaModel := strings.TrimSpace(os.Getenv("LLOA_MODEL"))
+	lloaModelDisplayName := strings.TrimSpace(os.Getenv("LLOA_MODEL_DISPLAY_NAME"))
 	return Config{
 		BindAddr:                                addr,
 		StoreBackend:                            storeBackend,
@@ -174,8 +182,9 @@ func Load() Config {
 		AnthropicExecutionTokenCeiling:          anthropicExecutionTokenCeiling,
 		PythonAIWorkerHTTPTimeoutSec:            pythonAIWorkerHTTPTimeoutSec,
 		PlanReuseEnabled:                        envBool("ANALYSIS_PLAN_REUSE_ENABLED", false),
-		LLOAModel:                               strings.TrimSpace(os.Getenv("LLOA_MODEL")),
-		LLOAModelDisplayName:                    strings.TrimSpace(os.Getenv("LLOA_MODEL_DISPLAY_NAME")),
+		LLOAModel:                               lloaModel,
+		LLOAModelDisplayName:                    lloaModelDisplayName,
+		LLOAModelOptions:                        parseLLOAModelOptions(os.Getenv("LLOA_MODELS"), lloaModel, lloaModelDisplayName),
 		AuthEnabled:                             envBool("AUTH_ENABLED", false),
 		AuthGoogleClientID:                      strings.TrimSpace(os.Getenv("AUTH_GOOGLE_CLIENT_ID")),
 		AuthGoogleSecret:                        strings.TrimSpace(os.Getenv("AUTH_GOOGLE_CLIENT_SECRET")),
@@ -301,4 +310,52 @@ func defaultCORSAllowedOrigins() []string {
 		"http://127.0.0.1:5173",
 		"http://localhost:5173",
 	}
+}
+
+// parseLLOAModelOptions — LLOA_MODELS="id=라벨,id2=라벨2" 파싱. 라벨 생략 시
+// id를 그대로 라벨로 쓴다. 미설정이면 LLOA_MODEL 단일 항목 fallback (둘 다
+// 없으면 빈 목록 — 모델 선택 UI 미노출). Default는 defaultModel(LLOA_MODEL)
+// 일치 항목, 없으면 첫 항목.
+func parseLLOAModelOptions(raw, defaultModel, defaultDisplayName string) []domain.LLOAModelOption {
+	var options []domain.LLOAModelOption
+	seen := map[string]struct{}{}
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		id, label, found := strings.Cut(entry, "=")
+		id = strings.TrimSpace(id)
+		label = strings.TrimSpace(label)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		if !found || label == "" {
+			label = id
+		}
+		options = append(options, domain.LLOAModelOption{ModelID: id, Label: label})
+	}
+	if len(options) == 0 {
+		if defaultModel == "" {
+			return nil
+		}
+		label := defaultDisplayName
+		if label == "" {
+			label = defaultModel
+		}
+		return []domain.LLOAModelOption{{ModelID: defaultModel, Label: label, Default: true}}
+	}
+	defaultIdx := 0
+	for i, opt := range options {
+		if opt.ModelID == defaultModel {
+			defaultIdx = i
+			break
+		}
+	}
+	options[defaultIdx].Default = true
+	return options
 }

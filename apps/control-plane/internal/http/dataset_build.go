@@ -36,6 +36,17 @@ func (s *Server) handleCreateDocGenuinenessJob(w stdhttp.ResponseWriter, r *stdh
 	writeJSON(w, stdhttp.StatusAccepted, response.AsAccepted())
 }
 
+// handleLLOAModelOptions — 전처리 빌드(doc_genuineness/clause_label) 모델 선택지.
+// LLOA_MODELS env allowlist 기반, default는 LLOA_MODEL(worker default) 일치 항목.
+// 빈 allowlist면 items: []로 응답 — 프론트는 select 자체를 숨긴다. (2026-06-12)
+func (s *Server) handleLLOAModelOptions(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	options := s.datasetService.LLOAModelOptions()
+	if options == nil {
+		options = []domain.LLOAModelOption{}
+	}
+	writeJSON(w, stdhttp.StatusOK, map[string]any{"items": options})
+}
+
 // 화면 polling용 GET handler — clean / doc_genuineness / clause_label 3종.
 // POST와 같은 path. status / progress / error_message / (단계별) summary
 // items + applied를 한 응답으로 반환해 화면이 build job API를 직접
