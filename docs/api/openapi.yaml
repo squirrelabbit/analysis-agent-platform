@@ -72,6 +72,22 @@ tags:
   - name: Auth
     description: Google OIDC 로그인 + 서버 세션 쿠키 + 프로젝트 RBAC (ADR-025)
 paths:
+  /auth/config:
+    get:
+      tags: [Auth]
+      summary: 프론트 부팅용 public 인증 config
+      description: auth_enabled로 프론트가 로그인 가드 on/off를 판단한다. 인증 없이 접근 가능.
+      operationId: authConfig
+      responses:
+        "200":
+          description: 인증 config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  auth_enabled: { type: boolean }
+                  provider: { type: string, example: google }
   /auth/google/start:
     get:
       tags: [Auth]

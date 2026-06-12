@@ -179,6 +179,30 @@ func (s *AuthService) Me(ctx context.Context, user domain.User) (domain.AuthMeRe
 	return domain.AuthMeResponse{User: user, ProjectRoles: roles}, nil
 }
 
+// projectRoleRank — viewer < editor < owner. 권한 비교용.
+var projectRoleRank = map[string]int{"viewer": 1, "editor": 2, "owner": 3}
+
+// HasProjectRole — user가 projectID에서 required 이상 권한인지. admin은 항상 true.
+func (s *AuthService) HasProjectRole(user domain.User, projectID, required string) bool {
+	role, has := s.ProjectRole(user, projectID)
+	if !has {
+		return false
+	}
+	return projectRoleRank[role] >= projectRoleRank[required]
+}
+
+// ProjectRolesForUser — 목록 필터용. user가 멤버인 project_id→role.
+func (s *AuthService) ProjectRolesForUser(userID string) (map[string]string, error) {
+	roles, err := s.store.ListProjectRolesForUser(userID)
+	if err != nil {
+		return nil, err
+	}
+	if roles == nil {
+		roles = map[string]string{}
+	}
+	return roles, nil
+}
+
 // ProjectRole — 프로젝트 권한. admin은 전 프로젝트 owner로 간주. 권한 없으면 ""+false.
 func (s *AuthService) ProjectRole(user domain.User, projectID string) (string, bool) {
 	if user.GlobalRole == "admin" {

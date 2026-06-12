@@ -110,7 +110,8 @@ func (s *Server) routes() {
 	// δ-4 (5/21) — /skills route 제거. analyze가 planner + executor로
 	// LLM이 plan_v2를 직접 생성하므로 고정 skill catalog 노출이 의미를 잃었다.
 	// plan_v2 8 skill catalog는 planner/schema.py의 SKILL_CATALOG로 잠금.
-	// 인증/RBAC (ADR-025). google/* 는 public, me/logout은 세션 필요.
+	// 인증/RBAC (ADR-025). config/google/* 는 public, me/logout은 세션 필요.
+	s.mux.HandleFunc("GET /auth/config", s.handleAuthConfig)
 	s.mux.HandleFunc("GET /auth/google/start", s.handleAuthGoogleStart)
 	s.mux.HandleFunc("GET /auth/google/callback", s.handleAuthGoogleCallback)
 	s.mux.HandleFunc("GET /auth/me", s.handleAuthMe)
@@ -400,11 +401,28 @@ func (s *Server) handleGetProject(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 	writeJSON(w, stdhttp.StatusOK, project)
 }
 
-func (s *Server) handleListProjects(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+func (s *Server) handleListProjects(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	response, err := s.projectService.ListProjects()
 	if err != nil {
 		s.writeServiceError(w, err)
 		return
+	}
+	// 인증 on이면 내가 멤버인 프로젝트만(admin은 전체). off면 그대로 전체.
+	if s.cfg.AuthEnabled {
+		if user, ok := userFromContext(r.Context()); ok && user.GlobalRole != "admin" {
+			roles, rErr := s.authService.ProjectRolesForUser(user.UserID)
+			if rErr != nil {
+				s.writeServiceError(w, rErr)
+				return
+			}
+			filtered := make([]domain.Project, 0, len(response.Items))
+			for _, p := range response.Items {
+				if _, member := roles[p.ProjectID]; member {
+					filtered = append(filtered, p)
+				}
+			}
+			response.Items = filtered
+		}
 	}
 	writeJSON(w, stdhttp.StatusOK, response)
 }

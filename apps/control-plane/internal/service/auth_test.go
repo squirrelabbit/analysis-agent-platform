@@ -138,4 +138,19 @@ func TestProjectRoleAndMembers(t *testing.T) {
 	if role, has := svc.ProjectRole(admin, "any"); !has || role != "owner" {
 		t.Fatalf("admin은 owner 기대, got %q/%v", role, has)
 	}
+
+	// HasProjectRole: editor는 viewer/editor 통과, owner 불가. admin은 전부 통과.
+	if !svc.HasProjectRole(user, "p1", "viewer") || !svc.HasProjectRole(user, "p1", "editor") {
+		t.Fatal("editor는 viewer/editor 이상 통과해야")
+	}
+	if svc.HasProjectRole(user, "p1", "owner") {
+		t.Fatal("editor는 owner 요구를 통과하면 안 됨")
+	}
+	if !svc.HasProjectRole(admin, "p1", "owner") {
+		t.Fatal("admin은 owner 요구도 통과해야")
+	}
+	// 멤버 아닌 프로젝트는 어떤 요구도 불가.
+	if svc.HasProjectRole(user, "p-other", "viewer") {
+		t.Fatal("비멤버는 viewer도 불가")
+	}
 }

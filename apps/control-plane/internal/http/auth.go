@@ -46,7 +46,53 @@ func (s *Server) authMiddleware(next stdhttp.Handler) stdhttp.Handler {
 			s.writeServiceError(w, err)
 			return
 		}
+		// 프로젝트 스코프 RBAC: /projects/{pid}/... 는 최소 role을 강제한다.
+		if pid, required, applies := projectScopeRequirement(r.Method, r.URL.Path); applies {
+			if !s.authService.HasProjectRole(user, pid, required) {
+				writeError(w, stdhttp.StatusForbidden, "프로젝트 접근 권한이 없습니다")
+				return
+			}
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userCtxKey, user)))
+	})
+}
+
+// projectScopeRequirement — path/method 기반 최소 프로젝트 role.
+//   - /projects (목록) · POST /projects (생성): pid 없음 → applies=false (인증만)
+//   - /projects/{pid}/members*       → owner (멤버 관리)
+//   - DELETE /projects/{pid}         → owner (프로젝트 삭제)
+//   - GET  /projects/{pid}[/...]     → viewer (읽기)
+//   - 그 외 mutating (POST/PUT/PATCH/DELETE) → editor (실행/수정)
+func projectScopeRequirement(method, path string) (projectID, required string, applies bool) {
+	segs := strings.Split(strings.Trim(path, "/"), "/")
+	if len(segs) < 2 || segs[0] != "projects" || segs[1] == "" {
+		return "", "", false
+	}
+	pid := segs[1]
+	if len(segs) >= 3 && segs[2] == "members" {
+		return pid, "owner", true
+	}
+	if len(segs) == 2 { // /projects/{pid}
+		switch method {
+		case stdhttp.MethodGet:
+			return pid, "viewer", true
+		case stdhttp.MethodDelete:
+			return pid, "owner", true
+		default:
+			return pid, "editor", true
+		}
+	}
+	if method == stdhttp.MethodGet {
+		return pid, "viewer", true
+	}
+	return pid, "editor", true
+}
+
+// handleAuthConfig — 프론트 부팅용 public config. auth_enabled로 가드 on/off 판단.
+func (s *Server) handleAuthConfig(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+	writeJSON(w, stdhttp.StatusOK, map[string]any{
+		"auth_enabled": s.cfg.AuthEnabled,
+		"provider":     "google",
 	})
 }
 
@@ -54,7 +100,7 @@ func (s *Server) authMiddleware(next stdhttp.Handler) stdhttp.Handler {
 func isPublicAuthPath(path string) bool {
 	switch path {
 	case "/health", "/runtime_status", "/metrics",
-		"/auth/google/start", "/auth/google/callback",
+		"/auth/config", "/auth/google/start", "/auth/google/callback",
 		"/openapi.yaml", "/openapi.frontend.yaml":
 		return true
 	}
