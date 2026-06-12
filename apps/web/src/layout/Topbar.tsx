@@ -1,4 +1,5 @@
 import { Sparkle } from "lucide-react";
+import UserMenu from "@/features/auth/components/UserMenu";
 
 export default function Topbar() {
   return (
@@ -13,6 +14,9 @@ export default function Topbar() {
             <div>Agent Platform</div>
           </div>
         </a>
+        <div className="ml-auto py-1">
+          <UserMenu />
+        </div>
       </div>
     </header>
   );
