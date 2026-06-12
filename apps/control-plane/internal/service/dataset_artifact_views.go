@@ -212,6 +212,20 @@ func (s *DatasetService) GetDocGenuinenessView(
 	}
 	view.Items = items
 	view.Pagination.Total = total
+
+	// silverone 2026-06-11 — 운영자 수동 보정 overlay. artifact 원본은 그대로
+	// 두고 effective label로 합성한다. 경계(clause_label 포함 여부)를 넘는 보정이
+	// 있고 후속 artifact가 이미 ready면 재실행 권장 플래그를 내린다.
+	overrides, ovErr := s.store.ListDocGenuinenessOverrides(projectID, version.DatasetVersionID)
+	if ovErr != nil {
+		return domain.DatasetArtifactView{}, ovErr
+	}
+	crossed := applyDocGenuinenessOverrides(&view, overrides)
+	if view.Summary != nil {
+		clauseReady := metadataString(version.Metadata, "clause_label_status", "") == "ready" ||
+			metadataString(version.Metadata, "clause_keywords_status", "") == "ready"
+		view.Summary["downstream_rerun_recommended"] = crossed && clauseReady
+	}
 	return view, nil
 }
 
@@ -284,6 +298,14 @@ func (s *DatasetService) GetClauseLabelView(
 	}
 	view.Items = items
 	view.Pagination.Total = total
+
+	// silverone 2026-06-11 — 운영자 수동 보정 overlay. artifact 원본은 그대로 두고
+	// effective aspect/sentiment로 합성하고 summary(분포/교차)도 재집계한다.
+	clauseOverrides, ovErr := s.store.ListClauseLabelOverrides(projectID, version.DatasetVersionID)
+	if ovErr != nil {
+		return domain.DatasetArtifactView{}, ovErr
+	}
+	applyClauseLabelOverrides(&view, clauseOverrides)
 	return view, nil
 }
 

@@ -10,6 +10,7 @@ import ProjectPage from "./pages/ProjectPage";
 import DatasetListRedesign from "./features/datasets/redesign/DatasetListRedesign";
 import VersionDetailPage from "./features/versions/pages/VersionDetailPage";
 import DatasetVersionListRedesign from "./features/versions/redesign/DatasetVersionListRedesign";
+import LoginPage from "./features/auth/pages/LoginPage";
 import ReportListPage from "./features/reports/pages/ReportListPage";
 import ReportEditorPage from "./features/reports/pages/ReportEditorPage";
 
@@ -21,6 +22,7 @@ function App() {
       <BrowserRouter>
         <AppLayout>
           <Routes>
+            <Route path="/login" element={<LoginPage />} />
             <Route path="/" element={<Navigate to="/projects" replace />} />
             <Route path="/projects" element={<ProjectPage />} />
             <Route path="/projects/:projectId" element={<ProjectLayout />}>

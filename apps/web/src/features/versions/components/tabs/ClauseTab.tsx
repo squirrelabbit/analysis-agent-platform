@@ -1,5 +1,14 @@
-import { useState } from "react";
-import { FileText, Check, Minus, X, type LucideIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import {
+  FileText,
+  Check,
+  Loader2,
+  Minus,
+  Pencil,
+  RotateCcw,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { StatCard, type StatTone } from "@/components/common/cards/StatCard";
 import {
   DonutChart,
@@ -16,6 +25,7 @@ import {
 import type { ClauseBuild, ClauseItem } from "../../models/build";
 import { Badge } from "@/components/ui/badge";
 import { useBuildVersion } from "../../hooks/build.query";
+import { useClauseLabelOverride } from "../../hooks/build.mutation";
 import {
   Select,
   SelectContent,
@@ -23,11 +33,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { useTaxonomy } from "@/features/taxonomy/hooks/taxonomy.query";
 import { aspectLabelOf } from "@/features/taxonomy/models";
 import {
   DataTable,
-  DocIdCell,
   ExpandableTextCell,
   FilterPills,
   type Column,
@@ -58,6 +68,36 @@ function SentimentBadge({ value }: { value: string }) {
   );
 }
 
+// 액션 컬럼 아이콘 버튼.
+function IconBtn({
+  onClick,
+  title,
+  disabled,
+  className,
+  children,
+}: {
+  onClick: () => void;
+  title: string;
+  disabled?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      disabled={disabled}
+      className={cn(
+        "inline-grid h-7 w-7 place-items-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-40",
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function ClauseTab() {
   const [filter, setFilter] = useState<string | "">("");
   const [aspectFilter, setAspectFilter] = useState<string>("all");
@@ -65,6 +105,13 @@ export function ClauseTab() {
   // 드릴다운: 선택된 aspect key (null이면 건수 1위 aspect로 fallback)
   const [activeAspect, setActiveAspect] = useState<string | null>(null);
   const pageSize = 10;
+
+  // 절 aspect/sentiment 수동 보정 — row 단위 inline edit.
+  const override = useClauseLabelOverride();
+  const [editingClauseId, setEditingClauseId] = useState<string | null>(null);
+  const [draftAspect, setDraftAspect] = useState<string>("");
+  const [draftSentiment, setDraftSentiment] = useState<string>("neutral");
+  const [savingClauseId, setSavingClauseId] = useState<string | null>(null);
 
   // 서버 페이징 + 서버 필터: 표는 서버가 필터/페이징해 준 현재 페이지(items)만 렌더.
   const { data, isLoading, isPlaceholderData } = useBuildVersion(
@@ -191,16 +238,54 @@ export function ClauseTab() {
   // aspect 옵션은 전체 분포(summary.aspect) 기준 — 현재 페이지 items가 아니라.
   const aspectOptions = Object.keys(summary.aspect);
 
+  // 수정 드롭다운용 aspect 키 — taxonomy 전체(9종) 우선, 없으면 관측된 분포 키.
+  const aspectEditKeys = taxonomy
+    ? Object.keys(taxonomy.aspectLabels)
+    : aspectOptions;
+
   // pagination.total은 (필터 적용된) 전체 건수. 표/페이지 계산의 기준.
   const totalCount = pagination?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
+  function startEdit(item: ClauseItem) {
+    if (savingClauseId) return;
+    setEditingClauseId(item.clauseId);
+    setDraftAspect(item.aspect);
+    setDraftSentiment(item.sentiment);
+  }
+  function cancelEdit() {
+    setEditingClauseId(null);
+  }
+  async function saveEdit(item: ClauseItem) {
+    if (savingClauseId) return;
+    // 변경된 필드만 전송. 둘 다 그대로면 저장 없이 편집만 종료.
+    const aspect = draftAspect !== item.aspect ? draftAspect : undefined;
+    const sentiment =
+      draftSentiment !== item.sentiment ? draftSentiment : undefined;
+    if (aspect === undefined && sentiment === undefined) {
+      setEditingClauseId(null);
+      return;
+    }
+    setSavingClauseId(item.clauseId);
+    try {
+      await override.set.mutateAsync({ clauseId: item.clauseId, aspect, sentiment });
+      setEditingClauseId(null);
+    } finally {
+      setSavingClauseId(null);
+    }
+  }
+  async function revertOverride(clauseId: string) {
+    if (savingClauseId) return;
+    setSavingClauseId(clauseId);
+    try {
+      await override.remove.mutateAsync({ clauseId });
+      if (editingClauseId === clauseId) setEditingClauseId(null);
+    } finally {
+      setSavingClauseId(null);
+    }
+  }
+
   const columns: Column<ClauseItem>[] = [
-    {
-      header: "문서 ID",
-      headerClassName: "w-30",
-      cell: (item) => <DocIdCell id={item.docId} />,
-    },
     {
       header: "문장",
       headerClassName: "w-80",
@@ -208,23 +293,143 @@ export function ClauseTab() {
     },
     {
       header: "Aspect",
-      headerClassName: "w-28",
-      cell: (item) => (
-        <td className="px-4 py-3">
-          <span className="text-xs text-zinc-500">
-            {aspectLabelOf(taxonomy, item.aspect)}
-          </span>
-        </td>
-      ),
+      headerClassName: "w-36",
+      cell: (item) => {
+        const editing = editingClauseId === item.clauseId;
+        if (editing) {
+          return (
+            <td className="px-4 py-3">
+              <Select
+                value={draftAspect}
+                onValueChange={setDraftAspect}
+                disabled={savingClauseId === item.clauseId}
+              >
+                <SelectTrigger className="h-7 w-32 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {aspectEditKeys.map((key) => (
+                    <SelectItem key={key} value={key} className="text-xs">
+                      {aspectLabelOf(taxonomy, key)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </td>
+          );
+        }
+        return (
+          <td className="px-4 py-3">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-zinc-500">
+                {aspectLabelOf(taxonomy, item.aspect)}
+              </span>
+              {item.isOverridden && (
+                <span
+                  title={
+                    item.originalAspect
+                      ? `원본: ${aspectLabelOf(taxonomy, item.originalAspect)} / ${SENTIMENT_LABELS[item.originalSentiment as Sentiment] ?? item.originalSentiment}`
+                      : "수동 수정됨"
+                  }
+                  className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600"
+                >
+                  수정됨
+                </span>
+              )}
+            </div>
+          </td>
+        );
+      },
     },
     {
       header: "감성",
-      headerClassName: "w-24",
-      cell: (item) => (
-        <td className="px-4 py-3">
-          <SentimentBadge value={item.sentiment} />
-        </td>
-      ),
+      headerClassName: "w-28",
+      cell: (item) => {
+        const editing = editingClauseId === item.clauseId;
+        if (editing) {
+          return (
+            <td className="px-4 py-3">
+              <Select
+                value={draftSentiment}
+                onValueChange={setDraftSentiment}
+                disabled={savingClauseId === item.clauseId}
+              >
+                <SelectTrigger className="h-7 w-24 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SENTIMENT_ORDER.map((s) => (
+                    <SelectItem key={s} value={s} className="text-xs">
+                      {SENTIMENT_LABELS[s]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </td>
+          );
+        }
+        return (
+          <td className="px-4 py-3">
+            <SentimentBadge value={item.sentiment} />
+          </td>
+        );
+      },
+    },
+    {
+      header: "",
+      headerClassName: "w-20 text-right",
+      cell: (item) => {
+        const editing = editingClauseId === item.clauseId;
+        const saving = savingClauseId === item.clauseId;
+        return (
+          <td className="px-4 py-3">
+            <div className="flex items-center justify-end gap-0.5">
+              {editing ? (
+                <>
+                  <IconBtn
+                    onClick={() => saveEdit(item)}
+                    title="저장"
+                    disabled={saving}
+                    className="text-violet-600 hover:bg-violet-50 hover:text-violet-700"
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Check className="h-4 w-4" />
+                    )}
+                  </IconBtn>
+                  <IconBtn onClick={cancelEdit} title="취소" disabled={saving}>
+                    <X className="h-4 w-4" />
+                  </IconBtn>
+                </>
+              ) : (
+                <>
+                  <IconBtn
+                    onClick={() => startEdit(item)}
+                    title="aspect/감성 수정"
+                    disabled={!!savingClauseId}
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Pencil className="h-4 w-4" />
+                    )}
+                  </IconBtn>
+                  {item.isOverridden && (
+                    <IconBtn
+                      onClick={() => revertOverride(item.clauseId)}
+                      title="원본 라벨로 되돌리기"
+                      disabled={!!savingClauseId}
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                    </IconBtn>
+                  )}
+                </>
+              )}
+            </div>
+          </td>
+        );
+      },
     },
   ];
 

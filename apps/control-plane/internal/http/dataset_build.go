@@ -70,6 +70,41 @@ func (s *Server) handleGetDocGenuinenessView(w stdhttp.ResponseWriter, r *stdhtt
 	writeJSON(w, stdhttp.StatusOK, view)
 }
 
+// silverone 2026-06-11 — 진성 라벨 수동 보정. PUT은 set(원본과 같으면 해제),
+// DELETE는 되돌리기. effective label은 GET doc_genuineness 응답에서 합성된다.
+func (s *Server) handleSetDocGenuinenessOverride(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.DocGenuinenessOverrideRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	override, err := s.datasetService.SetDocGenuinenessOverride(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		r.PathValue("doc_id"),
+		payload,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, override)
+}
+
+func (s *Server) handleDeleteDocGenuinenessOverride(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.datasetService.DeleteDocGenuinenessOverride(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		r.PathValue("doc_id"),
+	); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
 func (s *Server) handleGetClauseLabelView(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	limit, offset := parseArtifactPagination(r)
 	aspect := strings.TrimSpace(r.URL.Query().Get("aspect"))
@@ -86,6 +121,41 @@ func (s *Server) handleGetClauseLabelView(w stdhttp.ResponseWriter, r *stdhttp.R
 		return
 	}
 	writeJSON(w, stdhttp.StatusOK, view)
+}
+
+// silverone 2026-06-11 — 절 라벨링 aspect/sentiment 수동 보정. PATCH로 set,
+// DELETE override로 되돌리기. effective는 GET clause_label 응답에서 합성된다.
+func (s *Server) handleSetClauseLabelOverride(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ClauseLabelOverrideRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	override, err := s.datasetService.SetClauseLabelOverride(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		r.PathValue("clause_id"),
+		payload,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, override)
+}
+
+func (s *Server) handleDeleteClauseLabelOverride(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if err := s.datasetService.DeleteClauseLabelOverride(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		r.PathValue("clause_id"),
+	); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
 }
 
 // parseArtifactPagination — ?limit=&offset= query 파싱. 잘못된 값은 default로

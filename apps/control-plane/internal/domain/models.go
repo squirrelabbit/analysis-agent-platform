@@ -334,6 +334,58 @@ type ReportListResponse struct {
 	Items []ReportSummary `json:"items"`
 }
 
+// DocGenuinenessOverride — 전처리 진성 분석 화면에서 운영자가 수동으로 보정한
+// 진성 라벨 (silverone 2026-06-11). artifact JSONL은 LLOA 원본 그대로 두고
+// 보정값을 별도 overlay로 저장한다 — 진성 분석 GET이 effective label로 합성하고
+// 감사/재현/재실행 추적이 가능하게 한다. OriginalGenuineness는 보정 시점의
+// artifact 라벨 snapshot(summary effective 재집계의 기준). version 스코프.
+type DocGenuinenessOverride struct {
+	ProjectID           string    `json:"project_id"`
+	DatasetID           string    `json:"dataset_id"`
+	DatasetVersionID    string    `json:"dataset_version_id"`
+	DocID               string    `json:"doc_id"`
+	OriginalGenuineness string    `json:"original_genuineness"`
+	OriginalReason      string    `json:"original_reason,omitempty"`
+	OverrideGenuineness string    `json:"override_genuineness"`
+	OverrideReason      string    `json:"override_reason,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+// DocGenuinenessOverrideRequest — 보정 요청. genuineness는 effective로 적용할
+// 라벨. reason은 선택(운영 메모).
+type DocGenuinenessOverrideRequest struct {
+	Genuineness string `json:"genuineness"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+// ClauseLabelOverride — 전처리 절 라벨링 화면에서 운영자가 절(clause)의 aspect/
+// sentiment를 수동 보정한 overlay (silverone 2026-06-11). artifact JSONL(LLOA
+// 원본)은 건드리지 않고 보정값만 저장하고, 절 라벨링 GET이 effective aspect/
+// sentiment로 합성한다. original_*는 보정 시점 artifact 값 snapshot. clause_id는
+// 뷰가 doc_id+절 index로 합성하는 값(version 스코프).
+type ClauseLabelOverride struct {
+	ProjectID         string    `json:"project_id"`
+	DatasetID         string    `json:"dataset_id"`
+	DatasetVersionID  string    `json:"dataset_version_id"`
+	ClauseID          string    `json:"clause_id"`
+	OriginalAspect    string    `json:"original_aspect"`
+	OriginalSentiment string    `json:"original_sentiment"`
+	OverrideAspect    string    `json:"override_aspect"`
+	OverrideSentiment string    `json:"override_sentiment"`
+	OverrideReason    string    `json:"override_reason,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+// ClauseLabelOverrideRequest — aspect/sentiment를 effective로 적용. reason은 선택
+// (비면 서버가 "운영자 수동 수정" 기본값). 둘 중 하나만 보내도 다른 쪽은 원본 유지.
+type ClauseLabelOverrideRequest struct {
+	Aspect    string `json:"aspect,omitempty"`
+	Sentiment string `json:"sentiment,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
 type AnalysisThreadCreateRequest struct {
 	Title string `json:"title,omitempty"`
 }

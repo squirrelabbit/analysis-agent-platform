@@ -15,6 +15,7 @@ import { useVersionsWithNumber } from "../redesign/useVersionsWithNumber";
 import CleanTab from "../components/tabs/CleanTab";
 import GenuinenessTab from "../components/tabs/GenuinenessTab";
 import { ClauseTab } from "../components/tabs/ClauseTab";
+import { KeywordTab } from "../components/tabs/KeywordTab";
 
 export default function VersionDetailPage() {
   const navigate = useNavigate();
@@ -29,7 +30,7 @@ export default function VersionDetailPage() {
 
   const current = versions.find((v) => v.id === versionId);
 
-  const builds = ["clean", "doc_genuineness", "clause_label"] as BuildJobType[];
+  const builds = ["clean", "doc_genuineness", "clause_label", 'clause_keywords'] as BuildJobType[];
 
   return (
     <div className="p-8">
@@ -83,13 +84,13 @@ export default function VersionDetailPage() {
         </div>
       )}
 
-      <div className="grid md:grid-cols-3 gap-4">
+      <div className="grid lg:grid-cols-4 grid-cols-2 gap-4">
         {builds.map((build) => (
           <PipelineCard key={build} versionId={version.id} type={build} />
         ))}
       </div>
       <Tabs value={tab} onValueChange={(v) => setTab(v as BuildJobType)}>
-        <TabsList variant="line" className="my-6">
+        <TabsList variant="line" className="mt-6 mb-3">
           {builds.map((build) => (
             <TabsTrigger
               key={build}
@@ -116,6 +117,12 @@ export default function VersionDetailPage() {
           className="animate-in fade-in duration-300"
         >
           <ClauseTab />
+        </TabsContent>
+        <TabsContent
+          value="clause_keywords"
+          className="animate-in fade-in duration-300"
+        >
+          <KeywordTab />
         </TabsContent>
       </Tabs>
     </div>

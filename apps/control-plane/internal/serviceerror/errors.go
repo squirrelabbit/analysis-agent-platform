@@ -36,3 +36,27 @@ type ErrConflict struct {
 func (e ErrConflict) Error() string {
 	return e.Message
 }
+
+// ErrUnauthorized — 인증 실패(401). 세션 없음/만료/유효하지 않은 토큰.
+type ErrUnauthorized struct {
+	Message string
+}
+
+func (e ErrUnauthorized) Error() string {
+	if e.Message == "" {
+		return "unauthorized"
+	}
+	return e.Message
+}
+
+// ErrForbidden — 인증은 됐으나 권한 없음(403). 도메인 불일치/프로젝트 권한 없음/비활성.
+type ErrForbidden struct {
+	Message string
+}
+
+func (e ErrForbidden) Error() string {
+	if e.Message == "" {
+		return "forbidden"
+	}
+	return e.Message
+}

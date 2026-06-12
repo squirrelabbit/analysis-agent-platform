@@ -10,4 +10,6 @@ type (
 	ErrInvalidArgument = serviceerror.ErrInvalidArgument
 	ErrNotFound        = serviceerror.ErrNotFound
 	ErrConflict        = serviceerror.ErrConflict
+	ErrUnauthorized    = serviceerror.ErrUnauthorized
+	ErrForbidden       = serviceerror.ErrForbidden
 )

@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"time"
 
 	"analysis-support-platform/control-plane/internal/config"
 	"analysis-support-platform/control-plane/internal/domain"
@@ -77,6 +78,33 @@ type Repository interface {
 	ListReports(projectID string) ([]domain.ReportSummary, error)
 	GetReport(projectID, reportID string) (domain.Report, error)
 	DeleteReport(projectID, reportID string) error
+
+	// silverone 2026-06-11 — 진성 라벨 수동 보정 overlay. (version, doc) upsert,
+	// ListByVersion은 진성 GET overlay·summary 재집계용.
+	UpsertDocGenuinenessOverride(override domain.DocGenuinenessOverride) error
+	DeleteDocGenuinenessOverride(projectID, datasetVersionID, docID string) error
+	ListDocGenuinenessOverrides(projectID, datasetVersionID string) ([]domain.DocGenuinenessOverride, error)
+
+	// silverone 2026-06-11 — 절 라벨링 aspect/sentiment 수동 보정 overlay.
+	// (version, clause_id) upsert, ListByVersion은 절 라벨링 GET overlay·summary 재집계용.
+	UpsertClauseLabelOverride(override domain.ClauseLabelOverride) error
+	DeleteClauseLabelOverride(projectID, datasetVersionID, clauseID string) error
+	ListClauseLabelOverrides(projectID, datasetVersionID string) ([]domain.ClauseLabelOverride, error)
+
+	// 인증/RBAC (ADR-025, silverone 2026-06-12). Google OIDC = 인증,
+	// project_members = 권한. UpsertUserByExternal는 (auth_provider, external_id)
+	// 기준 upsert(첫 로그인 가입 + 재로그인 갱신).
+	UpsertUserByExternal(user domain.User) (domain.User, error)
+	GetUserByID(userID string) (domain.User, error)
+	CreateSession(session domain.Session) error
+	GetSessionByTokenHash(tokenHash string) (domain.Session, error)
+	TouchSession(sessionID string, lastSeen time.Time) error
+	DeleteSession(sessionID string) error
+	ListProjectRolesForUser(userID string) (map[string]string, error)
+	GetProjectRole(projectID, userID string) (string, error)
+	UpsertProjectMember(member domain.ProjectMember) error
+	DeleteProjectMember(projectID, userID string) error
+	ListProjectMembers(projectID string) ([]domain.ProjectMember, error)
 
 	// silverone 2026-05-27 (Codex adversarial review fix-2) — control-plane
 	// 재기동 시 reconciliation에서 사용. status가 queued/running으로 남아 있는

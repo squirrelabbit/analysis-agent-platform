@@ -27,6 +27,7 @@ type Server struct {
 	mux            *stdhttp.ServeMux
 	projectService *service.ProjectService
 	datasetService *service.DatasetService
+	authService    *service.AuthService
 }
 
 func NewServer(cfg config.Config) *Server {
@@ -44,6 +45,17 @@ func NewServer(cfg config.Config) *Server {
 		mux:            mux,
 		projectService: service.NewProjectService(repository, cfg.UploadRoot, cfg.ArtifactRoot),
 		datasetService: service.NewDatasetService(repository, cfg.PythonAIWorkerURL, cfg.UploadRoot, cfg.ArtifactRoot),
+		authService: service.NewAuthService(
+			repository,
+			service.NewGoogleAuthenticator(cfg.AuthGoogleClientID, cfg.AuthGoogleSecret, cfg.AuthRedirectURL),
+			service.AuthConfig{
+				ClientID:      cfg.AuthGoogleClientID,
+				RedirectURL:   cfg.AuthRedirectURL,
+				AllowedDomain: cfg.AuthAllowedDomain,
+				AdminEmails:   cfg.AuthAdminEmails,
+				SessionTTL:    time.Duration(cfg.AuthSessionTTLHours) * time.Hour,
+			},
+		),
 	}
 	if err := server.datasetService.SetDatasetProfilesPath(cfg.DatasetProfilesPath); err != nil {
 		panic(err)
@@ -58,7 +70,7 @@ func NewServer(cfg config.Config) *Server {
 }
 
 func (s *Server) Handler() stdhttp.Handler {
-	return obs.Middleware(s.withCORS(s.mux))
+	return obs.Middleware(s.withCORS(s.authMiddleware(s.mux)))
 }
 
 // ReconcileStartup — silverone 2026-05-27 (Codex adversarial review fix-2).
@@ -98,6 +110,16 @@ func (s *Server) routes() {
 	// δ-4 (5/21) — /skills route 제거. analyze가 planner + executor로
 	// LLM이 plan_v2를 직접 생성하므로 고정 skill catalog 노출이 의미를 잃었다.
 	// plan_v2 8 skill catalog는 planner/schema.py의 SKILL_CATALOG로 잠금.
+	// 인증/RBAC (ADR-025). config/google/* 는 public, me/logout은 세션 필요.
+	s.mux.HandleFunc("GET /auth/config", s.handleAuthConfig)
+	s.mux.HandleFunc("GET /auth/google/start", s.handleAuthGoogleStart)
+	s.mux.HandleFunc("GET /auth/google/callback", s.handleAuthGoogleCallback)
+	s.mux.HandleFunc("GET /auth/me", s.handleAuthMe)
+	s.mux.HandleFunc("POST /auth/logout", s.handleAuthLogout)
+	// 프로젝트 멤버(RBAC) 관리 — admin/owner. 권한 부여/회수/조회.
+	s.mux.HandleFunc("GET /projects/{project_id}/members", s.handleListProjectMembers)
+	s.mux.HandleFunc("PUT /projects/{project_id}/members/{user_id}", s.handleUpsertProjectMember)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/members/{user_id}", s.handleDeleteProjectMember)
 	s.mux.HandleFunc("POST /projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /projects", s.handleListProjects)
 	s.mux.HandleFunc("GET /projects/{project_id}", s.handleGetProject)
@@ -138,6 +160,9 @@ func (s *Server) routes() {
 	// 2026-05-21 — 화면 polling용 GET. status + applied + summary + items 페이지 반환.
 	// POST와 같은 path에 method routing.
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label", s.handleGetClauseLabelView)
+	// 절 라벨링 aspect/sentiment 수동 보정 (silverone 2026-06-11).
+	s.mux.HandleFunc("PATCH /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label/{clause_id}", s.handleSetClauseLabelOverride)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label/{clause_id}/override", s.handleDeleteClauseLabelOverride)
 	// 2026-05-21 — clause_label / doc_genuineness 산출물 CSV 다운로드. jsonl
 	// artifact를 DuckDB로 즉시 변환해 UTF-8 BOM CSV로 스트림.
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label_download", s.handleDownloadClauseLabelDataset)
@@ -149,6 +174,9 @@ func (s *Server) routes() {
 	// ADR-017 / 5/19 결정 — clean 직후 doc-level 3-tier 진성 분류 endpoint.
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness", s.handleCreateDocGenuinenessJob)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness", s.handleGetDocGenuinenessView)
+	// 진성 라벨 수동 보정 (silverone 2026-06-11) — PATCH로 set, DELETE override로 되돌리기.
+	s.mux.HandleFunc("PATCH /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness/{doc_id}", s.handleSetDocGenuinenessOverride)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness/{doc_id}/override", s.handleDeleteDocGenuinenessOverride)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness_download", s.handleDownloadDocGenuinenessDataset)
 	// Phase 3 (2026-05-22) — /versions/{vid}/build_jobs list 제거. 화면이
 	// build job 이력을 직접 조회할 필요가 사라졌다 (view endpoint가 최신 job의
@@ -373,11 +401,28 @@ func (s *Server) handleGetProject(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 	writeJSON(w, stdhttp.StatusOK, project)
 }
 
-func (s *Server) handleListProjects(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+func (s *Server) handleListProjects(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	response, err := s.projectService.ListProjects()
 	if err != nil {
 		s.writeServiceError(w, err)
 		return
+	}
+	// 인증 on이면 내가 멤버인 프로젝트만(admin은 전체). off면 그대로 전체.
+	if s.cfg.AuthEnabled {
+		if user, ok := userFromContext(r.Context()); ok && user.GlobalRole != "admin" {
+			roles, rErr := s.authService.ProjectRolesForUser(user.UserID)
+			if rErr != nil {
+				s.writeServiceError(w, rErr)
+				return
+			}
+			filtered := make([]domain.Project, 0, len(response.Items))
+			for _, p := range response.Items {
+				if _, member := roles[p.ProjectID]; member {
+					filtered = append(filtered, p)
+				}
+			}
+			response.Items = filtered
+		}
 	}
 	writeJSON(w, stdhttp.StatusOK, response)
 }
@@ -1166,9 +1211,15 @@ func (s *Server) writeServiceError(w stdhttp.ResponseWriter, err error) {
 	var invalid service.ErrInvalidArgument
 	var conflict service.ErrConflict
 	var missing service.ErrNotFound
+	var unauthorized service.ErrUnauthorized
+	var forbidden service.ErrForbidden
 	switch {
 	case errors.As(err, &invalid):
 		writeError(w, stdhttp.StatusBadRequest, invalid.Error())
+	case errors.As(err, &unauthorized):
+		writeError(w, stdhttp.StatusUnauthorized, unauthorized.Error())
+	case errors.As(err, &forbidden):
+		writeError(w, stdhttp.StatusForbidden, forbidden.Error())
 	case errors.As(err, &conflict):
 		writeError(w, stdhttp.StatusConflict, conflict.Error())
 	case errors.As(err, &missing):

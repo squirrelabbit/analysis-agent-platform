@@ -49,6 +49,11 @@ export const BuildClauseSchema = z.object({
   includeGenuineness: z.array(z.string()).optional(), // doc_genuineness ready 필요
 });
 
+export const BuildKeywordSchema = z.object({
+  keywordMinLen: z.number().optional(),
+});
+
 export type BuildCleanFormValues = z.infer<typeof BuildCleanSchema>;
 export type BuildGenuinenessFormValues = z.infer<typeof BuildGenuinenessSchema>;
 export type BuildClauseFormValues = z.infer<typeof BuildClauseSchema>;
+export type BuildKeywordFormValues = z.infer<typeof BuildKeywordSchema>;

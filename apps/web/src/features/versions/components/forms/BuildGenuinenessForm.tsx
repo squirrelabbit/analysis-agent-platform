@@ -30,6 +30,10 @@ export default function BuildGenuinenessForm({
   return (
     <form id={formId} onSubmit={handleSubmit(handleFormSubmit)}>
       <FieldGroup className="px-3">
+        <p className="text-sm text-zinc-500">
+          문서별로 실제 리뷰 여부(진성)를 분류합니다. 데이터 정제 완료 후
+          실행할 수 있습니다.
+        </p>
         <PromptVersionField
           task="doc_genuineness"
           value={promptVersion}

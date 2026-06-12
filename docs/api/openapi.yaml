@@ -69,7 +69,146 @@ tags:
     description: 저장형 analysis thread / message / run + plan replay
   - name: Reports
     description: 보고서 보관함 — 분석 결과 스냅샷 저장/조회
+  - name: Auth
+    description: Google OIDC 로그인 + 서버 세션 쿠키 + 프로젝트 RBAC (ADR-025)
 paths:
+  /auth/config:
+    get:
+      tags: [Auth]
+      summary: 프론트 부팅용 public 인증 config
+      description: auth_enabled로 프론트가 로그인 가드 on/off를 판단한다. 인증 없이 접근 가능.
+      operationId: authConfig
+      responses:
+        "200":
+          description: 인증 config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  auth_enabled: { type: boolean }
+                  provider: { type: string, example: google }
+  /auth/google/start:
+    get:
+      tags: [Auth]
+      summary: Google 로그인 시작 (Google OAuth로 redirect)
+      description: CSRF용 state 쿠키(asp_oauth_state)를 심고 Google 동의 화면으로 302 redirect.
+      operationId: authGoogleStart
+      responses:
+        "302":
+          description: Google authorization URL로 redirect
+  /auth/google/callback:
+    get:
+      tags: [Auth]
+      summary: Google OAuth callback
+      description: |
+        code를 Google token endpoint와 교환→id_token 검증→email_verified/도메인 확인
+        →user upsert→세션 생성→HttpOnly `asp_session` 쿠키 발급 후 프론트로 redirect.
+      operationId: authGoogleCallback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "302":
+          description: 로그인 성공 → 프론트로 redirect (asp_session 쿠키)
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/ErrorResponse"
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: 현재 로그인 사용자 + 프로젝트 role
+      description: 세션 쿠키 기준 현재 user와 project_id→role 매핑 반환. 미로그인 시 401.
+      operationId: authMe
+      responses:
+        "200":
+          description: 현재 사용자
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthMeResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: 로그아웃 (세션 삭제 + 쿠키 만료)
+      operationId: authLogout
+      responses:
+        "204":
+          description: 로그아웃 완료
+  /projects/{project_id}/members:
+    get:
+      tags: [Auth]
+      summary: 프로젝트 멤버(RBAC) 목록 — admin/owner
+      operationId: listProjectMembers
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: 멤버 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProjectMember" }
+        "401": { $ref: "#/components/responses/ErrorResponse" }
+        "403": { $ref: "#/components/responses/ErrorResponse" }
+  /projects/{project_id}/members/{user_id}:
+    put:
+      tags: [Auth]
+      summary: 프로젝트 멤버 role 부여/변경 — admin/owner
+      operationId: upsertProjectMember
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role:
+                  type: string
+                  enum: [owner, editor, viewer]
+      responses:
+        "204": { description: 적용 완료 }
+        "400": { $ref: "#/components/responses/ErrorResponse" }
+        "401": { $ref: "#/components/responses/ErrorResponse" }
+        "403": { $ref: "#/components/responses/ErrorResponse" }
+        "404": { $ref: "#/components/responses/ErrorResponse" }
+    delete:
+      tags: [Auth]
+      summary: 프로젝트 멤버 제거 — admin/owner
+      operationId: deleteProjectMember
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: 제거 완료 }
+        "401": { $ref: "#/components/responses/ErrorResponse" }
+        "403": { $ref: "#/components/responses/ErrorResponse" }
+        "404": { $ref: "#/components/responses/ErrorResponse" }
   /health:
     get:
       tags: [System]
@@ -886,6 +1025,67 @@ paths:
                 $ref: "#/components/schemas/DocGenuinenessView"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness/{doc_id}:
+    patch:
+      tags: [Datasets]
+      summary: 진성 라벨 수동 보정 (set)
+      description: |
+        전처리 진성 분석 화면에서 운영자가 문서의 진성 라벨을 수동 보정한다.
+        artifact JSONL(LLOA 원본)은 그대로 두고 보정값만 overlay 테이블에 저장하며,
+        GET doc_genuineness 응답이 effective label로 합성한다. original 라벨/사유는
+        서버가 artifact에서 직접 조회해 snapshot한다. 수정 사유(`reason`)가 비면
+        "운영자 수동 수정" 기본값으로 저장한다. 보정 해제는 DELETE override 사용.
+
+        **주의**: 진성 라벨을 바꿔도 이미 생성된 clause_label/clause_keywords는
+        자동 재실행되지 않는다. clause_label 포함 경계(genuine_review/mixed ↔
+        non_review/uncertain)를 넘는 보정이고 후속 artifact가 ready면, GET 응답의
+        `summary.downstream_rerun_recommended=true`로 재실행 권장을 노출한다.
+      operationId: setDocGenuinenessOverride
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: doc_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DocGenuinenessOverrideRequest"
+      responses:
+        "200":
+          description: 보정 결과(원본/보정 라벨·사유 포함)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocGenuinenessOverride"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness/{doc_id}/override:
+    delete:
+      tags: [Datasets]
+      summary: 진성 라벨 보정 되돌리기 (원본 LLOA 판정으로 복귀)
+      operationId: deleteDocGenuinenessOverride
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: doc_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: 보정 삭제 완료
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness_download:
     get:
       tags: [Datasets]
@@ -1055,6 +1255,64 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ClauseLabelView"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label/{clause_id}:
+    patch:
+      tags: [Datasets]
+      summary: 절 aspect/sentiment 수동 보정 (set)
+      description: |
+        전처리 절 라벨링 화면에서 운영자가 절(clause)의 aspect/sentiment를 수동
+        보정한다. artifact JSONL(LLOA 원본)은 그대로 두고 보정값만 overlay 테이블에
+        저장하며, GET clause_label 응답이 effective aspect/sentiment로 합성하고
+        summary(sentiment/aspect/aspect_sentiment)도 재집계한다. aspect/sentiment는
+        둘 다 선택이며 보낸 것만 바뀌고 나머지는 원본 유지(둘 다 비면 400). 수정
+        사유(`reason`)가 비면 "운영자 수동 수정" 기본값. 보정 해제는 DELETE override.
+        clause_id는 GET clause_label 응답 item의 clause_id.
+      operationId: setClauseLabelOverride
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: clause_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClauseLabelOverrideRequest"
+      responses:
+        "200":
+          description: 보정 결과(원본/보정 aspect·sentiment 포함)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClauseLabelOverride"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label/{clause_id}/override:
+    delete:
+      tags: [Datasets]
+      summary: 절 aspect/sentiment 보정 되돌리기 (원본 LLOA 라벨로 복귀)
+      operationId: deleteClauseLabelOverride
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: clause_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: 보정 삭제 완료
         "404":
           $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label_download:
@@ -2640,6 +2898,74 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReportSummary"
+    User:
+      type: object
+      description: Google OIDC로 인증된 사용자 (ADR-025). external_id = Google sub.
+      properties:
+        user_id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        avatar_url: { type: string }
+        auth_provider: { type: string, example: google }
+        external_id: { type: string }
+        global_role: { type: string, enum: [admin, user] }
+        status: { type: string, enum: [active, disabled] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        last_login_at: { type: string, format: date-time }
+    AuthMeResponse:
+      type: object
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        project_roles:
+          type: object
+          additionalProperties: { type: string }
+          description: project_id → role(owner/editor/viewer). admin은 비어도 전 프로젝트 접근.
+    ProjectMember:
+      type: object
+      properties:
+        project_id: { type: string }
+        user_id: { type: string }
+        role: { type: string, enum: [owner, editor, viewer] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    DocGenuinenessOverrideRequest:
+      type: object
+      required: [genuineness]
+      properties:
+        genuineness:
+          type: string
+          description: effective로 적용할 라벨
+          enum: [genuine_review, non_review, uncertain, mixed]
+        reason:
+          type: string
+          description: (선택) 보정 사유 메모
+    DocGenuinenessOverride:
+      type: object
+      description: 진성 라벨 수동 보정 결과. original은 보정 시점 artifact 라벨 snapshot.
+      properties:
+        project_id:
+          type: string
+        dataset_id:
+          type: string
+        dataset_version_id:
+          type: string
+        doc_id:
+          type: string
+        original_genuineness:
+          type: string
+        original_reason:
+          type: string
+        override_genuineness:
+          type: string
+        override_reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     AnalysisThread:
       type: object
       properties:
@@ -3708,6 +4034,35 @@ components:
                   dominant_sentiment_ratio: { type: number, description: "우세 감성 비율(0~1)" }
                   top_aspect: { type: string, description: "이 키워드의 대표 aspect(최빈)" }
                   representative_clause: { type: string, description: "대표 절(키워드 포함 절 중 최장)" }
+    ClauseLabelOverrideRequest:
+      type: object
+      description: aspect/sentiment 중 보낸 것만 effective로 바뀌고 나머지는 원본 유지(둘 다 비면 400).
+      properties:
+        aspect:
+          type: string
+          description: effective로 적용할 aspect 키(taxonomy aspect)
+        sentiment:
+          type: string
+          description: effective로 적용할 감성
+          enum: [positive, negative, neutral]
+        reason:
+          type: string
+          description: (선택) 보정 사유. 비면 "운영자 수동 수정"
+    ClauseLabelOverride:
+      type: object
+      description: 절 aspect/sentiment 수동 보정 결과. original_*는 보정 시점 artifact snapshot.
+      properties:
+        project_id: { type: string }
+        dataset_id: { type: string }
+        dataset_version_id: { type: string }
+        clause_id: { type: string }
+        original_aspect: { type: string }
+        original_sentiment: { type: string }
+        override_aspect: { type: string }
+        override_sentiment: { type: string }
+        override_reason: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     ClauseLabelView:
       allOf:
         - $ref: "#/components/schemas/ArtifactViewCommon"

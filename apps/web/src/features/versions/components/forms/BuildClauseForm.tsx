@@ -43,6 +43,10 @@ export function BuildClauseForm({
   return (
     <form id={formId} onSubmit={handleSubmit(handleFormSubmit)}>
       <FieldGroup className="px-3">
+        <p className="text-sm text-zinc-500">
+          문서를 절 단위로 나누고 각 절의 감성과 aspect(주제)를 라벨링합니다.
+          진성 분석 완료 후 실행할 수 있습니다.
+        </p>
         <PromptVersionField
           task="clause_label"
           value={promptVersion}
