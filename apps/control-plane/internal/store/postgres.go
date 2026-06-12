@@ -2646,6 +2646,42 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS clause_label_overrides_scope_idx
 		  ON clause_label_overrides(project_id, dataset_version_id)`,
+		// 인증/RBAC (ADR-025, silverone 2026-06-12). Google OIDC = 인증,
+		// project_members = 권한. password_hash는 local login 대비 자리만(1차 미사용).
+		`CREATE TABLE IF NOT EXISTS users (
+			user_id TEXT PRIMARY KEY,
+			email TEXT NOT NULL,
+			name TEXT,
+			avatar_url TEXT,
+			auth_provider TEXT NOT NULL DEFAULT 'google',
+			external_id TEXT,
+			password_hash TEXT,
+			global_role TEXT NOT NULL DEFAULT 'user',
+			status TEXT NOT NULL DEFAULT 'active',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_login_at TIMESTAMPTZ,
+			UNIQUE (auth_provider, external_id)
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users(lower(email))`,
+		`CREATE TABLE IF NOT EXISTS sessions (
+			session_id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+			token_hash TEXT NOT NULL UNIQUE,
+			expires_at TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions(user_id)`,
+		`CREATE TABLE IF NOT EXISTS project_members (
+			project_id UUID NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+			user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+			role TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (project_id, user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS project_members_user_idx ON project_members(user_id)`,
 		// silverone 2026-05-27 (Codex adversarial review fix-1) — 옛 schema
 		// (report_drafts / executions / skill_plans / analysis_requests) DROP을
 		// boot-time ensureSchema에서 제거. 운영/감사 이력이 들어있을 수 있는
