@@ -26,6 +26,7 @@ export default function UserMenu() {
   const { data, isError } = useAuthMe();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   if (isError || !data?.user) return null;
   const user = data.user;
@@ -33,10 +34,15 @@ export default function UserMenu() {
 
   const handleLogout = async () => {
     setLoading(true);
+    setFailed(false);
     try {
       await authApi.logout();
     } catch {
-      // 로그아웃 실패해도 세션 쿠키는 만료 처리되므로 로그인 화면으로 이동.
+      // 실패 시 서버 세션·쿠키가 그대로 남는다 — 로그인 화면으로 보내면
+      // /auth/me 성공으로 다시 되돌아오므로, 에러를 표시하고 재시도를 유도한다.
+      setLoading(false);
+      setFailed(true);
+      return;
     }
     queryClient.clear();
     window.location.href = "/login";
@@ -77,6 +83,11 @@ export default function UserMenu() {
           <LogOut />
           로그아웃
         </DropdownMenuItem>
+        {failed && (
+          <div className="px-2 py-1.5 text-xs text-destructive" role="alert">
+            로그아웃에 실패했습니다. 다시 시도해 주세요.
+          </div>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

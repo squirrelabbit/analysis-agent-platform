@@ -92,11 +92,13 @@ paths:
     get:
       tags: [Auth]
       summary: Google 로그인 시작 (Google OAuth로 redirect)
-      description: CSRF용 state 쿠키(asp_oauth_state)를 심고 Google 동의 화면으로 302 redirect.
+      description: |
+        CSRF용 state 쿠키(asp_oauth_state)를 심고 Google 동의 화면으로 302 redirect.
+        OAuth 미설정(client_id 없음)이면 `/login?error=config`로 redirect.
       operationId: authGoogleStart
       responses:
         "302":
-          description: Google authorization URL로 redirect
+          description: Google authorization URL로 redirect (미설정 시 `/login?error=config`)
   /auth/google/callback:
     get:
       tags: [Auth]
@@ -104,6 +106,9 @@ paths:
       description: |
         code를 Google token endpoint와 교환→id_token 검증→email_verified/도메인 확인
         →user upsert→세션 생성→HttpOnly `asp_session` 쿠키 발급 후 프론트로 redirect.
+        실패도 JSON 에러가 아니라 로그인 화면으로 302 redirect 한다
+        (`/login?error=<code>` — not_allowed: 도메인 밖 / wrong_account: 미인증 계정 /
+        session: state 불일치·일반 실패).
       operationId: authGoogleCallback
       parameters:
         - name: code
@@ -116,13 +121,9 @@ paths:
           schema: { type: string }
       responses:
         "302":
-          description: 로그인 성공 → 프론트로 redirect (asp_session 쿠키)
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "401":
-          $ref: "#/components/responses/ErrorResponse"
-        "403":
-          $ref: "#/components/responses/ErrorResponse"
+          description: |
+            성공 → 프론트로 redirect (asp_session 쿠키 발급).
+            실패 → `/login?error=not_allowed|wrong_account|session`.
   /auth/me:
     get:
       tags: [Auth]
