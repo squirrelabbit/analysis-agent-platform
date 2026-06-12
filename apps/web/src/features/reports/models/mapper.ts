@@ -1,8 +1,11 @@
 import type {
+  ReportDto,
+  ReportListResponseDto,
   ReportSavedResultDto,
   ReportSavedResultListResponseDto,
+  ReportSummaryDto,
 } from "./dto";
-import type { ReportSavedResult } from "./model";
+import type { Report, ReportSavedResult, ReportSummary } from "./model";
 
 // 식별/메타는 snake→camel. display/plan은 분석 스냅샷이라 변환 없이 그대로 보존한다.
 export const mapReportSavedResult = (
@@ -26,3 +29,25 @@ export const mapReportSavedResult = (
 export const mapReportSavedResultList = (
   dto: ReportSavedResultListResponseDto,
 ): ReportSavedResult[] => dto.items?.map(mapReportSavedResult) ?? [];
+
+// ── 보고서 문서 매퍼 ──
+export const mapReportSummary = (dto: ReportSummaryDto): ReportSummary => ({
+  reportId: dto.report_id,
+  projectId: dto.project_id,
+  title: dto.title,
+  blockCount: dto.block_count,
+  createdAt: dto.created_at,
+  updatedAt: dto.updated_at,
+});
+
+export const mapReportList = (dto: ReportListResponseDto): ReportSummary[] =>
+  dto.items?.map(mapReportSummary) ?? [];
+
+export const mapReport = (dto: ReportDto): Report => ({
+  reportId: dto.report_id,
+  projectId: dto.project_id,
+  title: dto.title,
+  blocks: dto.blocks ?? [],
+  createdAt: dto.created_at,
+  updatedAt: dto.updated_at,
+});

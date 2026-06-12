@@ -22,3 +22,37 @@ export interface ReportSavedResultDto {
 export interface ReportSavedResultListResponseDto {
   items: ReportSavedResultDto[];
 }
+
+// ── 보고서 문서(Report) — saved_results를 조합한 블록 문서 CRUD ──
+// blocks는 control-plane이 영속만 하는 opaque JSON 배열(블록 contract는 프론트 에디터 소유).
+export interface ReportSummaryDto {
+  report_id: string;
+  project_id: string;
+  title: string;
+  block_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReportDto {
+  report_id: string;
+  project_id: string;
+  title: string;
+  blocks: unknown[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReportListResponseDto {
+  items: ReportSummaryDto[];
+}
+
+export interface ReportCreateRequestDto {
+  title?: string;
+  blocks?: unknown[];
+}
+
+export interface ReportUpdateRequestDto {
+  title?: string;
+  blocks?: unknown[];
+}

@@ -1,6 +1,7 @@
-// 보고서 에디터 상태 관리. useReducer + localStorage 영속화.
-// NOTE: 현재는 로컬 영속(디자인 샘플). 실제 연동 시 보고서 저장/조회 API로 대체.
-import { useEffect, useReducer } from "react";
+// 보고서 에디터 상태 관리. useReducer 기반.
+// 서버(보고서 문서 API)가 source of truth — 단건 조회 결과를 hydrate로 주입하고,
+// 변경분은 페이지에서 디바운스 자동저장(PUT)한다.
+import { useReducer } from "react";
 import {
   DEFAULT_STATE,
   type BlockOpts,
@@ -9,14 +10,13 @@ import {
   type ReportState,
 } from "../models/editor";
 
-const LS_KEY = "report_editor";
-
 let uidc = 100;
 function newUid(): string {
   return "b" + uidc++ + "_" + Math.floor(Math.random() * 1e6).toString(36);
 }
 
 type Action =
+  | { type: "hydrate"; state: ReportState }
   | { type: "setTitle"; title: string }
   | { type: "setMode"; mode: ReportMode }
   | { type: "select"; uid: string | null }
@@ -38,6 +38,9 @@ type Action =
 
 function reducer(state: ReportState, action: Action): ReportState {
   switch (action.type) {
+    case "hydrate":
+      // 서버 로드 결과로 상태 교체. 편집 모드로 시작, 선택 해제.
+      return { ...action.state, mode: "edit", selected: null };
     case "setTitle":
       return { ...state, title: action.title };
     case "setMode":
@@ -128,27 +131,8 @@ function reducer(state: ReportState, action: Action): ReportState {
   }
 }
 
-function init(): ReportState {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) return JSON.parse(raw) as ReportState;
-  } catch {
-    /* ignore */
-  }
-  return DEFAULT_STATE();
-}
-
 export function useReportEditor() {
-  const [state, dispatch] = useReducer(reducer, undefined, init);
-
-  // 상태 변경마다 로컬 영속.
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify(state));
-    } catch {
-      /* ignore */
-    }
-  }, [state]);
-
+  // 빈 상태로 시작 → 페이지가 서버 단건을 hydrate로 주입한다.
+  const [state, dispatch] = useReducer(reducer, undefined, DEFAULT_STATE);
   return { state, dispatch };
 }

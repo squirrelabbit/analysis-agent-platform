@@ -1,4 +1,5 @@
-// 보고서 에디터 상단 인페이지 툴바 — 편집/미리보기 모드 전환 + 초기화 + 내보내기 메뉴.
+// 보고서 에디터 상단 인페이지 툴바 — 편집/미리보기 모드 전환 + 내보내기 메뉴.
+// (변경분은 자동저장되므로 초기화 버튼은 두지 않는다.)
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
@@ -8,7 +9,6 @@ import {
   FileText,
   Pencil,
   Presentation,
-  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ReportMode } from "../models/editor";
@@ -58,12 +58,10 @@ const EXPORT_ITEMS: {
 export function ReportToolbar({
   mode,
   onMode,
-  onReset,
   onExport,
 }: {
   mode: ReportMode;
   onMode: (mode: ReportMode) => void;
-  onReset: () => void;
   onExport: (fmt: ExportFormat) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -107,15 +105,6 @@ export function ReportToolbar({
           </button>
         ))}
       </div>
-
-      <button
-        onClick={onReset}
-        title="처음 상태로 되돌리기"
-        className="inline-flex h-9.5 items-center gap-1.75 rounded-xl px-3 text-[13.5px] font-semibold text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-      >
-        <RotateCcw className="h-3.75 w-3.75" />
-        초기화
-      </button>
 
       <div ref={wrapRef} className="relative">
         <button

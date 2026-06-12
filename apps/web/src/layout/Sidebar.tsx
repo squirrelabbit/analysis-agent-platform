@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Database, FileText, MessageCircle, PanelLeft } from "lucide-react";
 import type { Project } from "@/features/projects/models/model";
+import { useReports } from "@/features/reports/hooks/reportDoc.query";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -16,6 +17,10 @@ const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
 export default function Sidebar({ project }: { project: Project }) {
   const { pathname } = useLocation();
   const basePath = `/projects/${project.id}`;
+
+  // 보고서 개수는 Project 메타에 없어 목록 훅으로 가져온다(목록 페이지와 캐시 공유).
+  const { data: reports } = useReports(project.id);
+  const reportCount = reports?.length ?? 0;
 
   // 수동 접힘 상태 + 화면이 sm 이하면 강제 접힘.
   // 수동 상태는 localStorage에 저장해 새로고침 후에도 유지.
@@ -70,6 +75,7 @@ export default function Sidebar({ project }: { project: Project }) {
       name: "보고서",
       path: `${basePath}/reports`,
       icon: FileText,
+      badge: reportCount,
     },
   ];
 
