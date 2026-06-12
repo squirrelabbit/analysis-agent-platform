@@ -18,6 +18,21 @@ export const apiClient = axios.create({
 //   return config
 // })
 
+// 401 가드 (ADR-025) — 세션 만료/미로그인 상태로 앱 API를 부르면 로그인 화면으로.
+// `/auth/*`는 제외 — /auth/me 401은 "미로그인 상태 조회"라는 정상 흐름이고
+// (UserMenu·LoginPage가 isError로 다룬다), 로그인 화면 자체의 재귀 이동도 막는다.
+apiClient.interceptors.response.use(
+  (res) => res,
+  (error) => {
+    const status: number | undefined = error?.response?.status
+    const url: string = error?.config?.url ?? ''
+    if (status === 401 && !url.startsWith('/auth/') && window.location.pathname !== '/login') {
+      window.location.href = '/login?error=session'
+    }
+    return Promise.reject(error)
+  },
+)
+
 // 응답 인터셉터 — 에러 정규화
 // apiClient.interceptors.response.use(
 //   (res) => res,
