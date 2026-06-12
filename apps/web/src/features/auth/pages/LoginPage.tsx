@@ -10,6 +10,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   not_allowed: "허용되지 않은 계정입니다. 관리자에게 초대를 요청하세요.",
   wrong_account: "회사 Google 계정으로 로그인해 주세요.",
   session: "세션이 만료되었습니다. 다시 로그인해 주세요.",
+  config: "로그인이 아직 설정되지 않았습니다. 관리자에게 문의하세요.",
 };
 
 const GOOGLE_START_URL = "/api/auth/google/start";
