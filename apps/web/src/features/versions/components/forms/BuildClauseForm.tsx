@@ -6,6 +6,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertCircle } from "lucide-react";
 import PromptVersionField from "@/features/prompts/components/PromptVersionField";
+import LloaModelField from "./LloaModelField";
 
 const genuinenessOptions = [
   {
@@ -34,6 +35,7 @@ export function BuildClauseForm({
 
   const promptVersion = useWatch({ control, name: "promptVersion" }) ?? "";
   const currentInclude = useWatch({ control, name: "includeGenuineness" }) ?? [];
+  const modelId = useWatch({ control, name: "modelId" }) ?? "";
 
   async function handleFormSubmit(data: BuildClauseFormValues) {
     await onSubmit(data);
@@ -54,6 +56,11 @@ export function BuildClauseForm({
             setValue("promptVersion", v, { shouldValidate: true })
           }
           errorMessage={errors.promptVersion?.message}
+        />
+        <LloaModelField
+          value={modelId}
+          onChange={(v) => setValue("modelId", v, { shouldValidate: true })}
+          errorMessage={errors.modelId?.message}
         />
         <Field>
           <FieldLabel className="text-xs">
