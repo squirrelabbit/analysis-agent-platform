@@ -1,6 +1,46 @@
 package http
 
-import "testing"
+import (
+	stdhttp "net/http"
+	"net/http/httptest"
+	"testing"
+
+	"analysis-support-platform/control-plane/internal/config"
+)
+
+// Google OAuth 미설정(client_id 없음)이면 start는 깨진 Google 페이지가 아니라
+// 로그인 화면(/login?error=config)으로 돌려보내야 한다.
+func TestGoogleStartRedirectsToLoginWhenUnconfigured(t *testing.T) {
+	s := &Server{cfg: config.Config{}} // AuthGoogleClientID 빈 값
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(stdhttp.MethodGet, "/auth/google/start", nil)
+
+	s.handleAuthGoogleStart(rec, req)
+
+	if rec.Code != stdhttp.StatusFound {
+		t.Fatalf("status: got %d want %d", rec.Code, stdhttp.StatusFound)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/login?error=config" {
+		t.Fatalf("location: got %q want %q", loc, "/login?error=config")
+	}
+}
+
+// callback의 state 불일치(CSRF/만료)는 JSON 에러가 아니라 로그인 화면으로 리다이렉트.
+func TestGoogleCallbackStateMismatchRedirectsToLogin(t *testing.T) {
+	s := &Server{cfg: config.Config{}}
+	rec := httptest.NewRecorder()
+	// state 쿠키 없이 콜백 → 불일치.
+	req := httptest.NewRequest(stdhttp.MethodGet, "/auth/google/callback?code=c&state=x", nil)
+
+	s.handleAuthGoogleCallback(rec, req)
+
+	if rec.Code != stdhttp.StatusFound {
+		t.Fatalf("status: got %d want %d", rec.Code, stdhttp.StatusFound)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/login?error=session" {
+		t.Fatalf("location: got %q want %q", loc, "/login?error=session")
+	}
+}
 
 func TestProjectScopeRequirement(t *testing.T) {
 	cases := []struct {

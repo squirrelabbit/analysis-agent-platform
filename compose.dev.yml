@@ -103,6 +103,18 @@ services:
       # LLOA 모델/표시명 env를 읽는다(빌드 snapshot 아님 — .env 변경 즉시 반영).
       LLOA_MODEL: ${LLOA_MODEL:-wisenut/wise-lloa-max-v1.2.1}
       LLOA_MODEL_DISPLAY_NAME: ${LLOA_MODEL_DISPLAY_NAME:-}
+      # 인증/RBAC (ADR-025). 값은 .env에서 주입(파일엔 비밀 없음 — 참조만).
+      # AUTH_ENABLED 기본 false = 현 사내망 단계 호환. Google 로그인 테스트 시
+      # .env에 AUTH_* 채우고 `up -d control-plane`으로 재기동.
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      AUTH_GOOGLE_CLIENT_ID: ${AUTH_GOOGLE_CLIENT_ID:-}
+      AUTH_GOOGLE_CLIENT_SECRET: ${AUTH_GOOGLE_CLIENT_SECRET:-}
+      AUTH_REDIRECT_URL: ${AUTH_REDIRECT_URL:-}
+      AUTH_ALLOWED_DOMAIN: ${AUTH_ALLOWED_DOMAIN:-}
+      AUTH_ADMIN_EMAILS: ${AUTH_ADMIN_EMAILS:-}
+      AUTH_POST_LOGIN_URL: ${AUTH_POST_LOGIN_URL:-/}
+      AUTH_SESSION_TTL_HOURS: ${AUTH_SESSION_TTL_HOURS:-168}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
     ports:
       - "127.0.0.1:18080:8080"
     volumes:
