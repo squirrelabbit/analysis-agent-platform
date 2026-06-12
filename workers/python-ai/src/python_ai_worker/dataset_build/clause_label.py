@@ -315,10 +315,13 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
             "dataset_clause_label requires LLOA API key — set LLOA_API_KEY / WISENUT_LLOA_API_KEY / WISENUT_LLOA_MAX_V1_2_1_API_KEY"
         )
 
+    # 전처리 모델 선택 (2026-06-12) — control-plane이 allowlist(LLOA_MODELS) 검증
+    # 후 payload로 넘긴다. 생략 시 env(LLOA_MODEL) default.
+    requested_model = str(payload.get("model_id") or "").strip()
     lloa_config = LloaConfig(
         api_key=config.lloa_api_key,
         api_url=config.lloa_api_url,
-        model=config.lloa_model,
+        model=requested_model or config.lloa_model,
         max_tokens=config.lloa_max_tokens,
         timeout_sec=config.lloa_timeout_sec,
         reasoning_effort=config.lloa_reasoning_effort,
