@@ -11,6 +11,7 @@ import DatasetListRedesign from "./features/datasets/redesign/DatasetListRedesig
 import VersionDetailPage from "./features/versions/pages/VersionDetailPage";
 import DatasetVersionListRedesign from "./features/versions/redesign/DatasetVersionListRedesign";
 import ReportPage from "./features/reports/pages/ReportPage";
+import LoginPage from "./features/auth/pages/LoginPage";
 
 const queryClient = new QueryClient();
 
@@ -20,6 +21,7 @@ function App() {
       <BrowserRouter>
         <AppLayout>
           <Routes>
+            <Route path="/login" element={<LoginPage />} />
             <Route path="/" element={<Navigate to="/projects" replace />} />
             <Route path="/projects" element={<ProjectPage />} />
             <Route path="/projects/:projectId" element={<ProjectLayout />}>
