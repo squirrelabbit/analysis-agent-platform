@@ -5,6 +5,9 @@ export const apiClient = axios.create({
   // 프록시 경로 `/api`로 fallback — 절대주소 미설정 이미지가 127.0.0.1을 때리지 않게).
   baseURL: import.meta.env.DEV ? '/api' : (import.meta.env.VITE_API_BASE_URL || '/api'),
   timeout: 10_000,
+  // 세션 쿠키(asp_session) 인증. 동일출처(nginx /api)에선 자동 전송되지만,
+  // 교차출처(팀 LAN :18080 직결 등)에서도 쿠키를 보내도록 명시. (ADR-025)
+  withCredentials: true,
   // headers: { 'Content-Type': 'application/json' },
 })
 
