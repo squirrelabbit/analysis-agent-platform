@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	stdhttp "net/http"
 	"strings"
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
+	"analysis-support-platform/control-plane/internal/service"
 )
 
 // 인증/RBAC HTTP 계층 (ADR-025, silverone 2026-06-12).
@@ -16,7 +18,25 @@ import (
 const (
 	sessionCookieName = "asp_session"
 	stateCookieName   = "asp_oauth_state"
+	// loginPath — 인증 실패를 되돌릴 프론트 로그인 화면 경로(로그인.html).
+	loginPath = "/login"
 )
+
+// loginErrorRedirect — 인증 실패를 로그인 화면의 에러 배너로 되돌린다.
+// 로그인 화면 error 코드: not_allowed(도메인 밖) / wrong_account(미인증 계정) /
+// session(state·일반 실패) / config(OAuth 미설정).
+func (s *Server) loginErrorRedirect(w stdhttp.ResponseWriter, r *stdhttp.Request, err error) {
+	code := "session"
+	var unauthorized service.ErrUnauthorized
+	var forbidden service.ErrForbidden
+	switch {
+	case errors.As(err, &forbidden):
+		code = "not_allowed"
+	case errors.As(err, &unauthorized):
+		code = "wrong_account"
+	}
+	stdhttp.Redirect(w, r, loginPath+"?error="+code, stdhttp.StatusFound)
+}
 
 type ctxKey string
 
@@ -108,6 +128,12 @@ func isPublicAuthPath(path string) bool {
 }
 
 func (s *Server) handleAuthGoogleStart(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	// Google OAuth 미설정(client_id 없음): 깨진 Google invalid_request 페이지 대신
+	// 로그인 화면에 설정 안내를 띄운다.
+	if s.cfg.AuthGoogleClientID == "" {
+		stdhttp.Redirect(w, r, loginPath+"?error=config", stdhttp.StatusFound)
+		return
+	}
 	state, err := randomState()
 	if err != nil {
 		writeError(w, stdhttp.StatusInternalServerError, err.Error())
@@ -131,14 +157,16 @@ func (s *Server) handleAuthGoogleCallback(w stdhttp.ResponseWriter, r *stdhttp.R
 	stateCookie, err := r.Cookie(stateCookieName)
 	queryState := r.URL.Query().Get("state")
 	if err != nil || stateCookie.Value == "" || queryState == "" || stateCookie.Value != queryState {
-		writeError(w, stdhttp.StatusBadRequest, "유효하지 않은 OAuth state")
+		// state 불일치(CSRF/만료) → 로그인 화면으로.
+		s.loginErrorRedirect(w, r, nil)
 		return
 	}
 	clearCookie(w, stateCookieName, s.cfg.AuthCookieSecure)
 
 	token, expires, err := s.authService.HandleCallback(r.Context(), r.URL.Query().Get("code"))
 	if err != nil {
-		s.writeServiceError(w, err)
+		// 도메인 밖/미인증 계정 등 → 로그인 화면 에러 배너로.
+		s.loginErrorRedirect(w, r, err)
 		return
 	}
 	stdhttp.SetCookie(w, &stdhttp.Cookie{
