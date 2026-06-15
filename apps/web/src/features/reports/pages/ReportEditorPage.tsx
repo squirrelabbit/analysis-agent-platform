@@ -527,7 +527,7 @@ export default function ReportEditorPage() {
 
               <div
                 ref={blocksRef}
-                className="relative mt-6 grid grid-cols-12 items-start gap-3"
+                className="relative mt-6 grid grid-cols-12 items-stretch gap-3"
                 onDragOver={onCanvasDragOver}
                 onDrop={onCanvasDrop}
               >
@@ -558,6 +558,9 @@ export default function ReportEditorPage() {
                         }}
                         onSetSpan={(uid, span) =>
                           dispatch({ type: "setSpan", uid, span })
+                        }
+                        onSetHeight={(uid, height) =>
+                          dispatch({ type: "setHeight", uid, height })
                         }
                       />
                     );
@@ -622,6 +625,9 @@ export default function ReportEditorPage() {
           }
           onResetSpan={() =>
             dispatch({ type: "setSpan", uid: selectedBlock.uid, span: 6 })
+          }
+          onResetHeight={() =>
+            dispatch({ type: "setHeight", uid: selectedBlock.uid, height: null })
           }
           onDelete={() => {
             dispatch({ type: "deleteBlock", uid: selectedBlock.uid });

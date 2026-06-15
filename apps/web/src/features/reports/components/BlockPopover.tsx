@@ -87,6 +87,7 @@ export function BlockPopover({
   onSetInterp,
   onToggleOpt,
   onResetSpan,
+  onResetHeight,
   onDelete,
 }: {
   block: ReportBlock;
@@ -96,6 +97,7 @@ export function BlockPopover({
   onSetInterp: (interp: string) => void;
   onToggleOpt: (key: keyof BlockOpts) => void;
   onResetSpan: () => void;
+  onResetHeight: () => void;
   onDelete: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -230,6 +232,23 @@ export function BlockPopover({
         </div>
         <div className="mt-1.75 text-[11.5px] text-zinc-400">
           블록 오른쪽 모서리를 드래그해 조절
+        </div>
+
+        <Label>높이</Label>
+        <div className="flex items-center gap-2.5">
+          <span className="text-[13px] font-bold text-zinc-900">
+            {block.height ? `${block.height}px` : "자동"}
+          </span>
+          <button
+            disabled={block.height == null}
+            onClick={onResetHeight}
+            className="ml-auto rounded-lg border border-zinc-200 px-2.75 py-1.5 text-xs font-bold text-zinc-600 transition enabled:hover:border-zinc-300 enabled:hover:text-zinc-900 disabled:opacity-40"
+          >
+            자동 높이로
+          </button>
+        </div>
+        <div className="mt-1.75 text-[11.5px] text-zinc-400">
+          블록 아래 모서리를 드래그해 조절
         </div>
 
         {/* 보고서에서만 빼는 가역 동작 — 보관함 영구 삭제와 구분(중립 톤, "제거"). */}

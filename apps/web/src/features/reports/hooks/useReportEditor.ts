@@ -34,6 +34,7 @@ type Action =
   | { type: "setBlockInterp"; uid: string; interp: string }
   | { type: "toggleOpt"; uid: string; key: keyof BlockOpts }
   | { type: "setSpan"; uid: string; span: number }
+  | { type: "setHeight"; uid: string; height: number | null }
   | { type: "reset" };
 
 function reducer(state: ReportState, action: Action): ReportState {
@@ -60,6 +61,7 @@ function reducer(state: ReportState, action: Action): ReportState {
         interp: "",
         opts: { q: true, detail: !!action.hasDetail, plan: false },
         span: 12,
+        height: null,
         newRow: action.newRow ?? true,
       };
       const blocks = [...state.blocks];
@@ -122,6 +124,13 @@ function reducer(state: ReportState, action: Action): ReportState {
         ...state,
         blocks: state.blocks.map((b) =>
           b.uid === action.uid ? { ...b, span: action.span } : b,
+        ),
+      };
+    case "setHeight":
+      return {
+        ...state,
+        blocks: state.blocks.map((b) =>
+          b.uid === action.uid ? { ...b, height: action.height } : b,
         ),
       };
     case "reset":

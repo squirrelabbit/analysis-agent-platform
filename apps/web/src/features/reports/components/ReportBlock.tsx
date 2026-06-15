@@ -29,6 +29,7 @@ export function ReportBlock({
   onGripDragStart,
   onGripDragEnd,
   onSetSpan,
+  onSetHeight,
 }: {
   block: Block;
   lib: LibraryItem;
@@ -40,12 +41,16 @@ export function ReportBlock({
   onGripDragStart: (uid: string) => void;
   onGripDragEnd: () => void;
   onSetSpan: (uid: string, span: number) => void;
+  onSetHeight: (uid: string, height: number | null) => void;
 }) {
   const [dragSpan, setDragSpan] = useState<number | null>(null);
+  const [dragHeight, setDragHeight] = useState<number | null>(null);
 
   const isEdit = mode === "edit";
   const title = block.title != null ? block.title : lib.title;
   const span = dragSpan ?? block.span;
+  // 드래그 중이면 실시간 값, 아니면 저장된 height(null=자동).
+  const minHeight = dragHeight ?? block.height;
 
   // 메인 결과 1개 선택(채팅과 동일): metric > evidence > chart > table.
   const { result } = lib;
@@ -98,6 +103,62 @@ export function ReportBlock({
     handle.addEventListener("pointercancel", up);
   };
 
+  // 하단 모서리 드래그로 카드 높이(minHeight) 조절. 너비 핸들과 대칭.
+  const startResizeV = (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const card = (e.currentTarget as HTMLElement).closest(
+      "[data-card]",
+    ) as HTMLElement | null;
+    // 줄어들 수 있는 바닥 = 이 카드의 순수 콘텐츠 높이. 줄 정렬(stretch)·minHeight를
+    // 잠깐 무력화하고 측정 → 옆에 큰 블록이 있어도 콘텐츠까지는 줄일 수 있다(스크롤 없음).
+    let floor = 80;
+    if (card) {
+      const wrapper = card.parentElement;
+      const prevSelf = wrapper?.style.alignSelf ?? "";
+      const prevMin = card.style.minHeight;
+      const prevH = card.style.height;
+      if (wrapper) wrapper.style.alignSelf = "start";
+      card.style.minHeight = "0px";
+      card.style.height = "auto";
+      floor = Math.round(card.getBoundingClientRect().height);
+      card.style.height = prevH;
+      card.style.minHeight = prevMin;
+      if (wrapper) wrapper.style.alignSelf = prevSelf;
+    }
+    const startH = card?.getBoundingClientRect().height ?? 200;
+    const startY = e.clientY;
+    const handle = e.currentTarget as HTMLElement;
+    try {
+      handle.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+    let committed: number | null = block.height;
+
+    const move = (ev: PointerEvent) => {
+      // 콘텐츠 바닥 아래로는 클램프 → 배지 px도 바닥에서 멈춰 더 안 줄어듦이 보인다.
+      const h = Math.max(floor, Math.round(startH + (ev.clientY - startY)));
+      committed = h;
+      setDragHeight(h);
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setDragHeight(null);
+      // 끌어 정한 높이를 그대로 유지(자동 정렬에서 빠져 독립). 자동 복귀는 "자동 높이로" 버튼.
+      onSetHeight(block.uid, committed);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  };
+
   return (
     <div
       // 12컬럼 그리드 아이템. newRow(또는 첫 블록)면 col 1에서 시작(새 줄), 아니면 앞 블록에
@@ -106,7 +167,13 @@ export function ReportBlock({
         gridColumn:
           index === 0 || block.newRow ? `1 / span ${span}` : `span ${span}`,
       }}
-      className={cn("group/block relative min-w-0", selected && "z-10")}
+      className={cn(
+        "group/block relative min-w-0",
+        selected && "z-10",
+        // 높이를 직접 지정한 카드만 self-start로 빼 줄 높이에서 독립(옆보다 작아질 수 있음).
+        // 미지정 카드는 부모 items-stretch로 줄 최고 높이에 자동 정렬.
+        minHeight != null && "self-start",
+      )}
     >
       {/* 드래그 그립 (편집 모드) */}
       {isEdit && (
@@ -132,8 +199,12 @@ export function ReportBlock({
       <div
         data-card={block.uid}
         data-idx={index}
+        // 높이 드래그 값(있으면) → minHeight. null이면 콘텐츠 높이(자동).
+        style={minHeight != null ? { minHeight } : undefined}
         className={cn(
           "relative w-full rounded-2xl border bg-white px-5.5 py-5 shadow-sm transition",
+          // height 미지정 카드만 h-full로 줄 높이를 채워 정렬. 지정 카드는 self-start라 제외.
+          minHeight == null && "h-full",
           selected
             ? "border-violet-300 ring-3 ring-violet-100"
             : "border-zinc-100 group-hover/block:border-zinc-200",
@@ -164,6 +235,34 @@ export function ReportBlock({
                 dragSpan != null ? "bg-violet-500" : "bg-zinc-300",
               )}
             />
+          </div>
+        )}
+
+        {/* 높이 리사이즈 핸들 (편집 모드) — 하단 모서리 */}
+        {isEdit && (
+          <div
+            onPointerDown={startResizeV}
+            title="드래그해 높이 조절"
+            className={cn(
+              "absolute -bottom-1.25 left-0 right-0 z-3 flex h-3.5 cursor-ns-resize items-center justify-center transition",
+              dragHeight != null
+                ? "opacity-100"
+                : "opacity-0 group-hover/block:opacity-100",
+            )}
+          >
+            <span
+              className={cn(
+                "h-1 w-11.5 rounded-full",
+                dragHeight != null ? "bg-violet-500" : "bg-zinc-300",
+              )}
+            />
+          </div>
+        )}
+
+        {/* 리사이즈 중 현재 높이(px) 표시 */}
+        {isEdit && dragHeight != null && (
+          <div className="absolute -bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-violet-600 px-2.5 py-0.5 text-[11px] font-bold text-white shadow">
+            {dragHeight}px
           </div>
         )}
 
