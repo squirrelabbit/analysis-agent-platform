@@ -27,7 +27,9 @@ const (
 
 // enrichViewWithJob — view 공통 필드(started_at / completed_at / error_message
 // / progress / job_id)를 latest job + metadata에서 채워 넣는다. clean /
-// doc_genuineness / clause_label 3 view가 공유.
+// doc_genuineness / clause_label / clause_keywords 4 view가 공유.
+// progress는 buildJobMetadataPrefix가 buildType별 메타 키 prefix를 알아야
+// 로드된다 — 새 build view를 추가하면 그 switch에도 case를 더해야 한다.
 func enrichViewWithJob(view *domain.DatasetArtifactView, job *domain.DatasetBuildJob, metadata map[string]any, buildType string) {
 	if job != nil {
 		jobID := job.JobID

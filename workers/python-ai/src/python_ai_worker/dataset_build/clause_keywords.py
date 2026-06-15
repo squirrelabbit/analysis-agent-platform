@@ -89,6 +89,19 @@ def run_dataset_clause_keywords(payload: dict[str, Any]) -> dict[str, Any]:
     records = _assign_clause_ids(_read_clause_records(input_path))
     extractor = KiwiKeywordExtractor(min_len=min_len)
 
+    # 진행률은 status=running 동안만 화면에 표시되므로(BuildRunningBanner) 초기 0% +
+    # 루프 중 주기적 갱신을 남겨야 빌드 진행 중에 진행률 바가 채워진다. 최종 100%는
+    # 루프 후에 기록한다. (silverone 2026-06-15 — 다른 build 단계와 동일 패턴)
+    total_rows = len(records)
+    if progress_path:
+        write_progress(
+            progress_path,
+            processed_rows=0,
+            total_rows=total_rows,
+            started_at=started_at,
+            message="clause_keywords queued",
+        )
+
     clause_count = 0
     clauses_with_keywords = 0
     keyword_row_count = 0
@@ -117,11 +130,22 @@ def run_dataset_clause_keywords(payload: dict[str, Any]) -> dict[str, Any]:
                 keyword_row_count += 1
                 keyword_counts[keyword] = keyword_counts.get(keyword, 0) + 1
 
+            # 200절마다(또는 마지막) 진행률 갱신 — 큰 데이터셋에서 진행률 바가
+            # 실시간으로 채워지게. 결정론적 Kiwi 처리라 파일 I/O만 소폭 추가된다.
+            if progress_path and (clause_count % 200 == 0 or clause_count == total_rows):
+                write_progress(
+                    progress_path,
+                    processed_rows=clause_count,
+                    total_rows=total_rows,
+                    started_at=started_at,
+                    message="clause_keywords processing",
+                )
+
     if progress_path:
         write_progress(
             progress_path,
-            processed_rows=clause_count,
-            total_rows=clause_count,
+            processed_rows=total_rows,
+            total_rows=total_rows,
             started_at=started_at,
             message="clause_keywords completed",
         )
