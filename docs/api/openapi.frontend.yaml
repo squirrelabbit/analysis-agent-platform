@@ -107,10 +107,10 @@ paths:
       summary: 전처리 빌드 모델 선택지 (LLOA allowlist)
       description: |
         빌드 재실행 다이얼로그(doc_genuineness / clause_label)의 모델 select용
-        목록 (2026-06-12 모델 선택). env `LLOA_MODELS` allowlist 기반이며
-        `default`는 worker default 모델(LLOA_MODEL) 일치 항목. 항목이 1개
-        이하면 프론트는 select를 노출하지 않는다 (env default 사용). 선택값은
-        빌드 POST body의 `model_id`로 전달한다.
+        목록 (2026-06-12 모델 선택). control-plane이 `config/lloa_models.json`
+        catalog를 읽어 노출하며 `default`는 catalog의 default 항목. 항목이 1개
+        이하(또는 파일 부재)면 프론트는 select를 노출하지 않는다 (env default
+        사용). 선택값은 빌드 POST body의 `model_id`로 전달한다.
       operationId: getLLOAModelOptions
       responses:
         "200":
@@ -488,7 +488,7 @@ components:
       required: [key, label, description]
     LLOAModelOption:
       type: object
-      description: 전처리 빌드에 선택 가능한 LLOA 모델 항목 (LLOA_MODELS allowlist).
+      description: 전처리 빌드에 선택 가능한 LLOA 모델 항목 (config/lloa_models.json catalog).
       properties:
         model_id:
           type: string

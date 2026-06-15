@@ -103,9 +103,10 @@ services:
       # LLOA 모델/표시명 env를 읽는다(빌드 snapshot 아님 — .env 변경 즉시 반영).
       LLOA_MODEL: ${LLOA_MODEL:-wisenut/wise-lloa-max-v1.2.1}
       LLOA_MODEL_DISPLAY_NAME: ${LLOA_MODEL_DISPLAY_NAME:-}
-      # 전처리 빌드(doc_genuineness/clause_label) 모델 선택 allowlist (2026-06-12).
-      # "id=라벨,id2=라벨2" 형식. 미설정이면 LLOA_MODEL 단일 항목 → 모델 select 미노출.
-      LLOA_MODELS: ${LLOA_MODELS:-}
+      # 전처리 빌드(doc_genuineness/clause_label) 모델 선택 allowlist는 이미지에
+      # 구워진 config/lloa_models.json에서 로드한다 (config/*.json 패턴, 2026-06-12).
+      # 경로만 override가 필요하면 LLOA_MODELS_PATH 사용. 목록 변경은 파일 수정 후
+      # `up -d --build control-plane`로 재빌드.
       # 인증/RBAC (ADR-025). 값은 .env에서 주입(파일엔 비밀 없음 — 참조만).
       # AUTH_ENABLED 기본 false = 현 사내망 단계 호환. Google 로그인 테스트 시
       # .env에 AUTH_* 채우고 `up -d control-plane`으로 재기동.

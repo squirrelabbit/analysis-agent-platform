@@ -114,9 +114,21 @@ func (s *DatasetService) SetLLOAModelDisplay(model, displayName string) {
 	s.lloaModelDisplayName = strings.TrimSpace(displayName)
 }
 
-// SetLLOAModelOptions — 전처리 빌드 모델 선택 allowlist 주입 (LLOA_MODELS env,
-// config.parseLLOAModelOptions 결과). 응답 시점 표시명 lookup과 job 생성 시
-// model_id 검증에 쓰인다.
+// SetLLOAModelsPath — 전처리 빌드 모델 선택 allowlist를 config 파일에서 로드해
+// 주입한다 (config/lloa_models.json). dataset_profiles.json과 같은 패턴 —
+// 파일 부재는 정상(빈 목록), 손상된 JSON은 error로 부팅 시 fail-loud.
+func (s *DatasetService) SetLLOAModelsPath(path string) error {
+	options, err := loadLLOAModelOptions(path)
+	if err != nil {
+		return err
+	}
+	s.lloaModelOptions = options
+	return nil
+}
+
+// SetLLOAModelOptions — allowlist를 직접 주입 (테스트/직접 배선용). 운영 배선은
+// SetLLOAModelsPath가 config 파일에서 로드해 호출한다. 응답 시점 표시명 lookup과
+// job 생성 시 model_id 검증에 쓰인다.
 func (s *DatasetService) SetLLOAModelOptions(options []domain.LLOAModelOption) {
 	s.lloaModelOptions = options
 }
