@@ -242,7 +242,21 @@ def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, 
                 )
                 continue
             doc_id = str(rec.get("doc_id") or "").strip()
-            tier = str(rec.get("genuineness") or "").strip()
+            # ADR-026 — verify artifact는 권위 라벨이 final_label. 단일 모델
+            # artifact는 genuineness(또는 옛 label). effective label 우선순위:
+            # final_label > genuineness > label.
+            tier = str(
+                rec.get("final_label") or rec.get("genuineness") or rec.get("label") or ""
+            ).strip()
+            if doc_id and tier:
+                tier_by_doc[doc_id] = tier
+    # 사람 보정(override)은 최상위 — control-plane이 payload로 넘긴 doc_id→tier로
+    # 덮는다(override > final_label > genuineness). overrides 없으면 무효.
+    overrides = payload.get("genuineness_overrides")
+    if isinstance(overrides, dict):
+        for raw_doc, raw_tier in overrides.items():
+            doc_id = str(raw_doc or "").strip()
+            tier = str(raw_tier or "").strip()
             if doc_id and tier:
                 tier_by_doc[doc_id] = tier
     return tiers, tier_by_doc

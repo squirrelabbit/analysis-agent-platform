@@ -98,6 +98,20 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 		}
 		payload["include_genuineness"] = tiers
 		payload["doc_genuineness_ref"] = genRef
+		// ADR-026 — 사람 보정(override)을 다운스트림 필터 최상위로. worker가
+		// override > final_label > genuineness 우선순위로 effective tier를 정한다.
+		// (artifact 파일엔 override가 없으므로 control-plane이 주입한다.)
+		if overrides, err := s.store.ListDocGenuinenessOverrides(projectID, version.DatasetVersionID); err == nil && len(overrides) > 0 {
+			ov := make(map[string]string, len(overrides))
+			for _, o := range overrides {
+				if t := strings.TrimSpace(o.OverrideGenuineness); t != "" {
+					ov[o.DocID] = t
+				}
+			}
+			if len(ov) > 0 {
+				payload["genuineness_overrides"] = ov
+			}
+		}
 	}
 
 	response, err := s.runWorkerTask(context.Background(), registry.TaskPathFor("dataset_clause_label"), payload)

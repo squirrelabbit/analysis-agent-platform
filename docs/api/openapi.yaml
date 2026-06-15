@@ -4056,6 +4056,27 @@ components:
                     type:
                       - string
                       - "null"
+                  final_label:
+                    type: ["string", "null"]
+                    description: "verify 모드(ADR-026) 권위 라벨. genuineness에도 같은 값이 채워진다(호환). review면 null."
+                  needs_review:
+                    type: boolean
+                    description: "verify 모드 — 사람 확인 필요 여부(합의 false / 불일치+conf<0.85·review true)."
+                  is_disagreement:
+                    type: boolean
+                    description: "verify 모드 — 두 분류 모델이 갈렸는지."
+                  resolution:
+                    type: string
+                    description: "verify 모드 — model_agreement | judge_on_disagreement | empty_text_shortcut | classify_error | judge_error."
+                  model_a_result:
+                    type: ["object", "null"]
+                    description: "verify 모드 — 모델 A 분류 {genuineness, reason}."
+                  model_b_result:
+                    type: ["object", "null"]
+                    description: "verify 모드 — 모델 B 분류 {genuineness, reason}."
+                  judge_result:
+                    type: ["object", "null"]
+                    description: "verify 모드 불일치 시 judge 결과 {decision, final_label, confidence, reason, judge_model}. 합의면 null."
             pagination:
               $ref: "#/components/schemas/ArtifactPagination"
     ClauseKeywordsView:

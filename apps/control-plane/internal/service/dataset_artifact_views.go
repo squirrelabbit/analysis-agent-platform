@@ -2,6 +2,7 @@ package service
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -191,23 +192,50 @@ func (s *DatasetService) GetDocGenuinenessView(
 			cleanRef = "" // file 없으면 join 생략
 		}
 	}
-	summary, prompt, total, items, err := loadDocGenuinenessArtifact(ref, cleanRef, limit, offset, version.DatasetVersionID, genuineness)
+	// verify 모드(ADR-026)는 schema가 달라 전용 로더로 final_label을 effective
+	// label로 읽는다. 단일 모델 artifact는 기존 로더 유지.
+	verifyMode := metadataString(version.Metadata, "doc_genuineness_mode", "") == "verify"
+	var summary map[string]any
+	var prompt string
+	var total int
+	var items []map[string]any
+	if verifyMode {
+		summary, prompt, total, items, err = loadDocGenuinenessVerifyArtifact(ref, cleanRef, limit, offset, genuineness)
+	} else {
+		summary, prompt, total, items, err = loadDocGenuinenessArtifact(ref, cleanRef, limit, offset, version.DatasetVersionID, genuineness)
+	}
 	if err != nil {
 		return domain.DatasetArtifactView{}, err
 	}
 	view.Summary = summary
-	// model은 build 당시 doc_genuineness_summary metadata의 raw 모델 id(snapshot).
-	// model_display_name은 응답 시점에 env로 입힌다(빌드 재실행 불필요).
-	model := summaryMetadataString(version.Metadata, "doc_genuineness_summary", "model")
 	applied := map[string]any{}
 	if prompt != "" {
 		applied["prompt_version"] = prompt
 	}
-	if model != "" {
-		applied["model"] = model
-	}
-	if display := s.modelDisplayNameFor(model); display != "" {
-		applied["model_display_name"] = display
+	if verifyMode {
+		// verify는 단일 model 대신 build 당시 summary.applied(classify_models/
+		// judge_model)와 verify 집계(agreement/disagreement/judge/review counts)를 노출.
+		view.Summary["mode"] = "verify"
+		if storedApplied, ok := summaryMetadataMap(version.Metadata, "doc_genuineness_summary", "applied"); ok {
+			for k, v := range storedApplied {
+				applied[k] = v
+			}
+		}
+		for _, key := range []string{"agreement_count", "disagreement_count", "judge_count", "revised_count", "review_count", "classify_error_count", "models"} {
+			if v, ok := summaryMetadataValue(version.Metadata, "doc_genuineness_summary", key); ok {
+				view.Summary[key] = v
+			}
+		}
+	} else {
+		// model은 build 당시 doc_genuineness_summary metadata의 raw 모델 id(snapshot).
+		// model_display_name은 응답 시점에 env로 입힌다(빌드 재실행 불필요).
+		model := summaryMetadataString(version.Metadata, "doc_genuineness_summary", "model")
+		if model != "" {
+			applied["model"] = model
+		}
+		if display := s.modelDisplayNameFor(model); display != "" {
+			applied["model_display_name"] = display
+		}
 	}
 	if len(applied) > 0 {
 		view.Applied = applied
@@ -510,6 +538,153 @@ func loadDocGenuinenessArtifactWithoutBody(db *sql.DB, source string, summary ma
 	return summary, prompt, total, items, nil
 }
 
+// loadDocGenuinenessVerifyArtifact — ADR-026 verify artifact 로더. 단일 모델
+// 로더와 schema가 달라(final_label 권위 + nested model/judge 결과) 분리한다.
+// effective label은 final_label이며, 화면 호환을 위해 item["genuineness"]에도
+// final_label을 채운다. nested 필드(model_a/b_result, judge_result)는 to_json으로
+// 받아 Go에서 객체로 복원, bool은 CAST 후 복원한다.
+func loadDocGenuinenessVerifyArtifact(ref, cleanRef string, limit, offset int, genuineness string) (map[string]any, string, int, []map[string]any, error) {
+	db, cleanup, err := openTempDuckDB()
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
+	defer cleanup()
+
+	source := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(ref))
+
+	// summary 분포는 final_label 기준(=effective). 화면 donut이 읽는 summary.genuineness에 매핑.
+	total, byFinal, err := aggregateGroupedCounts(db, source, "final_label")
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
+	summary := map[string]any{"total": total, "genuineness": byFinal}
+
+	prompt, err := firstStringValue(db, source, "prompt_version")
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
+
+	whereSource, whereJoin := "", ""
+	filteredTotal := total
+	if g := strings.TrimSpace(genuineness); g != "" {
+		esc := escapeDuckDBLiteral(g)
+		whereSource = fmt.Sprintf("WHERE final_label = '%s'", esc)
+		whereJoin = fmt.Sprintf("WHERE dg.final_label = '%s'", esc)
+		filteredTotal, err = countRowsWhere(db, source, whereSource)
+		if err != nil {
+			return nil, "", 0, nil, err
+		}
+	}
+
+	cols := []string{
+		"doc_id", "final_label", "needs_review", "resolution", "is_disagreement",
+		"model_a_result", "model_b_result", "judge_result", "cleaned_text",
+	}
+	selectExpr := func(prefix string) string {
+		return fmt.Sprintf(
+			`%[1]sdoc_id, %[1]sfinal_label, CAST(%[1]sneeds_review AS VARCHAR) AS needs_review, `+
+				`%[1]sresolution, CAST(%[1]sis_disagreement AS VARCHAR) AS is_disagreement, `+
+				`CAST(to_json(%[1]smodel_a_result) AS VARCHAR) AS model_a_result, `+
+				`CAST(to_json(%[1]smodel_b_result) AS VARCHAR) AS model_b_result, `+
+				`CAST(to_json(%[1]sjudge_result) AS VARCHAR) AS judge_result`,
+			prefix,
+		)
+	}
+
+	var itemQuery string
+	if cleanRef != "" {
+		cleanSource := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+		itemQuery = fmt.Sprintf(
+			`SELECT %s, c.cleaned_text
+			 FROM %s AS dg LEFT JOIN %s AS c ON dg.doc_id = c.row_id
+			 %s ORDER BY dg.doc_id LIMIT %d OFFSET %d`,
+			selectExpr("dg."), source, cleanSource, whereJoin, limit, offset,
+		)
+	} else {
+		itemQuery = fmt.Sprintf(
+			`SELECT %s, NULL AS cleaned_text
+			 FROM %s %s ORDER BY doc_id LIMIT %d OFFSET %d`,
+			selectExpr(""), source, whereSource, limit, offset,
+		)
+	}
+	rawItems, err := scanArtifactRows(db, itemQuery, cols)
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
+
+	items := make([]map[string]any, 0, len(rawItems))
+	for _, raw := range rawItems {
+		final, _ := raw["final_label"].(string)
+		item := map[string]any{
+			"doc_id":          raw["doc_id"],
+			"final_label":     raw["final_label"],
+			"genuineness":     final, // 화면 호환 — effective label
+			"resolution":      raw["resolution"],
+			"needs_review":    docVerifyBool(raw["needs_review"]),
+			"is_disagreement": docVerifyBool(raw["is_disagreement"]),
+			"cleaned_text":    raw["cleaned_text"],
+		}
+		modelA := docVerifyObject(raw["model_a_result"])
+		modelB := docVerifyObject(raw["model_b_result"])
+		judge := docVerifyObject(raw["judge_result"])
+		// typed nil map을 any에 직접 넣으면 != nil이 되므로 리터럴 nil로 넣는다.
+		item["model_a_result"] = objOrNil(modelA)
+		item["model_b_result"] = objOrNil(modelB)
+		item["judge_result"] = objOrNil(judge)
+		// reason: judge가 있으면 judge 사유, 없으면(합의) model_a 사유.
+		reason := ""
+		if judge != nil {
+			reason, _ = judge["reason"].(string)
+		}
+		if reason == "" && modelA != nil {
+			reason, _ = modelA["reason"].(string)
+		}
+		item["reason"] = reason
+		items = append(items, item)
+	}
+	return summary, prompt, filteredTotal, items, nil
+}
+
+// docVerifyBool — CAST(... AS VARCHAR) 결과("true"/"false"/nil)를 bool로.
+func docVerifyBool(v any) bool {
+	s, _ := v.(string)
+	return strings.EqualFold(strings.TrimSpace(s), "true")
+}
+
+// objOrNil — nil map을 리터럴 nil interface로(typed-nil != nil 함정 회피).
+func objOrNil(m map[string]any) any {
+	if m == nil {
+		return nil
+	}
+	return m
+}
+
+// docVerifyObject — to_json 문자열을 객체로 복원. null/빈 값은 nil.
+func docVerifyObject(v any) map[string]any {
+	s, _ := v.(string)
+	s = strings.TrimSpace(s)
+	if s == "" || s == "null" {
+		return nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(s), &obj); err != nil {
+		return nil
+	}
+	// DuckDB가 null struct를 {"k":null,...}로 직렬화하므로(예: 합의 doc의
+	// judge_result) 모든 값이 nil이면 없는 것으로 본다.
+	hasValue := false
+	for _, v := range obj {
+		if v != nil {
+			hasValue = true
+			break
+		}
+	}
+	if !hasValue {
+		return nil
+	}
+	return obj
+}
+
 // loadClauseLabelArtifact — DuckDB on-demand로 summary/total/items + 첫 행
 // prompt_version 회수. clause_id는 `{doc_id}-{partition_row_index}`로 즉시 생성.
 // summary(차트용)는 항상 전체 분포(필터 무관)이고, items + 반환 total은 aspect/
@@ -785,6 +960,26 @@ func summaryMetadataString(metadata map[string]any, summaryKey, field string) st
 		return strings.TrimSpace(v)
 	}
 	return ""
+}
+
+// summaryMetadataValue — metadata[summaryKey][field]를 타입 무관하게 회수.
+func summaryMetadataValue(metadata map[string]any, summaryKey, field string) (any, bool) {
+	summary, ok := metadata[summaryKey].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	v, ok := summary[field]
+	return v, ok
+}
+
+// summaryMetadataMap — metadata[summaryKey][field]를 map으로 회수.
+func summaryMetadataMap(metadata map[string]any, summaryKey, field string) (map[string]any, bool) {
+	v, ok := summaryMetadataValue(metadata, summaryKey, field)
+	if !ok {
+		return nil, false
+	}
+	m, ok := v.(map[string]any)
+	return m, ok
 }
 
 // firstStringValue — 첫 행에서 column 값 1개 추출. prompt_version 회수용.
