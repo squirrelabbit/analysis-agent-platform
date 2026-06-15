@@ -30,7 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useBuildVersion } from "../../hooks/build.query";
+import { useBuildVersion, useLloaModelOptions } from "../../hooks/build.query";
 import { useGenuinenessOverride } from "../../hooks/build.mutation";
 import {
   DataTable,
@@ -133,6 +133,11 @@ export default function GenuinenessTab() {
   const [filter, setFilter] = useState<string>("");
   const [page, setPage] = useState(1);
   const pageSize = 10;
+
+  // 교차검증 배너의 모델 id→표시명 변환 (allowlist).
+  const { data: lloaModels = [] } = useLloaModelOptions();
+  const modelLabelOf = (id?: string) =>
+    lloaModels.find((m) => m.model_id === id)?.label ?? id ?? "";
 
   // 진성 라벨 수동 보정 — row 단위 inline edit. editingDocId가 편집 중 row,
   // draft*는 입력값, savingDocId는 저장 진행 중(연타·중복 방지).
@@ -241,6 +246,39 @@ export default function GenuinenessTab() {
             {item.isOverridden && item.originalReason && (
               <div className="mt-1 text-[11px] text-zinc-400">
                 원본 판정: {item.originalReason}
+              </div>
+            )}
+            {/* 교차검증(verify) 상세 — 모델 A/B + judge (ADR-026) */}
+            {item.resolution && item.modelAResult && (
+              <div className="mt-1.5 text-[11px]">
+                {item.isDisagreement ? (
+                  <div className="rounded-md bg-amber-50/70 px-2 py-1 text-amber-800">
+                    <span>
+                      모델 A: <b>{labelOf(item.modelAResult.genuineness ?? "")}</b> · 모델 B:{" "}
+                      <b>{labelOf(item.modelBResult?.genuineness ?? "")}</b>
+                    </span>
+                    {item.judgeResult && (
+                      <span>
+                        {" "}→ judge: <b>{labelOf(item.judgeResult.finalLabel ?? "")}</b>
+                        {typeof item.judgeResult.confidence === "number" && (
+                          <span
+                            className="text-amber-600"
+                            title="judge 자기보고 신뢰도 — 정답 확률 아님"
+                          >
+                            {" "}(판정 신뢰도 {item.judgeResult.confidence.toFixed(2)})
+                          </span>
+                        )}
+                      </span>
+                    )}
+                    {item.needsReview && (
+                      <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">
+                        검토 필요
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-zinc-400">모델 합의</span>
+                )}
               </div>
             )}
           </td>
@@ -419,6 +457,45 @@ export default function GenuinenessTab() {
           />
         ))}
       </div>
+
+      {/* 교차검증(verify) 요약 배너 (ADR-026) */}
+      {summary.mode === "verify" && (
+        <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-4 text-sm">
+          <div className="font-bold text-violet-800">교차검증 결과</div>
+          <p className="mt-1 text-zinc-700">
+            모델 합의 <b>{(summary.agreementCount ?? 0).toLocaleString()}</b>건 · 불일치{" "}
+            <b>{(summary.disagreementCount ?? 0).toLocaleString()}</b>건(judge 처리{" "}
+            {(summary.judgeCount ?? 0).toLocaleString()}건) · 검토 필요{" "}
+            <b>{(summary.reviewCount ?? 0).toLocaleString()}</b>건.
+          </p>
+          {Array.isArray(
+            (applied as Record<string, unknown> | undefined)?.["classify_models"],
+          ) && (
+            <p className="mt-1 text-xs text-zinc-500">
+              모델 A ={" "}
+              {modelLabelOf(
+                ((applied as Record<string, unknown>)["classify_models"] as string[])[0],
+              )}
+              , 모델 B ={" "}
+              {modelLabelOf(
+                ((applied as Record<string, unknown>)["classify_models"] as string[])[1],
+              )}
+              {(applied as Record<string, unknown>)["judge_model"] ? (
+                <>
+                  {" "}· judge ={" "}
+                  {modelLabelOf(
+                    (applied as Record<string, unknown>)["judge_model"] as string,
+                  )}
+                </>
+              ) : null}
+            </p>
+          )}
+          <p className="mt-1 text-[11px] text-zinc-400">
+            합의는 신뢰 신호, 불일치는 judge가 라벨 기준으로 재검토합니다. judge 신뢰도는
+            모델 자기보고 값이며 정답 확률이 아닙니다.
+          </p>
+        </div>
+      )}
 
       {/* 판별 결과 분포 */}
       <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
