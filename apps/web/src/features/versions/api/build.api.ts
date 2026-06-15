@@ -18,12 +18,58 @@ export interface LloaModelOptionDto {
   default: boolean;
 }
 
+// 진성 분류 모델 비교 (2026-06-15). 두 버전 doc_id 1:1 비교 리포트.
+export interface DocGenuinenessCompareSideDto {
+  dataset_version_id: string;
+  model?: string;
+  model_display_name?: string;
+  total: number;
+}
+export interface DocGenuinenessCompareDisagreementDto {
+  doc_id: string;
+  a_genuineness: string;
+  a_reason?: string;
+  b_genuineness: string;
+  b_reason?: string;
+  cleaned_text?: string;
+  override_genuineness?: string;
+}
+export interface DocGenuinenessCompareDto {
+  version_a: DocGenuinenessCompareSideDto;
+  version_b: DocGenuinenessCompareSideDto;
+  tiers: string[];
+  compared: number;
+  matched: number;
+  agreement_rate: number;
+  only_in_a: number;
+  only_in_b: number;
+  confusion: number[][];
+  disagreements: DocGenuinenessCompareDisagreementDto[];
+  disagreements_total: number;
+  pagination?: { limit: number; offset: number; total: number };
+}
+
 export const buildApi = {
   // 전역 read-only — 빌드 재실행 다이얼로그의 모델 select용. (2026-06-12)
   getLloaModelOptions: () =>
     apiClient
       .get<{ items: LloaModelOptionDto[] }>("/lloa_model_options")
       .then((r) => r.data.items),
+
+  // 진성 분류 모델 비교 — 두 버전(보통 다른 모델)을 doc_id 1:1 비교. (2026-06-15)
+  compareDocGenuineness: (
+    projectId: string,
+    datasetId: string,
+    versionA: string,
+    versionB: string,
+    params?: { limit?: number; offset?: number },
+  ) =>
+    apiClient
+      .get<DocGenuinenessCompareDto>(
+        `/projects/${projectId}/datasets/${datasetId}/doc_genuineness/compare`,
+        { params: { version_a: versionA, version_b: versionB, ...params } },
+      )
+      .then(({ data }) => data),
 
   getBuildVersion: (
     projectId: string,

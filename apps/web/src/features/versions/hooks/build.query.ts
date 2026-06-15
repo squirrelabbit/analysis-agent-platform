@@ -13,6 +13,29 @@ export const useLloaModelOptions = () =>
     staleTime: 5 * 60 * 1000,
   });
 
+// 진성 분류 모델 비교 (2026-06-15) — 두 버전 모두 선택돼야 실행.
+export const useDocGenuinenessCompare = (
+  projectId: string,
+  datasetId: string,
+  versionA: string,
+  versionB: string,
+  params?: { limit?: number; offset?: number },
+) =>
+  useQuery({
+    queryKey: [
+      ...buildKeys.all,
+      "doc_genuineness_compare",
+      projectId,
+      datasetId,
+      versionA,
+      versionB,
+      params ?? {},
+    ],
+    queryFn: () =>
+      buildApi.compareDocGenuineness(projectId, datasetId, versionA, versionB, params),
+    enabled: !!projectId && !!datasetId && !!versionA && !!versionB && versionA !== versionB,
+  });
+
 export const useBuildVersion = (
   type: BuildJobType,
   jobId?: string,

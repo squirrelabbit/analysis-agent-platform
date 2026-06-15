@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Download,
   FileText,
+  GitCompare,
   Layers,
   MoreVertical,
   Plus,
@@ -64,7 +65,7 @@ interface Props {
 
 export default function DatasetVersionListRedesign({ onNewVersion }: Props) {
   const navigate = useNavigate();
-  const { projectId } = useDatasetParams();
+  const { projectId, datasetId } = useDatasetParams();
   const { data: project } = useProjectDetail(projectId);
   const { data: dataset } = useDataset();
   const { data: versions = [], isLoading } = useVersionsWithNumber();
@@ -103,12 +104,26 @@ export default function DatasetVersionListRedesign({ onNewVersion }: Props) {
               <div className={styles.sub}>{dataset.description}</div>
             ) : null}
           </div>
-          <button
-            className={styles.btnPrimary}
-            onClick={() => (onNewVersion ? onNewVersion() : setUploadOpen(true))}
-          >
-            <Plus />새 버전 업로드
-          </button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              className="h-9 gap-1.5"
+              onClick={() =>
+                navigate(
+                  `/projects/${projectId}/datasets/${datasetId}/doc-genuineness-compare`,
+                )
+              }
+            >
+              <GitCompare className="h-4 w-4" />
+              모델 비교
+            </Button>
+            <button
+              className={styles.btnPrimary}
+              onClick={() => (onNewVersion ? onNewVersion() : setUploadOpen(true))}
+            >
+              <Plus />새 버전 업로드
+            </button>
+          </div>
         </div>
 
         {/* summary bar */}

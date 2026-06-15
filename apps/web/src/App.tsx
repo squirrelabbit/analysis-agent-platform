@@ -11,6 +11,7 @@ import DatasetListRedesign from "./features/datasets/redesign/DatasetListRedesig
 import VersionDetailPage from "./features/versions/pages/VersionDetailPage";
 import DatasetVersionListRedesign from "./features/versions/redesign/DatasetVersionListRedesign";
 import ReportPage from "./features/reports/pages/ReportPage";
+import DocGenuinenessComparePage from "./features/versions/pages/DocGenuinenessComparePage";
 import LoginPage from "./features/auth/pages/LoginPage";
 
 const queryClient = new QueryClient();
@@ -35,6 +36,7 @@ function App() {
                 {/* 기존 버전 목록 화면 (리디자인으로 교체, 보존) */}
                 {/* <Route path="versions" element={<DatasetDetail />} /> */}
                 <Route path="versions" element={<DatasetVersionListRedesign />} />
+                <Route path="doc-genuineness-compare" element={<DocGenuinenessComparePage />} />
                 {/* <Route path="prompts" element={<PromptPage />} /> */}
               </Route>
               {/* <Route path="scenarios" element={<ScenarioPage />} /> */}
