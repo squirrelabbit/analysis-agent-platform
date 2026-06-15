@@ -1,0 +1,3 @@
+# doc_genuineness_judge prompt task (ADR-026) — 두 후보 분류가 갈린 문서를
+# 라벨 기준으로 재검토해 최종 라벨을 정하는 judge. version 목록은 이 폴더의 *.md.
+default: v1

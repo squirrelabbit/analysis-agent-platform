@@ -314,7 +314,15 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
     non_review 라벨을 받는다. 후속 clause_label이 이 라벨을 옵션 필터로
     사용해서 *모든 doc 처리* vs *genuine_review·mixed만 처리*를 선택할 수
     있다 (5/19 결정 — default는 모든 doc 처리, 사용자가 명시 시만 필터).
+
+    verify 모드(payload['verify']=true, ADR-026): 모델 2개로 교차 분류 + 불일치
+    judge로 final_label을 정하는 경로로 위임한다. 옵션 플래그라 task는 동일.
     """
+    if payload.get("verify"):
+        from .doc_genuineness_verify import run_dataset_doc_genuineness_verify
+
+        return run_dataset_doc_genuineness_verify(payload)
+
     dataset_version_id = str(payload.get("dataset_version_id") or "").strip()
     clean_artifact_ref = str(payload.get("clean_artifact_ref") or "").strip()
     output_path_raw = str(payload.get("output_path") or "").strip()
