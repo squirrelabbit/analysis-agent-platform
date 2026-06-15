@@ -4078,7 +4078,7 @@ components:
                     description: "verify 모드 — 두 분류 모델이 갈렸는지."
                   resolution:
                     type: string
-                    description: "verify 모드 — model_agreement | judge_on_disagreement | empty_text_shortcut | classify_error | judge_error."
+                    description: "verify 모드 — model_agreement | judge_on_disagreement | partial_classify(한 모델만 성공) | empty_text_shortcut | classify_error(둘 다 실패→uncertain) | judge_error."
                   model_a_result:
                     type: ["object", "null"]
                     description: "verify 모드 — 모델 A 분류 {genuineness, reason}."

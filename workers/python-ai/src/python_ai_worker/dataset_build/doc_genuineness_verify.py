@@ -188,8 +188,11 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
     )
     judge_system_prompt = _render_prompt(judge_body, doc_config)
 
-    max_tokens = int(payload.get("max_tokens") or 1024)
-    judge_max_tokens = int(payload.get("judge_max_tokens") or 1024)
+    # max-v1.2.1이 /no_think을 무시하고 reasoning을 길게 토하면 1024로는 reasoning만
+    # 차고 content가 0이 된다(finish_reason=length). 여유를 둬 reasoning+content가
+    # 같이 들어가게 한다. judge(no_think off, reasoning on)는 더 필요.
+    max_tokens = int(payload.get("max_tokens") or 4096)
+    judge_max_tokens = int(payload.get("judge_max_tokens") or 4096)
     concurrency = _resolve_concurrency(payload)
     max_input_chars = _resolve_max_input_chars(payload)
 
@@ -220,7 +223,7 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
 
     counters = {
         "agreement": 0, "disagreement": 0, "judge": 0, "review": 0,
-        "revised": 0, "classify_error": 0,
+        "revised": 0, "classify_error": 0, "partial": 0,
     }
 
     def _process(item: tuple[int, str, str]) -> dict[str, Any]:
@@ -231,19 +234,42 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
             "prompt_version": prompt_version, "source": "verify",
             "judge_required": False, "judge_result": None,
         }
-        try:
-            a = _classify_doc(client_a, system_prompt=classify_system_prompt, doc_id=doc_id, doc_text=used_text, max_tokens=max_tokens)
-            b = _classify_doc(client_b, system_prompt=classify_system_prompt, doc_id=doc_id, doc_text=used_text, max_tokens=max_tokens)
-        except (LloaResponseParseError, OSError, ValueError) as exc:
+
+        # per-model 격리 — 한 모델이 실패해도 다른 모델 결과를 쓴다. classify가
+        # reasoning을 길게 토해 max_tokens를 소진하면 빈 content("did not contain
+        # content")가 나는데, 이를 doc 전체 실패로 죽이지 않는다.
+        def _classify_safe(client: LloaClient):
+            try:
+                return _classify_doc(
+                    client, system_prompt=classify_system_prompt,
+                    doc_id=doc_id, doc_text=used_text, max_tokens=max_tokens,
+                ), None
+            except (LloaResponseParseError, OSError, ValueError) as exc:
+                return None, str(exc)
+
+        a, a_err = _classify_safe(client_a)
+        b, b_err = _classify_safe(client_b)
+        rec["model_a_result"] = {"genuineness": a["genuineness"], "reason": a["reason"]} if a else None
+        rec["model_b_result"] = {"genuineness": b["genuineness"], "reason": b["reason"]} if b else None
+
+        if not a and not b:
+            # 둘 다 실패 → uncertain으로 격리(빈칸 아님), 검토 필요.
             rec.update({
-                "model_a_result": None, "model_b_result": None,
-                "is_disagreement": False, "final_label": None,
+                "is_disagreement": False, "final_label": "uncertain",
                 "resolution": "classify_error", "needs_review": True,
-                "error": str(exc),
+                "error": a_err or b_err,
             })
             return rec
-        rec["model_a_result"] = {"genuineness": a["genuineness"], "reason": a["reason"]}
-        rec["model_b_result"] = {"genuineness": b["genuineness"], "reason": b["reason"]}
+        if not a or not b:
+            # 한 모델만 성공 → 그 라벨 채택, 교차검증 미완이라 검토 필요.
+            ok = a or b
+            rec.update({
+                "is_disagreement": False, "final_label": ok["genuineness"],
+                "resolution": "partial_classify", "needs_review": True,
+                "error": a_err or b_err,
+            })
+            return rec
+
         if a["genuineness"] == b["genuineness"]:
             rec.update({
                 "is_disagreement": False, "final_label": a["genuineness"],
@@ -287,6 +313,8 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
             records_by_doc[rec["doc_id"]] = rec
             if rec["resolution"] == "classify_error" or rec["resolution"] == "judge_error":
                 counters["classify_error"] += 1
+            elif rec["resolution"] == "partial_classify":
+                counters["partial"] += 1
             elif rec["resolution"] == "model_agreement":
                 counters["agreement"] += 1
             elif rec["resolution"] == "judge_on_disagreement":
@@ -337,6 +365,7 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
         "revised_count": counters["revised"],
         "review_count": counters["review"],
         "classify_error_count": counters["classify_error"],
+        "partial_classify_count": counters["partial"],
         "final_tier_counts": final_tier_counts,
         "final_null_count": null_final,
         "models": {"a": model_a, "b": model_b, "judge": judge_model},

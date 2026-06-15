@@ -256,48 +256,52 @@ export default function GenuinenessTab() {
                 원본 판정: {item.originalReason}
               </div>
             )}
-            {/* 분류 실패(verify) — 모델 호출 실패라 라벨 없음. 재시도 필요. */}
+            {/* 교차검증(verify) 상세 — resolution 기준 분기 (ADR-026) */}
             {(item.resolution === "classify_error" ||
               item.resolution === "judge_error") && (
               <div className="mt-1.5 rounded-md bg-rose-50 px-2 py-1 text-[11px] text-rose-700">
-                분류 실패 — 모델 호출이 실패해 라벨이 없습니다. 재실행이 필요합니다.
+                분류 실패 — 두 모델 모두 분류에 실패해 불확실로 처리했습니다. 재실행을 권장합니다.
                 <span className="ml-1 rounded-full bg-rose-100 px-1.5 py-0.5 font-semibold">
                   검토 필요
                 </span>
               </div>
             )}
-            {/* 교차검증(verify) 상세 — 모델 A/B + judge (ADR-026) */}
-            {item.resolution && item.modelAResult && (
-              <div className="mt-1.5 text-[11px]">
-                {item.isDisagreement ? (
-                  <div className="rounded-md bg-amber-50/70 px-2 py-1 text-amber-800">
-                    <span>
-                      모델 A: <b>{labelOf(item.modelAResult.genuineness ?? "")}</b> · 모델 B:{" "}
-                      <b>{labelOf(item.modelBResult?.genuineness ?? "")}</b>
-                    </span>
-                    {item.judgeResult && (
-                      <span>
-                        {" "}→ judge: <b>{labelOf(item.judgeResult.finalLabel ?? "")}</b>
-                        {typeof item.judgeResult.confidence === "number" && (
-                          <span
-                            className="text-amber-600"
-                            title="judge 자기보고 신뢰도 — 정답 확률 아님"
-                          >
-                            {" "}(판정 신뢰도 {item.judgeResult.confidence.toFixed(2)})
-                          </span>
-                        )}
+            {item.resolution === "partial_classify" && (
+              <div className="mt-1.5 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+                한 모델 분류 실패 — 단일 모델 결과입니다(교차검증 미완). 재실행을 권장합니다.
+                <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold">
+                  검토 필요
+                </span>
+              </div>
+            )}
+            {item.resolution === "judge_on_disagreement" && item.modelAResult && (
+              <div className="mt-1.5 rounded-md bg-amber-50/70 px-2 py-1 text-[11px] text-amber-800">
+                <span>
+                  모델 A: <b>{labelOf(item.modelAResult.genuineness ?? "")}</b> · 모델 B:{" "}
+                  <b>{labelOf(item.modelBResult?.genuineness ?? "")}</b>
+                </span>
+                {item.judgeResult && (
+                  <span>
+                    {" "}→ judge: <b>{labelOf(item.judgeResult.finalLabel ?? "")}</b>
+                    {typeof item.judgeResult.confidence === "number" && (
+                      <span
+                        className="text-amber-600"
+                        title="judge 자기보고 신뢰도 — 정답 확률 아님"
+                      >
+                        {" "}(판정 신뢰도 {item.judgeResult.confidence.toFixed(2)})
                       </span>
                     )}
-                    {item.needsReview && (
-                      <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">
-                        검토 필요
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <span className="text-zinc-400">모델 합의</span>
+                  </span>
+                )}
+                {item.needsReview && (
+                  <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">
+                    검토 필요
+                  </span>
                 )}
               </div>
+            )}
+            {item.resolution === "model_agreement" && (
+              <div className="mt-1.5 text-[11px] text-zinc-400">모델 합의</div>
             )}
           </td>
         );

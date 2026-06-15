@@ -156,6 +156,63 @@ class DocGenuinenessVerifyTests(unittest.TestCase):
         self.assertEqual(recs["d2"]["judge_result"]["decision"], "revise")
         self.assertEqual(recs["d2"]["final_label"], "uncertain")
 
+    def _run_with_urlopen(self, make_urlopen):
+        from python_ai_worker.dataset_build import doc_genuineness_verify as v
+
+        original_init = v.LloaClient.__init__
+
+        def _init(self, config, *, urlopen=None):
+            original_init(self, config, urlopen=make_urlopen(config.model))
+
+        payload = {
+            "dataset_version_id": "ver1", "clean_artifact_ref": str(self.clean),
+            "output_path": str(self.out), "verify": True,
+            "classify_models": ["model-a", "model-b"], "judge_model": "model-judge",
+            "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉 국가유산야행"},
+            "concurrency": 1,
+        }
+        with patch.object(v, "load_config", return_value=_fake_config()), \
+             patch.object(v.LloaClient, "__init__", _init):
+            v.run_dataset_doc_genuineness_verify(payload)
+        recs = {}
+        with self.out.open(encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    r = json.loads(line)
+                    recs[r["doc_id"]] = r
+        return recs
+
+    def test_partial_classify_isolation(self) -> None:
+        # model-b는 항상 빈 content(실패), model-a는 정상 → partial_classify.
+        def make_urlopen(model):
+            def _fake(req, timeout=None):  # type: ignore[no-untyped-def]
+                obj = json.loads(json.loads(req.data.decode("utf-8"))["messages"][1]["content"])
+                if "candidate_1" in obj:
+                    return _Resp(_completion(json.dumps({"chosen": "candidate_1", "final_label": "genuine_review", "confidence": 0.9, "reason": "r"})))
+                if model == "model-b":
+                    return _Resp(_completion(""))  # 빈 content → LloaResponseParseError
+                return _Resp(_completion(json.dumps({"genuineness": "genuine_review", "reason": "a ok"})))
+            return _fake
+
+        recs = self._run_with_urlopen(make_urlopen)
+        for doc in ("d1", "d2"):
+            self.assertEqual(recs[doc]["resolution"], "partial_classify", doc)
+            self.assertEqual(recs[doc]["final_label"], "genuine_review", doc)  # a 라벨 채택
+            self.assertTrue(recs[doc]["needs_review"], doc)
+            self.assertIsNone(recs[doc]["model_b_result"], doc)  # b 실패
+
+    def test_both_classify_fail_uncertain(self) -> None:
+        # 두 모델 모두 빈 content → classify_error + uncertain(빈칸 아님).
+        def make_urlopen(_model):
+            def _fake(req, timeout=None):  # type: ignore[no-untyped-def]
+                return _Resp(_completion(""))
+            return _fake
+
+        recs = self._run_with_urlopen(make_urlopen)
+        self.assertEqual(recs["d1"]["resolution"], "classify_error")
+        self.assertEqual(recs["d1"]["final_label"], "uncertain")
+        self.assertTrue(recs["d1"]["needs_review"])
+
     def test_classify_models_validation(self) -> None:
         from python_ai_worker.dataset_build import doc_genuineness_verify as v
 

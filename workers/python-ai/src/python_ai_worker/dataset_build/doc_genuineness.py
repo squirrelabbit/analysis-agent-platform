@@ -360,7 +360,10 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
     template, prompt_version = _load_prompt_template(payload)
     doc_genuineness_config = _extract_doc_genuineness_config(payload)
     system_prompt = _render_prompt(template, doc_genuineness_config)
-    max_tokens = int(payload.get("max_tokens") or 1024)
+    # max-v1.2.1이 /no_think 무시하고 reasoning을 길게 내면 1024로는 content가
+    # 잘려 빈 응답이 된다(ADR-026 진단). 여유를 둔다(단일 모델은 parse 실패를
+    # uncertain으로 격리하지만 애초에 실패를 줄인다).
+    max_tokens = int(payload.get("max_tokens") or 4096)
 
     rows = rt._iter_rows(clean_artifact_ref)
     total_rows = len(rows)
