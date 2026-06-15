@@ -4243,7 +4243,33 @@ components:
           items: { $ref: "#/components/schemas/DocGenuinenessCompareDisagreement" }
         disagreements_total: { type: integer }
         pagination: { $ref: "#/components/schemas/ArtifactPagination" }
-      required: [version_a, version_b, tiers, compared, matched, agreement_rate, confusion, disagreements, disagreements_total]
+        patterns:
+          type: array
+          description: "불일치 패턴(A 라벨→B 라벨) 빈도 내림차순."
+          items:
+            type: object
+            properties:
+              a_genuineness: { type: string }
+              b_genuineness: { type: string }
+              count: { type: integer }
+            required: [a_genuineness, b_genuineness, count]
+        override_eval:
+          description: "사람 보정(정답) 문서 기준 모델별 정확도. 정답 샘플 없으면 생략(판정 불가)."
+          type: object
+          properties:
+            sample_count: { type: integer }
+            a_correct: { type: integer }
+            b_correct: { type: integer }
+            a_accuracy: { type: number, format: float }
+            b_accuracy: { type: number, format: float }
+            leader: { type: string, enum: [a, b, tie] }
+          required: [sample_count, a_correct, b_correct, a_accuracy, b_accuracy, leader]
+        unreviewed_disagreements: { type: integer, description: "정답 미보정 불일치 수(우선 검토 대상)" }
+        verdict_level:
+          type: string
+          enum: [ground_truth, agreement_only, review_needed]
+          description: "ground_truth: 정답 샘플로 우열 제시 / agreement_only: 정답 없음+일치율 높음(판단 불가) / review_needed: 일치율 낮음(검토 필요)"
+      required: [version_a, version_b, tiers, compared, matched, agreement_rate, confusion, disagreements, disagreements_total, patterns, unreviewed_disagreements, verdict_level]
     ClauseLabelView:
       allOf:
         - $ref: "#/components/schemas/ArtifactViewCommon"

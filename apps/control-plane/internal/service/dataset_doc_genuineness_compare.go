@@ -16,6 +16,10 @@ import (
 // compareTiers — confusion matrix 행/열 순서이자 비교 대상 tier 집합.
 var compareTiers = []string{"genuine_review", "mixed", "non_review", "uncertain"}
 
+// compareHighAgreement — 정답이 없을 때 "일치율 높음(agreement_only)" vs "검토
+// 필요(review_needed)"를 가르는 임계. 그 이하면 모델 간 기준 차가 크다고 본다.
+const compareHighAgreement = 0.85
+
 // compareDocRow — 비교용 doc 1건(원본 모델 라벨).
 type compareDocRow struct {
 	label       string
@@ -129,6 +133,8 @@ func (s *DatasetService) CompareDocGenuineness(
 
 	var disagreements []domain.DocGenuinenessCompareDisagreement
 	compared, matched, onlyInA, onlyInB := 0, 0, 0, 0
+	// override(정답) 기준 모델별 정확도 누적 + 우선 검토(정답 미보정 불일치) 카운트.
+	ovSample, ovACorrect, ovBCorrect, unreviewed := 0, 0, 0, 0
 	for _, docID := range docIDs {
 		a, okA := rowsA[docID]
 		b, okB := rowsB[docID]
@@ -144,9 +150,22 @@ func (s *DatasetService) CompareDocGenuineness(
 					confusion[ai][bi]++
 				}
 			}
+			// 정답이 있는 문서는 모델별 정확도에 반영(일치/불일치 무관).
+			if truth, ok := overrideByDoc[docID]; ok && truth != "" {
+				ovSample++
+				if a.label == truth {
+					ovACorrect++
+				}
+				if b.label == truth {
+					ovBCorrect++
+				}
+			}
 			if a.label == b.label {
 				matched++
 				continue
+			}
+			if overrideByDoc[docID] == "" {
+				unreviewed++ // 정답 미보정 불일치 → 사람이 봐야 함
 			}
 			cleaned := a.cleanedText
 			if cleaned == "" {
@@ -167,6 +186,43 @@ func (s *DatasetService) CompareDocGenuineness(
 	rate := 0.0
 	if compared > 0 {
 		rate = float64(matched) / float64(compared)
+	}
+
+	// 불일치 패턴(off-diagonal) 빈도 내림차순.
+	patterns := make([]domain.DocGenuinenessComparePattern, 0)
+	for i, ai := range compareTiers {
+		for j, bj := range compareTiers {
+			if i != j && confusion[i][j] > 0 {
+				patterns = append(patterns, domain.DocGenuinenessComparePattern{
+					AGenuineness: ai, BGenuineness: bj, Count: confusion[i][j],
+				})
+			}
+		}
+	}
+	sort.SliceStable(patterns, func(i, j int) bool { return patterns[i].Count > patterns[j].Count })
+
+	// override 정확도 + 판정 레벨.
+	var overrideEval *domain.DocGenuinenessOverrideEval
+	if ovSample > 0 {
+		aAcc := float64(ovACorrect) / float64(ovSample)
+		bAcc := float64(ovBCorrect) / float64(ovSample)
+		leader := "tie"
+		if ovACorrect > ovBCorrect {
+			leader = "a"
+		} else if ovBCorrect > ovACorrect {
+			leader = "b"
+		}
+		overrideEval = &domain.DocGenuinenessOverrideEval{
+			SampleCount: ovSample, ACorrect: ovACorrect, BCorrect: ovBCorrect,
+			AAccuracy: aAcc, BAccuracy: bAcc, Leader: leader,
+		}
+	}
+	verdictLevel := "review_needed"
+	switch {
+	case overrideEval != nil:
+		verdictLevel = "ground_truth"
+	case rate >= compareHighAgreement:
+		verdictLevel = "agreement_only"
 	}
 
 	disTotal := len(disagreements)
@@ -202,9 +258,13 @@ func (s *DatasetService) CompareDocGenuineness(
 		Rate:               rate,
 		OnlyInA:            onlyInA,
 		OnlyInB:            onlyInB,
-		Confusion:          confusion,
-		Disagreements:      page,
-		DisagreementsTotal: disTotal,
-		Pagination:         &domain.ArtifactPagination{Limit: limit, Offset: offset, Total: disTotal},
+		Confusion:               confusion,
+		Disagreements:           page,
+		DisagreementsTotal:      disTotal,
+		Pagination:              &domain.ArtifactPagination{Limit: limit, Offset: offset, Total: disTotal},
+		Patterns:                patterns,
+		OverrideEval:            overrideEval,
+		UnreviewedDisagreements: unreviewed,
+		VerdictLevel:            verdictLevel,
 	}, nil
 }

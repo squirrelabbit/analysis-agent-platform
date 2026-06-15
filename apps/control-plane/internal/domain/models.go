@@ -912,6 +912,40 @@ type DocGenuinenessCompareView struct {
 	Disagreements      []DocGenuinenessCompareDisagreement `json:"disagreements"`
 	DisagreementsTotal int                                 `json:"disagreements_total"`
 	Pagination         *ArtifactPagination                 `json:"pagination,omitempty"`
+
+	// ── 결론 레이어 (silverone 2026-06-15) — 정답 판정이 아니라 합의/불일치
+	// 기반 판정 보조. ──
+	// Patterns — 불일치 패턴(A 라벨→B 라벨) 빈도 내림차순. "어디서 주로 갈리나".
+	Patterns []DocGenuinenessComparePattern `json:"patterns"`
+	// OverrideEval — 사람 보정(정답)이 있는 문서 기준 모델별 정확도. 정답 샘플이
+	// 없으면 nil(=판정 불가, agreement만).
+	OverrideEval *DocGenuinenessOverrideEval `json:"override_eval,omitempty"`
+	// UnreviewedDisagreements — 정답 보정이 아직 없는 불일치 수(우선 검토 대상).
+	UnreviewedDisagreements int `json:"unreviewed_disagreements"`
+	// VerdictLevel — 자동 결론의 신뢰 수준.
+	//   ground_truth   — 정답 샘플 있음 → 모델별 정확도로 우열 제시 가능
+	//   agreement_only — 정답 없음 + 일치율 높음 → 일치율만, 우열 판단 불가
+	//   review_needed  — 일치율 낮음 → 운영 적용 전 불일치 검토 필요
+	VerdictLevel string `json:"verdict_level"`
+}
+
+// DocGenuinenessComparePattern — 불일치 패턴 1종(A 라벨→B 라벨)과 빈도.
+type DocGenuinenessComparePattern struct {
+	AGenuineness string `json:"a_genuineness"`
+	BGenuineness string `json:"b_genuineness"`
+	Count        int    `json:"count"`
+}
+
+// DocGenuinenessOverrideEval — 사람 보정(정답) 문서 기준 모델별 정확도.
+// 비교 대상(양쪽 모두 존재 + 정답 있음) 문서에서 각 모델 라벨이 정답과 일치한
+// 비율. Leader는 "a"/"b"/"tie".
+type DocGenuinenessOverrideEval struct {
+	SampleCount int     `json:"sample_count"`
+	ACorrect    int     `json:"a_correct"`
+	BCorrect    int     `json:"b_correct"`
+	AAccuracy   float64 `json:"a_accuracy"`
+	BAccuracy   float64 `json:"b_accuracy"`
+	Leader      string  `json:"leader"`
 }
 
 type BuildJobProgress struct {

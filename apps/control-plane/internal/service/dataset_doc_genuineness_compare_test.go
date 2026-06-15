@@ -123,6 +123,80 @@ func TestCompareDocGenuineness_AgreementAndConfusion(t *testing.T) {
 	if view.Disagreements[0].DocID != "doc:3" {
 		t.Fatalf("first disagreement=%q, want doc:3", view.Disagreements[0].DocID)
 	}
+	// 결론 레이어: 정답 없음 + 일치율 0.5(<0.85) → review_needed.
+	if view.VerdictLevel != "review_needed" {
+		t.Fatalf("verdict=%q, want review_needed", view.VerdictLevel)
+	}
+	if view.OverrideEval != nil {
+		t.Fatalf("override_eval should be nil without overrides")
+	}
+	if view.UnreviewedDisagreements != 2 {
+		t.Fatalf("unreviewed=%d, want 2", view.UnreviewedDisagreements)
+	}
+	// 패턴: genuine→non, mixed→genuine 각 1건.
+	if len(view.Patterns) != 2 {
+		t.Fatalf("patterns=%d, want 2: %+v", len(view.Patterns), view.Patterns)
+	}
+}
+
+func TestCompareDocGenuineness_VerdictAgreementOnly(t *testing.T) {
+	svc, repo := newCompareService(t)
+	// 정답 없음, 일치율 높음(>=0.85) → agreement_only.
+	a := map[string]string{}
+	b := map[string]string{}
+	for i := 0; i < 20; i++ {
+		id := fmt.Sprintf("doc:%02d", i)
+		a[id] = "genuine_review"
+		b[id] = "genuine_review"
+	}
+	b["doc:00"] = "non_review" // 1/20 불일치 → 95%
+	seedVersionWithRuns(t, repo, "v1", map[string]map[string]string{"model-a": a, "model-b": b})
+
+	view, err := svc.CompareDocGenuineness("p1", "d1", "v1", "model-a", "model-b", 100, 0)
+	if err != nil {
+		t.Fatalf("compare: %v", err)
+	}
+	if view.VerdictLevel != "agreement_only" {
+		t.Fatalf("verdict=%q (rate=%v), want agreement_only", view.VerdictLevel, view.Rate)
+	}
+}
+
+func TestCompareDocGenuineness_OverrideAccuracyVerdict(t *testing.T) {
+	svc, repo := newCompareService(t)
+	// doc:1 A맞음(genuine) / doc:2 B맞음(non) → A 1/2, B 1/2? 조정: A 2개 정답, B 1개.
+	seedVersionWithRuns(t, repo, "v1", map[string]map[string]string{
+		"model-a": {"doc:1": "genuine_review", "doc:2": "genuine_review", "doc:3": "non_review"},
+		"model-b": {"doc:1": "non_review", "doc:2": "genuine_review", "doc:3": "genuine_review"},
+	})
+	// 정답: doc:1=genuine(A맞음), doc:2=genuine(둘다맞음), doc:3=non(A맞음).
+	for _, ov := range []struct{ doc, truth string }{
+		{"doc:1", "genuine_review"}, {"doc:2", "genuine_review"}, {"doc:3", "non_review"},
+	} {
+		if err := repo.UpsertDocGenuinenessOverride(domain.DocGenuinenessOverride{
+			ProjectID: "p1", DatasetID: "d1", DatasetVersionID: "v1", DocID: ov.doc,
+			OverrideGenuineness: ov.truth,
+		}); err != nil {
+			t.Fatalf("override %s: %v", ov.doc, err)
+		}
+	}
+
+	view, err := svc.CompareDocGenuineness("p1", "d1", "v1", "model-a", "model-b", 100, 0)
+	if err != nil {
+		t.Fatalf("compare: %v", err)
+	}
+	if view.VerdictLevel != "ground_truth" {
+		t.Fatalf("verdict=%q, want ground_truth", view.VerdictLevel)
+	}
+	oe := view.OverrideEval
+	if oe == nil {
+		t.Fatal("override_eval nil, want populated")
+	}
+	if oe.SampleCount != 3 || oe.ACorrect != 3 || oe.BCorrect != 1 {
+		t.Fatalf("override_eval sample/A/B = %d/%d/%d, want 3/3/1", oe.SampleCount, oe.ACorrect, oe.BCorrect)
+	}
+	if oe.Leader != "a" {
+		t.Fatalf("leader=%q, want a", oe.Leader)
+	}
 }
 
 func TestCompareDocGenuineness_OverrideIsGroundTruthHint(t *testing.T) {

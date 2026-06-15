@@ -34,6 +34,19 @@ export interface DocGenuinenessCompareDisagreementDto {
   cleaned_text?: string;
   override_genuineness?: string;
 }
+export interface DocGenuinenessComparePatternDto {
+  a_genuineness: string;
+  b_genuineness: string;
+  count: number;
+}
+export interface DocGenuinenessOverrideEvalDto {
+  sample_count: number;
+  a_correct: number;
+  b_correct: number;
+  a_accuracy: number;
+  b_accuracy: number;
+  leader: "a" | "b" | "tie";
+}
 export interface DocGenuinenessCompareDto {
   version_a: DocGenuinenessCompareSideDto;
   version_b: DocGenuinenessCompareSideDto;
@@ -47,6 +60,10 @@ export interface DocGenuinenessCompareDto {
   disagreements: DocGenuinenessCompareDisagreementDto[];
   disagreements_total: number;
   pagination?: { limit: number; offset: number; total: number };
+  patterns: DocGenuinenessComparePatternDto[];
+  override_eval?: DocGenuinenessOverrideEvalDto;
+  unreviewed_disagreements: number;
+  verdict_level: "ground_truth" | "agreement_only" | "review_needed";
 }
 
 // 한 버전에 보관된 모델별 진성 분류 결과(run).

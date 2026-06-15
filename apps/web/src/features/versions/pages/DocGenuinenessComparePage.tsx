@@ -145,6 +145,83 @@ export default function DocGenuinenessComparePage() {
 
       {data && (
         <div className="mt-6 space-y-6">
+          {/* 결론 카드 — 정답 판정이 아니라 합의/불일치 기반 판정 보조. */}
+          {(() => {
+            const aName = data.version_a.model_display_name || data.version_a.model || "모델 A";
+            const bName = data.version_b.model_display_name || data.version_b.model || "모델 B";
+            const oe = data.override_eval;
+            const accent =
+              data.verdict_level === "ground_truth"
+                ? "border-emerald-200 bg-emerald-50/60"
+                : data.verdict_level === "review_needed"
+                  ? "border-amber-200 bg-amber-50/60"
+                  : "border-zinc-200 bg-zinc-50/60";
+            return (
+              <div className={`rounded-2xl border p-5 ${accent}`}>
+                <div className="text-sm font-bold text-zinc-800">결론</div>
+                <p className="mt-2 text-sm text-zinc-700">
+                  총 {data.compared.toLocaleString()}건 중 {data.matched.toLocaleString()}건 일치 (일치율 {pct}%).
+                </p>
+                {data.verdict_level === "ground_truth" && oe && (
+                  <p className="mt-1 text-sm text-zinc-700">
+                    사람 보정 정답 {oe.sample_count}건 기준 — {aName} {Math.round(oe.a_accuracy * 100)}% ({oe.a_correct}건),{" "}
+                    {bName} {Math.round(oe.b_accuracy * 100)}% ({oe.b_correct}건).{" "}
+                    {oe.leader === "tie" ? (
+                      <b>두 모델 정확도 동률.</b>
+                    ) : (
+                      <b>{oe.leader === "a" ? aName : bName} 모델이 정답에 더 가까움.</b>
+                    )}
+                  </p>
+                )}
+                {data.verdict_level === "agreement_only" && (
+                  <p className="mt-1 text-sm text-zinc-700">
+                    일치율은 높지만 <b>정답 데이터가 없어 어느 모델이 맞는지는 판단할 수 없습니다.</b> 표본 보정(불일치 문서에 정답 지정) 후 재확인하세요.
+                  </p>
+                )}
+                {data.verdict_level === "review_needed" && (
+                  <p className="mt-1 text-sm text-amber-700">
+                    일치율이 낮아 모델 간 판단 기준 차이가 큽니다. <b>운영 적용 전 불일치 문서 검토가 필요합니다.</b>
+                  </p>
+                )}
+                {data.patterns.length > 0 && (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    주요 불일치 패턴:{" "}
+                    {data.patterns.slice(0, 3).map((p, i) => (
+                      <span key={`${p.a_genuineness}-${p.b_genuineness}`}>
+                        {i > 0 && ", "}
+                        {aName.slice(0, 6)}={tierLabel(p.a_genuineness)} / {bName.slice(0, 6)}=
+                        {tierLabel(p.b_genuineness)} {p.count}건
+                      </span>
+                    ))}
+                  </p>
+                )}
+                {/* 추천 액션 */}
+                <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                  {data.unreviewed_disagreements > 0 && (
+                    <span className="rounded-full bg-white px-2.5 py-1 font-medium text-zinc-600 ring-1 ring-zinc-200">
+                      검토 필요 {data.unreviewed_disagreements.toLocaleString()}건 (정답 미보정 불일치)
+                    </span>
+                  )}
+                  {data.verdict_level === "ground_truth" && oe && oe.leader !== "tie" && (
+                    <span className="rounded-full bg-white px-2.5 py-1 font-medium text-emerald-700 ring-1 ring-emerald-200">
+                      추천: {oe.leader === "a" ? bName : aName} 적용 보류, {oe.leader === "a" ? aName : bName} 우선
+                    </span>
+                  )}
+                  {data.verdict_level === "agreement_only" && (
+                    <span className="rounded-full bg-white px-2.5 py-1 font-medium text-zinc-600 ring-1 ring-zinc-200">
+                      추천: 정답 샘플 확보 후 재평가
+                    </span>
+                  )}
+                  {data.verdict_level === "review_needed" && (
+                    <span className="rounded-full bg-white px-2.5 py-1 font-medium text-amber-700 ring-1 ring-amber-200">
+                      추천: 불일치 {data.disagreements_total.toLocaleString()}건 검토 후 적용 결정
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* 요약 */}
           <div className="rounded-2xl border border-zinc-200 p-5">
             <div className="flex flex-wrap items-center gap-6">
