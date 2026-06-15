@@ -83,6 +83,38 @@ class RunClauseKeywordsTests(unittest.TestCase):
             self.assertGreaterEqual(summary["unique_keyword_count"], 2)
             self.assertIn("top_keywords", summary)
 
+    def test_progress_written_with_final_100(self) -> None:
+        # silverone 2026-06-15 — 진행률은 status=running 동안만 화면에 보이므로
+        # worker가 progress.json에 최종 100%(+ 진행 중 갱신)를 남겨야 한다.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            inp = tmp_path / "clause_label.jsonl"
+            out = tmp_path / "clause_keywords.jsonl"
+            progress = tmp_path / "clause_keywords.jsonl.progress.json"
+            _write_jsonl(
+                inp,
+                [
+                    {"doc_id": "d1", "clause": "푸드트럭 가격이 비쌌어요", "sentiment": "negative", "aspect": "food", "source": "lloa", "prompt_version": "v3"},
+                    {"doc_id": "d2", "clause": "직원이 친절했어요", "sentiment": "positive", "aspect": "service", "source": "lloa", "prompt_version": "v3"},
+                ],
+            )
+            result = run_dataset_clause_keywords(
+                {
+                    "dataset_version_id": "ver1",
+                    "clause_label_ref": str(inp),
+                    "output_path": str(out),
+                    "progress_path": str(progress),
+                }
+            )
+            # artifact가 progress_ref를 노출(control-plane이 metadata로 보존)
+            self.assertEqual(result["artifact"]["progress_ref"], str(progress))
+            self.assertTrue(progress.exists(), "progress.json이 기록되지 않음")
+            data = json.loads(progress.read_text(encoding="utf-8"))
+            self.assertEqual(data["percent"], 100.0)
+            self.assertEqual(data["processed_rows"], data["total_rows"])
+            self.assertEqual(data["total_rows"], 2)
+            self.assertEqual(data["message"], "clause_keywords completed")
+
     def test_missing_required_payload_raises(self) -> None:
         with self.assertRaises(ValueError):
             run_dataset_clause_keywords({"dataset_version_id": "v"})
