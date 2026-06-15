@@ -979,6 +979,44 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/doc_genuineness/compare:
+    get:
+      tags: [Datasets]
+      summary: 진성 분류 모델 비교 (두 버전 doc_id 1:1)
+      description: |
+        같은 원본을 서로 다른 모델로 빌드한 두 버전(`version_a`/`version_b`)의
+        doc_genuineness 결과를 doc_id 기준 1:1 비교한다 (silverone 2026-06-15).
+        비교값은 override 적용 *전* 원본 모델 라벨이다 — override(사람 보정)는
+        모델 간 비교를 오염시키므로 제외하고, 불일치 항목에 정답 힌트
+        (`override_genuineness`)로만 노출한다. `limit`/`offset`은 불일치 목록에만
+        적용된다. 두 버전 모두 doc_genuineness가 완료 상태여야 한다(아니면 400).
+      operationId: compareDocGenuineness
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - name: version_a
+          in: query
+          required: true
+          schema: { type: string }
+          description: 비교 기준 A 버전 id
+        - name: version_b
+          in: query
+          required: true
+          schema: { type: string }
+          description: 비교 기준 B 버전 id
+        - $ref: "#/components/parameters/ArtifactLimit"
+        - $ref: "#/components/parameters/ArtifactOffset"
+      responses:
+        "200":
+          description: 비교 리포트
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocGenuinenessCompareView"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness:
     post:
       tags: [Datasets]
@@ -4108,6 +4146,56 @@ components:
         override_reason: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    DocGenuinenessCompareSide:
+      type: object
+      description: 진성 분류 모델 비교 한쪽(버전) 메타.
+      properties:
+        dataset_version_id: { type: string }
+        model: { type: string, description: "빌드 당시 모델 id (summary.model snapshot)" }
+        model_display_name: { type: string, description: "env 기반 표시명(없으면 생략)" }
+        total: { type: integer, description: "이 버전 doc 수" }
+      required: [dataset_version_id, total]
+    DocGenuinenessCompareDisagreement:
+      type: object
+      description: 두 모델이 다르게 분류한 문서 1건. genuineness는 override 적용 전 원본 모델 라벨.
+      properties:
+        doc_id: { type: string }
+        a_genuineness: { type: string }
+        a_reason: { type: string }
+        b_genuineness: { type: string }
+        b_reason: { type: string }
+        cleaned_text: { type: string, description: "본문(clean join 가능 시)" }
+        override_genuineness: { type: string, description: "사람 보정 정답 힌트(어느 버전에든 보정 있으면)" }
+      required: [doc_id, a_genuineness, b_genuineness]
+    DocGenuinenessCompareView:
+      type: object
+      description: |
+        진성 분류 모델 비교 리포트 (silverone 2026-06-15). confusion은 a_label(행)×
+        b_label(열) 카운트로 tiers 순서를 따른다. pagination은 disagreements에만 적용.
+      properties:
+        version_a: { $ref: "#/components/schemas/DocGenuinenessCompareSide" }
+        version_b: { $ref: "#/components/schemas/DocGenuinenessCompareSide" }
+        tiers:
+          type: array
+          items: { type: string }
+          description: "confusion 행/열 순서 (genuine_review/mixed/non_review/uncertain)"
+        compared: { type: integer, description: "양쪽 모두 존재하는 doc 수" }
+        matched: { type: integer, description: "그중 라벨 일치 수" }
+        agreement_rate: { type: number, format: float, description: "matched/compared (compared=0이면 0)" }
+        only_in_a: { type: integer, description: "A에만 있는 doc 수(소스 불일치 신호)" }
+        only_in_b: { type: integer }
+        confusion:
+          type: array
+          description: "a_label(행)×b_label(열) 카운트. tiers 순서."
+          items:
+            type: array
+            items: { type: integer }
+        disagreements:
+          type: array
+          items: { $ref: "#/components/schemas/DocGenuinenessCompareDisagreement" }
+        disagreements_total: { type: integer }
+        pagination: { $ref: "#/components/schemas/ArtifactPagination" }
+      required: [version_a, version_b, tiers, compared, matched, agreement_rate, confusion, disagreements, disagreements_total]
     ClauseLabelView:
       allOf:
         - $ref: "#/components/schemas/ArtifactViewCommon"

@@ -47,6 +47,30 @@ func (s *Server) handleLLOAModelOptions(w stdhttp.ResponseWriter, _ *stdhttp.Req
 	writeJSON(w, stdhttp.StatusOK, map[string]any{"items": options})
 }
 
+// handleCompareDocGenuineness — 진성 분류 모델 비교 (silverone 2026-06-15).
+// 같은 dataset의 두 버전(version_a/version_b, 보통 서로 다른 모델로 빌드)을
+// doc_id 기준 1:1 비교한다. limit/offset은 불일치 목록에만 적용.
+func (s *Server) handleCompareDocGenuineness(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	versionA := strings.TrimSpace(r.URL.Query().Get("version_a"))
+	versionB := strings.TrimSpace(r.URL.Query().Get("version_b"))
+	if versionA == "" || versionB == "" {
+		writeError(w, stdhttp.StatusBadRequest, "version_a and version_b query params are required")
+		return
+	}
+	limit, offset := parseArtifactPagination(r)
+	view, err := s.datasetService.CompareDocGenuineness(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		versionA, versionB,
+		limit, offset,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, view)
+}
+
 // 화면 polling용 GET handler — clean / doc_genuineness / clause_label 3종.
 // POST와 같은 path. status / progress / error_message / (단계별) summary
 // items + applied를 한 응답으로 반환해 화면이 build job API를 직접

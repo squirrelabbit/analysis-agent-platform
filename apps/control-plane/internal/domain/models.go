@@ -853,6 +853,49 @@ type ArtifactPagination struct {
 	Total  int `json:"total"`
 }
 
+// ── doc_genuineness 모델 비교 (silverone 2026-06-15) ──
+// 같은 원본을 두 모델로 빌드한 두 버전의 진성 분류 결과를 doc_id 기준으로
+// 1:1 비교한다. 비교값은 override 적용 전 *원본 모델 라벨*이다(override는 사람
+// 보정이라 모델 간 비교를 오염시키므로 제외하고, 정답 힌트로만 노출).
+
+// DocGenuinenessCompareSide — 비교 한쪽(버전) 메타.
+type DocGenuinenessCompareSide struct {
+	DatasetVersionID string `json:"dataset_version_id"`
+	Model            string `json:"model,omitempty"`             // summary.model snapshot
+	ModelDisplayName string `json:"model_display_name,omitempty"` // env 기반 표시명
+	Total            int    `json:"total"`                       // 이 버전 doc 수
+}
+
+// DocGenuinenessCompareDisagreement — 두 모델이 다르게 분류한 문서 1건.
+type DocGenuinenessCompareDisagreement struct {
+	DocID               string `json:"doc_id"`
+	AGenuineness        string `json:"a_genuineness"`
+	AReason             string `json:"a_reason,omitempty"`
+	BGenuineness        string `json:"b_genuineness"`
+	BReason             string `json:"b_reason,omitempty"`
+	CleanedText         string `json:"cleaned_text,omitempty"`
+	OverrideGenuineness string `json:"override_genuineness,omitempty"` // 사람 보정(정답 힌트), 있으면
+}
+
+// DocGenuinenessCompareView — 비교 리포트 응답.
+type DocGenuinenessCompareView struct {
+	VersionA DocGenuinenessCompareSide `json:"version_a"`
+	VersionB DocGenuinenessCompareSide `json:"version_b"`
+	Tiers    []string                  `json:"tiers"` // confusion 행/열 순서
+	// Compared — 양쪽에 모두 존재하는 doc 수. Matched — 그중 라벨 일치 수.
+	Compared int     `json:"compared"`
+	Matched  int     `json:"matched"`
+	Rate     float64 `json:"agreement_rate"` // matched/compared, compared=0이면 0
+	OnlyInA  int     `json:"only_in_a"`      // 한쪽에만 있는 doc(소스 불일치 신호)
+	OnlyInB  int     `json:"only_in_b"`
+	// Confusion — A 라벨(행) × B 라벨(열) 카운트. tiers 순서.
+	Confusion [][]int `json:"confusion"`
+	// Disagreements — 불일치 문서. pagination은 이 목록에만 적용.
+	Disagreements      []DocGenuinenessCompareDisagreement `json:"disagreements"`
+	DisagreementsTotal int                                 `json:"disagreements_total"`
+	Pagination         *ArtifactPagination                 `json:"pagination,omitempty"`
+}
+
 type BuildJobProgress struct {
 	Percent        float64    `json:"percent"`
 	ProcessedRows  int        `json:"processed_rows"`
