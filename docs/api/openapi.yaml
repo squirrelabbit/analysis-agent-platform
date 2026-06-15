@@ -982,28 +982,34 @@ paths:
   /projects/{project_id}/datasets/{dataset_id}/doc_genuineness/compare:
     get:
       tags: [Datasets]
-      summary: 진성 분류 모델 비교 (두 버전 doc_id 1:1)
+      summary: 진성 분류 모델 비교 (한 버전 내 두 모델 doc_id 1:1)
       description: |
-        같은 원본을 서로 다른 모델로 빌드한 두 버전(`version_a`/`version_b`)의
-        doc_genuineness 결과를 doc_id 기준 1:1 비교한다 (silverone 2026-06-15).
-        비교값은 override 적용 *전* 원본 모델 라벨이다 — override(사람 보정)는
-        모델 간 비교를 오염시키므로 제외하고, 불일치 항목에 정답 힌트
-        (`override_genuineness`)로만 노출한다. `limit`/`offset`은 불일치 목록에만
-        적용된다. 두 버전 모두 doc_genuineness가 완료 상태여야 한다(아니면 400).
+        한 버전에 모델별로 누적된 doc_genuineness 결과 중 두 모델
+        (`model_a`/`model_b`)을 doc_id 기준 1:1 비교한다 (silverone 2026-06-15).
+        같은 버전 = 같은 원본이라 doc_id가 정확히 정렬된다. 비교값은 override
+        적용 *전* 원본 모델 라벨이다 — override(사람 보정)는 모델 간 비교를
+        오염시키므로 제외하고, 불일치 항목에 정답 힌트(`override_genuineness`)로만
+        노출한다. `limit`/`offset`은 불일치 목록에만 적용. 버전에 해당 모델 결과가
+        없으면 400. 모델별 결과 목록은 `.../versions/{vid}/doc_genuineness/runs`.
       operationId: compareDocGenuineness
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/DatasetId"
-        - name: version_a
+        - name: version_id
           in: query
           required: true
           schema: { type: string }
-          description: 비교 기준 A 버전 id
-        - name: version_b
+          description: 비교할 버전 id
+        - name: model_a
           in: query
           required: true
           schema: { type: string }
-          description: 비교 기준 B 버전 id
+          description: 비교 기준 A 모델 id (그 버전 runs의 model)
+        - name: model_b
+          in: query
+          required: true
+          schema: { type: string }
+          description: 비교 기준 B 모델 id
         - $ref: "#/components/parameters/ArtifactLimit"
         - $ref: "#/components/parameters/ArtifactOffset"
       responses:
@@ -1015,6 +1021,29 @@ paths:
                 $ref: "#/components/schemas/DocGenuinenessCompareView"
         "400":
           $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness/runs:
+    get:
+      tags: [Datasets]
+      summary: 진성 분류 모델별 결과 목록 (비교 선택지)
+      description: |
+        한 버전에 보관된 모델별 doc_genuineness 결과(run) 목록 (silverone
+        2026-06-15). 같은 버전을 다른 모델로 재실행하면 덮어쓰지 않고 모델별로
+        누적되며, 비교 화면이 이 목록으로 두 모델을 고른다. 옛 버전(이 기능 이전
+        빌드)은 단일 결과를 run 1건으로 합성해 반환한다.
+      operationId: listDocGenuinenessRuns
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: 모델별 결과 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocGenuinenessRunsResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness:
@@ -4146,14 +4175,33 @@ components:
         override_reason: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-    DocGenuinenessCompareSide:
+    DocGenuinenessRun:
       type: object
-      description: 진성 분류 모델 비교 한쪽(버전) 메타.
+      description: 한 버전에 보관된 모델별 진성 분류 결과 1건 (silverone 2026-06-15).
+      properties:
+        model: { type: string, description: "이 결과의 모델 id" }
+        model_display_name: { type: string, description: "env 기반 표시명(없으면 생략)" }
+        ref: { type: string, description: "이 모델 결과 artifact 경로" }
+        prompt_version: { type: string }
+        completed_at: { type: string, format: date-time }
+      required: [model, ref, completed_at]
+    DocGenuinenessRunsResponse:
+      type: object
+      description: GET .../doc_genuineness/runs 응답.
       properties:
         dataset_version_id: { type: string }
-        model: { type: string, description: "빌드 당시 모델 id (summary.model snapshot)" }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DocGenuinenessRun" }
+      required: [dataset_version_id, items]
+    DocGenuinenessCompareSide:
+      type: object
+      description: 진성 분류 모델 비교 한쪽 메타. version_a/version_b는 같은 버전이고 model로 구분.
+      properties:
+        dataset_version_id: { type: string }
+        model: { type: string, description: "이 run의 모델 id" }
         model_display_name: { type: string, description: "env 기반 표시명(없으면 생략)" }
-        total: { type: integer, description: "이 버전 doc 수" }
+        total: { type: integer, description: "이 run의 doc 수" }
       required: [dataset_version_id, total]
     DocGenuinenessCompareDisagreement:
       type: object

@@ -75,7 +75,12 @@ func (s *DatasetService) BuildDocGenuineness(projectID, datasetID, datasetVersio
 		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "clean artifact ref missing — doc_genuineness requires clean ready"}
 	}
 
-	outputPath := s.datasetArtifactPathOrFallback(version, "doc_genuineness", "doc_genuineness.jsonl")
+	// silverone 2026-06-15 — 모델별 결과를 덮어쓰지 않고 보관하려고 출력 파일을
+	// 모델 slug로 분리한다. 같은 모델 재실행은 같은 파일을 덮고(=그 모델 최신),
+	// 다른 모델은 별도 파일로 남아 비교에 쓰인다. doc_genuineness_ref(단일 view +
+	// 후속 clause_label 입력)는 이번 실행 파일을 가리켜 "최신" 의미를 유지한다.
+	effectiveModel := s.effectiveLLOAModel(input.ModelID)
+	outputPath := s.datasetArtifactPathOrFallback(version, "doc_genuineness", "doc_genuineness."+docGenuinenessModelSlug(effectiveModel)+".jsonl")
 	progressPath := outputPath + ".progress.json"
 
 	if version.Metadata == nil {
@@ -136,6 +141,7 @@ func (s *DatasetService) BuildDocGenuineness(projectID, datasetID, datasetVersio
 		"doc_genuineness_notes":        response.Notes,
 	})
 	delete(version.Metadata, "doc_genuineness_error")
+	promptVersion := ""
 	if summary, ok := artifact["summary"].(map[string]any); ok {
 		version.Metadata["doc_genuineness_summary"] = summary
 		// silverone 2026-05-22 (PR-α2) — Python worker가 summary.applied 안에
@@ -144,7 +150,16 @@ func (s *DatasetService) BuildDocGenuineness(projectID, datasetID, datasetVersio
 		if applied, ok := summary["applied"].(map[string]any); ok {
 			version.Metadata["doc_genuineness_applied"] = applied
 		}
+		promptVersion = anyStringValue(summary["prompt_version"])
 	}
+	// silverone 2026-06-15 — 모델별 결과 누적. 같은 모델은 갱신, 다른 모델은 추가.
+	// 비교 화면(GetDocGenuinenessRuns/CompareDocGenuineness)이 이 목록을 읽는다.
+	upsertDocGenuinenessRun(&version, domain.DocGenuinenessRun{
+		Model:         effectiveModel,
+		Ref:           genuinenessRef,
+		PromptVersion: promptVersion,
+		CompletedAt:   now,
+	})
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err
 	}

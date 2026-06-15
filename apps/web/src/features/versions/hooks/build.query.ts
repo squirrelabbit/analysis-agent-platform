@@ -13,12 +13,25 @@ export const useLloaModelOptions = () =>
     staleTime: 5 * 60 * 1000,
   });
 
-// 진성 분류 모델 비교 (2026-06-15) — 두 버전 모두 선택돼야 실행.
+// 한 버전의 모델별 결과 목록 (비교 선택지) — 버전 선택 시 조회.
+export const useDocGenuinenessRuns = (
+  projectId: string,
+  datasetId: string,
+  versionId: string,
+) =>
+  useQuery({
+    queryKey: [...buildKeys.all, "doc_genuineness_runs", projectId, datasetId, versionId],
+    queryFn: () => buildApi.getDocGenuinenessRuns(projectId, datasetId, versionId),
+    enabled: !!projectId && !!datasetId && !!versionId,
+  });
+
+// 진성 분류 모델 비교 (2026-06-15) — 한 버전 + 서로 다른 두 모델이 선택돼야 실행.
 export const useDocGenuinenessCompare = (
   projectId: string,
   datasetId: string,
-  versionA: string,
-  versionB: string,
+  versionId: string,
+  modelA: string,
+  modelB: string,
   params?: { limit?: number; offset?: number },
 ) =>
   useQuery({
@@ -27,13 +40,15 @@ export const useDocGenuinenessCompare = (
       "doc_genuineness_compare",
       projectId,
       datasetId,
-      versionA,
-      versionB,
+      versionId,
+      modelA,
+      modelB,
       params ?? {},
     ],
     queryFn: () =>
-      buildApi.compareDocGenuineness(projectId, datasetId, versionA, versionB, params),
-    enabled: !!projectId && !!datasetId && !!versionA && !!versionB && versionA !== versionB,
+      buildApi.compareDocGenuineness(projectId, datasetId, versionId, modelA, modelB, params),
+    enabled:
+      !!projectId && !!datasetId && !!versionId && !!modelA && !!modelB && modelA !== modelB,
   });
 
 export const useBuildVersion = (

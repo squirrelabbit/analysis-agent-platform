@@ -49,6 +49,15 @@ export interface DocGenuinenessCompareDto {
   pagination?: { limit: number; offset: number; total: number };
 }
 
+// 한 버전에 보관된 모델별 진성 분류 결과(run).
+export interface DocGenuinenessRunDto {
+  model: string;
+  model_display_name?: string;
+  ref: string;
+  prompt_version?: string;
+  completed_at: string;
+}
+
 export const buildApi = {
   // 전역 read-only — 빌드 재실행 다이얼로그의 모델 select용. (2026-06-12)
   getLloaModelOptions: () =>
@@ -56,18 +65,27 @@ export const buildApi = {
       .get<{ items: LloaModelOptionDto[] }>("/lloa_model_options")
       .then((r) => r.data.items),
 
-  // 진성 분류 모델 비교 — 두 버전(보통 다른 모델)을 doc_id 1:1 비교. (2026-06-15)
+  // 한 버전에 모델별로 누적된 진성 분류 결과 목록 (비교 선택지). (2026-06-15)
+  getDocGenuinenessRuns: (projectId: string, datasetId: string, versionId: string) =>
+    apiClient
+      .get<{ dataset_version_id: string; items: DocGenuinenessRunDto[] }>(
+        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/doc_genuineness/runs`,
+      )
+      .then(({ data }) => data.items),
+
+  // 진성 분류 모델 비교 — 한 버전 안의 두 모델을 doc_id 1:1 비교. (2026-06-15)
   compareDocGenuineness: (
     projectId: string,
     datasetId: string,
-    versionA: string,
-    versionB: string,
+    versionId: string,
+    modelA: string,
+    modelB: string,
     params?: { limit?: number; offset?: number },
   ) =>
     apiClient
       .get<DocGenuinenessCompareDto>(
         `/projects/${projectId}/datasets/${datasetId}/doc_genuineness/compare`,
-        { params: { version_a: versionA, version_b: versionB, ...params } },
+        { params: { version_id: versionId, model_a: modelA, model_b: modelB, ...params } },
       )
       .then(({ data }) => data),
 

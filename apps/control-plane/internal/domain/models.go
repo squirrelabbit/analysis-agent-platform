@@ -858,12 +858,30 @@ type ArtifactPagination struct {
 // 1:1 비교한다. 비교값은 override 적용 전 *원본 모델 라벨*이다(override는 사람
 // 보정이라 모델 간 비교를 오염시키므로 제외하고, 정답 힌트로만 노출).
 
-// DocGenuinenessCompareSide — 비교 한쪽(버전) 메타.
+// DocGenuinenessRun — 한 버전에 보관된 모델별 진성 분류 결과 1건 (silverone
+// 2026-06-15). 같은 버전을 다른 모델로 재실행하면 덮어쓰지 않고 모델별로
+// 누적되며, 비교는 한 버전 안의 두 run(모델) 사이에서 이뤄진다.
+type DocGenuinenessRun struct {
+	Model            string    `json:"model"`
+	ModelDisplayName string    `json:"model_display_name,omitempty"` // 응답 시점 env 기반
+	Ref              string    `json:"ref"`                          // 이 모델 결과 artifact 경로
+	PromptVersion    string    `json:"prompt_version,omitempty"`
+	CompletedAt      time.Time `json:"completed_at"`
+}
+
+// DocGenuinenessRunsResponse — GET .../doc_genuineness/runs 응답.
+type DocGenuinenessRunsResponse struct {
+	DatasetVersionID string              `json:"dataset_version_id"`
+	Items            []DocGenuinenessRun `json:"items"`
+}
+
+// DocGenuinenessCompareSide — 비교 한쪽 메타. version_a/version_b는 같은 버전이고
+// model로 구분된다.
 type DocGenuinenessCompareSide struct {
 	DatasetVersionID string `json:"dataset_version_id"`
-	Model            string `json:"model,omitempty"`             // summary.model snapshot
+	Model            string `json:"model,omitempty"`             // 이 run의 모델 id
 	ModelDisplayName string `json:"model_display_name,omitempty"` // env 기반 표시명
-	Total            int    `json:"total"`                       // 이 버전 doc 수
+	Total            int    `json:"total"`                       // 이 run의 doc 수
 }
 
 // DocGenuinenessCompareDisagreement — 두 모델이 다르게 분류한 문서 1건.

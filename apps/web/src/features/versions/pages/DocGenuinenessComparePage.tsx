@@ -11,16 +11,16 @@ import {
 } from "@/components/ui/select";
 import { useDatasetParams } from "@/shared/hooks/useRouteParams";
 import { useVersions } from "../hooks/version.query";
-import { useDocGenuinenessCompare } from "../hooks/build.query";
+import { useDocGenuinenessCompare, useDocGenuinenessRuns } from "../hooks/build.query";
 import { GENUINENESS_LABELS } from "../constants/genuineness";
 
-// 진성 분류 모델 비교 화면 (silverone 2026-06-15). 같은 원본을 다른 모델로 빌드한
-// 두 버전을 골라 doc_id 1:1로 비교한다. 일치율 + 혼동행렬 + 불일치 문서 목록.
+// 진성 분류 모델 비교 화면 (silverone 2026-06-15). 버전 1개를 고르면 그 버전에
+// 모델별로 누적된 결과(run) 중 두 모델을 골라 doc_id 1:1로 비교한다.
+// 일치율 + 혼동행렬 + 불일치 문서 목록.
 
 const tierLabel = (key: string) =>
   (GENUINENESS_LABELS as Record<string, string>)[key] ?? key;
 
-// 버전 라벨 — 모델 표시명이 있으면 함께. (목록 select용)
 function versionOption(v: { id: string; createdAt: string }) {
   return `${v.id.slice(0, 8)} · ${v.createdAt.slice(0, 16).replace("T", " ")}`;
 }
@@ -36,14 +36,25 @@ export default function DocGenuinenessComparePage() {
     [versions],
   );
 
-  const [versionA, setVersionA] = useState("");
-  const [versionB, setVersionB] = useState("");
+  const [versionId, setVersionId] = useState("");
+  const [modelA, setModelA] = useState("");
+  const [modelB, setModelB] = useState("");
+
+  const { data: runs = [] } = useDocGenuinenessRuns(projectId, datasetId, versionId);
+
+  // 버전이 바뀌면 모델 선택 초기화.
+  const onVersionChange = (v: string) => {
+    setVersionId(v);
+    setModelA("");
+    setModelB("");
+  };
 
   const { data, isLoading, isError, error } = useDocGenuinenessCompare(
     projectId,
     datasetId,
-    versionA,
-    versionB,
+    versionId,
+    modelA,
+    modelB,
   );
 
   const pct = data ? Math.round(data.agreement_rate * 1000) / 10 : 0;
@@ -58,15 +69,15 @@ export default function DocGenuinenessComparePage() {
       </button>
       <h1 className="text-xl font-bold text-zinc-800">진성 분류 모델 비교</h1>
       <p className="mt-1 text-sm text-zinc-500">
-        같은 데이터를 서로 다른 모델로 빌드한 두 버전을 골라 문서 단위로 비교합니다.
-        비교값은 사람 보정 전 원본 모델 라벨입니다.
+        버전을 고른 뒤, 그 버전에서 모델별로 돌린 결과 중 두 모델을 골라 문서 단위로
+        비교합니다. 비교값은 사람 보정 전 원본 모델 라벨입니다.
       </p>
 
-      {/* 버전 선택 */}
+      {/* 버전 + 모델 선택 */}
       <div className="mt-5 flex flex-wrap items-end gap-4">
         <div>
-          <div className="mb-1 text-xs font-medium text-zinc-500">버전 A</div>
-          <Select value={versionA} onValueChange={setVersionA}>
+          <div className="mb-1 text-xs font-medium text-zinc-500">버전</div>
+          <Select value={versionId} onValueChange={onVersionChange}>
             <SelectTrigger className="w-64 text-xs">
               <SelectValue placeholder="버전 선택" />
             </SelectTrigger>
@@ -80,15 +91,30 @@ export default function DocGenuinenessComparePage() {
           </Select>
         </div>
         <div>
-          <div className="mb-1 text-xs font-medium text-zinc-500">버전 B</div>
-          <Select value={versionB} onValueChange={setVersionB}>
-            <SelectTrigger className="w-64 text-xs">
-              <SelectValue placeholder="버전 선택" />
+          <div className="mb-1 text-xs font-medium text-zinc-500">모델 A</div>
+          <Select value={modelA} onValueChange={setModelA} disabled={!versionId}>
+            <SelectTrigger className="w-56 text-xs">
+              <SelectValue placeholder="모델 선택" />
             </SelectTrigger>
             <SelectContent>
-              {ready.map((v) => (
-                <SelectItem key={v.id} value={v.id} className="text-xs">
-                  {versionOption(v)}
+              {runs.map((r) => (
+                <SelectItem key={r.model} value={r.model} className="text-xs">
+                  {r.model_display_name || r.model}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-medium text-zinc-500">모델 B</div>
+          <Select value={modelB} onValueChange={setModelB} disabled={!versionId}>
+            <SelectTrigger className="w-56 text-xs">
+              <SelectValue placeholder="모델 선택" />
+            </SelectTrigger>
+            <SelectContent>
+              {runs.map((r) => (
+                <SelectItem key={r.model} value={r.model} className="text-xs">
+                  {r.model_display_name || r.model}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -96,14 +122,19 @@ export default function DocGenuinenessComparePage() {
         </div>
       </div>
 
-      {ready.length < 2 && (
+      {ready.length === 0 && (
         <p className="mt-4 text-sm text-amber-600">
-          비교하려면 진성 분류가 완료된 버전이 2개 이상 필요합니다. 같은 원본을 다른
-          모델로 한 번 더 빌드하세요.
+          진성 분류가 완료된 버전이 없습니다.
         </p>
       )}
-      {versionA && versionB && versionA === versionB && (
-        <p className="mt-4 text-sm text-amber-600">서로 다른 버전을 선택하세요.</p>
+      {versionId && runs.length < 2 && (
+        <p className="mt-4 text-sm text-amber-600">
+          이 버전은 모델 결과가 {runs.length}개뿐입니다. 같은 버전을 다른 모델로 한 번
+          더 빌드하면 비교할 수 있습니다.
+        </p>
+      )}
+      {modelA && modelB && modelA === modelB && (
+        <p className="mt-4 text-sm text-amber-600">서로 다른 모델을 선택하세요.</p>
       )}
 
       {isLoading && <p className="mt-6 text-sm text-zinc-400">비교 중…</p>}

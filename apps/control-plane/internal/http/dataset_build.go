@@ -47,21 +47,37 @@ func (s *Server) handleLLOAModelOptions(w stdhttp.ResponseWriter, _ *stdhttp.Req
 	writeJSON(w, stdhttp.StatusOK, map[string]any{"items": options})
 }
 
+// handleListDocGenuinenessRuns — 한 버전에 보관된 모델별 진성 분류 결과 목록
+// (비교 화면 dropdown용, silverone 2026-06-15).
+func (s *Server) handleListDocGenuinenessRuns(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	resp, err := s.datasetService.GetDocGenuinenessRuns(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, resp)
+}
+
 // handleCompareDocGenuineness — 진성 분류 모델 비교 (silverone 2026-06-15).
-// 같은 dataset의 두 버전(version_a/version_b, 보통 서로 다른 모델로 빌드)을
-// doc_id 기준 1:1 비교한다. limit/offset은 불일치 목록에만 적용.
+// 한 버전에 보관된 두 모델 결과(model_a/model_b)를 doc_id 기준 1:1 비교한다.
+// limit/offset은 불일치 목록에만 적용.
 func (s *Server) handleCompareDocGenuineness(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-	versionA := strings.TrimSpace(r.URL.Query().Get("version_a"))
-	versionB := strings.TrimSpace(r.URL.Query().Get("version_b"))
-	if versionA == "" || versionB == "" {
-		writeError(w, stdhttp.StatusBadRequest, "version_a and version_b query params are required")
+	versionID := strings.TrimSpace(r.URL.Query().Get("version_id"))
+	modelA := strings.TrimSpace(r.URL.Query().Get("model_a"))
+	modelB := strings.TrimSpace(r.URL.Query().Get("model_b"))
+	if versionID == "" || modelA == "" || modelB == "" {
+		writeError(w, stdhttp.StatusBadRequest, "version_id, model_a, model_b query params are required")
 		return
 	}
 	limit, offset := parseArtifactPagination(r)
 	view, err := s.datasetService.CompareDocGenuineness(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
-		versionA, versionB,
+		versionID, modelA, modelB,
 		limit, offset,
 	)
 	if err != nil {
