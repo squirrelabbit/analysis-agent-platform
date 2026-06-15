@@ -41,6 +41,11 @@ export interface ReportBlock {
    */
   span: number;
   /**
+   * 카드 최소 높이(px). null이면 콘텐츠 높이(자동). 하단 모서리 드래그로 늘린다.
+   * minHeight 기준이라 콘텐츠보다 짧게는 줄지 않아 차트 등이 잘리지 않는다.
+   */
+  height: number | null;
+  /**
    * true면 새 줄에서 시작(한 줄 차지). false면 앞 블록과 같은 줄에 이어 배치(나란히).
    * 자동 packing은 하지 않으며, 옆에 드롭할 때만 false로 설정된다.
    */
