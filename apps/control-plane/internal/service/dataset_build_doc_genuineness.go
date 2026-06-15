@@ -102,6 +102,11 @@ func (s *DatasetService) BuildDocGenuineness(projectID, datasetID, datasetVersio
 	if input.DocGenuinenessPromptVer != nil && strings.TrimSpace(*input.DocGenuinenessPromptVer) != "" {
 		payload["doc_genuineness_prompt_version"] = strings.TrimSpace(*input.DocGenuinenessPromptVer)
 	}
+	// silverone 2026-06-12 — 전처리 모델 선택. allowlist 검증은 job 생성 시
+	// 완료(validateLLOAModelID). 생략 시 worker env(LLOA_MODEL) default.
+	if input.ModelID != nil && strings.TrimSpace(*input.ModelID) != "" {
+		payload["model_id"] = strings.TrimSpace(*input.ModelID)
+	}
 
 	response, err := s.runWorkerTask(context.Background(), registry.TaskPathFor("dataset_doc_genuineness"), payload)
 	if err != nil {

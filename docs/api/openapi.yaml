@@ -270,6 +270,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /lloa_model_options:
+    get:
+      tags: [System]
+      summary: 전처리 빌드 모델 선택지 (LLOA allowlist)
+      description: |
+        전처리 빌드(doc_genuineness / clause_label)에 선택 가능한 LLOA 모델
+        목록을 반환한다 (2026-06-12 모델 선택). control-plane이
+        `config/lloa_models.json`(LLOA_MODELS_PATH로 override 가능) catalog를
+        읽어 노출하며, `default`는 catalog의 `default` model_id와 일치하는 항목
+        (없으면 첫 항목)에 표시된다. catalog 파일이 없거나 항목이 1개 이하면
+        프론트는 모델 select를 노출하지 않는다(env LLOA_MODEL default 사용).
+      operationId: getLLOAModelOptions
+      responses:
+        "200":
+          description: 모델 선택지
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LLOAModelOptionsResponse"
   /taxonomy:
     get:
       tags: [System]
@@ -1949,6 +1968,31 @@ components:
           items:
             $ref: "#/components/schemas/PromptOptionVersion"
       required: [task, default, versions]
+    LLOAModelOption:
+      type: object
+      description: 전처리 빌드에 선택 가능한 LLOA 모델 항목 (config/lloa_models.json catalog).
+      properties:
+        model_id:
+          type: string
+          description: LLOA 모델 id (빌드 요청 model_id로 그대로 전달).
+          example: wisenut/wise-lloa-max-v1.2.1
+        label:
+          type: string
+          description: 화면 표시용 라벨. allowlist에 라벨 생략 시 model_id와 동일.
+          example: LLOA Max 1.2.1
+        default:
+          type: boolean
+          description: LLOA_MODEL(worker default)과 일치하는 항목에 true.
+      required: [model_id, label, default]
+    LLOAModelOptionsResponse:
+      type: object
+      description: GET /lloa_model_options 응답.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LLOAModelOption"
+      required: [items]
     TaxonomyAspect:
       type: object
       description: 단일 aspect 정의. key는 artifact에 저장되는 영문 식별자, label은 표시용 한글.
@@ -4340,6 +4384,9 @@ components:
         doc_genuineness_prompt_version:
           type: string
           description: "사용할 prompt version stem (예: v1). GET /prompt_options?task=doc_genuineness의 versions[].version 값. 미지정 시 index.yaml default. 알 수 없는 version은 400. inline prompt(doc_genuineness_prompt_content) 사용 시엔 그 inline의 label로 쓰인다. artifact의 prompt_version에는 실제 resolve된 stem이 기록된다."
+        model_id:
+          type: string
+          description: "전처리에 사용할 LLOA 모델 id (2026-06-12 모델 선택). GET /lloa_model_options의 items[].model_id 값. 미지정 시 worker env(LLOA_MODEL) default. allowlist(config/lloa_models.json) 밖이면 400. 실사용 모델은 artifact summary.model에 기록된다."
         force:
           type: boolean
           default: false
@@ -4363,4 +4410,7 @@ components:
             type: string
             enum: [genuine_review, mixed, non_review]
           description: "doc_genuineness 결과로 필터링 (예: ['genuine_review','mixed']). 명시 안 하면 모든 doc 처리. 명시 시 doc_genuineness ready 필요."
+        model_id:
+          type: string
+          description: "전처리에 사용할 LLOA 모델 id (2026-06-12 모델 선택). GET /lloa_model_options의 items[].model_id 값. 미지정 시 worker env(LLOA_MODEL) default. allowlist(config/lloa_models.json) 밖이면 400. 실사용 모델은 artifact summary.model에 기록된다."
         force: { type: boolean }

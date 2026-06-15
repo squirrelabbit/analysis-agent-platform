@@ -11,7 +11,20 @@ export interface BuildViewParams {
   q?: string;
 }
 
+// 전처리 빌드(doc_genuineness/clause_label) 모델 선택지 (LLOA_MODELS allowlist).
+export interface LloaModelOptionDto {
+  model_id: string;
+  label: string;
+  default: boolean;
+}
+
 export const buildApi = {
+  // 전역 read-only — 빌드 재실행 다이얼로그의 모델 select용. (2026-06-12)
+  getLloaModelOptions: () =>
+    apiClient
+      .get<{ items: LloaModelOptionDto[] }>("/lloa_model_options")
+      .then((r) => r.data.items),
+
   getBuildVersion: (
     projectId: string,
     datasetId: string,

@@ -104,6 +104,7 @@ export default function BuildDialog({
                   type: "doc_genuineness",
                   req: compactObject({
                     doc_genuineness_prompt_version: data.promptVersion,
+                    model_id: data.modelId,
                   }),
                 });
               }}
@@ -119,6 +120,7 @@ export default function BuildDialog({
                   req: compactObject({
                     clause_label_prompt_version: data.promptVersion,
                     include_genuineness: data.includeGenuineness,
+                    model_id: data.modelId,
                   }),
                 });
               }}

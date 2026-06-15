@@ -63,6 +63,11 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 	if input.ClauseLabelPromptVer != nil && strings.TrimSpace(*input.ClauseLabelPromptVer) != "" {
 		payload["clause_label_prompt_version"] = strings.TrimSpace(*input.ClauseLabelPromptVer)
 	}
+	// silverone 2026-06-12 — 전처리 모델 선택. allowlist 검증은 job 생성 시
+	// 완료(validateLLOAModelID). 생략 시 worker env(LLOA_MODEL) default.
+	if input.ModelID != nil && strings.TrimSpace(*input.ModelID) != "" {
+		payload["model_id"] = strings.TrimSpace(*input.ModelID)
+	}
 	// silverone 2026-05-28 — dataset.metadata.doc_genuineness를 doc_genuineness
 	// skill과 공유. raw map을 그대로 pass-through하고 Python `_extract_subject_config`
 	// 가 정규화한다 (recruitment_keywords는 무시 + subject_name 누락 시 festival

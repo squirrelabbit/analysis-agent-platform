@@ -4,6 +4,7 @@ import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { FieldGroup } from "@/components/ui/field";
 import PromptVersionField from "@/features/prompts/components/PromptVersionField";
+import LloaModelField from "./LloaModelField";
 
 
 export default function BuildGenuinenessForm({
@@ -21,6 +22,7 @@ export default function BuildGenuinenessForm({
   });
 
   const promptVersion = useWatch({ control, name: "promptVersion" }) ?? "";
+  const modelId = useWatch({ control, name: "modelId" }) ?? "";
 
   async function handleFormSubmit(data: BuildGenuinenessFormValues) {
     await onSubmit(data);
@@ -41,6 +43,11 @@ export default function BuildGenuinenessForm({
             setValue("promptVersion", v, { shouldValidate: true })
           }
           errorMessage={errors.promptVersion?.message}
+        />
+        <LloaModelField
+          value={modelId}
+          onChange={(v) => setValue("modelId", v, { shouldValidate: true })}
+          errorMessage={errors.modelId?.message}
         />
       </FieldGroup>
     </form>

@@ -54,6 +54,10 @@ type DatasetService struct {
 	// 같을 때만 lloaModelDisplayName을 노출한다. SetLLOAModelDisplay로 주입.
 	lloaModel            string
 	lloaModelDisplayName string
+	// silverone 2026-06-12 — 전처리 빌드 모델 선택 allowlist (LLOA_MODELS env).
+	// SetLLOAModelOptions로 주입. 빈 목록이면 model_id 선택 자체를 거부한다
+	// (default env 모델만 사용).
+	lloaModelOptions []domain.LLOAModelOption
 	// silverone 2026-06-08 — plan reuse(POC-1) 토글. 기본 false(비활성).
 	// ANALYSIS_PLAN_REUSE_ENABLED로 SetPlanReuseEnabled를 통해 주입. context
 	// hijack(이전 결과 오재표시) 때문에 기본 OFF. threads()가 sub-service로 전달.
@@ -108,6 +112,47 @@ func (s *DatasetService) SetBuildJobStarter(starter workflows.Starter) {
 func (s *DatasetService) SetLLOAModelDisplay(model, displayName string) {
 	s.lloaModel = strings.TrimSpace(model)
 	s.lloaModelDisplayName = strings.TrimSpace(displayName)
+}
+
+// SetLLOAModelsPath — 전처리 빌드 모델 선택 allowlist를 config 파일에서 로드해
+// 주입한다 (config/lloa_models.json). dataset_profiles.json과 같은 패턴 —
+// 파일 부재는 정상(빈 목록), 손상된 JSON은 error로 부팅 시 fail-loud.
+func (s *DatasetService) SetLLOAModelsPath(path string) error {
+	options, err := loadLLOAModelOptions(path)
+	if err != nil {
+		return err
+	}
+	s.lloaModelOptions = options
+	return nil
+}
+
+// SetLLOAModelOptions — allowlist를 직접 주입 (테스트/직접 배선용). 운영 배선은
+// SetLLOAModelsPath가 config 파일에서 로드해 호출한다. 응답 시점 표시명 lookup과
+// job 생성 시 model_id 검증에 쓰인다.
+func (s *DatasetService) SetLLOAModelOptions(options []domain.LLOAModelOption) {
+	s.lloaModelOptions = options
+}
+
+// LLOAModelOptions — GET /lloa_model_options 응답용 allowlist 조회.
+func (s *DatasetService) LLOAModelOptions() []domain.LLOAModelOption {
+	return s.lloaModelOptions
+}
+
+// validateLLOAModelID — 빌드 요청의 model_id 검증. nil/빈 값은 default 모델
+// 사용으로 통과. allowlist 밖이면 ErrInvalidArgument (400).
+func (s *DatasetService) validateLLOAModelID(modelID *string) error {
+	if modelID == nil || strings.TrimSpace(*modelID) == "" {
+		return nil
+	}
+	requested := strings.TrimSpace(*modelID)
+	allowed := make([]string, 0, len(s.lloaModelOptions))
+	for _, opt := range s.lloaModelOptions {
+		if opt.ModelID == requested {
+			return nil
+		}
+		allowed = append(allowed, opt.ModelID)
+	}
+	return ErrInvalidArgument{Message: "model_id not allowed: " + requested + " (allowed: " + strings.Join(allowed, ", ") + ")"}
 }
 
 // SetPlanReuseEnabled — plan reuse(POC-1) 활성 여부 주입. config의

@@ -1,0 +1,8 @@
+{
+  "default": "wisenut/wise-lloa-max-v1.2.1",
+  "models": [
+    { "model_id": "wisenut/wise-lloa-max-v1.2.1", "label": "LLOA Max 1.2.1" },
+    { "model_id": "wisenut/wise-lloa-ultra-v1.1.0", "label": "LLOA Ultra 1.1.0" },
+    { "model_id": "wisenut/wise-lloa-max-v1.1.1", "label": "LLOA Max 1.1.1" }
+  ]
+}

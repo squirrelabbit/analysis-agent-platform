@@ -19,3 +19,4 @@ workers/python-ai/docs
 .claude/
 *.egg-info/
 compose.local.yml
+.cache/

@@ -402,6 +402,9 @@ func (s *DatasetService) CreateDocGenuinenessJob(projectID, datasetID, datasetVe
 	if _, err := extractDocGenuinenessConfig(dataset.Metadata); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
+	if err := s.validateLLOAModelID(input.ModelID); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
 	if status := cleanStatus(version); status == "queued" || status == "cleaning" || status == "failed" || status == "stale" {
 		return domain.DatasetBuildJob{}, ErrInvalidArgument{Message: "dataset clean must be ready before doc_genuineness"}
 	}
@@ -449,6 +452,9 @@ func (s *DatasetService) CreateClauseLabelJob(projectID, datasetID, datasetVersi
 	// ADR-017 / 5/19 — clause_label 입력 source가 segment → clean으로 변경.
 	// segment 단계는 PR-4에서 deprecate 예정. 옵션 include_genuineness 명시 시
 	// doc_genuineness ready도 BuildClauseLabel가 검증.
+	if err := s.validateLLOAModelID(input.ModelID); err != nil {
+		return domain.DatasetBuildJob{}, err
+	}
 	if status := cleanStatus(version); status == "queued" || status == "cleaning" || status == "failed" || status == "stale" {
 		return domain.DatasetBuildJob{}, ErrInvalidArgument{Message: "dataset clean must be ready before clause_label"}
 	}
