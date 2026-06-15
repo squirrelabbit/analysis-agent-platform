@@ -204,6 +204,12 @@ export default function GenuinenessTab() {
                 onChange={setDraftGenuineness}
                 disabled={savingDocId === item.docId}
               />
+            ) : !item.genuineness &&
+              (item.resolution === "classify_error" ||
+                item.resolution === "judge_error") ? (
+              <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-600">
+                분류 실패
+              </span>
             ) : (
               <div className="flex items-center justify-center gap-1.5">
                 <GenuinenessBadge value={item.genuineness} />
@@ -248,6 +254,16 @@ export default function GenuinenessTab() {
             {item.isOverridden && item.originalReason && (
               <div className="mt-1 text-[11px] text-zinc-400">
                 원본 판정: {item.originalReason}
+              </div>
+            )}
+            {/* 분류 실패(verify) — 모델 호출 실패라 라벨 없음. 재시도 필요. */}
+            {(item.resolution === "classify_error" ||
+              item.resolution === "judge_error") && (
+              <div className="mt-1.5 rounded-md bg-rose-50 px-2 py-1 text-[11px] text-rose-700">
+                분류 실패 — 모델 호출이 실패해 라벨이 없습니다. 재실행이 필요합니다.
+                <span className="ml-1 rounded-full bg-rose-100 px-1.5 py-0.5 font-semibold">
+                  검토 필요
+                </span>
               </div>
             )}
             {/* 교차검증(verify) 상세 — 모델 A/B + judge (ADR-026) */}
