@@ -1,14 +1,7 @@
 // 보고서 캔버스의 단일 블록. 그립(드래그 정렬) + 카드(너비 리사이즈) + 속성 편집 버튼 +
 // 원 질문 칩 + 제목/부제 + viz + 해석 문구 + 상세/분석계획 폴드.
 import { useState, type RefObject } from "react";
-import {
-  ChevronDown,
-  ClipboardCheck,
-  GripVertical,
-  MessageSquare,
-  Pencil,
-  Table2,
-} from "lucide-react";
+import { GripVertical, MessageSquare, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   GRID_COLS,
@@ -18,44 +11,12 @@ import {
   type ReportBlock as Block,
   type ReportMode,
 } from "../models/editor";
-import { Viz, VizGrid, VizPlan } from "./Viz";
-
-function Fold({
-  icon,
-  label,
-  open,
-  onToggle,
-  children,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  open: boolean;
-  onToggle: () => void;
-  children: React.ReactNode;
-}) {
-  const isOpen = open;
-  return (
-    <div className="mt-3.5 overflow-hidden rounded-xl border border-zinc-100">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center gap-2.25 bg-zinc-50/70 px-3.5 py-2.75 text-[13px] font-semibold text-zinc-600 transition-colors hover:bg-zinc-100/70"
-      >
-        <span className="text-zinc-400">{icon}</span>
-        {label}
-        <ChevronDown
-          className={cn(
-            "ml-auto h-4 w-4 text-zinc-400 transition-transform",
-            isOpen && "rotate-180",
-          )}
-        />
-      </button>
-      {isOpen && (
-        <div className="border-t border-zinc-100 p-3.5">{children}</div>
-      )}
-    </div>
-  );
-}
+import ChartView from "@/features/chats/components/ChartView";
+import CollapsibleTable from "@/features/chats/components/CollapsibleTable";
+import DisplayTable from "@/features/chats/components/DisplayTable";
+import EvidenceCardList from "@/features/chats/components/EvidenceCardList";
+import MetricCompareView from "@/features/chats/components/MetricCompareView";
+import PlanPanel from "@/features/chats/components/PlanPanel";
 
 export function ReportBlock({
   block,
@@ -80,13 +41,19 @@ export function ReportBlock({
   onGripDragEnd: () => void;
   onSetSpan: (uid: string, span: number) => void;
 }) {
-  const [foldDetail, setFoldDetail] = useState(false);
-  const [foldPlan, setFoldPlan] = useState(false);
   const [dragSpan, setDragSpan] = useState<number | null>(null);
 
   const isEdit = mode === "edit";
   const title = block.title != null ? block.title : lib.title;
   const span = dragSpan ?? block.span;
+
+  // 메인 결과 1개 선택(채팅과 동일): metric > evidence > chart > table.
+  const { result } = lib;
+  const metricMain = !!result.metric;
+  const evidenceMain = !metricMain && !!result.evidence;
+  const chartMain = !metricMain && !evidenceMain && !!result.chart;
+  const tableMain = !metricMain && !evidenceMain && !chartMain && !!result.display;
+  const hasNonTableMain = metricMain || evidenceMain || chartMain;
 
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -235,8 +202,18 @@ export function ReportBlock({
           {lib.sub}
         </div>
 
+        {/* 메인 결과 — 채팅 결과 뷰 카탈로그 재사용(metric>evidence>chart>table) */}
         <div className="mt-4">
-          <Viz lib={lib} />
+          {metricMain && result.metric && (
+            <MetricCompareView metric={result.metric} />
+          )}
+          {evidenceMain && result.evidence && (
+            <EvidenceCardList evidence={result.evidence} />
+          )}
+          {chartMain && result.chart && <ChartView chart={result.chart} />}
+          {tableMain && result.display && (
+            <DisplayTable display={result.display} />
+          )}
         </div>
 
         {/* 해석 문구 */}
@@ -259,27 +236,12 @@ export function ReportBlock({
           )
         )}
 
-        {block.opts.detail && lib.detail && (
-          <Fold
-            icon={<Table2 className="h-3.5 w-3.5" />}
-            label="상세 데이터"
-            open={foldDetail}
-            onToggle={() => setFoldDetail((v) => !v)}
-          >
-            <VizGrid d={lib.detail} />
-          </Fold>
+        {/* 메인이 표가 아니면 display는 상세 데이터 접이식으로(채팅과 동일) */}
+        {block.opts.detail && hasNonTableMain && result.display && (
+          <CollapsibleTable display={result.display} />
         )}
 
-        {block.opts.plan && lib.plan.length > 0 && (
-          <Fold
-            icon={<ClipboardCheck className="h-3.5 w-3.5" />}
-            label="분석 계획"
-            open={foldPlan}
-            onToggle={() => setFoldPlan((v) => !v)}
-          >
-            <VizPlan steps={lib.plan} />
-          </Fold>
-        )}
+        {block.opts.plan && result.plan && <PlanPanel plan={result.plan} />}
       </div>
     </div>
   );

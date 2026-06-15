@@ -142,6 +142,10 @@ export function BlockPopover({
   }, [block.uid, block.span]);
 
   const title = block.title != null ? block.title : lib.title;
+  // 메인이 표가 아니면(metric/evidence/chart) display를 상세 데이터로 보여줄 수 있다.
+  const r = lib.result;
+  const hasDetail =
+    (!!r.metric || !!r.evidence || !!r.chart) && !!r.display;
 
   return (
     <>
@@ -199,9 +203,9 @@ export function BlockPopover({
         />
         <OptRow
           icon={<Table2 className="h-3.75 w-3.75" />}
-          label={lib.detail ? "상세 데이터 포함" : "상세 데이터 포함 (없음)"}
+          label={hasDetail ? "상세 데이터 포함" : "상세 데이터 포함 (없음)"}
           on={block.opts.detail}
-          disabled={!lib.detail}
+          disabled={!hasDetail}
           onToggle={() => onToggleOpt("detail")}
         />
         <OptRow
@@ -228,12 +232,13 @@ export function BlockPopover({
           블록 오른쪽 모서리를 드래그해 조절
         </div>
 
+        {/* 보고서에서만 빼는 가역 동작 — 보관함 영구 삭제와 구분(중립 톤, "제거"). */}
         <button
           onClick={onDelete}
-          className="mt-4 flex w-full items-center justify-center gap-1.75 rounded-lg border border-red-100 bg-red-50 py-2.25 text-[13px] font-bold text-red-600 transition hover:brightness-97"
+          className="mt-4 flex w-full items-center justify-center gap-1.75 rounded-lg border border-zinc-200 bg-white py-2.25 text-[13px] font-bold text-zinc-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
         >
           <Trash2 className="h-3.5 w-3.5" />
-          블록 삭제
+          보고서에서 제거
         </button>
       </div>
     </>

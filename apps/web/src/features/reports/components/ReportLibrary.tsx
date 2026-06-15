@@ -1,12 +1,13 @@
 // 보고서 에디터 좌측 "저장된 결과 보관함" — 검색 + 타입 필터 + 결과 카드 목록.
 // 카드는 보고서에 "추가"(+)하거나 캔버스로 드래그할 수 있고, 이미 추가된 결과는 dim + 체크.
 import { useMemo, useState } from "react";
-import { Check, Library, Plus, Search } from "lucide-react";
+import { Check, Library, Plus, Search, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import DeleteDialog from "@/components/common/dialogs/DeleteDialog";
 import {
-  LIBRARY,
   LIB_TYPE_LABEL,
   type LibType,
+  type LibraryItem,
 } from "../models/editor";
 
 const FILTERS: { label: string; type: LibType | "all" }[] = [
@@ -17,13 +18,17 @@ const FILTERS: { label: string; type: LibType | "all" }[] = [
 ];
 
 export function ReportLibrary({
+  items,
   usedIds,
   onAdd,
+  onDelete,
   onDragStart,
   onDragEnd,
 }: {
+  items: LibraryItem[];
   usedIds: Set<string>;
   onAdd: (libId: string) => void;
+  onDelete: (libId: string) => void;
   onDragStart: (libId: string) => void;
   onDragEnd: () => void;
 }) {
@@ -31,20 +36,22 @@ export function ReportLibrary({
   const [query, setQuery] = useState("");
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: LIBRARY.length };
-    for (const l of LIBRARY) c[l.type] = (c[l.type] ?? 0) + 1;
+    const c: Record<string, number> = { all: items.length };
+    for (const l of items) c[l.type] = (c[l.type] ?? 0) + 1;
     return c;
-  }, []);
+  }, [items]);
 
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return LIBRARY.filter((l) => filter === "all" || l.type === filter).filter(
-      (l) =>
-        !q ||
-        l.title.toLowerCase().includes(q) ||
-        l.question.toLowerCase().includes(q),
-    );
-  }, [filter, query]);
+    return items
+      .filter((l) => filter === "all" || l.type === filter)
+      .filter(
+        (l) =>
+          !q ||
+          l.title.toLowerCase().includes(q) ||
+          l.question.toLowerCase().includes(q),
+      );
+  }, [items, filter, query]);
 
   return (
     <aside className="flex h-full w-80 shrink-0 flex-col border-r border-zinc-200 bg-white">
@@ -53,7 +60,7 @@ export function ReportLibrary({
           <Library className="h-4.25 w-4.25 text-zinc-400" />
           저장된 결과 보관함
           <span className="ml-auto text-xs font-bold text-zinc-400">
-            {LIBRARY.length}
+            {items.length}
           </span>
         </h2>
 
@@ -132,6 +139,27 @@ export function ReportLibrary({
                 <span className="shrink-0 rounded-md bg-zinc-100 px-1.75 py-0.5 text-[10.5px] font-bold text-zinc-400">
                   {LIB_TYPE_LABEL[l.type]}
                 </span>
+                <DeleteDialog
+                  title="보관함에서 삭제"
+                  description={
+                    used
+                      ? "결과를 보관함에서 완전히 삭제합니다. 보고서에 사용 중이라 해당 블록도 함께 제거됩니다."
+                      : "결과를 보관함에서 완전히 삭제합니다."
+                  }
+                  onDelete={() => onDelete(l.id)}
+                  trigger={
+                    <button
+                      title="보관함에서 삭제"
+                      className="grid h-7.5 w-7.5 shrink-0 place-items-center rounded-lg text-zinc-300 transition hover:bg-red-50 hover:text-red-500"
+                    >
+                      <Trash2 className="h-4 w-4" strokeWidth={2.2} />
+                    </button>
+                  }
+                >
+                  <b className="mt-1 text-sm font-semibold text-zinc-800">
+                    {l.title}
+                  </b>
+                </DeleteDialog>
                 {used ? (
                   <span
                     title="보고서에서 사용 중"
