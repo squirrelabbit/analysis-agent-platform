@@ -131,6 +131,8 @@ function IconBtn({
 
 export default function GenuinenessTab() {
   const [filter, setFilter] = useState<string>("");
+  // 교차검증 검토 큐 필터 (ADR-026): "" | "disagreement" | "needs_review".
+  const [reviewFilter, setReviewFilter] = useState<string>("");
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
@@ -351,6 +353,8 @@ export default function GenuinenessTab() {
       limit: pageSize,
       offset: (page - 1) * pageSize,
       genuineness: filter || undefined,
+      disagreement: reviewFilter === "disagreement" || undefined,
+      needs_review: reviewFilter === "needs_review" || undefined,
     },
   ) as {
     data: GenuinenessBuild | undefined;
@@ -538,14 +542,30 @@ export default function GenuinenessTab() {
         rowKey={(item) => item.docId}
         title={`판별 결과 상세`}
         toolbar={
-          <FilterPills
-            options={FILTER_OPTIONS}
-            value={filter}
-            onChange={(value) => {
-              setFilter(value);
-              setPage(1);
-            }}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <FilterPills
+              options={FILTER_OPTIONS}
+              value={filter}
+              onChange={(value) => {
+                setFilter(value);
+                setPage(1);
+              }}
+            />
+            {summary.mode === "verify" && (
+              <FilterPills
+                options={[
+                  { label: "전체", value: "" },
+                  { label: "불일치만", value: "disagreement" },
+                  { label: "검토 필요", value: "needs_review" },
+                ]}
+                value={reviewFilter}
+                onChange={(value) => {
+                  setReviewFilter(value);
+                  setPage(1);
+                }}
+              />
+            )}
+          </div>
         }
         page={page}
         totalPages={totalPages}

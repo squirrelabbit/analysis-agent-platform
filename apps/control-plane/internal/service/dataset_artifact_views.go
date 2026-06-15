@@ -144,6 +144,7 @@ func (s *DatasetService) GetDocGenuinenessView(
 	projectID, datasetID, datasetVersionID string,
 	limit, offset int,
 	genuineness string,
+	disagreementOnly, needsReviewOnly bool,
 ) (domain.DatasetArtifactView, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
@@ -200,7 +201,7 @@ func (s *DatasetService) GetDocGenuinenessView(
 	var total int
 	var items []map[string]any
 	if verifyMode {
-		summary, prompt, total, items, err = loadDocGenuinenessVerifyArtifact(ref, cleanRef, limit, offset, genuineness)
+		summary, prompt, total, items, err = loadDocGenuinenessVerifyArtifact(ref, cleanRef, limit, offset, genuineness, disagreementOnly, needsReviewOnly)
 	} else {
 		summary, prompt, total, items, err = loadDocGenuinenessArtifact(ref, cleanRef, limit, offset, version.DatasetVersionID, genuineness)
 	}
@@ -543,7 +544,7 @@ func loadDocGenuinenessArtifactWithoutBody(db *sql.DB, source string, summary ma
 // effective label은 final_label이며, 화면 호환을 위해 item["genuineness"]에도
 // final_label을 채운다. nested 필드(model_a/b_result, judge_result)는 to_json으로
 // 받아 Go에서 객체로 복원, bool은 CAST 후 복원한다.
-func loadDocGenuinenessVerifyArtifact(ref, cleanRef string, limit, offset int, genuineness string) (map[string]any, string, int, []map[string]any, error) {
+func loadDocGenuinenessVerifyArtifact(ref, cleanRef string, limit, offset int, genuineness string, disagreementOnly, needsReviewOnly bool) (map[string]any, string, int, []map[string]any, error) {
 	db, cleanup, err := openTempDuckDB()
 	if err != nil {
 		return nil, "", 0, nil, err
@@ -564,12 +565,26 @@ func loadDocGenuinenessVerifyArtifact(ref, cleanRef string, limit, offset int, g
 		return nil, "", 0, nil, err
 	}
 
-	whereSource, whereJoin := "", ""
-	filteredTotal := total
+	// 필터(검토 큐): final_label(genuineness) + 불일치만 + 검토 필요만. AND 결합.
+	var condsSource, condsJoin []string
 	if g := strings.TrimSpace(genuineness); g != "" {
 		esc := escapeDuckDBLiteral(g)
-		whereSource = fmt.Sprintf("WHERE final_label = '%s'", esc)
-		whereJoin = fmt.Sprintf("WHERE dg.final_label = '%s'", esc)
+		condsSource = append(condsSource, fmt.Sprintf("final_label = '%s'", esc))
+		condsJoin = append(condsJoin, fmt.Sprintf("dg.final_label = '%s'", esc))
+	}
+	if disagreementOnly {
+		condsSource = append(condsSource, "is_disagreement = true")
+		condsJoin = append(condsJoin, "dg.is_disagreement = true")
+	}
+	if needsReviewOnly {
+		condsSource = append(condsSource, "needs_review = true")
+		condsJoin = append(condsJoin, "dg.needs_review = true")
+	}
+	whereSource, whereJoin := "", ""
+	filteredTotal := total
+	if len(condsSource) > 0 {
+		whereSource = "WHERE " + strings.Join(condsSource, " AND ")
+		whereJoin = "WHERE " + strings.Join(condsJoin, " AND ")
 		filteredTotal, err = countRowsWhere(db, source, whereSource)
 		if err != nil {
 			return nil, "", 0, nil, err

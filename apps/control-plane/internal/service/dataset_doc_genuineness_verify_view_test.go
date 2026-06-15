@@ -47,7 +47,7 @@ func TestGetDocGenuinenessViewVerify(t *testing.T) {
 		t.Fatalf("version: %v", err)
 	}
 
-	view, err := svc.GetDocGenuinenessView("p1", "d1", "v1", 100, 0, "")
+	view, err := svc.GetDocGenuinenessView("p1", "d1", "v1", 100, 0, "", false, false)
 	if err != nil {
 		t.Fatalf("GetDocGenuinenessView verify: %v", err)
 	}
@@ -94,5 +94,22 @@ func TestGetDocGenuinenessViewVerify(t *testing.T) {
 	// applied에 classify/judge 모델.
 	if view.Applied == nil || view.Applied["judge_model"] != "mj" {
 		t.Fatalf("applied judge_model: %+v", view.Applied)
+	}
+
+	// 검토 큐 필터 — 불일치만 → d2만.
+	disOnly, err := svc.GetDocGenuinenessView("p1", "d1", "v1", 100, 0, "", true, false)
+	if err != nil {
+		t.Fatalf("disagreement filter: %v", err)
+	}
+	if len(disOnly.Items) != 1 || disOnly.Items[0]["doc_id"] != "d2" {
+		t.Fatalf("disagreement-only should return [d2], got %+v", disOnly.Items)
+	}
+	// needs_review만 → d2(needs_review=true)만.
+	nr, err := svc.GetDocGenuinenessView("p1", "d1", "v1", 100, 0, "", false, true)
+	if err != nil {
+		t.Fatalf("needs_review filter: %v", err)
+	}
+	if len(nr.Items) != 1 || nr.Items[0]["doc_id"] != "d2" {
+		t.Fatalf("needs_review-only should return [d2], got %+v", nr.Items)
 	}
 }

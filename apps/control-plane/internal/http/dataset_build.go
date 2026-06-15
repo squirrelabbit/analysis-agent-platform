@@ -107,12 +107,16 @@ func (s *Server) handleGetCleanView(w stdhttp.ResponseWriter, r *stdhttp.Request
 func (s *Server) handleGetDocGenuinenessView(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	limit, offset := parseArtifactPagination(r)
 	genuineness := strings.TrimSpace(r.URL.Query().Get("genuineness"))
+	// 교차검증(verify) 검토 큐 필터 (ADR-026) — verify artifact에만 의미.
+	disagreementOnly := r.URL.Query().Get("disagreement") == "true"
+	needsReviewOnly := r.URL.Query().Get("needs_review") == "true"
 	view, err := s.datasetService.GetDocGenuinenessView(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
 		r.PathValue("version_id"),
 		limit, offset,
 		genuineness,
+		disagreementOnly, needsReviewOnly,
 	)
 	if err != nil {
 		s.writeServiceError(w, err)

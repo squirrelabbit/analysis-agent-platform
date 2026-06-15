@@ -1100,9 +1100,20 @@ paths:
           description: |
             genuineness 서버 필터(genuine_review/non_review/uncertain 등). 지정 시 해당
             판별 결과 문서만 반환하고 pagination.total도 필터 기준. summary(차트 통계)는
-            필터와 무관하게 전체 분포 유지. silverone 2026-06-05.
+            필터와 무관하게 전체 분포 유지. silverone 2026-06-05. (verify 모드에선
+            final_label 기준 필터.)
           schema:
             type: string
+        - name: disagreement
+          in: query
+          required: false
+          description: "교차검증(verify) 검토 큐 필터 (ADR-026). true면 두 모델이 갈린 문서만 반환."
+          schema: { type: boolean }
+        - name: needs_review
+          in: query
+          required: false
+          description: "교차검증(verify) 검토 큐 필터. true면 needs_review=true(저신뢰/review) 문서만 반환."
+          schema: { type: boolean }
       responses:
         "200":
           description: doc_genuineness artifact view
