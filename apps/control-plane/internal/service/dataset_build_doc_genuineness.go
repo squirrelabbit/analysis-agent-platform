@@ -86,6 +86,11 @@ func (s *DatasetService) BuildDocGenuineness(projectID, datasetID, datasetVersio
 	if version.Metadata == nil {
 		version.Metadata = map[string]any{}
 	}
+	// 마이그레이션 빈틈 메움 — runs 도입 *이전*에 빌드된 단일 결과는 runs에
+	// 없다. 아래에서 doc_genuineness_ref/summary를 이번 실행 값으로 덮어쓰기
+	// 전에, runs 키가 없으면 기존 단일 결과를 run 1건으로 미리 편입한다(다른
+	// 모델·다른 파일일 때만). 그래야 새 모델 1회 실행만으로 옛 결과와 비교 가능.
+	legacyRun, hasLegacy := pendingLegacyDocGenuinenessRun(version.Metadata, outputPath)
 	version.Metadata["doc_genuineness_status"] = "running"
 	version.Metadata["doc_genuineness_uri"] = outputPath
 	version.Metadata["doc_genuineness_ref"] = outputPath
@@ -154,6 +159,10 @@ func (s *DatasetService) BuildDocGenuineness(projectID, datasetID, datasetVersio
 	}
 	// silverone 2026-06-15 — 모델별 결과 누적. 같은 모델은 갱신, 다른 모델은 추가.
 	// 비교 화면(GetDocGenuinenessRuns/CompareDocGenuineness)이 이 목록을 읽는다.
+	// 먼저 옛 단일 결과(있으면)를 편입한 뒤 이번 실행을 올린다.
+	if hasLegacy {
+		upsertDocGenuinenessRun(&version, legacyRun)
+	}
 	upsertDocGenuinenessRun(&version, domain.DocGenuinenessRun{
 		Model:         effectiveModel,
 		Ref:           genuinenessRef,

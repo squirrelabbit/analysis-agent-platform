@@ -132,6 +132,33 @@ func docGenuinenessRunsFromMetadata(metadata map[string]any) []domain.DocGenuine
 	}}
 }
 
+// pendingLegacyDocGenuinenessRun — runs 키가 아직 없는 버전에서, 덮어쓰기 전의
+// 단일 결과(doc_genuineness_ref + summary.model)를 run 1건으로 만들어 반환한다.
+// runs 도입 이전에 빌드된 첫 결과가 새 빌드로 사라지지 않게 하는 마이그레이션용.
+// 새로 쓸 파일(newOutputPath)과 같은 경로면(같은 모델 재빌드) 편입하지 않는다.
+func pendingLegacyDocGenuinenessRun(metadata map[string]any, newOutputPath string) (domain.DocGenuinenessRun, bool) {
+	if _, exists := metadata[docGenuinenessRunsMetaKey]; exists {
+		return domain.DocGenuinenessRun{}, false // 이미 runs로 관리됨
+	}
+	ref := strings.TrimSpace(metadataString(metadata, "doc_genuineness_ref", ""))
+	if ref == "" {
+		ref = strings.TrimSpace(metadataString(metadata, "doc_genuineness_uri", ""))
+	}
+	if ref == "" || ref == strings.TrimSpace(newOutputPath) {
+		return domain.DocGenuinenessRun{}, false
+	}
+	model := summaryMetadataString(metadata, "doc_genuineness_summary", "model")
+	if model == "" {
+		model = "default"
+	}
+	return domain.DocGenuinenessRun{
+		Model:         model,
+		Ref:           ref,
+		PromptVersion: strings.TrimSpace(metadataString(metadata, "doc_genuineness_prompt_version", "")),
+		CompletedAt:   anyTimeValue(metadata["doc_genuineness_completed_at"]),
+	}, true
+}
+
 // findDocGenuinenessRun — 모델 id로 run 1건 조회.
 func findDocGenuinenessRun(runs []domain.DocGenuinenessRun, model string) (domain.DocGenuinenessRun, bool) {
 	model = strings.TrimSpace(model)

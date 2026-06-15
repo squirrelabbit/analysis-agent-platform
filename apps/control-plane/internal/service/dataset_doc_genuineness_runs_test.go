@@ -55,6 +55,37 @@ func TestDocGenuinenessRunsFromMetadata_RoundTripStrings(t *testing.T) {
 	}
 }
 
+func TestPendingLegacyDocGenuinenessRun(t *testing.T) {
+	// runs 키 없는 옛 단일 결과 → 새 모델 파일로 빌드 시 편입 대상.
+	legacy := map[string]any{
+		"doc_genuineness_ref":     "/dg.jsonl",
+		"doc_genuineness_summary": map[string]any{"model": "model-max"},
+	}
+	run, ok := pendingLegacyDocGenuinenessRun(legacy, "/dg.model-ultra.jsonl")
+	if !ok || run.Model != "model-max" || run.Ref != "/dg.jsonl" {
+		t.Fatalf("expected legacy max run, got ok=%v run=%+v", ok, run)
+	}
+
+	// 이미 runs 키가 있으면 편입 안 함(이미 관리됨).
+	withRuns := map[string]any{
+		docGenuinenessRunsMetaKey: []any{map[string]any{"model": "m", "ref": "/r.jsonl"}},
+		"doc_genuineness_ref":     "/dg.jsonl",
+	}
+	if _, ok := pendingLegacyDocGenuinenessRun(withRuns, "/new.jsonl"); ok {
+		t.Fatal("should not fold legacy when runs key exists")
+	}
+
+	// 새로 쓸 파일과 같은 경로(같은 모델 재빌드)면 편입 안 함.
+	if _, ok := pendingLegacyDocGenuinenessRun(legacy, "/dg.jsonl"); ok {
+		t.Fatal("should not fold when ref == new output path")
+	}
+
+	// ref 없으면 편입 안 함.
+	if _, ok := pendingLegacyDocGenuinenessRun(map[string]any{}, "/new.jsonl"); ok {
+		t.Fatal("should not fold without ref")
+	}
+}
+
 func TestGetDocGenuinenessRuns_FillsDisplayName(t *testing.T) {
 	repo := store.NewMemoryStore()
 	if err := repo.SaveProject(domain.Project{ProjectID: "p1"}); err != nil {
