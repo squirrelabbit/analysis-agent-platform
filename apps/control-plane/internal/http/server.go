@@ -64,6 +64,9 @@ func NewServer(cfg config.Config) *Server {
 	server.datasetService.SetBuildJobStarter(starter)
 	server.datasetService.SetPythonAITaskTimeout(time.Duration(cfg.PythonAIWorkerHTTPTimeoutSec) * time.Second)
 	server.datasetService.SetLLOAModelDisplay(cfg.LLOAModel, cfg.LLOAModelDisplayName)
+	if err := server.datasetService.SetLLOAModelsPath(cfg.LLOAModelsPath); err != nil {
+		panic(err)
+	}
 	server.datasetService.SetPlanReuseEnabled(cfg.PlanReuseEnabled)
 	server.routes()
 	return server
@@ -93,6 +96,9 @@ func (s *Server) routes() {
 	// 전역 read-only prompt 선택지. task-folder prompt(doc_genuineness /
 	// clause_label)의 version/default/label을 Python worker로 proxy해 반환.
 	s.mux.HandleFunc("GET /prompt_options", s.handlePromptOptions)
+	// 전역 read-only 전처리 모델 선택지 (LLOA_MODELS env allowlist). 빌드 재실행
+	// 다이얼로그의 모델 select용. (silverone 2026-06-12)
+	s.mux.HandleFunc("GET /lloa_model_options", s.handleLLOAModelOptions)
 	// 전역 read-only taxonomy 정의. aspect key→한글 label 매핑 등을 Python
 	// worker로 proxy해 반환 (프론트 표시용).
 	s.mux.HandleFunc("GET /taxonomy", s.handleTaxonomy)

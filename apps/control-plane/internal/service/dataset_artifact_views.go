@@ -27,7 +27,9 @@ const (
 
 // enrichViewWithJob — view 공통 필드(started_at / completed_at / error_message
 // / progress / job_id)를 latest job + metadata에서 채워 넣는다. clean /
-// doc_genuineness / clause_label 3 view가 공유.
+// doc_genuineness / clause_label / clause_keywords 4 view가 공유.
+// progress는 buildJobMetadataPrefix가 buildType별 메타 키 prefix를 알아야
+// 로드된다 — 새 build view를 추가하면 그 switch에도 case를 더해야 한다.
 func enrichViewWithJob(view *domain.DatasetArtifactView, job *domain.DatasetBuildJob, metadata map[string]any, buildType string) {
 	if job != nil {
 		jobID := job.JobID
@@ -312,15 +314,21 @@ func (s *DatasetService) GetClauseLabelView(
 // ===== helpers =====
 
 // modelDisplayNameFor — artifact의 raw 모델 id에 대한 화면 표시명을 응답 시점에
-// 계산한다. 빌드 당시 모델(model)이 현재 설정된 LLOA_MODEL과 같을 때만 현재
-// LLOA_MODEL_DISPLAY_NAME을 반환한다. 다른 모델로 빌드된 옛 결과는 "" → 표시명
-// 미노출(프론트가 raw model로 fallback). 하드코딩 매핑 없이 env 기반.
+// 계산한다. 우선 LLOA_MODELS allowlist의 라벨에서 찾고(2026-06-12 모델 선택),
+// 없으면 기존 단일쌍(LLOA_MODEL/LLOA_MODEL_DISPLAY_NAME) 매칭으로 fallback.
+// 어디에도 없으면 "" → 표시명 미노출(프론트가 raw model로 fallback).
+// 하드코딩 매핑 없이 env 기반.
 func (s *DatasetService) modelDisplayNameFor(model string) string {
 	model = strings.TrimSpace(model)
-	if model == "" || s.lloaModelDisplayName == "" {
+	if model == "" {
 		return ""
 	}
-	if model != s.lloaModel {
+	for _, opt := range s.lloaModelOptions {
+		if opt.ModelID == model && opt.Label != opt.ModelID {
+			return opt.Label
+		}
+	}
+	if s.lloaModelDisplayName == "" || model != s.lloaModel {
 		return ""
 	}
 	return s.lloaModelDisplayName

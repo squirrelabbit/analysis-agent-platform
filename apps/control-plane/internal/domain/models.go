@@ -706,7 +706,10 @@ type DatasetClusterBuildRequest struct {
 // aspect_taxonomy_version 같은 worker 내부 default가 derive하는 필드는 제거.
 type DatasetDocGenuinenessBuildRequest struct {
 	DocGenuinenessPromptVer *string `json:"doc_genuineness_prompt_version,omitempty"`
-	Force                   *bool   `json:"force,omitempty"`
+	// silverone 2026-06-12 — 전처리 LLOA 모델 선택. 생략 시 worker env(LLOA_MODEL)
+	// default. allowlist(LLOA_MODELS) 검증은 job 생성 시 control-plane이 수행.
+	ModelID *string `json:"model_id,omitempty"`
+	Force   *bool   `json:"force,omitempty"`
 }
 
 type DatasetClauseLabelBuildRequest struct {
@@ -714,7 +717,18 @@ type DatasetClauseLabelBuildRequest struct {
 	// 5/20 결정 — doc_genuineness 결과로 필터링. nil이면 default
 	// ["genuine_review", "mixed"]로 자동 ON. explicit empty list ``[]``로 opt-out.
 	IncludeGenuineness []string `json:"include_genuineness,omitempty"`
-	Force              *bool    `json:"force,omitempty"`
+	// silverone 2026-06-12 — 전처리 LLOA 모델 선택 (doc_genuineness와 동일 정책).
+	ModelID *string `json:"model_id,omitempty"`
+	Force   *bool   `json:"force,omitempty"`
+}
+
+// LLOAModelOption — 전처리(doc_genuineness/clause_label) 빌드에 선택 가능한
+// LLOA 모델 항목. LLOA_MODELS env에서 파싱되며 Default는 LLOA_MODEL(worker
+// default)과 일치하는 항목에 표시된다.
+type LLOAModelOption struct {
+	ModelID string `json:"model_id"`
+	Label   string `json:"label"`
+	Default bool   `json:"default"`
 }
 
 // silverone 2026-06-10 — 수동 keyword build 요청. clause_label_ref 존재가 precondition.

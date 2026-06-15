@@ -23,4 +23,7 @@ export const buildKeys = {
     jobId?: string,
   ) =>
     [...buildKeys.all, versionId, type, jobId ?? "latest"] as const,
+
+  // 전처리 모델 선택지 (전역 — 버전과 무관).
+  lloaModelOptions: () => [...buildKeys.all, "lloa_model_options"] as const,
 };

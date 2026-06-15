@@ -26,6 +26,8 @@ COPY docs/api/openapi.frontend.yaml /app/docs/api/openapi.frontend.yaml
 # δ-4 (2026-05-21)로 skill_bundle.json은 삭제됐다 — plan은 planner_v2가
 # LLM으로 생성하므로 고정 카탈로그가 필요하지 않다.
 COPY config/task_registry.json /app/config/task_registry.json
+# silverone 2026-06-12 — 전처리 빌드 모델 선택 allowlist (config/*.json 패턴).
+COPY config/lloa_models.json /app/config/lloa_models.json
 
 EXPOSE 8080
 

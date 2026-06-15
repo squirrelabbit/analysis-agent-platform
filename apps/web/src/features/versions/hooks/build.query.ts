@@ -5,6 +5,14 @@ import { buildApi, type BuildViewParams } from "../api/build.api";
 import { mapBuild } from "../models/build";
 import type { BuildJobType } from "@/shared/types/common";
 
+// 전처리 모델 선택지 — env allowlist라 거의 변하지 않으므로 stale을 길게.
+export const useLloaModelOptions = () =>
+  useQuery({
+    queryKey: buildKeys.lloaModelOptions(),
+    queryFn: buildApi.getLloaModelOptions,
+    staleTime: 5 * 60 * 1000,
+  });
+
 export const useBuildVersion = (
   type: BuildJobType,
   jobId?: string,

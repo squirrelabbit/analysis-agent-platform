@@ -49,6 +49,11 @@ type Config struct {
 	// 일치할 때만 LLOAModelDisplayName을 노출한다(하드코딩 매핑 없음, env 기반).
 	LLOAModel            string
 	LLOAModelDisplayName string
+	// silverone 2026-06-12 — 전처리 빌드(doc_genuineness/clause_label) 모델 선택
+	// allowlist 파일 경로 (config/lloa_models.json). dataset_profiles.json과 같은
+	// config/*.json 패턴. LLOA_MODELS_PATH로 override. 파일 없으면 모델 select
+	// 미노출(env LLOA_MODEL default만 사용).
+	LLOAModelsPath string
 
 	// 인증/RBAC (ADR-025, silverone 2026-06-12). AuthEnabled가 false면 auth
 	// 미들웨어가 통과(7/30 사내망 격리 단계 호환). Google OIDC 설정 +
@@ -142,6 +147,9 @@ func Load() Config {
 	// adds first-token latency). Default 120s gives Anthropic + worker
 	// retry budget without making the dev loop intolerably slow.
 	pythonAIWorkerHTTPTimeoutSec := envPositiveInt("PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC", 120)
+	lloaModel := strings.TrimSpace(os.Getenv("LLOA_MODEL"))
+	lloaModelDisplayName := strings.TrimSpace(os.Getenv("LLOA_MODEL_DISPLAY_NAME"))
+	lloaModelsPath := resolvePath(os.Getenv("LLOA_MODELS_PATH"), filepath.Join(workspaceRoot, "config", "lloa_models.json"), workspaceRoot)
 	return Config{
 		BindAddr:                                addr,
 		StoreBackend:                            storeBackend,
@@ -174,8 +182,9 @@ func Load() Config {
 		AnthropicExecutionTokenCeiling:          anthropicExecutionTokenCeiling,
 		PythonAIWorkerHTTPTimeoutSec:            pythonAIWorkerHTTPTimeoutSec,
 		PlanReuseEnabled:                        envBool("ANALYSIS_PLAN_REUSE_ENABLED", false),
-		LLOAModel:                               strings.TrimSpace(os.Getenv("LLOA_MODEL")),
-		LLOAModelDisplayName:                    strings.TrimSpace(os.Getenv("LLOA_MODEL_DISPLAY_NAME")),
+		LLOAModel:                               lloaModel,
+		LLOAModelDisplayName:                    lloaModelDisplayName,
+		LLOAModelsPath:                          lloaModelsPath,
 		AuthEnabled:                             envBool("AUTH_ENABLED", false),
 		AuthGoogleClientID:                      strings.TrimSpace(os.Getenv("AUTH_GOOGLE_CLIENT_ID")),
 		AuthGoogleSecret:                        strings.TrimSpace(os.Getenv("AUTH_GOOGLE_CLIENT_SECRET")),
@@ -302,3 +311,4 @@ func defaultCORSAllowedOrigins() []string {
 		"http://localhost:5173",
 	}
 }
+
