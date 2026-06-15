@@ -355,6 +355,8 @@ func buildJobMetadataPrefix(buildType string) string {
 		return "clause_label"
 	case datasetBuildTypeDocGenuineness:
 		return "doc_genuineness"
+	case datasetBuildTypeClauseKeywords:
+		return "clause_keywords"
 	default:
 		return ""
 	}
