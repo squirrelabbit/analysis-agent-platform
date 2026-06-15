@@ -709,7 +709,13 @@ type DatasetDocGenuinenessBuildRequest struct {
 	// silverone 2026-06-12 — 전처리 LLOA 모델 선택. 생략 시 worker env(LLOA_MODEL)
 	// default. allowlist(LLOA_MODELS) 검증은 job 생성 시 control-plane이 수행.
 	ModelID *string `json:"model_id,omitempty"`
-	Force   *bool   `json:"force,omitempty"`
+	// silverone 2026-06-15 (ADR-026) — verify 모드. true면 ClassifyModels 2개로
+	// 교차 분류 + 불일치 시 JudgeModel이 judge. final_label/needs_review 산출.
+	// ModelID(단일)와 동시 사용 안 함.
+	Verify         *bool    `json:"verify,omitempty"`
+	ClassifyModels []string `json:"classify_models,omitempty"`
+	JudgeModel     *string  `json:"judge_model,omitempty"`
+	Force          *bool    `json:"force,omitempty"`
 }
 
 type DatasetClauseLabelBuildRequest struct {
