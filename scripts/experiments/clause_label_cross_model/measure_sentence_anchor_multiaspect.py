@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -39,6 +40,7 @@ from python_ai_worker.runtime.common import _split_sentences
 
 SUBJECT_NAME = "강릉 국가유산야행"
 SUBJECT_TYPE = "festival"
+_REGEX_SENTENCE_SPLIT = re.compile(r"(?<=[.!?。！？])\s+|\n+")
 
 
 def build_system_prompt() -> str:
@@ -56,6 +58,12 @@ def build_system_prompt() -> str:
         "- sentiment: relevant=true면 positive|negative|neutral. false면 \"neutral\"\n"
         "출력은 입력 문장 수와 정확히 같은 길이의 JSON 배열만. 설명·코드펜스 금지. /no_think"
     )
+
+
+def load_system_prompt(path: str) -> str:
+    if not path:
+        return build_system_prompt()
+    return Path(path).read_text(encoding="utf-8").strip()
 
 
 def label_doc(client, system_prompt, sentences, max_tokens):
@@ -95,8 +103,32 @@ def label_doc(client, system_prompt, sentences, max_tokens):
     return out
 
 
-def build_docs(csv_path, limit):
+def split_sentences(text: str, *, splitter: str, kiwi=None) -> tuple[list[str], str]:
+    body = str(text or "").strip()
+    if not body:
+        return [], "empty"
+    if splitter == "kiwipiepy":
+        if kiwi is None:
+            raise RuntimeError("kiwipiepy splitter requested but Kiwi instance is missing")
+        return [s.text.strip() for s in kiwi.split_into_sents(body) if s.text.strip()], "kiwipiepy"
+    if splitter == "regex":
+        return [s.strip() for s in _REGEX_SENTENCE_SPLIT.split(body) if s.strip()], "regex"
+    return [s for s in _split_sentences(body, language="ko")[0] if s.strip()], "runtime"
+
+
+def build_docs(csv_path, limit, *, splitter: str):
+    kiwi = None
+    if splitter == "kiwipiepy":
+        try:
+            from kiwipiepy import Kiwi
+        except ImportError as exc:
+            raise RuntimeError(
+                "kiwipiepy splitter requested but kiwipiepy is not installed. "
+                "Use python3.11 with workers/python-ai dependencies."
+            ) from exc
+        kiwi = Kiwi()
     docs = []
+    backend_counts = {}
     with csv_path.open("r", encoding="utf-8") as f:
         for i, row in enumerate(csv.DictReader(f)):
             if limit is not None and len(docs) >= limit:
@@ -105,10 +137,11 @@ def build_docs(csv_path, limit):
             if not body:
                 continue
             row_id = (row.get("수집ID(고유)") or f"row:{i}").strip()
-            sents = [s for s in _split_sentences(body, language="ko")[0] if s.strip()]
+            sents, backend = split_sentences(body, splitter=splitter, kiwi=kiwi)
+            backend_counts[backend] = backend_counts.get(backend, 0) + 1
             if sents:
                 docs.append((row_id, sents))
-    return docs
+    return docs, backend_counts
 
 
 def client_for(model, cfg):
@@ -135,6 +168,17 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=8192)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--out-dir", default="/tmp/clause_sentence_multiaspect")
+    ap.add_argument(
+        "--system-prompt-file",
+        default="",
+        help="튜닝 프롬프트 파일. 생략하면 내장 측정 프롬프트 사용.",
+    )
+    ap.add_argument(
+        "--splitter",
+        choices=("kiwipiepy", "regex", "runtime"),
+        default="kiwipiepy",
+        help="문장 앵커 splitter. Gate 1은 kiwipiepy를 명시 사용한다.",
+    )
     args = ap.parse_args()
 
     models = [m.strip() for m in args.models.split(",") if m.strip()]
@@ -145,10 +189,10 @@ def main():
     cfg = load_config()
     if not (cfg.lloa_api_key or "").strip():
         raise SystemExit("LLOA_API_KEY 필요")
-    system_prompt = build_system_prompt()
-    docs = build_docs(Path(args.csv), args.limit)
+    system_prompt = load_system_prompt(args.system_prompt_file)
+    docs, backend_counts = build_docs(Path(args.csv), args.limit, splitter=args.splitter)
     total_sentences = sum(len(s) for _, s in docs)
-    print(f"[docs] {len(docs)} docs, {total_sentences} sentences")
+    print(f"[docs] {len(docs)} docs, {total_sentences} sentences, splitter={args.splitter} {backend_counts}")
 
     clients = {m: client_for(m, cfg) for m in models}
     tasks = [(di, m) for di in range(len(docs)) for m in models]
@@ -174,10 +218,21 @@ def main():
     a_card = []  # aspects per relevant sentence (A)
     b_card = []
     a_multi = b_multi = 0  # ≥2 aspect 문장 수
+    error_counts = {m: 0 for m in models}
+    error_examples: list[str] = []
+    skipped_docs = 0
 
     for di, (row_id, sents) in enumerate(docs):
         la = results.get((di, ma), {}); lb = results.get((di, mb), {})
-        if "__error__" in la or "__error__" in lb:
+        had_error = False
+        for m, labels in ((ma, la), (mb, lb)):
+            if "__error__" in labels:
+                error_counts[m] += 1
+                had_error = True
+                if len(error_examples) < 5:
+                    error_examples.append(f"{row_id} {m}: {labels['__error__']}")
+        if had_error:
+            skipped_docs += 1
             continue
         for idx in range(1, len(sents) + 1):
             a = la.get(idx); b = lb.get(idx)
@@ -203,6 +258,12 @@ def main():
 
     # relevant kappa
     tot = rel_total
+    if tot == 0:
+        raise RuntimeError(
+            "no comparable sentence labels produced; "
+            f"skipped_docs={skipped_docs}, error_counts={error_counts}, "
+            f"error_examples={error_examples[:3]}"
+        )
     po = rel_agree / tot if tot else 0
     pa, pb = a_rel / tot, b_rel / tot
     pe = pa * pb + (1 - pa) * (1 - pb)
@@ -213,7 +274,10 @@ def main():
     report = [
         "# 문장 앵커 + multi-label aspect 교차모델 측정",
         f"- 모델 A={ma} / B={mb}",
+        f"- splitter={args.splitter} backend_counts={backend_counts}",
+        f"- system_prompt_file={args.system_prompt_file or '(built-in)'}",
         f"- doc {len(docs)} / 문장 {total_sentences} / 비교쌍 {rel_total} / wall {wall:.1f}s",
+        f"- skipped_docs={skipped_docs} / error_counts={error_counts}",
         "",
         "## relevant (분절 대체 지표)",
         f"- Cohen's kappa: {kappa:.3f}   (raw 일치 {pct(rel_agree,tot)})",
