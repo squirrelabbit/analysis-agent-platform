@@ -65,7 +65,7 @@ func TestExportDocGenuinenessEnrichedCSVWithCleanRef(t *testing.T) {
 func TestExportDocGenuinenessEnrichedCSVWithoutCleanRefHasEmptyColumns(t *testing.T) {
 	dir := t.TempDir()
 	jsonl := writeDocGenuinenessJSONL(t, dir, []dgRecord{
-		{docID: "v:row:0", genuineness: "mixed", reason: "ambiguous"},
+		{docID: "v:row:0", genuineness: "uncertain", reason: "ambiguous"},
 	})
 
 	csvPath, err := exportDocGenuinenessEnrichedCSV(jsonl, "")
@@ -139,7 +139,7 @@ func TestExportClauseLabelEnrichedCSVWithCleanAndDgJoin(t *testing.T) {
 	})
 	dgJSONL := writeDocGenuinenessJSONL(t, dir, []dgRecord{
 		{docID: "v:row:0", genuineness: "genuine_review", reason: "ok"},
-		{docID: "v:row:1", genuineness: "mixed", reason: "partial"},
+		{docID: "v:row:1", genuineness: "uncertain", reason: "partial"},
 	})
 
 	csvPath, err := exportClauseLabelEnrichedCSV(clJSONL, parquet, dgJSONL)
@@ -171,7 +171,7 @@ func TestExportClauseLabelEnrichedCSVWithCleanAndDgJoin(t *testing.T) {
 		t.Errorf("rows[1].clause_text multiline escape failed: %q", rows[1][2])
 	}
 	// genuineness join 확인.
-	if rows[0][11] != "genuine_review" || rows[2][11] != "mixed" {
+	if rows[0][11] != "genuine_review" || rows[2][11] != "uncertain" {
 		t.Errorf("genuineness join failed: rows[0]=%q rows[2]=%q", rows[0][11], rows[2][11])
 	}
 }

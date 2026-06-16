@@ -15,7 +15,7 @@ import (
 // → clean_artifact_ref로 바뀌었다. is_relevant / scope / source_sentence_id
 // 모두 schema에서 빠지고 sentiment_reason / aspect_reason 추가.
 //
-// Optional ``include_genuineness=["genuine_review","mixed"]`` 명시 시
+// Optional ``include_genuineness=["genuine_review","uncertain"]`` 명시 시
 // doc_genuineness artifact를 필터링용으로 함께 inject.
 //
 // silverone 2026-05-28 — doc_genuineness PR-α2 패턴을 이식해 prompt에 subject
@@ -77,13 +77,14 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 	}
 
 	// 5/20 결정 — default ON. caller가 ``IncludeGenuineness``를 명시 안 하면
-	// ``["genuine_review", "mixed"]``로 자동 필터링 (non_review skip → LLOA
+	// ``["genuine_review", "uncertain"]``로 자동 필터링 (non_review skip → LLOA
 	// 호출 ~60% 절감 + 분석 가치 0). caller가 explicit empty list 보내면 모든
 	// doc 처리 (opt-out). 어느 경로든 doc_genuineness ready 필수.
+	// silverone 2026-06-16 — legacy mixed tier 제거, uncertain으로 통합.
 	tiers := input.IncludeGenuineness
 	optOut := input.IncludeGenuineness != nil && len(input.IncludeGenuineness) == 0
 	if input.IncludeGenuineness == nil {
-		tiers = []string{"genuine_review", "mixed"}
+		tiers = []string{"genuine_review", "uncertain"}
 	}
 	if !optOut {
 		genRef := strings.TrimSpace(metadataString(version.Metadata, "doc_genuineness_ref", ""))
@@ -92,9 +93,9 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 		}
 		if genRef == "" {
 			version.Metadata["clause_label_status"] = "failed"
-			version.Metadata["clause_label_error"] = "doc_genuineness artifact not ready — clause_label default filters genuine_review+mixed (5/20)"
+			version.Metadata["clause_label_error"] = "doc_genuineness artifact not ready — clause_label default filters genuine_review+uncertain (5/20)"
 			_ = s.store.SaveDatasetVersion(version)
-			return domain.DatasetVersion{}, ErrInvalidArgument{Message: "doc_genuineness artifact not ready — clause_label default filters genuine_review+mixed (5/20). Run /doc_genuineness first, or POST with include_genuineness=[] to process all docs."}
+			return domain.DatasetVersion{}, ErrInvalidArgument{Message: "doc_genuineness artifact not ready — clause_label default filters genuine_review+uncertain (5/20). Run /doc_genuineness first, or POST with include_genuineness=[] to process all docs."}
 		}
 		payload["include_genuineness"] = tiers
 		payload["doc_genuineness_ref"] = genRef

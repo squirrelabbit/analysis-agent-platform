@@ -4,7 +4,7 @@ from __future__ import annotations
 
 5/14~19 LLOA + claude-haiku PoC로 production-ready 검증된 doc-level genuineness
 분류를 정식 통합. 5-step pipeline의 clean 직후 단계 (ADR-017 task_registry,
-5/19 결정). cleaned doc 하나씩 LLOA 호출 → genuine_review / mixed / non_review
+5/19 결정). cleaned doc 하나씩 LLOA 호출 → genuine_review / non_review / uncertain
 3-tier 라벨 + reason 문장 생성.
 """
 
@@ -31,9 +31,9 @@ LOGGER = get(__name__)
 # artifact prompt_version은 resolve된 stem(예 "v1")을 그대로 기록한다.
 _PROMPT_TASK = "doc_genuineness"
 # silverone 2026-05-22 — prompt T/F/A 분류를 production schema에 매핑.
-# T=genuine_review, F=non_review, A=uncertain. mixed는 prompt에서 더는 생성
-# 안 되지만 enum에는 보존 — 옛 호출자 / clause_label default filter 호환.
-_ALLOWED_TIERS = {"genuine_review", "mixed", "non_review", "uncertain"}
+# T=genuine_review, F=non_review, A=uncertain.
+# silverone 2026-06-16 — legacy mixed tier 완전 제거. mixed 출력은 거부된다.
+_ALLOWED_TIERS = {"genuine_review", "non_review", "uncertain"}
 # silverone 2026-05-28 (D2) — clause_label과 동일 concurrency default.
 # `concurrency` payload key로 override 가능. festival 2121 docs 기준
 # sequential ~25분 → ThreadPoolExecutor(8) ~3분 (clause_label 패턴 검증값).
@@ -310,9 +310,9 @@ def _classify_doc(
 def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
     """ADR-017 / 5/19 결정 — clean 직후 doc-level 3-tier 진성 분류.
 
-    각 row의 cleaned_text를 LLOA에 한 호출씩 보내 genuine_review / mixed /
-    non_review 라벨을 받는다. 후속 clause_label이 이 라벨을 옵션 필터로
-    사용해서 *모든 doc 처리* vs *genuine_review·mixed만 처리*를 선택할 수
+    각 row의 cleaned_text를 LLOA에 한 호출씩 보내 genuine_review / non_review /
+    uncertain 라벨을 받는다. 후속 clause_label이 이 라벨을 옵션 필터로
+    사용해서 *모든 doc 처리* vs *genuine_review·uncertain만 처리*를 선택할 수
     있다 (5/19 결정 — default는 모든 doc 처리, 사용자가 명시 시만 필터).
 
     verify 모드(payload['verify']=true, ADR-026): 모델 2개로 교차 분류 + 불일치
@@ -612,7 +612,6 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         "notes": [
             f"dataset_doc_genuineness — {processed} docs classified "
             f"(genuine_review={tier_counts['genuine_review']}, "
-            f"mixed={tier_counts['mixed']}, "
             f"non_review={tier_counts['non_review']}, "
             f"uncertain={tier_counts['uncertain']}, "
             f"parse_failures={parse_failures}, "

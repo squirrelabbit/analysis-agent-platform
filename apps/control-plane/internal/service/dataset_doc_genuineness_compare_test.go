@@ -82,7 +82,7 @@ func tierIndex(t *testing.T, view domain.DocGenuinenessCompareView, tier string)
 func TestCompareDocGenuineness_AgreementAndConfusion(t *testing.T) {
 	svc, repo := newCompareService(t)
 	seedVersionWithRuns(t, repo, "v1", map[string]map[string]string{
-		"model-a": {"doc:1": "genuine_review", "doc:2": "non_review", "doc:3": "genuine_review", "doc:4": "mixed"},
+		"model-a": {"doc:1": "genuine_review", "doc:2": "non_review", "doc:3": "genuine_review", "doc:4": "uncertain"},
 		"model-b": {"doc:1": "genuine_review", "doc:2": "non_review", "doc:3": "non_review", "doc:4": "genuine_review"},
 	})
 
@@ -107,15 +107,15 @@ func TestCompareDocGenuineness_AgreementAndConfusion(t *testing.T) {
 	}
 	gi := tierIndex(t, view, "genuine_review")
 	ni := tierIndex(t, view, "non_review")
-	mi := tierIndex(t, view, "mixed")
+	ui := tierIndex(t, view, "uncertain")
 	if view.Confusion[gi][gi] != 1 || view.Confusion[ni][ni] != 1 {
 		t.Fatalf("diagonal wrong: %v", view.Confusion)
 	}
 	if view.Confusion[gi][ni] != 1 { // doc:3 A genuine, B non
 		t.Fatalf("confusion[genuine][non]=%d, want 1", view.Confusion[gi][ni])
 	}
-	if view.Confusion[mi][gi] != 1 { // doc:4 A mixed, B genuine
-		t.Fatalf("confusion[mixed][genuine]=%d, want 1", view.Confusion[mi][gi])
+	if view.Confusion[ui][gi] != 1 { // doc:4 A uncertain, B genuine
+		t.Fatalf("confusion[uncertain][genuine]=%d, want 1", view.Confusion[ui][gi])
 	}
 	if view.DisagreementsTotal != 2 || len(view.Disagreements) != 2 {
 		t.Fatalf("disagreements total=%d len=%d, want 2/2", view.DisagreementsTotal, len(view.Disagreements))
@@ -133,7 +133,7 @@ func TestCompareDocGenuineness_AgreementAndConfusion(t *testing.T) {
 	if view.UnreviewedDisagreements != 2 {
 		t.Fatalf("unreviewed=%d, want 2", view.UnreviewedDisagreements)
 	}
-	// 패턴: genuine→non, mixed→genuine 각 1건.
+	// 패턴: genuine→non, uncertain→genuine 각 1건.
 	if len(view.Patterns) != 2 {
 		t.Fatalf("patterns=%d, want 2: %+v", len(view.Patterns), view.Patterns)
 	}

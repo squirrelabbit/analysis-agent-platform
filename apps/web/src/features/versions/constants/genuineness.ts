@@ -1,6 +1,6 @@
 // 문서 진성 3-tier 분류 도메인 상수.
 // key는 백엔드 genuineness 컬럼 원본(snake_case)과 일치해야 서버 필터가 동작한다.
-// mixed는 planner가 더 이상 생성하지 않아(backward-compat enum만 존재) UI에서 제거.
+// silverone 2026-06-16 — legacy mixed tier는 백엔드 enum에서도 완전 제거됨.
 
 export type Genuineness = "genuine_review" | "non_review" | "uncertain";
 

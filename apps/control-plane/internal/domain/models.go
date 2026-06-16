@@ -721,7 +721,7 @@ type DatasetDocGenuinenessBuildRequest struct {
 type DatasetClauseLabelBuildRequest struct {
 	ClauseLabelPromptVer *string `json:"clause_label_prompt_version,omitempty"`
 	// 5/20 결정 — doc_genuineness 결과로 필터링. nil이면 default
-	// ["genuine_review", "mixed"]로 자동 ON. explicit empty list ``[]``로 opt-out.
+	// ["genuine_review", "uncertain"]로 자동 ON. explicit empty list ``[]``로 opt-out.
 	IncludeGenuineness []string `json:"include_genuineness,omitempty"`
 	// silverone 2026-06-12 — 전처리 LLOA 모델 선택 (doc_genuineness와 동일 정책).
 	ModelID *string `json:"model_id,omitempty"`

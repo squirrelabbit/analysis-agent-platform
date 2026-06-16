@@ -51,7 +51,7 @@ func extractDocGenuinenessConfig(metadata map[string]any) (map[string]any, error
 
 // BuildDocGenuineness — ADR-017 / 5/19 결정 5-step pipeline의 clean 직후
 // doc-level 진성 분류. cleaned doc 단위로 LLOA에 호출해 3-tier
-// (genuine_review / mixed / non_review) 라벨을 부여한다. clean ready
+// (genuine_review / non_review / uncertain) 라벨을 부여한다. clean ready
 // precondition은 CreateDocGenuinenessJob에서 검사.
 //
 // silverone 2026-05-22 (PR-α2) — `dataset.metadata.doc_genuineness`를 읽어

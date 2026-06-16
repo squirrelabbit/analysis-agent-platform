@@ -42,7 +42,6 @@ export interface GenuinenessSummaryDto {
   genuineness: {
     genuine_review?: number;
     non_review?: number;
-    mixed?: number;
     uncertain?: number;
   };
   total: number;
@@ -99,7 +98,6 @@ export interface GenuinenessSummary {
     genuine_review: number;
     non_review: number;
     uncertain: number;
-    mixed: number;
   };
   total: number;
   // silverone 2026-06-11 — 수동 보정 메타.
@@ -155,7 +153,6 @@ export const mapGenuinenessSummary = (
   genuineness: {
     genuine_review: dto.genuineness?.genuine_review ?? 0,
     non_review: dto.genuineness?.non_review ?? 0,
-    mixed: dto.genuineness?.mixed ?? 0,
     uncertain: dto.genuineness?.uncertain ?? 0,
   },
   total: dto.total ?? 0,

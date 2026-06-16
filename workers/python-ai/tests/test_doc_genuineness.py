@@ -1,8 +1,8 @@
 """dataset_doc_genuineness skill — 3-tier 분류 + LLOA mock 단위 테스트.
 
 ADR-017 / 5/19 결정. LLOA client는 urlopen 주입 패턴(test_lloa_client.py와
-동일)으로 mock한다. fixture: cleaned doc 4건 (genuine_review / mixed /
-non_review / empty).
+동일)으로 mock한다. fixture: cleaned doc 4건 (genuine_review / non_review /
+uncertain / empty).
 """
 from __future__ import annotations
 
@@ -112,8 +112,8 @@ class DocGenuinenessTests(unittest.TestCase):
             return doc_genuineness.run_dataset_doc_genuineness(payload or self._payload())
 
     def test_three_tier_classification_success(self) -> None:
-        # silverone 2026-05-22 — T/F/A prompt 채택 후 mixed 대신 uncertain 분기
-        # 잠금. mixed enum은 backward compat용으로 enum에는 남아 있다.
+        # silverone 2026-05-22 — T/F/A prompt 채택 후 mixed 대신 uncertain 분기.
+        # silverone 2026-06-16 — legacy mixed tier 완전 제거 (enum/count에서 빠짐).
         responses = {
             "row:1": _llm_completion(
                 '{"doc_id":"row:1","genuineness":"genuine_review","reason":"1인칭 야경 후기 중심."}'
@@ -136,7 +136,7 @@ class DocGenuinenessTests(unittest.TestCase):
         summary = artifact["summary"]
         self.assertEqual(artifact["skill_name"], "dataset_doc_genuineness")
         self.assertEqual(summary["tier_counts"]["genuine_review"], 1)
-        self.assertEqual(summary["tier_counts"]["mixed"], 0)
+        self.assertNotIn("mixed", summary["tier_counts"])
         self.assertEqual(summary["tier_counts"]["non_review"], 2)  # row:2 LLOA + row:4 empty shortcut
         self.assertEqual(summary["tier_counts"]["uncertain"], 1)
         self.assertEqual(summary["parse_failures"], 0)

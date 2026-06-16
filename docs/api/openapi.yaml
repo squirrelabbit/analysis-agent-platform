@@ -1051,9 +1051,9 @@ paths:
       tags: [Datasets]
       summary: doc_genuineness build job 큐잉
       description: |
-        cleaned doc 단위로 LLOA에 한 호출씩 보내 `genuine_review` / `mixed` /
-        `non_review` 3-tier 라벨을 부여한다. clean이 ready 상태여야 호출 가능.
-        후속 `clause_label`에서 `include_genuineness=["genuine_review","mixed"]`
+        cleaned doc 단위로 LLOA에 한 호출씩 보내 `genuine_review` / `non_review` /
+        `uncertain` 3-tier 라벨을 부여한다. clean이 ready 상태여야 호출 가능.
+        후속 `clause_label`에서 `include_genuineness=["genuine_review","uncertain"]`
         옵션을 쓰면 후기성 doc만 절 분리/감성·aspect 라벨링 단계로 흘려보낸다.
       operationId: createDocGenuinenessJob
       parameters:
@@ -1135,8 +1135,8 @@ paths:
         "운영자 수동 수정" 기본값으로 저장한다. 보정 해제는 DELETE override 사용.
 
         **주의**: 진성 라벨을 바꿔도 이미 생성된 clause_label/clause_keywords는
-        자동 재실행되지 않는다. clause_label 포함 경계(genuine_review/mixed ↔
-        non_review/uncertain)를 넘는 보정이고 후속 artifact가 ready면, GET 응답의
+        자동 재실행되지 않는다. clause_label 포함 경계(genuine_review/uncertain ↔
+        non_review)를 넘는 보정이고 후속 artifact가 ready면, GET 응답의
         `summary.downstream_rerun_recommended=true`로 재실행 권장을 노출한다.
       operationId: setDocGenuinenessOverride
       parameters:
@@ -1289,7 +1289,7 @@ paths:
       description: |
         cleaned doc 단위로 LLOA에 한 호출씩 보내 절 분리 + sentiment + aspect를
         한 번에 라벨링한다. clean이 ready 상태여야 호출 가능. 옵션
-        `include_genuineness=["genuine_review","mixed"]` 명시 시 doc_genuineness
+        `include_genuineness=["genuine_review","uncertain"]` 명시 시 doc_genuineness
         도 ready여야 한다 (후기성 doc만 통과).
       operationId: createClauseLabelJob
       parameters:
@@ -2718,7 +2718,7 @@ components:
             (`GET /datasets/.../{type}`)과 동일한 normalized core를 노출하면서 운영·감사용
             metadata는 superset으로 포함한다. 프론트 매퍼는 normalized key만 사용한다.
 
-            - `doc_genuineness`: core `{ genuineness: {genuine_review, mixed, non_review, uncertain}, total }`
+            - `doc_genuineness`: core `{ genuineness: {genuine_review, non_review, uncertain}, total }`
               + metadata (`applied`, `model`, `prompt_version`, `input_row_count`, `processed_row_count`,
               `parse_failures`, `total_prompt_tokens`, `total_completion_tokens`).
               `total`은 `processed_row_count`가 있으면 우선, 없으면 `genuineness` 값 합.
@@ -3059,7 +3059,7 @@ components:
         genuineness:
           type: string
           description: effective로 적용할 라벨
-          enum: [genuine_review, non_review, uncertain, mixed]
+          enum: [genuine_review, non_review, uncertain]
         reason:
           type: string
           description: (선택) 보정 사유 메모
@@ -4049,7 +4049,7 @@ components:
                   type: object
                   additionalProperties:
                     type: integer
-                  description: "key: genuine_review / mixed / non_review / unknown / value: doc count"
+                  description: "key: genuine_review / non_review / uncertain / unknown / value: doc count"
             items:
               type: array
               items:
@@ -4258,7 +4258,7 @@ components:
         tiers:
           type: array
           items: { type: string }
-          description: "confusion 행/열 순서 (genuine_review/mixed/non_review/uncertain)"
+          description: "confusion 행/열 순서 (genuine_review/non_review/uncertain)"
         compared: { type: integer, description: "양쪽 모두 존재하는 doc 수" }
         matched: { type: integer, description: "그중 라벨 일치 수" }
         agreement_rate: { type: number, format: float, description: "matched/compared (compared=0이면 0)" }
@@ -4603,7 +4603,7 @@ components:
           description: "키워드 최소 길이(글자). 미지정 시 worker default 2."
     DatasetClauseLabelBuildRequest:
       type: object
-      description: "ADR-017 / 5/19 + 5/20 — cleaned doc 단위 LLOA 한 호출 절 분리 + sentiment + aspect 라벨링 build payload. prompt v3 schema (clause/sentiment/aspect 3 필드). 5/20 결정으로 output_path/batch_size/max_tokens/aspect_taxonomy_version 제거 — worker default 사용 + default include_genuineness=[\"genuine_review\",\"mixed\"]."
+      description: "ADR-017 / 5/19 + 5/20 — cleaned doc 단위 LLOA 한 호출 절 분리 + sentiment + aspect 라벨링 build payload. prompt v3 schema (clause/sentiment/aspect 3 필드). 5/20 결정으로 output_path/batch_size/max_tokens/aspect_taxonomy_version 제거 — worker default 사용 + default include_genuineness=[\"genuine_review\",\"uncertain\"]."
       properties:
         clause_label_prompt_version:
           type: string
@@ -4612,8 +4612,8 @@ components:
           type: array
           items:
             type: string
-            enum: [genuine_review, mixed, non_review]
-          description: "doc_genuineness 결과로 필터링 (예: ['genuine_review','mixed']). 명시 안 하면 모든 doc 처리. 명시 시 doc_genuineness ready 필요."
+            enum: [genuine_review, non_review, uncertain]
+          description: "doc_genuineness 결과로 필터링 (예: ['genuine_review','uncertain']). 명시 안 하면 모든 doc 처리. 명시 시 doc_genuineness ready 필요."
         model_id:
           type: string
           description: "전처리에 사용할 LLOA 모델 id (2026-06-12 모델 선택). GET /lloa_model_options의 items[].model_id 값. 미지정 시 worker env(LLOA_MODEL) default. allowlist(config/lloa_models.json) 밖이면 400. 실사용 모델은 artifact summary.model에 기록된다."

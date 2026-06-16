@@ -19,22 +19,21 @@ import (
 // effective 기준으로 재집계한다. 보정 시점의 artifact 라벨을 original로 snapshot
 // 해 두어 summary 재집계·감사·재현이 가능하다. version 스코프.
 
-// 보정 허용 tier. genuine_review / non_review / uncertain은 현행 prompt 산출,
-// mixed는 legacy 데이터 호환.
+// 보정 허용 tier. genuine_review / non_review / uncertain.
+// silverone 2026-06-16 — legacy mixed tier 제거.
 var allowedGenuinenessTiers = map[string]bool{
 	"genuine_review": true,
 	"non_review":     true,
 	"uncertain":      true,
-	"mixed":          true,
 }
 
 // 수정 사유 미입력 시 서버 기본값.
 const defaultOverrideReason = "운영자 수동 수정"
 
 // clauseLabelIncludedTier — clause_label build 기본 포함 집합(genuine_review +
-// mixed). 이 경계를 넘는 보정은 절/감성/키워드 분석 재실행 권장 대상이다.
+// uncertain). 이 경계를 넘는 보정은 절/감성/키워드 분석 재실행 권장 대상이다.
 func clauseLabelIncludedTier(tier string) bool {
-	return tier == "genuine_review" || tier == "mixed"
+	return tier == "genuine_review" || tier == "uncertain"
 }
 
 func docGenuinenessRefFromMetadata(metadata map[string]any) string {
@@ -81,7 +80,7 @@ func (s *DatasetService) SetDocGenuinenessOverride(
 	}
 	tier := strings.TrimSpace(req.Genuineness)
 	if !allowedGenuinenessTiers[tier] {
-		return domain.DocGenuinenessOverride{}, ErrInvalidArgument{Message: "genuineness must be one of genuine_review / non_review / uncertain / mixed"}
+		return domain.DocGenuinenessOverride{}, ErrInvalidArgument{Message: "genuineness must be one of genuine_review / non_review / uncertain"}
 	}
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {

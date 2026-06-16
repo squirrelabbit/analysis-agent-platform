@@ -107,8 +107,8 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
     # 추가 시점에는 lock test도 같이 갱신.
     "clauses": TableSchema(
         name="clauses",
-        description="clause_label 단계 결과. doc 단위 LLOA 호출로 절 분리 + sentiment + aspect 라벨링. 진성/혼합(genuine_review/mixed) 문서에서 추출된 절만 포함하며 전체 문서가 아니다.",
-        grain="한 행 = 진성/혼합 문서에서 추출된 절(문장) 1개",
+        description="clause_label 단계 결과. doc 단위 LLOA 호출로 절 분리 + sentiment + aspect 라벨링. 진성/불확실(genuine_review/uncertain) 문서에서 추출된 절만 포함하며 전체 문서가 아니다.",
+        grain="한 행 = 진성/불확실 문서에서 추출된 절(문장) 1개",
         coverage="clause_label이 만든 절만 — non_review 문서는 미포함. 전체 source 문서가 아니다",
         counting_unit="clause/mention(절·언급)",
         use_for="sentiment, aspect, 절 단위 근거(evidence), 언급 수",
@@ -137,7 +137,7 @@ TABLE_SCHEMAS: dict[str, TableSchema] = {
         avoid_for="",
         columns=(
             ColumnSpec("doc_id", "string", "docs.doc_id와 join 가능"),
-            ColumnSpec("genuineness", "string", "genuine_review | mixed | non_review"),
+            ColumnSpec("genuineness", "string", "genuine_review | non_review | uncertain"),
             ColumnSpec("reason", "string", "분류 사유 (LLM 출력)"),
             ColumnSpec("prompt_version", "string", "분류에 사용된 prompt 버전"),
             ColumnSpec("source", "string", "분류 호출 식별자"),

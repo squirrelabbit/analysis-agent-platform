@@ -14,7 +14,8 @@ import (
 // 같은 버전 = 같은 원본이라 doc_id가 정확히 정렬된다.
 
 // compareTiers — confusion matrix 행/열 순서이자 비교 대상 tier 집합.
-var compareTiers = []string{"genuine_review", "mixed", "non_review", "uncertain"}
+// silverone 2026-06-16 — legacy mixed tier 제거.
+var compareTiers = []string{"genuine_review", "non_review", "uncertain"}
 
 // compareHighAgreement — 정답이 없을 때 "일치율 높음(agreement_only)" vs "검토
 // 필요(review_needed)"를 가르는 임계. 그 이하면 모델 간 기준 차가 크다고 본다.

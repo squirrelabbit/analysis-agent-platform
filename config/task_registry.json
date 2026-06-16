@@ -141,7 +141,7 @@
       "task_path": "/tasks/dataset_doc_genuineness",
       "kind": "dataset_build",
       "visibility": "internal",
-      "description": "5/19 결정 5-step pipeline doc-level 진성 분류 — cleaned doc 단위 3-tier (genuine_review / mixed / non_review) LLOA 호출.",
+      "description": "5/19 결정 5-step pipeline doc-level 진성 분류 — cleaned doc 단위 3-tier (genuine_review / non_review / uncertain) LLOA 호출.",
       "dataset_source": "clean",
       "result_kind": "dataset_artifact",
       "result_scope": "full_dataset",
