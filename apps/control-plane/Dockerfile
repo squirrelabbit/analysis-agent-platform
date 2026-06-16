@@ -21,7 +21,6 @@ WORKDIR /app
 COPY --from=build /out/server /usr/local/bin/server
 COPY --from=build /out/temporal-worker /usr/local/bin/temporal-worker
 COPY docs/api/openapi.yaml /app/docs/api/openapi.yaml
-COPY docs/api/openapi.frontend.yaml /app/docs/api/openapi.frontend.yaml
 # ADR-017 (2026-05-19) — internal task routing 카탈로그 (planner와 분리).
 # δ-4 (2026-05-21)로 skill_bundle.json은 삭제됐다 — plan은 planner_v2가
 # LLM으로 생성하므로 고정 카탈로그가 필요하지 않다.
