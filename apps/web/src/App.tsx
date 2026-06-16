@@ -10,9 +10,10 @@ import ProjectPage from "./pages/ProjectPage";
 import DatasetListRedesign from "./features/datasets/redesign/DatasetListRedesign";
 import VersionDetailPage from "./features/versions/pages/VersionDetailPage";
 import DatasetVersionListRedesign from "./features/versions/redesign/DatasetVersionListRedesign";
-import ReportPage from "./features/reports/pages/ReportPage";
 import DocGenuinenessComparePage from "./features/versions/pages/DocGenuinenessComparePage";
 import LoginPage from "./features/auth/pages/LoginPage";
+import ReportListPage from "./features/reports/pages/ReportListPage";
+import ReportEditorPage from "./features/reports/pages/ReportEditorPage";
 
 const queryClient = new QueryClient();
 
@@ -41,7 +42,9 @@ function App() {
               </Route>
               {/* <Route path="scenarios" element={<ScenarioPage />} /> */}
               <Route path="chats" element={<ChatPage />} />
-              <Route path="reports" element={<ReportPage />} />
+              <Route path="reports" element={<ReportListPage />} />
+              {/* 에디터: reportId 라우팅 추가. 본문 로드/저장 API 연동은 후속(현재 localStorage). */}
+              <Route path="reports/:reportId" element={<ReportEditorPage />} />
             </Route>
           </Routes>
         </AppLayout>

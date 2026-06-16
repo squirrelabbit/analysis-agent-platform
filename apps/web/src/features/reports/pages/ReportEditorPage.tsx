@@ -2,15 +2,21 @@
 // 좌: 저장된 결과 보관함(LIBRARY) / 우: 보고서 캔버스(블록 구성).
 // 채팅에서 저장된 차트·표·원문 결과를 골라 블록으로 추가하고, 드래그 정렬·너비 조절·
 // 해석 문구·표시 옵션을 편집한 뒤 PDF/HTML로 내보낸다.
-// NOTE: LIBRARY와 영속(localStorage)은 디자인 샘플. 실제 결과 저장/조회·보고서 저장 API 연동 필요.
+// 보고서 문서 API(GET 단건 → hydrate, 변경분 디바운스 PUT 자동저장)와 연동된다.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText } from "lucide-react";
+import { useParams } from "react-router-dom";
+import { AlertCircle, Check, FileText, Loader2, Pencil } from "lucide-react";
 import Breadcrumbs from "@/components/common/Breadcrumbs";
 import { cn } from "@/lib/utils";
 import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { useProjectDetail } from "@/features/projects/hooks/project.query";
-import { libById } from "../models/editor";
+import { savedResultToLibraryItem } from "../models/library";
+import { useSavedResults } from "../hooks/report.query";
+import { useDeleteSavedResult } from "../hooks/report.mutation";
+import { useReport } from "../hooks/reportDoc.query";
+import { useUpdateReport } from "../hooks/reportDoc.mutation";
 import { useReportEditor } from "../hooks/useReportEditor";
+import type { ReportBlock as ReportBlockModel } from "../models";
 import { ReportLibrary } from "../components/ReportLibrary";
 import { ReportBlock } from "../components/ReportBlock";
 import { BlockPopover } from "../components/BlockPopover";
@@ -29,10 +35,123 @@ type DropMarker =
   | { orient: "v"; left: number; top: number; height: number }
   | { orient: "h"; left: number; top: number; width: number };
 
-export default function ReportPage() {
+type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
+
+// 자동저장 디바운스(ms).
+const AUTOSAVE_DEBOUNCE_MS = 800;
+
+export default function ReportEditorPage() {
   const { projectId } = useProjectParams();
+  const { reportId } = useParams();
   const { data: project } = useProjectDetail(projectId);
   const { state, dispatch } = useReportEditor();
+  const deleteSaved = useDeleteSavedResult(projectId);
+
+  // 보고서 문서 로드 → 에디터 hydrate.
+  const {
+    data: report,
+    isLoading: reportLoading,
+    isError: reportError,
+  } = useReport(projectId, reportId);
+  const updateReport = useUpdateReport(projectId);
+
+  // 자동저장 상태 + 중복 저장 방지용 마지막 저장 스냅샷.
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const lastSavedRef = useRef<string>("");
+  // 현재 상태가 어떤 보고서로 hydrate됐는지. 라우트 reportId와 일치할 때만 저장한다
+  // (hydrate 전/다른 보고서 전환 순간의 stale 저장 방지).
+  const hydratedIdRef = useRef<string | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 디바운스 대기 중인 미저장 변경분. 페이지 이탈/언마운트 시 즉시 flush한다.
+  const pendingRef = useRef<{ title: string; blocks: unknown[] } | null>(null);
+
+  // 단건 로드 시 1회 hydrate. blocks는 에디터가 소유하는 contract라 그대로 캐스팅.
+  useEffect(() => {
+    if (!report) return;
+    const blocks = (report.blocks as ReportBlockModel[]) ?? [];
+    dispatch({
+      type: "hydrate",
+      state: { title: report.title, mode: "edit", selected: null, blocks },
+    });
+    lastSavedRef.current = JSON.stringify({ title: report.title, blocks });
+    hydratedIdRef.current = report.reportId;
+    // 서버 로드 직후 1회 "저장됨" 동기화 — 로드 시점에만 실행돼 cascading 영향 없음.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSaveStatus("saved");
+    // report 객체 동일 id 동안은 재hydrate 안 함(편집 중 덮어쓰기 방지).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report?.reportId]);
+
+  // 변경분 디바운스 자동저장(PUT 전체 교체). hydrate 직후/무변경은 skip.
+  useEffect(() => {
+    if (!reportId || hydratedIdRef.current !== reportId) return;
+    const snapshot = JSON.stringify({
+      title: state.title,
+      blocks: state.blocks,
+    });
+    if (snapshot === lastSavedRef.current) {
+      pendingRef.current = null;
+      return;
+    }
+    pendingRef.current = { title: state.title, blocks: state.blocks };
+    setSaveStatus("dirty");
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      setSaveStatus("saving");
+      updateReport.mutate(
+        { reportId, title: state.title, blocks: state.blocks },
+        {
+          onSuccess: () => {
+            lastSavedRef.current = snapshot;
+            // 저장 직후에도 더 새로운 변경이 쌓였으면 pending 유지(이탈 시 flush 대상).
+            // 방금 저장한 스냅샷과 동일할 때만 비운다.
+            if (JSON.stringify(pendingRef.current) === snapshot)
+              pendingRef.current = null;
+            setSaveStatus("saved");
+          },
+          onError: () => setSaveStatus("error"),
+        },
+      );
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.title, state.blocks, reportId]);
+
+  // 페이지 이탈/언마운트 시 디바운스 대기 중이던 변경분을 즉시 저장(마지막 변경 유실 방지).
+  // flush에 필요한 최신 값은 커밋 후 effect에서 ref에 담아 둔다(렌더 중 ref 갱신 금지).
+  const flushDataRef = useRef({ reportId, mutate: updateReport.mutate });
+  useEffect(() => {
+    flushDataRef.current = { reportId, mutate: updateReport.mutate };
+  });
+  useEffect(
+    () => () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      const pending = pendingRef.current;
+      const { reportId: rid, mutate } = flushDataRef.current;
+      // hydrate된 보고서와 일치할 때만 저장(stale/타 보고서로의 오저장 방지).
+      if (!pending || !rid || hydratedIdRef.current !== rid) return;
+      pendingRef.current = null;
+      mutate({ reportId: rid, title: pending.title, blocks: pending.blocks });
+    },
+    [],
+  );
+
+  // 보관함(saved_results) 실데이터 → 에디터 뷰모델(LibraryItem) + id 조회 맵.
+  const { data: saved } = useSavedResults(projectId);
+  const library = useMemo(
+    () => (saved ?? []).map(savedResultToLibraryItem),
+    [saved],
+  );
+  const libMap = useMemo(
+    () => new Map(library.map((l) => [l.id, l])),
+    [library],
+  );
+  const libById = (id: string) => libMap.get(id);
 
   const blocksRef = useRef<HTMLDivElement>(null);
   const libDragId = useRef<string | null>(null);
@@ -60,8 +179,27 @@ export default function ReportPage() {
   };
 
   const addBlock = (libId: string, atIdx?: number, sameRow = false) => {
-    dispatch({ type: "addBlock", libId, atIdx, newRow: !sameRow });
+    // 메인이 표가 아니면(metric/evidence/chart) display를 상세 데이터 폴드로 보여줄 수 있다.
+    const r = libById(libId)?.result;
+    const hasDetail =
+      !!r && (!!r.metric || !!r.evidence || !!r.chart) && !!r.display;
+    dispatch({ type: "addBlock", libId, atIdx, newRow: !sameRow, hasDetail });
     showToast(`"${libById(libId)?.title}" 추가됨`);
+  };
+
+  // 보관함에서 결과 삭제. 삭제 확인은 보관함 카드의 DeleteDialog가 담당.
+  // 성공 시 삭제된 결과를 참조하던 블록도 함께 정리한다.
+  const deleteLib = (libId: string) => {
+    const title = libById(libId)?.title ?? "결과";
+    deleteSaved.mutate(libId, {
+      onSuccess: () => {
+        state.blocks
+          .filter((b) => b.libId === libId)
+          .forEach((b) => dispatch({ type: "deleteBlock", uid: b.uid }));
+        showToast(`"${title}" 삭제됨`);
+      },
+      onError: () => showToast("삭제에 실패했어요"),
+    });
   };
 
   // 드롭 위치 계산 — 포인터에서 가장 가까운 카드 중심 기준 앞/뒤 삽입.
@@ -273,12 +411,29 @@ export default function ReportPage() {
     }, 220);
   };
 
+  if (reportLoading) {
+    return (
+      <div className="grid h-full place-items-center text-sm text-zinc-400">
+        보고서를 불러오는 중…
+      </div>
+    );
+  }
+  if (reportError || !report) {
+    return (
+      <div className="grid h-full place-items-center text-sm text-zinc-400">
+        보고서를 찾을 수 없습니다.
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full">
       {isEdit && (
         <ReportLibrary
+          items={library}
           usedIds={usedIds}
           onAdd={(libId) => addBlock(libId)}
+          onDelete={deleteLib}
           onDragStart={(libId) => {
             libDragId.current = libId;
           }}
@@ -305,8 +460,9 @@ export default function ReportPage() {
             <Breadcrumbs
           items={[
             { label: "프로젝트", to: "/projects" },
-            { label: project?.name ?? "프로젝트" },
-            { label: "분석 보고서" },
+            { label: project?.name ?? "프로젝트",  to: `/projects/${projectId}/datasets`},
+            { label: "보고서", to: `/projects/${projectId}/reports` },
+            { label: report?.title || "제목 없는 보고서" },
           ]}
         />
       </div>
@@ -321,17 +477,14 @@ export default function ReportPage() {
             분석 채팅에서 저장된 결과를 골라 보고서를 구성하고 내보냅니다.
           </p>
         </div>
-        <ReportToolbar
-          mode={state.mode}
-          onMode={(mode) => dispatch({ type: "setMode", mode })}
-          onReset={() => {
-            if (window.confirm("편집 중인 보고서를 처음 상태로 되돌릴까요?")) {
-              dispatch({ type: "reset" });
-              showToast("초기화했어요");
-            }
-          }}
-          onExport={handleExport}
-        />
+        <div className="flex items-center gap-3">
+          <SaveIndicator status={saveStatus} />
+          <ReportToolbar
+            mode={state.mode}
+            onMode={(mode) => dispatch({ type: "setMode", mode })}
+            onExport={handleExport}
+          />
+        </div>
       </div>
 
           {/* 캔버스 */}
@@ -343,15 +496,27 @@ export default function ReportPage() {
             )}
           >
             <div id={REPORT_EXPORT_ROOT_ID}>
-              <input
-                value={state.title}
-                onChange={(e) =>
-                  dispatch({ type: "setTitle", title: e.target.value })
-                }
-                placeholder="보고서 제목을 입력하세요"
-                readOnly={!isEdit}
-                className="w-full rounded-lg bg-transparent px-1.5 py-1 text-3xl font-extrabold tracking-tight text-zinc-900 outline-none transition placeholder:text-zinc-300 read-only:cursor-default hover:not-read-only:bg-zinc-100 focus:not-read-only:bg-white focus:not-read-only:ring-2 focus:not-read-only:ring-violet-100"
-              />
+              {/* 제목 입력 + 편집 가능 표시(연필). 편집 모드에서만 노출. */}
+              <div className="group relative">
+                <input
+                  value={state.title}
+                  onChange={(e) =>
+                    dispatch({ type: "setTitle", title: e.target.value })
+                  }
+                  placeholder="보고서 제목을 입력하세요"
+                  readOnly={!isEdit}
+                  className={cn(
+                    "w-full rounded-lg bg-transparent px-1.5 py-1 text-3xl font-extrabold tracking-tight text-zinc-900 outline-none transition placeholder:text-zinc-300 read-only:cursor-default hover:not-read-only:bg-zinc-100 focus:not-read-only:bg-white focus:not-read-only:ring-2 focus:not-read-only:ring-violet-100",
+                    isEdit && "pr-10",
+                  )}
+                />
+                {isEdit && (
+                  <Pencil
+                    className="pointer-events-none absolute right-3 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-zinc-300 transition-colors group-focus-within:text-violet-500"
+                    strokeWidth={2.2}
+                  />
+                )}
+              </div>
               <div className="mt-2 flex items-center gap-2.5 px-1.5 text-[13px] font-medium text-zinc-400">
                 <span>작성자</span>
                 <span className="h-0.75 w-0.75 rounded-full bg-zinc-300" />
@@ -362,7 +527,7 @@ export default function ReportPage() {
 
               <div
                 ref={blocksRef}
-                className="relative mt-6 grid grid-cols-12 items-start gap-3"
+                className="relative mt-6 grid grid-cols-12 items-stretch gap-3"
                 onDragOver={onCanvasDragOver}
                 onDrop={onCanvasDrop}
               >
@@ -393,6 +558,9 @@ export default function ReportPage() {
                         }}
                         onSetSpan={(uid, span) =>
                           dispatch({ type: "setSpan", uid, span })
+                        }
+                        onSetHeight={(uid, height) =>
+                          dispatch({ type: "setHeight", uid, height })
                         }
                       />
                     );
@@ -458,6 +626,9 @@ export default function ReportPage() {
           onResetSpan={() =>
             dispatch({ type: "setSpan", uid: selectedBlock.uid, span: 6 })
           }
+          onResetHeight={() =>
+            dispatch({ type: "setHeight", uid: selectedBlock.uid, height: null })
+          }
           onDelete={() => {
             dispatch({ type: "deleteBlock", uid: selectedBlock.uid });
             showToast("블록을 삭제했어요");
@@ -472,6 +643,38 @@ export default function ReportPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// 자동저장 상태 칩 — 저장 중/저장됨/변경됨/실패.
+function SaveIndicator({ status }: { status: SaveStatus }) {
+  if (status === "idle") return null;
+  if (status === "saving")
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-400">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+        저장 중…
+      </span>
+    );
+  if (status === "saved")
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
+        <Check className="h-3.5 w-3.5" strokeWidth={2.4} />
+        저장됨
+      </span>
+    );
+  if (status === "error")
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-500">
+        <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
+        저장 실패
+      </span>
+    );
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-400">
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+      변경됨
+    </span>
   );
 }
 
