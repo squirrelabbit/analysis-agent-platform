@@ -60,6 +60,13 @@ const toSentiment = (raw: string): Sentiment =>
 const toPercent = (ratio: number): number =>
   Math.round(ratio <= 1 ? ratio * 100 : ratio);
 
+// 상세 표 감성 필터가 켜졌을 때 선택 pill을 감성색(연하게)으로 — 필터 적용을 눈에 띄게.
+const SENTIMENT_PILL_SELECTED: Record<Sentiment, string> = {
+  positive: "bg-emerald-50 text-emerald-600 border-emerald-200",
+  neutral: "bg-zinc-100 text-zinc-500 border-zinc-200",
+  negative: "bg-red-50 text-red-600 border-red-200",
+};
+
 // 건수 최다 aspect key (selected_aspect가 비었을 때 fallback).
 const topAspectKey = (aspect: Record<string, number>): string => {
   let best = "";
@@ -229,8 +236,11 @@ export function KeywordTab() {
   const [chipAspect, setChipAspect] = useState<string | null>(null);
   // 하단 상세표의 Aspect 필터 — 서버 파라미터(aspect)로 호출.
   const [activeAspect, setActiveAspect] = useState<string | null>(null);
-  // Aspect 워드클라우드 보기 모드. all = 단색(빈도만), sentiment = 우세 감성색.
-  const [cloudMode, setCloudMode] = useState<"all" | "sentiment">("all");
+  // Aspect 워드클라우드 보기 모드. all = 전체(단색·합산 빈도),
+  // positive/negative = 해당 감성 키워드만(감성색·감성별 빈도).
+  const [cloudMode, setCloudMode] = useState<"all" | "positive" | "negative">(
+    "all",
+  );
   const [sentiment, setSentiment] = useState<string>("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -301,9 +311,45 @@ export function KeywordTab() {
   const aspectKeywords = dedupeAspectKeywords(
     summary.aspectSentimentKeywords[selectedKey],
   );
-  const aspectCloudRows = buildCloud(aspectKeywords);
-  const topKeywords = aspectKeywords.slice(0, ASPECT_KEYWORD_LIMIT);
-  const moreKeywordCount = aspectKeywords.length - topKeywords.length;
+  // 워드클라우드 입력 — 모드별 필터/빈도. 긍정/부정은 해당 감성 빈도가 있는 키워드만,
+  // 크기도 그 감성 빈도로(전체일 때만 긍정이 부정을 압도하던 문제 해소).
+  const cloudInputs: CloudInput[] =
+    cloudMode === "positive"
+      ? aspectKeywords
+          .filter((k) => k.positiveCount > 0)
+          .map((k) => ({
+            term: k.term,
+            count: k.positiveCount,
+            sentiment: "positive" as const,
+          }))
+      : cloudMode === "negative"
+        ? aspectKeywords
+            .filter((k) => k.negativeCount > 0)
+            .map((k) => ({
+              term: k.term,
+              count: k.negativeCount,
+              sentiment: "negative" as const,
+            }))
+        : aspectKeywords.map((k) => ({
+            term: k.term,
+            count: k.count,
+            sentiment: k.sentiment,
+          }));
+  const aspectCloudRows = buildCloud(cloudInputs);
+  // 우측 표도 현재 모드 기준 정렬 — 전체는 합산 빈도, 긍정/부정은 해당 감성 빈도 내림차순
+  // (긍정/부정은 해당 감성이 있는 키워드만, 워드클라우드와 동일 집합).
+  const rankedKeywords =
+    cloudMode === "positive"
+      ? aspectKeywords
+          .filter((k) => k.positiveCount > 0)
+          .sort((a, b) => b.positiveCount - a.positiveCount)
+      : cloudMode === "negative"
+        ? aspectKeywords
+            .filter((k) => k.negativeCount > 0)
+            .sort((a, b) => b.negativeCount - a.negativeCount)
+        : aspectKeywords; // dedupeAspectKeywords가 이미 합산 빈도 내림차순
+  const topKeywords = rankedKeywords.slice(0, ASPECT_KEYWORD_LIMIT);
+  const moreKeywordCount = rankedKeywords.length - topKeywords.length;
 
   // 칭찬/불만 Top — 서버가 이미 N개씩 줌(슬라이스 없음). count는 문자열일 수 있어 Number 변환.
   const positiveTop = summary.topKeywordsPositive.map((k) => ({
@@ -353,20 +399,25 @@ export function KeywordTab() {
         </td>
       ),
     },
-    {
-      header: "대표 감성",
-      headerClassName: "w-28",
-      cell: (it) => {
-        const s = toSentiment(it.dominantSentiment);
-        return (
-          <td className="px-4 py-3">
-            <Badge className={SENTIMENT_BADGE[s]}>
-              {SENTIMENT_LABELS[s]} {toPercent(it.dominantSentimentRatio)}%
-            </Badge>
-          </td>
-        );
-      },
-    },
+    // 대표 감성 — 감성 필터를 걸면 모든 행이 해당 감성 100%라 무의미. '전체'에서만 표시.
+    ...((sentiment
+      ? []
+      : [
+          {
+            header: "대표 감성",
+            headerClassName: "w-28",
+            cell: (it) => {
+              const s = toSentiment(it.dominantSentiment);
+              return (
+                <td className="px-4 py-3">
+                  <Badge className={SENTIMENT_BADGE[s]}>
+                    {SENTIMENT_LABELS[s]} {toPercent(it.dominantSentimentRatio)}%
+                  </Badge>
+                </td>
+              );
+            },
+          },
+        ]) as Column<KeywordItem>[]),
     {
       header: "연관 Aspect",
       headerClassName: "w-32",
@@ -461,48 +512,53 @@ export function KeywordTab() {
         <div className="grid grid-cols-1 gap-6 md:grid-cols-[1.1fr_0.9fr]">
           {/* 좌: 워드클라우드 */}
           <div className="flex flex-col gap-2">
-            {/* 보기 모드 토글 + 우세 감성 배지 (주제명·문장수는 칩에 이미 노출) */}
+            {/* 보기 모드 토글 (전체/긍정/부정) — 주제명·문장수는 칩에 이미 노출 */}
             <div className="flex items-center gap-2">
               <div className="flex rounded-lg bg-zinc-100 p-0.5 text-[11px] font-semibold">
-                <button
-                  type="button"
-                  onClick={() => setCloudMode("all")}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 transition-colors",
-                    cloudMode === "all"
-                      ? "bg-white text-violet-700 shadow-sm"
-                      : "text-zinc-500 hover:text-zinc-700",
-                  )}
-                >
-                  전체
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCloudMode("sentiment")}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 transition-colors",
-                    cloudMode === "sentiment"
-                      ? "bg-white text-violet-700 shadow-sm"
-                      : "text-zinc-500 hover:text-zinc-700",
-                  )}
-                >
-                  감성
-                </button>
+                {(
+                  [
+                    { mode: "all", label: "전체" },
+                    { mode: "positive", label: "긍정" },
+                    { mode: "negative", label: "부정" },
+                  ] as const
+                ).map(({ mode, label }) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setCloudMode(mode)}
+                    className={cn(
+                      "rounded-md px-2.5 py-1 transition-colors",
+                      cloudMode === mode
+                        ? mode === "positive"
+                          ? "bg-white text-emerald-600 shadow-sm"
+                          : mode === "negative"
+                            ? "bg-white text-red-500 shadow-sm"
+                            : "bg-white text-violet-700 shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-700",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
-              {cloudMode === "sentiment" ? (
-                <div className="ml-auto flex items-center gap-2.5 text-[10px] font-semibold">
-                  <span className="inline-flex items-center gap-1 text-emerald-600">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    긍정
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-red-500">
-                    <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                    부정
-                  </span>
-                </div>
-              ) : (
+              {cloudMode === "all" ? (
                 <span className="ml-auto text-[10px] font-medium text-zinc-400">
                   글자 크기 = 빈도
+                </span>
+              ) : (
+                <span
+                  className={cn(
+                    "ml-auto inline-flex items-center gap-1 text-[10px] font-semibold",
+                    cloudMode === "positive" ? "text-emerald-600" : "text-red-500",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      cloudMode === "positive" ? "bg-emerald-500" : "bg-red-500",
+                    )}
+                  />
+                  {cloudMode === "positive" ? "긍정" : "부정"} · 크기 = 빈도
                 </span>
               )}
             </div>
@@ -531,9 +587,9 @@ export function KeywordTab() {
                         style={{
                           fontSize: `${w.px}px`,
                           color:
-                            cloudMode === "sentiment"
-                              ? SENTIMENT_COLORS[w.sentiment]
-                              : undefined,
+                            cloudMode === "all"
+                              ? undefined
+                              : SENTIMENT_COLORS[w.sentiment],
                         }}
                       >
                         {w.term}
@@ -552,12 +608,29 @@ export function KeywordTab() {
               <thead>
                 <tr className="border-b border-zinc-100 text-[11px] text-zinc-400">
                   <th className="pb-1.5 text-left font-semibold">키워드</th>
-                  <th className="pb-1.5 text-right font-semibold">빈도</th>
-                  <th className="pb-1.5 text-right font-semibold text-emerald-600">
-                    긍정
+                  <th
+                    className={cn(
+                      "pb-1.5 text-right font-semibold",
+                      cloudMode === "all" && "text-violet-600",
+                    )}
+                  >
+                    빈도{cloudMode === "all" && " ▼"}
                   </th>
-                  <th className="pb-1.5 text-right font-semibold text-red-500">
-                    부정
+                  <th
+                    className={cn(
+                      "pb-1.5 text-right font-semibold text-emerald-600",
+                      cloudMode === "positive" && "text-violet-600",
+                    )}
+                  >
+                    긍정{cloudMode === "positive" && " ▼"}
+                  </th>
+                  <th
+                    className={cn(
+                      "pb-1.5 text-right font-semibold text-red-500",
+                      cloudMode === "negative" && "text-violet-600",
+                    )}
+                  >
+                    부정{cloudMode === "negative" && " ▼"}
                   </th>
                 </tr>
               </thead>
@@ -665,6 +738,9 @@ export function KeywordTab() {
                 setSentiment(v);
                 setPage(1);
               }}
+              selectedClassName={(v) =>
+                v ? SENTIMENT_PILL_SELECTED[toSentiment(v)] : undefined
+              }
             />
           </>
         }
