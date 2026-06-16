@@ -1,18 +1,28 @@
 """dataset_doc_genuineness skill — 3-tier 분류 + LLOA mock 단위 테스트.
 
 ADR-017 / 5/19 결정. LLOA client는 urlopen 주입 패턴(test_lloa_client.py와
-동일)으로 mock한다. fixture: cleaned doc 4건 (genuine_review / mixed /
-non_review / empty).
+동일)으로 mock한다. fixture: cleaned doc 4건 (genuine_review / non_review /
+uncertain / empty).
 """
 from __future__ import annotations
 
 import io
 import json
+import os
 import tempfile
+import threading
+import time
 import unittest
 import urllib.error
 from pathlib import Path
 from unittest.mock import patch
+
+from python_ai_worker.dataset_build.doc_genuineness import (
+    _DEFAULT_CONCURRENCY,
+    _DOC_GENUINENESS_CONCURRENCY_ENV,
+    _MAX_CONCURRENCY,
+    _resolve_concurrency,
+)
 
 
 def _fake_urlopen_factory(responses_by_doc: dict[str, dict]):
@@ -112,8 +122,8 @@ class DocGenuinenessTests(unittest.TestCase):
             return doc_genuineness.run_dataset_doc_genuineness(payload or self._payload())
 
     def test_three_tier_classification_success(self) -> None:
-        # silverone 2026-05-22 — T/F/A prompt 채택 후 mixed 대신 uncertain 분기
-        # 잠금. mixed enum은 backward compat용으로 enum에는 남아 있다.
+        # silverone 2026-05-22 — T/F/A prompt 채택 후 mixed 대신 uncertain 분기.
+        # silverone 2026-06-16 — legacy mixed tier 완전 제거 (enum/count에서 빠짐).
         responses = {
             "row:1": _llm_completion(
                 '{"doc_id":"row:1","genuineness":"genuine_review","reason":"1인칭 야경 후기 중심."}'
@@ -136,7 +146,7 @@ class DocGenuinenessTests(unittest.TestCase):
         summary = artifact["summary"]
         self.assertEqual(artifact["skill_name"], "dataset_doc_genuineness")
         self.assertEqual(summary["tier_counts"]["genuine_review"], 1)
-        self.assertEqual(summary["tier_counts"]["mixed"], 0)
+        self.assertNotIn("mixed", summary["tier_counts"])
         self.assertEqual(summary["tier_counts"]["non_review"], 2)  # row:2 LLOA + row:4 empty shortcut
         self.assertEqual(summary["tier_counts"]["uncertain"], 1)
         self.assertEqual(summary["parse_failures"], 0)
@@ -480,6 +490,583 @@ class DocGenuinenessRenderTests(unittest.TestCase):
         self.assertEqual(config["subject_type"], "generic")
         self.assertEqual(config["subject_aliases"], [])
         self.assertEqual(config["recruitment_keywords"], [])
+
+
+
+
+# ===== concurrency 잠금 (구 test_doc_genuineness_concurrency.py 병합 2026-06-16) =====
+# _llm_completion 은 위 정의 재사용 (토큰값은 어느 테스트도 assert 안 함).
+
+def _fake_urlopen_factory_with_delay(responses_by_doc, delay_sec: float = 0.05):
+    """LLOA 호출마다 delay를 주고 호출된 thread name을 기록 — 병렬성 검증용."""
+    call_log: list[dict] = []
+    log_lock = threading.Lock()
+
+    class _Resp:
+        def __init__(self, payload: dict) -> None:
+            self._payload = payload
+
+        def read(self) -> bytes:
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+    def _fake(req, timeout=None):
+        body = json.loads(req.data.decode("utf-8"))
+        user_text = body["messages"][1]["content"]
+        user_obj = json.loads(user_text)
+        doc_id = user_obj["doc_id"]
+        with log_lock:
+            call_log.append({
+                "doc_id": doc_id,
+                "thread": threading.current_thread().name,
+                "started_at": time.monotonic(),
+            })
+        time.sleep(delay_sec)
+        if doc_id not in responses_by_doc:
+            raise AssertionError(f"unexpected doc_id in test: {doc_id}")
+        return _Resp(responses_by_doc[doc_id])
+
+    return _fake, call_log
+
+
+class DocGenuinenessConcurrencyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.clean_path = Path(self.tmpdir.name) / "clean.jsonl"
+        self.output_path = Path(self.tmpdir.name) / "doc_genuineness.jsonl"
+        # 8 docs (concurrency=8과 동일 — full saturation 검증)
+        self.rows = [
+            {"row_id": f"row:{i}", "cleaned_text": f"본문 {i}번째 doc의 실제 후기 텍스트 내용입니다."}
+            for i in range(8)
+        ]
+        with self.clean_path.open("w", encoding="utf-8") as f:
+            for row in self.rows:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    def _payload(self, **overrides) -> dict:
+        payload = {
+            "dataset_version_id": "dvid:test",
+            "clean_artifact_ref": str(self.clean_path),
+            "output_path": str(self.output_path),
+            "doc_genuineness": {
+                "subject_type": "festival",
+                "subject_name": "강릉 국가유산야행",
+                "subject_aliases": ["문화유산야행"],
+                "recruitment_keywords": [],
+            },
+        }
+        payload.update(overrides)
+        return payload
+
+    def _run_with_concurrency(self, urlopen_fn, payload_overrides=None):
+        from python_ai_worker.dataset_build import doc_genuineness
+        from python_ai_worker.config import WorkerConfig
+
+        fake_config = WorkerConfig(
+            lloa_api_key="test-key",
+            lloa_api_url="http://lloa.example/v1/chat/completions",
+            lloa_model="wisenut/wise-lloa-max-v1.2.1",
+            lloa_max_tokens=2048,
+            lloa_timeout_sec=30,
+            lloa_reasoning_effort="low",
+            lloa_prepend_no_think=True,
+        )
+
+        original_init = doc_genuineness.LloaClient.__init__
+
+        def _init_with_fake(self, config, *, urlopen=None):
+            original_init(self, config, urlopen=urlopen_fn)
+
+        payload = self._payload(**(payload_overrides or {}))
+        with patch.object(doc_genuineness, "load_config", return_value=fake_config), \
+             patch.object(doc_genuineness.LloaClient, "__init__", _init_with_fake):
+            return doc_genuineness.run_dataset_doc_genuineness(payload)
+
+    def test_default_concurrency_exposed_in_summary(self):
+        responses = {
+            f"row:{i}": _llm_completion(
+                f'{{"doc_id":"row:{i}","genuineness":"genuine_review","reason":"r{i}"}}'
+            )
+            for i in range(8)
+        }
+        urlopen_fn, _ = _fake_urlopen_factory_with_delay(responses, delay_sec=0)
+        result = self._run_with_concurrency(urlopen_fn)
+        summary = result["artifact"]["summary"]
+        self.assertEqual(summary["concurrency"], 8, "default concurrency must be 8")
+        self.assertEqual(summary["reasoning_effort"], "low")
+        self.assertEqual(summary["processed_row_count"], 8)
+        self.assertEqual(summary["parse_failures"], 0)
+
+    def test_payload_concurrency_override(self):
+        responses = {
+            f"row:{i}": _llm_completion(
+                f'{{"doc_id":"row:{i}","genuineness":"non_review","reason":"r"}}'
+            )
+            for i in range(8)
+        }
+        urlopen_fn, _ = _fake_urlopen_factory_with_delay(responses, delay_sec=0)
+        result = self._run_with_concurrency(urlopen_fn, payload_overrides={"concurrency": 2})
+        self.assertEqual(result["artifact"]["summary"]["concurrency"], 2)
+
+    def test_output_preserves_original_row_order_under_concurrency(self):
+        # 의도적으로 LLOA 호출에 delay를 주고 ordering 확인.
+        # ThreadPoolExecutor는 as_completed로 처리하지만 jsonl write는 원본
+        # row 순서로 한다.
+        responses = {
+            f"row:{i}": _llm_completion(
+                f'{{"doc_id":"row:{i}","genuineness":"genuine_review","reason":"r{i}"}}'
+            )
+            for i in range(8)
+        }
+        urlopen_fn, log = _fake_urlopen_factory_with_delay(responses, delay_sec=0.02)
+        self._run_with_concurrency(urlopen_fn)
+
+        # 출력 파일 line 순서 == 원본 row 순서.
+        lines = self.output_path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 8)
+        for idx, line in enumerate(lines):
+            record = json.loads(line)
+            self.assertEqual(record["doc_id"], f"row:{idx}",
+                             f"line {idx} doc_id mismatch — concurrency가 order를 깨면 안 됨")
+
+        # 병렬 호출이 실제로 일어났는지 — 동일 thread만 쓰면 sequential과 동일.
+        unique_threads = {entry["thread"] for entry in log}
+        self.assertGreater(len(unique_threads), 1,
+                           f"concurrency 적용 안 됨 — 단일 thread만 사용됨: {unique_threads}")
+
+    def test_empty_docs_skipped_from_lloa_calls(self):
+        # rows[7]을 empty로 만들면 LLOA 호출은 7건만 일어나야.
+        empty_row_path = Path(self.tmpdir.name) / "clean_with_empty.jsonl"
+        rows_with_empty = self.rows[:7] + [{"row_id": "row:7", "cleaned_text": ""}]
+        with empty_row_path.open("w", encoding="utf-8") as f:
+            for row in rows_with_empty:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+        responses = {
+            f"row:{i}": _llm_completion(
+                f'{{"doc_id":"row:{i}","genuineness":"genuine_review","reason":"r"}}'
+            )
+            for i in range(7)
+        }
+        urlopen_fn, log = _fake_urlopen_factory_with_delay(responses, delay_sec=0)
+
+        from python_ai_worker.dataset_build import doc_genuineness
+        from python_ai_worker.config import WorkerConfig
+        fake_config = WorkerConfig(
+            lloa_api_key="test-key",
+            lloa_api_url="http://lloa.example/v1/chat/completions",
+            lloa_model="wisenut/wise-lloa-max-v1.2.1",
+            lloa_max_tokens=2048,
+            lloa_timeout_sec=30,
+            lloa_reasoning_effort="low",
+            lloa_prepend_no_think=True,
+        )
+        original_init = doc_genuineness.LloaClient.__init__
+
+        def _init_with_fake(self, config, *, urlopen=None):
+            original_init(self, config, urlopen=urlopen_fn)
+
+        payload = self._payload(clean_artifact_ref=str(empty_row_path))
+        with patch.object(doc_genuineness, "load_config", return_value=fake_config), \
+             patch.object(doc_genuineness.LloaClient, "__init__", _init_with_fake):
+            result = doc_genuineness.run_dataset_doc_genuineness(payload)
+
+        # 7건만 LLOA에 도달, 1건은 empty shortcut.
+        self.assertEqual(len(log), 7)
+        self.assertNotIn("row:7", {e["doc_id"] for e in log})
+
+        summary = result["artifact"]["summary"]
+        self.assertEqual(summary["processed_row_count"], 8)
+        # row:7 empty shortcut + row:0~6 genuine_review
+        self.assertEqual(summary["tier_counts"]["genuine_review"], 7)
+        self.assertEqual(summary["tier_counts"]["non_review"], 1)
+
+
+
+# ===== concurrency env fallback 잠금 (구 test_doc_genuineness_concurrency_env.py) =====
+
+class ResolveConcurrencyEnvTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # 다른 test에서 set한 env가 새지 않도록 항상 깨끗하게 시작.
+        self._saved_env = os.environ.pop(_DOC_GENUINENESS_CONCURRENCY_ENV, None)
+
+    def tearDown(self) -> None:
+        os.environ.pop(_DOC_GENUINENESS_CONCURRENCY_ENV, None)
+        if self._saved_env is not None:
+            os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = self._saved_env
+
+    def test_env_absent_uses_default(self):
+        self.assertEqual(_resolve_concurrency({}), _DEFAULT_CONCURRENCY)
+        self.assertEqual(_DEFAULT_CONCURRENCY, 8, "default constant 변경 잠금")
+
+    def test_env_overrides_default(self):
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = "4"
+        self.assertEqual(_resolve_concurrency({}), 4)
+
+    def test_payload_overrides_env(self):
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = "4"
+        self.assertEqual(_resolve_concurrency({"concurrency": 2}), 2)
+
+    def test_env_invalid_falls_back_to_default(self):
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = "abc"
+        self.assertEqual(_resolve_concurrency({}), _DEFAULT_CONCURRENCY)
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = ""
+        self.assertEqual(_resolve_concurrency({}), _DEFAULT_CONCURRENCY)
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = "3.5"
+        self.assertEqual(_resolve_concurrency({}), _DEFAULT_CONCURRENCY)
+
+    def test_env_zero_or_negative_falls_back_to_default(self):
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = "0"
+        self.assertEqual(_resolve_concurrency({}), _DEFAULT_CONCURRENCY)
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = "-3"
+        self.assertEqual(_resolve_concurrency({}), _DEFAULT_CONCURRENCY)
+
+    def test_env_too_large_caps_at_max(self):
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = "999"
+        self.assertEqual(_resolve_concurrency({}), _MAX_CONCURRENCY)
+        self.assertEqual(_MAX_CONCURRENCY, 32, "max cap 변경 잠금")
+
+    def test_payload_invalid_then_env_fallback(self):
+        # payload가 invalid면 env로 fallback (payload value 없는 것으로 취급).
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = "5"
+        self.assertEqual(_resolve_concurrency({"concurrency": -1}), 5)
+        self.assertEqual(_resolve_concurrency({"concurrency": "abc"}), 5)
+        self.assertEqual(_resolve_concurrency({"concurrency": 0}), 5)
+
+    def test_payload_too_large_caps_at_max(self):
+        self.assertEqual(_resolve_concurrency({"concurrency": 999}), _MAX_CONCURRENCY)
+
+    def test_payload_bool_rejected(self):
+        # bool은 int subclass라 silent로 1/0이 될 위험 — reject 확인.
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = "5"
+        self.assertEqual(_resolve_concurrency({"concurrency": True}), 5)
+        self.assertEqual(_resolve_concurrency({"concurrency": False}), 5)
+
+
+class SummaryReflectsResolvedConcurrencyTests(unittest.TestCase):
+    """run_dataset_doc_genuineness가 _resolve_concurrency 결과를
+    summary.concurrency에 그대로 기록하는지 fixture로 확인.
+    """
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.clean_path = Path(self.tmpdir.name) / "clean.jsonl"
+        self.output_path = Path(self.tmpdir.name) / "doc_genuineness.jsonl"
+        # 1 doc — concurrency 값 잠금만 확인하면 충분.
+        with self.clean_path.open("w", encoding="utf-8") as f:
+            f.write(json.dumps(
+                {"row_id": "row:0", "cleaned_text": "본문 텍스트."},
+                ensure_ascii=False,
+            ) + "\n")
+        self._saved_env = os.environ.pop(_DOC_GENUINENESS_CONCURRENCY_ENV, None)
+
+    def tearDown(self) -> None:
+        os.environ.pop(_DOC_GENUINENESS_CONCURRENCY_ENV, None)
+        if self._saved_env is not None:
+            os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = self._saved_env
+
+    def _payload(self, **overrides) -> dict:
+        payload = {
+            "dataset_version_id": "dvid:test",
+            "clean_artifact_ref": str(self.clean_path),
+            "output_path": str(self.output_path),
+            "doc_genuineness": {
+                "subject_type": "festival",
+                "subject_name": "강릉 국가유산야행",
+                "subject_aliases": ["문화유산야행"],
+                "recruitment_keywords": [],
+            },
+        }
+        payload.update(overrides)
+        return payload
+
+    def _run(self, urlopen_fn, payload_overrides=None):
+        from python_ai_worker.dataset_build import doc_genuineness
+        from python_ai_worker.config import WorkerConfig
+
+        fake_config = WorkerConfig(
+            lloa_api_key="test-key",
+            lloa_api_url="http://lloa.example/v1/chat/completions",
+            lloa_model="wisenut/wise-lloa-max-v1.2.1",
+            lloa_max_tokens=2048,
+            lloa_timeout_sec=30,
+            lloa_reasoning_effort="low",
+            lloa_prepend_no_think=True,
+        )
+        original_init = doc_genuineness.LloaClient.__init__
+
+        def _init_with_fake(self, config, *, urlopen=None):
+            original_init(self, config, urlopen=urlopen_fn)
+
+        payload = self._payload(**(payload_overrides or {}))
+        with patch.object(doc_genuineness, "load_config", return_value=fake_config), \
+             patch.object(doc_genuineness.LloaClient, "__init__", _init_with_fake):
+            return doc_genuineness.run_dataset_doc_genuineness(payload)
+
+    def _stub_urlopen(self):
+        class _Resp:
+            def __init__(self, payload: dict) -> None:
+                self._payload = payload
+
+            def read(self) -> bytes:
+                return json.dumps(self._payload).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return None
+
+        def _fake(req, timeout=None):
+            return _Resp({
+                "choices": [{
+                    "message": {"content": '{"doc_id":"row:0","genuineness":"genuine_review","reason":"r"}', "reasoning_content": ""},
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            })
+
+        return _fake
+
+    def test_summary_records_env_concurrency(self):
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = "4"
+        result = self._run(self._stub_urlopen())
+        self.assertEqual(result["artifact"]["summary"]["concurrency"], 4)
+
+    def test_summary_records_capped_value(self):
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = "999"
+        result = self._run(self._stub_urlopen())
+        self.assertEqual(result["artifact"]["summary"]["concurrency"], _MAX_CONCURRENCY)
+
+    def test_summary_records_payload_over_env(self):
+        os.environ[_DOC_GENUINENESS_CONCURRENCY_ENV] = "4"
+        result = self._run(self._stub_urlopen(), payload_overrides={"concurrency": 2})
+        self.assertEqual(result["artifact"]["summary"]["concurrency"], 2)
+
+
+
+# ===== verify mode 잠금 / ADR-026 (구 test_doc_genuineness_verify.py) =====
+
+def _completion(content: str) -> dict:
+    return {
+        "choices": [{"message": {"content": content, "reasoning_content": ""}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    }
+
+
+class _Resp:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def read(self) -> bytes:
+        return json.dumps(self._payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+
+def _fake_config():
+    from python_ai_worker.config import WorkerConfig
+
+    return WorkerConfig(
+        lloa_api_key="k",
+        lloa_api_url="http://lloa.example/v1/chat/completions",
+        lloa_model="model-a",
+        lloa_max_tokens=2048,
+        lloa_timeout_sec=30,
+        lloa_reasoning_effort=None,
+        lloa_prepend_no_think=True,
+    )
+
+
+class DocGenuinenessVerifyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.clean = Path(self.tmp.name) / "clean.jsonl"
+        self.out = Path(self.tmp.name) / "out.jsonl"
+        rows = [
+            {"row_id": "d1", "cleaned_text": "강릉야행 다녀왔어요. 야경 환상적."},  # 합의(genuine)
+            {"row_id": "d2", "cleaned_text": "행사 안내문입니다. 일정 확인."},      # 불일치 → judge
+            {"row_id": "d3", "cleaned_text": ""},                                   # empty shortcut
+        ]
+        with self.clean.open("w", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+    def _run(self, *, judge_chosen: str, judge_label: str | None, judge_conf: float):
+        from python_ai_worker.dataset_build import doc_genuineness_verify as v
+
+        # model별 응답: a/b classify는 doc_id로, judge는 candidate 포함 여부로 구분.
+        def make_urlopen(model: str):
+            def _fake(req, timeout=None):  # type: ignore[no-untyped-def]
+                body = json.loads(req.data.decode("utf-8"))
+                user = body["messages"][1]["content"]
+                obj = json.loads(user)
+                if "candidate_1" in obj:  # judge 호출
+                    return _Resp(_completion(json.dumps({
+                        "chosen": judge_chosen,
+                        "final_label": judge_label,
+                        "confidence": judge_conf,
+                        "reason": "judge reason",
+                    }, ensure_ascii=False)))
+                doc_id = obj["doc_id"]
+                # d1은 둘 다 genuine, d2는 a=genuine b=non_review로 불일치.
+                if doc_id == "d1":
+                    label = "genuine_review"
+                else:  # d2
+                    label = "genuine_review" if model == "model-a" else "non_review"
+                return _Resp(_completion(json.dumps({"genuineness": label, "reason": "r"}, ensure_ascii=False)))
+
+            return _fake
+
+        original_init = v.LloaClient.__init__
+
+        def _init(self, config, *, urlopen=None):
+            original_init(self, config, urlopen=make_urlopen(config.model))
+
+        payload = {
+            "dataset_version_id": "ver1",
+            "clean_artifact_ref": str(self.clean),
+            "output_path": str(self.out),
+            "verify": True,
+            "classify_models": ["model-a", "model-b"],
+            "judge_model": "model-judge",
+            "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉 국가유산야행"},
+            "concurrency": 1,
+        }
+        with patch.object(v, "load_config", return_value=_fake_config()), \
+             patch.object(v.LloaClient, "__init__", _init):
+            result = v.run_dataset_doc_genuineness_verify(payload)
+        records = {}
+        with self.out.open(encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    rec = json.loads(line)
+                    records[rec["doc_id"]] = rec
+        return result, records
+
+    def test_agreement_and_judge_accept(self) -> None:
+        # judge가 candidate 중 non_review 쪽(=model-b) 채택하도록.
+        # d2: a=genuine(candidate_? ), b=non. judge_label은 매핑 후 검증하므로
+        # chosen=candidate_1/2 어느 쪽이든 코드가 winner.genuineness로 final 설정.
+        result, recs = self._run(judge_chosen="candidate_1", judge_label="genuine_review", judge_conf=0.9)
+        # d1 합의.
+        self.assertEqual(recs["d1"]["resolution"], "model_agreement")
+        self.assertEqual(recs["d1"]["final_label"], "genuine_review")
+        self.assertFalse(recs["d1"]["needs_review"])
+        self.assertFalse(recs["d1"]["is_disagreement"])
+        # d3 empty shortcut.
+        self.assertEqual(recs["d3"]["resolution"], "empty_text_shortcut")
+        self.assertEqual(recs["d3"]["final_label"], "non_review")
+        # d2 불일치 → judge.
+        self.assertTrue(recs["d2"]["is_disagreement"])
+        self.assertEqual(recs["d2"]["resolution"], "judge_on_disagreement")
+        self.assertIn(recs["d2"]["judge_result"]["decision"], {"accept_a", "accept_b"})
+        self.assertIn(recs["d2"]["final_label"], {"genuine_review", "non_review"})
+        self.assertFalse(recs["d2"]["needs_review"])  # conf 0.9 >= 0.85
+        # summary.
+        s = result["artifact"]["summary"]
+        self.assertEqual(s["mode"], "verify")
+        self.assertEqual(s["agreement_count"], 1)
+        self.assertEqual(s["disagreement_count"], 1)
+        self.assertEqual(s["judge_count"], 1)
+        self.assertEqual(s["models"], {"a": "model-a", "b": "model-b", "judge": "model-judge"})
+
+    def test_low_confidence_needs_review(self) -> None:
+        _result, recs = self._run(judge_chosen="candidate_2", judge_label="non_review", judge_conf=0.5)
+        self.assertTrue(recs["d2"]["needs_review"])  # conf 0.5 < 0.85
+
+    def test_judge_review_decision_nulls_final(self) -> None:
+        _result, recs = self._run(judge_chosen="review", judge_label=None, judge_conf=0.4)
+        self.assertEqual(recs["d2"]["judge_result"]["decision"], "review")
+        self.assertIsNone(recs["d2"]["final_label"])
+        self.assertTrue(recs["d2"]["needs_review"])
+
+    def test_revise_third_label(self) -> None:
+        _result, recs = self._run(judge_chosen="other", judge_label="uncertain", judge_conf=0.9)
+        self.assertEqual(recs["d2"]["judge_result"]["decision"], "revise")
+        self.assertEqual(recs["d2"]["final_label"], "uncertain")
+
+    def _run_with_urlopen(self, make_urlopen):
+        from python_ai_worker.dataset_build import doc_genuineness_verify as v
+
+        original_init = v.LloaClient.__init__
+
+        def _init(self, config, *, urlopen=None):
+            original_init(self, config, urlopen=make_urlopen(config.model))
+
+        payload = {
+            "dataset_version_id": "ver1", "clean_artifact_ref": str(self.clean),
+            "output_path": str(self.out), "verify": True,
+            "classify_models": ["model-a", "model-b"], "judge_model": "model-judge",
+            "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉 국가유산야행"},
+            "concurrency": 1,
+        }
+        with patch.object(v, "load_config", return_value=_fake_config()), \
+             patch.object(v.LloaClient, "__init__", _init):
+            v.run_dataset_doc_genuineness_verify(payload)
+        recs = {}
+        with self.out.open(encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    r = json.loads(line)
+                    recs[r["doc_id"]] = r
+        return recs
+
+    def test_partial_classify_isolation(self) -> None:
+        # model-b는 항상 빈 content(실패), model-a는 정상 → partial_classify.
+        def make_urlopen(model):
+            def _fake(req, timeout=None):  # type: ignore[no-untyped-def]
+                obj = json.loads(json.loads(req.data.decode("utf-8"))["messages"][1]["content"])
+                if "candidate_1" in obj:
+                    return _Resp(_completion(json.dumps({"chosen": "candidate_1", "final_label": "genuine_review", "confidence": 0.9, "reason": "r"})))
+                if model == "model-b":
+                    return _Resp(_completion(""))  # 빈 content → LloaResponseParseError
+                return _Resp(_completion(json.dumps({"genuineness": "genuine_review", "reason": "a ok"})))
+            return _fake
+
+        recs = self._run_with_urlopen(make_urlopen)
+        for doc in ("d1", "d2"):
+            self.assertEqual(recs[doc]["resolution"], "partial_classify", doc)
+            self.assertEqual(recs[doc]["final_label"], "genuine_review", doc)  # a 라벨 채택
+            self.assertTrue(recs[doc]["needs_review"], doc)
+            self.assertIsNone(recs[doc]["model_b_result"], doc)  # b 실패
+
+    def test_both_classify_fail_uncertain(self) -> None:
+        # 두 모델 모두 빈 content → classify_error + uncertain(빈칸 아님).
+        def make_urlopen(_model):
+            def _fake(req, timeout=None):  # type: ignore[no-untyped-def]
+                return _Resp(_completion(""))
+            return _fake
+
+        recs = self._run_with_urlopen(make_urlopen)
+        self.assertEqual(recs["d1"]["resolution"], "classify_error")
+        self.assertEqual(recs["d1"]["final_label"], "uncertain")
+        self.assertTrue(recs["d1"]["needs_review"])
+
+    def test_classify_models_validation(self) -> None:
+        from python_ai_worker.dataset_build import doc_genuineness_verify as v
+
+        with patch.object(v, "load_config", return_value=_fake_config()):
+            with self.assertRaises(ValueError):
+                v.run_dataset_doc_genuineness_verify({
+                    "dataset_version_id": "x", "clean_artifact_ref": str(self.clean),
+                    "output_path": str(self.out), "verify": True,
+                    "classify_models": ["only-one"],
+                    "doc_genuineness": {"subject_name": "x"},
+                })
+
 
 
 if __name__ == "__main__":

@@ -18,7 +18,6 @@ func TestNormalizeDocGenuinenessSummaryHappyPath(t *testing.T) {
 	raw := map[string]any{
 		"tier_counts": map[string]any{
 			"genuine_review": float64(389),
-			"mixed":          float64(0),
 			"non_review":     float64(1724),
 			"uncertain":      float64(8),
 		},
@@ -47,7 +46,6 @@ func TestNormalizeDocGenuinenessSummaryHappyPath(t *testing.T) {
 	}
 	wantG := map[string]any{
 		"genuine_review": 389,
-		"mixed":          0,
 		"non_review":     1724,
 		"uncertain":      8,
 	}
@@ -159,7 +157,7 @@ func TestNormalizeClauseLabelSummaryHappyPath(t *testing.T) {
 		"taxonomy_hash":           "b52c5e...",
 		"reasoning_effort":        "low",
 		"concurrency":             float64(8),
-		"include_genuineness":     []any{"genuine_review", "mixed"},
+		"include_genuineness":     []any{"genuine_review", "uncertain"},
 		"model":                   "wisenut/wise-lloa-max-v1.2.1",
 		"prompt_version":          "v3",
 		"total_prompt_tokens":     float64(123456),
@@ -262,7 +260,6 @@ func TestSummarizeDatasetVersionDetailNormalizesStageSummaries(t *testing.T) {
 			"doc_genuineness_summary": map[string]any{
 				"tier_counts": map[string]any{
 					"genuine_review": float64(389),
-					"mixed":          float64(0),
 					"non_review":     float64(1724),
 					"uncertain":      float64(8),
 				},

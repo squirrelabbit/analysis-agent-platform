@@ -165,7 +165,8 @@ ruby -e 'require "yaml"; YAML.load_file("docs/api/openapi.yaml"); YAML.load_file
 - `scripts/smoke_analyze_service.sh`: Python `execute_analyze_plan` direct 호출 (compose 없이 deterministic 경로).
 - `scripts/smoke_analyze_endpoint.sh`: python-ai worker `/tasks/plan` + `/tasks/analyze` 4 case.
 - `scripts/smoke_analyze_e2e.sh`: Go control plane `POST /analyze` active version end-to-end.
-- `scripts/smoke_doc_genuineness.sh` / `scripts/smoke_preprocess_pipeline.sh`: dataset build 단계별 smoke.
+- `scripts/smoke_preprocess_pipeline.sh`: dataset build (clean → doc_genuineness → clause_label) 단계 smoke.
+- `scripts/smoke_doc_genuineness_verify.sh`: doc_genuineness 교차모델 검증(verify) end-to-end smoke.
 
 ## 주요 문서
 

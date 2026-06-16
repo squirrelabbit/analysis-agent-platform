@@ -43,6 +43,7 @@ export const BuildCleanSchema = z.object({
 export const BuildGenuinenessSchema = z.object({
   promptVersion: z.string().min(1, "프롬프트 버전을 선택하세요"),
   modelId: z.string().optional(), // 빈 값 = env default 모델 (LLOA_MODEL)
+  verify: z.boolean().optional(), // 교차검증 모드 (ADR-026)
 });
 
 export const BuildClauseSchema = z.object({

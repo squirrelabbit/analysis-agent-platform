@@ -709,13 +709,19 @@ type DatasetDocGenuinenessBuildRequest struct {
 	// silverone 2026-06-12 — 전처리 LLOA 모델 선택. 생략 시 worker env(LLOA_MODEL)
 	// default. allowlist(LLOA_MODELS) 검증은 job 생성 시 control-plane이 수행.
 	ModelID *string `json:"model_id,omitempty"`
-	Force   *bool   `json:"force,omitempty"`
+	// silverone 2026-06-15 (ADR-026) — verify 모드. true면 ClassifyModels 2개로
+	// 교차 분류 + 불일치 시 JudgeModel이 judge. final_label/needs_review 산출.
+	// ModelID(단일)와 동시 사용 안 함.
+	Verify         *bool    `json:"verify,omitempty"`
+	ClassifyModels []string `json:"classify_models,omitempty"`
+	JudgeModel     *string  `json:"judge_model,omitempty"`
+	Force          *bool    `json:"force,omitempty"`
 }
 
 type DatasetClauseLabelBuildRequest struct {
 	ClauseLabelPromptVer *string `json:"clause_label_prompt_version,omitempty"`
 	// 5/20 결정 — doc_genuineness 결과로 필터링. nil이면 default
-	// ["genuine_review", "mixed"]로 자동 ON. explicit empty list ``[]``로 opt-out.
+	// ["genuine_review", "uncertain"]로 자동 ON. explicit empty list ``[]``로 opt-out.
 	IncludeGenuineness []string `json:"include_genuineness,omitempty"`
 	// silverone 2026-06-12 — 전처리 LLOA 모델 선택 (doc_genuineness와 동일 정책).
 	ModelID *string `json:"model_id,omitempty"`
@@ -851,6 +857,101 @@ type ArtifactPagination struct {
 	Limit  int `json:"limit"`
 	Offset int `json:"offset"`
 	Total  int `json:"total"`
+}
+
+// ── doc_genuineness 모델 비교 (silverone 2026-06-15) ──
+// 같은 원본을 두 모델로 빌드한 두 버전의 진성 분류 결과를 doc_id 기준으로
+// 1:1 비교한다. 비교값은 override 적용 전 *원본 모델 라벨*이다(override는 사람
+// 보정이라 모델 간 비교를 오염시키므로 제외하고, 정답 힌트로만 노출).
+
+// DocGenuinenessRun — 한 버전에 보관된 모델별 진성 분류 결과 1건 (silverone
+// 2026-06-15). 같은 버전을 다른 모델로 재실행하면 덮어쓰지 않고 모델별로
+// 누적되며, 비교는 한 버전 안의 두 run(모델) 사이에서 이뤄진다.
+type DocGenuinenessRun struct {
+	Model            string    `json:"model"`
+	ModelDisplayName string    `json:"model_display_name,omitempty"` // 응답 시점 env 기반
+	Ref              string    `json:"ref"`                          // 이 모델 결과 artifact 경로
+	PromptVersion    string    `json:"prompt_version,omitempty"`
+	CompletedAt      time.Time `json:"completed_at"`
+}
+
+// DocGenuinenessRunsResponse — GET .../doc_genuineness/runs 응답.
+type DocGenuinenessRunsResponse struct {
+	DatasetVersionID string              `json:"dataset_version_id"`
+	Items            []DocGenuinenessRun `json:"items"`
+}
+
+// DocGenuinenessCompareSide — 비교 한쪽 메타. version_a/version_b는 같은 버전이고
+// model로 구분된다.
+type DocGenuinenessCompareSide struct {
+	DatasetVersionID string `json:"dataset_version_id"`
+	Model            string `json:"model,omitempty"`             // 이 run의 모델 id
+	ModelDisplayName string `json:"model_display_name,omitempty"` // env 기반 표시명
+	Total            int    `json:"total"`                       // 이 run의 doc 수
+}
+
+// DocGenuinenessCompareDisagreement — 두 모델이 다르게 분류한 문서 1건.
+type DocGenuinenessCompareDisagreement struct {
+	DocID               string `json:"doc_id"`
+	AGenuineness        string `json:"a_genuineness"`
+	AReason             string `json:"a_reason,omitempty"`
+	BGenuineness        string `json:"b_genuineness"`
+	BReason             string `json:"b_reason,omitempty"`
+	CleanedText         string `json:"cleaned_text,omitempty"`
+	OverrideGenuineness string `json:"override_genuineness,omitempty"` // 사람 보정(정답 힌트), 있으면
+}
+
+// DocGenuinenessCompareView — 비교 리포트 응답.
+type DocGenuinenessCompareView struct {
+	VersionA DocGenuinenessCompareSide `json:"version_a"`
+	VersionB DocGenuinenessCompareSide `json:"version_b"`
+	Tiers    []string                  `json:"tiers"` // confusion 행/열 순서
+	// Compared — 양쪽에 모두 존재하는 doc 수. Matched — 그중 라벨 일치 수.
+	Compared int     `json:"compared"`
+	Matched  int     `json:"matched"`
+	Rate     float64 `json:"agreement_rate"` // matched/compared, compared=0이면 0
+	OnlyInA  int     `json:"only_in_a"`      // 한쪽에만 있는 doc(소스 불일치 신호)
+	OnlyInB  int     `json:"only_in_b"`
+	// Confusion — A 라벨(행) × B 라벨(열) 카운트. tiers 순서.
+	Confusion [][]int `json:"confusion"`
+	// Disagreements — 불일치 문서. pagination은 이 목록에만 적용.
+	Disagreements      []DocGenuinenessCompareDisagreement `json:"disagreements"`
+	DisagreementsTotal int                                 `json:"disagreements_total"`
+	Pagination         *ArtifactPagination                 `json:"pagination,omitempty"`
+
+	// ── 결론 레이어 (silverone 2026-06-15) — 정답 판정이 아니라 합의/불일치
+	// 기반 판정 보조. ──
+	// Patterns — 불일치 패턴(A 라벨→B 라벨) 빈도 내림차순. "어디서 주로 갈리나".
+	Patterns []DocGenuinenessComparePattern `json:"patterns"`
+	// OverrideEval — 사람 보정(정답)이 있는 문서 기준 모델별 정확도. 정답 샘플이
+	// 없으면 nil(=판정 불가, agreement만).
+	OverrideEval *DocGenuinenessOverrideEval `json:"override_eval,omitempty"`
+	// UnreviewedDisagreements — 정답 보정이 아직 없는 불일치 수(우선 검토 대상).
+	UnreviewedDisagreements int `json:"unreviewed_disagreements"`
+	// VerdictLevel — 자동 결론의 신뢰 수준.
+	//   ground_truth   — 정답 샘플 있음 → 모델별 정확도로 우열 제시 가능
+	//   agreement_only — 정답 없음 + 일치율 높음 → 일치율만, 우열 판단 불가
+	//   review_needed  — 일치율 낮음 → 운영 적용 전 불일치 검토 필요
+	VerdictLevel string `json:"verdict_level"`
+}
+
+// DocGenuinenessComparePattern — 불일치 패턴 1종(A 라벨→B 라벨)과 빈도.
+type DocGenuinenessComparePattern struct {
+	AGenuineness string `json:"a_genuineness"`
+	BGenuineness string `json:"b_genuineness"`
+	Count        int    `json:"count"`
+}
+
+// DocGenuinenessOverrideEval — 사람 보정(정답) 문서 기준 모델별 정확도.
+// 비교 대상(양쪽 모두 존재 + 정답 있음) 문서에서 각 모델 라벨이 정답과 일치한
+// 비율. Leader는 "a"/"b"/"tie".
+type DocGenuinenessOverrideEval struct {
+	SampleCount int     `json:"sample_count"`
+	ACorrect    int     `json:"a_correct"`
+	BCorrect    int     `json:"b_correct"`
+	AAccuracy   float64 `json:"a_accuracy"`
+	BAccuracy   float64 `json:"b_accuracy"`
+	Leader      string  `json:"leader"`
 }
 
 type BuildJobProgress struct {

@@ -155,6 +155,50 @@ func (s *DatasetService) validateLLOAModelID(modelID *string) error {
 	return ErrInvalidArgument{Message: "model_id not allowed: " + requested + " (allowed: " + strings.Join(allowed, ", ") + ")"}
 }
 
+// validateLLOAModelInAllowlist — 단일 모델 id가 allowlist에 있는지(빈 값 거부).
+// validateLLOAModelID는 nil/빈 값을 통과시키지만, verify는 모델이 필수라 별도.
+func (s *DatasetService) validateLLOAModelInAllowlist(model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ErrInvalidArgument{Message: "model id required"}
+	}
+	for _, opt := range s.lloaModelOptions {
+		if opt.ModelID == model {
+			return nil
+		}
+	}
+	return ErrInvalidArgument{Message: "model_id not allowed: " + model}
+}
+
+// validateVerifyModels — verify 모드 입력 검증 (ADR-026). classify_models는
+// allowlist의 서로 다른 2개, judge_model(지정 시)도 allowlist. allowlist가 비어
+// 있으면(LLOA_MODELS 미설정) verify 자체 불가.
+func (s *DatasetService) validateVerifyModels(classify []string, judge *string) error {
+	if len(s.lloaModelOptions) == 0 {
+		return ErrInvalidArgument{Message: "verify mode requires LLOA model allowlist (config/lloa_models.json)"}
+	}
+	trimmed := make([]string, 0, len(classify))
+	for _, m := range classify {
+		if t := strings.TrimSpace(m); t != "" {
+			trimmed = append(trimmed, t)
+		}
+	}
+	if len(trimmed) != 2 || trimmed[0] == trimmed[1] {
+		return ErrInvalidArgument{Message: "verify mode requires classify_models = 2 distinct allowlisted model ids"}
+	}
+	for _, m := range trimmed {
+		if err := s.validateLLOAModelInAllowlist(m); err != nil {
+			return err
+		}
+	}
+	if judge != nil && strings.TrimSpace(*judge) != "" {
+		if err := s.validateLLOAModelInAllowlist(*judge); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SetPlanReuseEnabled — plan reuse(POC-1) 활성 여부 주입. config의
 // ANALYSIS_PLAN_REUSE_ENABLED를 wiring 시점에 넘긴다. 기본 false(비활성).
 func (s *DatasetService) SetPlanReuseEnabled(enabled bool) {

@@ -126,7 +126,7 @@ PYTHONPATH=workers/python-ai/src python3.11 -m unittest discover -s workers/pyth
 ruby -e 'require "yaml"; YAML.load_file("docs/api/openapi.yaml"); puts "ok"'
 ```
 
-API, workflow, dataset build에 영향을 주는 변경이면 관련 smoke script도 확인한다 (`apps/control-plane/dev/smoke*.sh`).
+API, workflow, dataset build에 영향을 주는 변경이면 관련 smoke script도 확인한다 (`scripts/smoke_analyze_*.sh`, `scripts/smoke_preprocess_pipeline.sh`, `scripts/smoke_doc_genuineness_verify.sh`). ADR-018로 삭제된 단계용 `apps/control-plane/dev/smoke*.sh`는 제거됨.
 
 ---
 

@@ -30,7 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useBuildVersion } from "../../hooks/build.query";
+import { useBuildVersion, useLloaModelOptions } from "../../hooks/build.query";
 import { useGenuinenessOverride } from "../../hooks/build.mutation";
 import {
   DataTable,
@@ -131,8 +131,15 @@ function IconBtn({
 
 export default function GenuinenessTab() {
   const [filter, setFilter] = useState<string>("");
+  // 교차검증 검토 큐 필터 (ADR-026): "" | "disagreement" | "needs_review".
+  const [reviewFilter, setReviewFilter] = useState<string>("");
   const [page, setPage] = useState(1);
   const pageSize = 10;
+
+  // 교차검증 배너의 모델 id→표시명 변환 (allowlist).
+  const { data: lloaModels = [] } = useLloaModelOptions();
+  const modelLabelOf = (id?: string) =>
+    lloaModels.find((m) => m.model_id === id)?.label ?? id ?? "";
 
   // 진성 라벨 수동 보정 — row 단위 inline edit. editingDocId가 편집 중 row,
   // draft*는 입력값, savingDocId는 저장 진행 중(연타·중복 방지).
@@ -197,6 +204,12 @@ export default function GenuinenessTab() {
                 onChange={setDraftGenuineness}
                 disabled={savingDocId === item.docId}
               />
+            ) : !item.genuineness &&
+              (item.resolution === "classify_error" ||
+                item.resolution === "judge_error") ? (
+              <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-600">
+                분류 실패
+              </span>
             ) : (
               <div className="flex items-center justify-center gap-1.5">
                 <GenuinenessBadge value={item.genuineness} />
@@ -242,6 +255,53 @@ export default function GenuinenessTab() {
               <div className="mt-1 text-[11px] text-zinc-400">
                 원본 판정: {item.originalReason}
               </div>
+            )}
+            {/* 교차검증(verify) 상세 — resolution 기준 분기 (ADR-026) */}
+            {(item.resolution === "classify_error" ||
+              item.resolution === "judge_error") && (
+              <div className="mt-1.5 rounded-md bg-rose-50 px-2 py-1 text-[11px] text-rose-700">
+                분류 실패 — 두 모델 모두 분류에 실패해 불확실로 처리했습니다. 재실행을 권장합니다.
+                <span className="ml-1 rounded-full bg-rose-100 px-1.5 py-0.5 font-semibold">
+                  검토 필요
+                </span>
+              </div>
+            )}
+            {item.resolution === "partial_classify" && (
+              <div className="mt-1.5 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+                한 모델 분류 실패 — 단일 모델 결과입니다(교차검증 미완). 재실행을 권장합니다.
+                <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold">
+                  검토 필요
+                </span>
+              </div>
+            )}
+            {item.resolution === "judge_on_disagreement" && item.modelAResult && (
+              <div className="mt-1.5 rounded-md bg-amber-50/70 px-2 py-1 text-[11px] text-amber-800">
+                <span>
+                  모델 A: <b>{labelOf(item.modelAResult.genuineness ?? "")}</b> · 모델 B:{" "}
+                  <b>{labelOf(item.modelBResult?.genuineness ?? "")}</b>
+                </span>
+                {item.judgeResult && (
+                  <span>
+                    {" "}→ judge: <b>{labelOf(item.judgeResult.finalLabel ?? "")}</b>
+                    {typeof item.judgeResult.confidence === "number" && (
+                      <span
+                        className="text-amber-600"
+                        title="judge 자기보고 신뢰도 — 정답 확률 아님"
+                      >
+                        {" "}(판정 신뢰도 {item.judgeResult.confidence.toFixed(2)})
+                      </span>
+                    )}
+                  </span>
+                )}
+                {item.needsReview && (
+                  <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">
+                    검토 필요
+                  </span>
+                )}
+              </div>
+            )}
+            {item.resolution === "model_agreement" && (
+              <div className="mt-1.5 text-[11px] text-zinc-400">모델 합의</div>
             )}
           </td>
         );
@@ -313,6 +373,8 @@ export default function GenuinenessTab() {
       limit: pageSize,
       offset: (page - 1) * pageSize,
       genuineness: filter || undefined,
+      disagreement: reviewFilter === "disagreement" || undefined,
+      needs_review: reviewFilter === "needs_review" || undefined,
     },
   ) as {
     data: GenuinenessBuild | undefined;
@@ -420,6 +482,45 @@ export default function GenuinenessTab() {
         ))}
       </div>
 
+      {/* 교차검증(verify) 요약 배너 (ADR-026) */}
+      {summary.mode === "verify" && (
+        <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-4 text-sm">
+          <div className="font-bold text-violet-800">교차검증 결과</div>
+          <p className="mt-1 text-zinc-700">
+            모델 합의 <b>{(summary.agreementCount ?? 0).toLocaleString()}</b>건 · 불일치{" "}
+            <b>{(summary.disagreementCount ?? 0).toLocaleString()}</b>건(judge 처리{" "}
+            {(summary.judgeCount ?? 0).toLocaleString()}건) · 검토 필요{" "}
+            <b>{(summary.reviewCount ?? 0).toLocaleString()}</b>건.
+          </p>
+          {Array.isArray(
+            (applied as Record<string, unknown> | undefined)?.["classify_models"],
+          ) && (
+            <p className="mt-1 text-xs text-zinc-500">
+              모델 A ={" "}
+              {modelLabelOf(
+                ((applied as Record<string, unknown>)["classify_models"] as string[])[0],
+              )}
+              , 모델 B ={" "}
+              {modelLabelOf(
+                ((applied as Record<string, unknown>)["classify_models"] as string[])[1],
+              )}
+              {(applied as Record<string, unknown>)["judge_model"] ? (
+                <>
+                  {" "}· judge ={" "}
+                  {modelLabelOf(
+                    (applied as Record<string, unknown>)["judge_model"] as string,
+                  )}
+                </>
+              ) : null}
+            </p>
+          )}
+          <p className="mt-1 text-[11px] text-zinc-400">
+            합의는 신뢰 신호, 불일치는 judge가 라벨 기준으로 재검토합니다. judge 신뢰도는
+            모델 자기보고 값이며 정답 확률이 아닙니다.
+          </p>
+        </div>
+      )}
+
       {/* 판별 결과 분포 */}
       <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
         <div className="text-[15px] font-bold text-zinc-900">
@@ -461,14 +562,30 @@ export default function GenuinenessTab() {
         rowKey={(item) => item.docId}
         title={`판별 결과 상세`}
         toolbar={
-          <FilterPills
-            options={FILTER_OPTIONS}
-            value={filter}
-            onChange={(value) => {
-              setFilter(value);
-              setPage(1);
-            }}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <FilterPills
+              options={FILTER_OPTIONS}
+              value={filter}
+              onChange={(value) => {
+                setFilter(value);
+                setPage(1);
+              }}
+            />
+            {summary.mode === "verify" && (
+              <FilterPills
+                options={[
+                  { label: "전체", value: "" },
+                  { label: "불일치만", value: "disagreement" },
+                  { label: "검토 필요", value: "needs_review" },
+                ]}
+                value={reviewFilter}
+                onChange={(value) => {
+                  setReviewFilter(value);
+                  setPage(1);
+                }}
+              />
+            )}
+          </div>
         }
         page={page}
         totalPages={totalPages}

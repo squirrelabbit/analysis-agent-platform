@@ -10,6 +10,7 @@ import ProjectPage from "./pages/ProjectPage";
 import DatasetListRedesign from "./features/datasets/redesign/DatasetListRedesign";
 import VersionDetailPage from "./features/versions/pages/VersionDetailPage";
 import DatasetVersionListRedesign from "./features/versions/redesign/DatasetVersionListRedesign";
+import DocGenuinenessComparePage from "./features/versions/pages/DocGenuinenessComparePage";
 import LoginPage from "./features/auth/pages/LoginPage";
 import ReportListPage from "./features/reports/pages/ReportListPage";
 import ReportEditorPage from "./features/reports/pages/ReportEditorPage";
@@ -36,6 +37,7 @@ function App() {
                 {/* 기존 버전 목록 화면 (리디자인으로 교체, 보존) */}
                 {/* <Route path="versions" element={<DatasetDetail />} /> */}
                 <Route path="versions" element={<DatasetVersionListRedesign />} />
+                <Route path="doc-genuineness-compare" element={<DocGenuinenessComparePage />} />
                 {/* <Route path="prompts" element={<PromptPage />} /> */}
               </Route>
               {/* <Route path="scenarios" element={<ScenarioPage />} /> */}

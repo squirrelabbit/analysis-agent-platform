@@ -107,4 +107,4 @@ docker compose -f "${COMPOSE_FILE}" up -d temporal python-ai-worker control-plan
 echo "[5/5] collation warning 확인"
 show_collation_logs
 
-echo "완료: 필요하면 apps/control-plane/dev/smoke_semantic.sh 와 apps/control-plane/dev/smoke_cluster.sh 로 smoke를 다시 확인하세요."
+echo "완료: 필요하면 scripts/smoke_preprocess_pipeline.sh 로 dataset_build smoke를 다시 확인하세요."

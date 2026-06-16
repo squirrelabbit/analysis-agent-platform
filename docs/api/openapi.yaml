@@ -979,14 +979,81 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/doc_genuineness/compare:
+    get:
+      tags: [Datasets]
+      summary: 진성 분류 모델 비교 (한 버전 내 두 모델 doc_id 1:1)
+      description: |
+        한 버전에 모델별로 누적된 doc_genuineness 결과 중 두 모델
+        (`model_a`/`model_b`)을 doc_id 기준 1:1 비교한다 (silverone 2026-06-15).
+        같은 버전 = 같은 원본이라 doc_id가 정확히 정렬된다. 비교값은 override
+        적용 *전* 원본 모델 라벨이다 — override(사람 보정)는 모델 간 비교를
+        오염시키므로 제외하고, 불일치 항목에 정답 힌트(`override_genuineness`)로만
+        노출한다. `limit`/`offset`은 불일치 목록에만 적용. 버전에 해당 모델 결과가
+        없으면 400. 모델별 결과 목록은 `.../versions/{vid}/doc_genuineness/runs`.
+      operationId: compareDocGenuineness
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - name: version_id
+          in: query
+          required: true
+          schema: { type: string }
+          description: 비교할 버전 id
+        - name: model_a
+          in: query
+          required: true
+          schema: { type: string }
+          description: 비교 기준 A 모델 id (그 버전 runs의 model)
+        - name: model_b
+          in: query
+          required: true
+          schema: { type: string }
+          description: 비교 기준 B 모델 id
+        - $ref: "#/components/parameters/ArtifactLimit"
+        - $ref: "#/components/parameters/ArtifactOffset"
+      responses:
+        "200":
+          description: 비교 리포트
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocGenuinenessCompareView"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness/runs:
+    get:
+      tags: [Datasets]
+      summary: 진성 분류 모델별 결과 목록 (비교 선택지)
+      description: |
+        한 버전에 보관된 모델별 doc_genuineness 결과(run) 목록 (silverone
+        2026-06-15). 같은 버전을 다른 모델로 재실행하면 덮어쓰지 않고 모델별로
+        누적되며, 비교 화면이 이 목록으로 두 모델을 고른다. 옛 버전(이 기능 이전
+        빌드)은 단일 결과를 run 1건으로 합성해 반환한다.
+      operationId: listDocGenuinenessRuns
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: 모델별 결과 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocGenuinenessRunsResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness:
     post:
       tags: [Datasets]
       summary: doc_genuineness build job 큐잉
       description: |
-        cleaned doc 단위로 LLOA에 한 호출씩 보내 `genuine_review` / `mixed` /
-        `non_review` 3-tier 라벨을 부여한다. clean이 ready 상태여야 호출 가능.
-        후속 `clause_label`에서 `include_genuineness=["genuine_review","mixed"]`
+        cleaned doc 단위로 LLOA에 한 호출씩 보내 `genuine_review` / `non_review` /
+        `uncertain` 3-tier 라벨을 부여한다. clean이 ready 상태여야 호출 가능.
+        후속 `clause_label`에서 `include_genuineness=["genuine_review","uncertain"]`
         옵션을 쓰면 후기성 doc만 절 분리/감성·aspect 라벨링 단계로 흘려보낸다.
       operationId: createDocGenuinenessJob
       parameters:
@@ -1033,9 +1100,20 @@ paths:
           description: |
             genuineness 서버 필터(genuine_review/non_review/uncertain 등). 지정 시 해당
             판별 결과 문서만 반환하고 pagination.total도 필터 기준. summary(차트 통계)는
-            필터와 무관하게 전체 분포 유지. silverone 2026-06-05.
+            필터와 무관하게 전체 분포 유지. silverone 2026-06-05. (verify 모드에선
+            final_label 기준 필터.)
           schema:
             type: string
+        - name: disagreement
+          in: query
+          required: false
+          description: "교차검증(verify) 검토 큐 필터 (ADR-026). true면 두 모델이 갈린 문서만 반환."
+          schema: { type: boolean }
+        - name: needs_review
+          in: query
+          required: false
+          description: "교차검증(verify) 검토 큐 필터. true면 needs_review=true(저신뢰/review) 문서만 반환."
+          schema: { type: boolean }
       responses:
         "200":
           description: doc_genuineness artifact view
@@ -1057,8 +1135,8 @@ paths:
         "운영자 수동 수정" 기본값으로 저장한다. 보정 해제는 DELETE override 사용.
 
         **주의**: 진성 라벨을 바꿔도 이미 생성된 clause_label/clause_keywords는
-        자동 재실행되지 않는다. clause_label 포함 경계(genuine_review/mixed ↔
-        non_review/uncertain)를 넘는 보정이고 후속 artifact가 ready면, GET 응답의
+        자동 재실행되지 않는다. clause_label 포함 경계(genuine_review/uncertain ↔
+        non_review)를 넘는 보정이고 후속 artifact가 ready면, GET 응답의
         `summary.downstream_rerun_recommended=true`로 재실행 권장을 노출한다.
       operationId: setDocGenuinenessOverride
       parameters:
@@ -1211,7 +1289,7 @@ paths:
       description: |
         cleaned doc 단위로 LLOA에 한 호출씩 보내 절 분리 + sentiment + aspect를
         한 번에 라벨링한다. clean이 ready 상태여야 호출 가능. 옵션
-        `include_genuineness=["genuine_review","mixed"]` 명시 시 doc_genuineness
+        `include_genuineness=["genuine_review","uncertain"]` 명시 시 doc_genuineness
         도 ready여야 한다 (후기성 doc만 통과).
       operationId: createClauseLabelJob
       parameters:
@@ -2640,7 +2718,7 @@ components:
             (`GET /datasets/.../{type}`)과 동일한 normalized core를 노출하면서 운영·감사용
             metadata는 superset으로 포함한다. 프론트 매퍼는 normalized key만 사용한다.
 
-            - `doc_genuineness`: core `{ genuineness: {genuine_review, mixed, non_review, uncertain}, total }`
+            - `doc_genuineness`: core `{ genuineness: {genuine_review, non_review, uncertain}, total }`
               + metadata (`applied`, `model`, `prompt_version`, `input_row_count`, `processed_row_count`,
               `parse_failures`, `total_prompt_tokens`, `total_completion_tokens`).
               `total`은 `processed_row_count`가 있으면 우선, 없으면 `genuineness` 값 합.
@@ -2981,7 +3059,7 @@ components:
         genuineness:
           type: string
           description: effective로 적용할 라벨
-          enum: [genuine_review, non_review, uncertain, mixed]
+          enum: [genuine_review, non_review, uncertain]
         reason:
           type: string
           description: (선택) 보정 사유 메모
@@ -3971,7 +4049,7 @@ components:
                   type: object
                   additionalProperties:
                     type: integer
-                  description: "key: genuine_review / mixed / non_review / unknown / value: doc count"
+                  description: "key: genuine_review / non_review / uncertain / unknown / value: doc count"
             items:
               type: array
               items:
@@ -3989,6 +4067,27 @@ components:
                     type:
                       - string
                       - "null"
+                  final_label:
+                    type: ["string", "null"]
+                    description: "verify 모드(ADR-026) 권위 라벨. genuineness에도 같은 값이 채워진다(호환). review면 null."
+                  needs_review:
+                    type: boolean
+                    description: "verify 모드 — 사람 확인 필요 여부(합의 false / 불일치+conf<0.85·review true)."
+                  is_disagreement:
+                    type: boolean
+                    description: "verify 모드 — 두 분류 모델이 갈렸는지."
+                  resolution:
+                    type: string
+                    description: "verify 모드 — model_agreement | judge_on_disagreement | partial_classify(한 모델만 성공) | empty_text_shortcut | classify_error(둘 다 실패→uncertain) | judge_error."
+                  model_a_result:
+                    type: ["object", "null"]
+                    description: "verify 모드 — 모델 A 분류 {genuineness, reason}."
+                  model_b_result:
+                    type: ["object", "null"]
+                    description: "verify 모드 — 모델 B 분류 {genuineness, reason}."
+                  judge_result:
+                    type: ["object", "null"]
+                    description: "verify 모드 불일치 시 judge 결과 {decision, final_label, confidence, reason, judge_model}. 합의면 null."
             pagination:
               $ref: "#/components/schemas/ArtifactPagination"
     ClauseKeywordsView:
@@ -4108,6 +4207,101 @@ components:
         override_reason: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    DocGenuinenessRun:
+      type: object
+      description: 한 버전에 보관된 모델별 진성 분류 결과 1건 (silverone 2026-06-15).
+      properties:
+        model: { type: string, description: "이 결과의 모델 id" }
+        model_display_name: { type: string, description: "env 기반 표시명(없으면 생략)" }
+        ref: { type: string, description: "이 모델 결과 artifact 경로" }
+        prompt_version: { type: string }
+        completed_at: { type: string, format: date-time }
+      required: [model, ref, completed_at]
+    DocGenuinenessRunsResponse:
+      type: object
+      description: GET .../doc_genuineness/runs 응답.
+      properties:
+        dataset_version_id: { type: string }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DocGenuinenessRun" }
+      required: [dataset_version_id, items]
+    DocGenuinenessCompareSide:
+      type: object
+      description: 진성 분류 모델 비교 한쪽 메타. version_a/version_b는 같은 버전이고 model로 구분.
+      properties:
+        dataset_version_id: { type: string }
+        model: { type: string, description: "이 run의 모델 id" }
+        model_display_name: { type: string, description: "env 기반 표시명(없으면 생략)" }
+        total: { type: integer, description: "이 run의 doc 수" }
+      required: [dataset_version_id, total]
+    DocGenuinenessCompareDisagreement:
+      type: object
+      description: 두 모델이 다르게 분류한 문서 1건. genuineness는 override 적용 전 원본 모델 라벨.
+      properties:
+        doc_id: { type: string }
+        a_genuineness: { type: string }
+        a_reason: { type: string }
+        b_genuineness: { type: string }
+        b_reason: { type: string }
+        cleaned_text: { type: string, description: "본문(clean join 가능 시)" }
+        override_genuineness: { type: string, description: "사람 보정 정답 힌트(어느 버전에든 보정 있으면)" }
+      required: [doc_id, a_genuineness, b_genuineness]
+    DocGenuinenessCompareView:
+      type: object
+      description: |
+        진성 분류 모델 비교 리포트 (silverone 2026-06-15). confusion은 a_label(행)×
+        b_label(열) 카운트로 tiers 순서를 따른다. pagination은 disagreements에만 적용.
+      properties:
+        version_a: { $ref: "#/components/schemas/DocGenuinenessCompareSide" }
+        version_b: { $ref: "#/components/schemas/DocGenuinenessCompareSide" }
+        tiers:
+          type: array
+          items: { type: string }
+          description: "confusion 행/열 순서 (genuine_review/non_review/uncertain)"
+        compared: { type: integer, description: "양쪽 모두 존재하는 doc 수" }
+        matched: { type: integer, description: "그중 라벨 일치 수" }
+        agreement_rate: { type: number, format: float, description: "matched/compared (compared=0이면 0)" }
+        only_in_a: { type: integer, description: "A에만 있는 doc 수(소스 불일치 신호)" }
+        only_in_b: { type: integer }
+        confusion:
+          type: array
+          description: "a_label(행)×b_label(열) 카운트. tiers 순서."
+          items:
+            type: array
+            items: { type: integer }
+        disagreements:
+          type: array
+          items: { $ref: "#/components/schemas/DocGenuinenessCompareDisagreement" }
+        disagreements_total: { type: integer }
+        pagination: { $ref: "#/components/schemas/ArtifactPagination" }
+        patterns:
+          type: array
+          description: "불일치 패턴(A 라벨→B 라벨) 빈도 내림차순."
+          items:
+            type: object
+            properties:
+              a_genuineness: { type: string }
+              b_genuineness: { type: string }
+              count: { type: integer }
+            required: [a_genuineness, b_genuineness, count]
+        override_eval:
+          description: "사람 보정(정답) 문서 기준 모델별 정확도. 정답 샘플 없으면 생략(판정 불가)."
+          type: object
+          properties:
+            sample_count: { type: integer }
+            a_correct: { type: integer }
+            b_correct: { type: integer }
+            a_accuracy: { type: number, format: float }
+            b_accuracy: { type: number, format: float }
+            leader: { type: string, enum: [a, b, tie] }
+          required: [sample_count, a_correct, b_correct, a_accuracy, b_accuracy, leader]
+        unreviewed_disagreements: { type: integer, description: "정답 미보정 불일치 수(우선 검토 대상)" }
+        verdict_level:
+          type: string
+          enum: [ground_truth, agreement_only, review_needed]
+          description: "ground_truth: 정답 샘플로 우열 제시 / agreement_only: 정답 없음+일치율 높음(판단 불가) / review_needed: 일치율 낮음(검토 필요)"
+      required: [version_a, version_b, tiers, compared, matched, agreement_rate, confusion, disagreements, disagreements_total, patterns, unreviewed_disagreements, verdict_level]
     ClauseLabelView:
       allOf:
         - $ref: "#/components/schemas/ArtifactViewCommon"
@@ -4387,6 +4581,16 @@ components:
         model_id:
           type: string
           description: "전처리에 사용할 LLOA 모델 id (2026-06-12 모델 선택). GET /lloa_model_options의 items[].model_id 값. 미지정 시 worker env(LLOA_MODEL) default. allowlist(config/lloa_models.json) 밖이면 400. 실사용 모델은 artifact summary.model에 기록된다."
+        verify:
+          type: boolean
+          description: "교차모델 검증 모드 (ADR-026). true면 classify_models 2개로 교차 분류 + 불일치 시 judge가 final_label 확정. model_id(단일)와 동시 사용 안 함."
+        classify_models:
+          type: array
+          items: { type: string }
+          description: "verify 모드 분류 모델 2개 (서로 다른 allowlist model_id). verify=true면 필수."
+        judge_model:
+          type: string
+          description: "verify 모드 judge 모델 (allowlist model_id). 생략 시 classify_models[1]."
         force:
           type: boolean
           default: false
@@ -4399,7 +4603,7 @@ components:
           description: "키워드 최소 길이(글자). 미지정 시 worker default 2."
     DatasetClauseLabelBuildRequest:
       type: object
-      description: "ADR-017 / 5/19 + 5/20 — cleaned doc 단위 LLOA 한 호출 절 분리 + sentiment + aspect 라벨링 build payload. prompt v3 schema (clause/sentiment/aspect 3 필드). 5/20 결정으로 output_path/batch_size/max_tokens/aspect_taxonomy_version 제거 — worker default 사용 + default include_genuineness=[\"genuine_review\",\"mixed\"]."
+      description: "ADR-017 / 5/19 + 5/20 — cleaned doc 단위 LLOA 한 호출 절 분리 + sentiment + aspect 라벨링 build payload. prompt v3 schema (clause/sentiment/aspect 3 필드). 5/20 결정으로 output_path/batch_size/max_tokens/aspect_taxonomy_version 제거 — worker default 사용 + default include_genuineness=[\"genuine_review\",\"uncertain\"]."
       properties:
         clause_label_prompt_version:
           type: string
@@ -4408,8 +4612,8 @@ components:
           type: array
           items:
             type: string
-            enum: [genuine_review, mixed, non_review]
-          description: "doc_genuineness 결과로 필터링 (예: ['genuine_review','mixed']). 명시 안 하면 모든 doc 처리. 명시 시 doc_genuineness ready 필요."
+            enum: [genuine_review, non_review, uncertain]
+          description: "doc_genuineness 결과로 필터링 (예: ['genuine_review','uncertain']). 명시 안 하면 모든 doc 처리. 명시 시 doc_genuineness ready 필요."
         model_id:
           type: string
           description: "전처리에 사용할 LLOA 모델 id (2026-06-12 모델 선택). GET /lloa_model_options의 items[].model_id 값. 미지정 시 worker env(LLOA_MODEL) default. allowlist(config/lloa_models.json) 밖이면 400. 실사용 모델은 artifact summary.model에 기록된다."

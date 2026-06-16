@@ -47,17 +47,19 @@ func TestApplyDocGenuinenessOverrides(t *testing.T) {
 	}
 }
 
-// uncertain↔non_review는 둘 다 clause_label 제외 → 경계 cross 아님.
+// genuine_review↔uncertain은 둘 다 clause_label 포함 → 경계 cross 아님.
+// silverone 2026-06-16 — mixed→uncertain 통합으로 uncertain이 default 포함 집합에
+// 들어가면서, no-cross 케이스가 (uncertain↔non_review)에서 (genuine_review↔uncertain)로 바뀜.
 func TestApplyDocGenuinenessOverridesNoCross(t *testing.T) {
 	view := domain.DatasetArtifactView{
 		Items:   []map[string]any{{"doc_id": "d1", "genuineness": "uncertain"}},
-		Summary: map[string]any{"genuineness": map[string]int{"uncertain": 1, "non_review": 0}},
+		Summary: map[string]any{"genuineness": map[string]int{"uncertain": 1, "genuine_review": 0}},
 	}
 	crossed := applyDocGenuinenessOverrides(&view, []domain.DocGenuinenessOverride{
-		{DocID: "d1", OriginalGenuineness: "uncertain", OverrideGenuineness: "non_review"},
+		{DocID: "d1", OriginalGenuineness: "uncertain", OverrideGenuineness: "genuine_review"},
 	})
 	if crossed {
-		t.Fatal("uncertain→non_review는 cross 아님")
+		t.Fatal("genuine_review↔uncertain은 둘 다 clause_label 포함이라 cross 아님")
 	}
 }
 

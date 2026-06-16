@@ -54,7 +54,7 @@ ADR-017로 `config/task_registry.json`에 분리됐다.
 ADR-018 (2026-05-19 β2 결정)으로 hot path는 다음 3종으로 축소됐다.
 
 - `dataset_clean` — 업로드 직후 자동 실행되는 row-level 정제.
-- `dataset_doc_genuineness` — clean 직후 LLOA 한 호출씩 doc-level 3-tier 진성 분류(genuine_review / mixed / non_review).
+- `dataset_doc_genuineness` — clean 직후 LLOA 한 호출씩 doc-level 3-tier 진성 분류(genuine_review / non_review / uncertain).
 - `dataset_clause_label` — cleaned doc 단위 LLOA 한 호출로 절 분리 + sentiment + aspect 라벨링.
 
 dataset build 단계는 `source → clean → doc_genuineness → clause_label` 순으로 흐른다.

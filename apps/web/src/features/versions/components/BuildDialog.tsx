@@ -13,6 +13,7 @@ import { useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { compactObject } from "@/shared/utils/clean";
 import { useBuildJob } from "../hooks/build.mutation";
+import { useLloaModelOptions } from "../hooks/build.query";
 import BuildCleanForm from "./forms/BuildCleanForm";
 import BuildGenuinenessForm from "./forms/BuildGenuinenessForm";
 import type {
@@ -39,6 +40,7 @@ export default function BuildDialog({
 }) {
   const { projectId, datasetId } = useParams();
   const { mutateAsync } = useBuildJob();
+  const { data: lloaModels = [] } = useLloaModelOptions();
   const [open, setOpen] = useState(false);
 
   const close = () => setOpen(false);
@@ -100,6 +102,19 @@ export default function BuildDialog({
             <BuildGenuinenessForm
               formId={formId}
               onSubmit={async (data: BuildGenuinenessFormValues) => {
+                // 교차검증 모드: allowlist 앞 두 모델을 classify, 두 번째를 judge로(고정 preset).
+                if (data.verify && lloaModels.length >= 2) {
+                  await mutateAsync({
+                    type: "doc_genuineness",
+                    req: compactObject({
+                      doc_genuineness_prompt_version: data.promptVersion,
+                      verify: true,
+                      classify_models: [lloaModels[0].model_id, lloaModels[1].model_id],
+                      judge_model: lloaModels[1].model_id,
+                    }),
+                  });
+                  return;
+                }
                 await mutateAsync({
                   type: "doc_genuineness",
                   req: compactObject({

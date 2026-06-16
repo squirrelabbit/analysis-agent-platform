@@ -75,7 +75,7 @@ Result of the doc_genuineness step. Doc-level three-tier authenticity label.
 | column | type | description |
 | --- | --- | --- |
 | `doc_id` | string | joins to `docs.doc_id` |
-| `genuineness` | string | genuine_review \| mixed \| non_review |
+| `genuineness` | string | genuine_review \| non_review \| uncertain |
 | `reason` | string | classification rationale (LLM output) |
 | `prompt_version` | string | prompt version used |
 | `source` | string | call identifier |

@@ -10,7 +10,7 @@ input source는 clean_artifact_ref (cleaned doc parquet/jsonl).
 성능: ThreadPoolExecutor(max_workers=8) 병렬 호출 — 50 docs sequential ~11분
 → 병렬 ~1.5분. silverone 5/20 결정. ``concurrency`` payload key로 override 가능.
 
-Optional: ``include_genuineness=["genuine_review","mixed"]``로 doc_genuineness
+Optional: ``include_genuineness=["genuine_review","uncertain"]``로 doc_genuineness
 artifact를 읽어 필터링한다. default는 *모든 doc 처리*.
 """
 
@@ -45,12 +45,13 @@ DEFAULT_CLAUSE_LABEL_TAXONOMY_ID = "festival-v2"
 _TAXONOMY = load_taxonomy(DEFAULT_CLAUSE_LABEL_TAXONOMY_ID)
 _ALLOWED_ASPECT: frozenset[str] = _TAXONOMY.aspect_keys_set
 _FALLBACK_ASPECT: str = _TAXONOMY.fallback_aspect
-_ALLOWED_GENUINENESS_FILTER = {"genuine_review", "mixed", "non_review", "uncertain"}
-# 5/20 결정 — default ON. doc_genuineness 결과 중 genuine_review + mixed만
+_ALLOWED_GENUINENESS_FILTER = {"genuine_review", "non_review", "uncertain"}
+# 5/20 결정 — default ON. doc_genuineness 결과 중 genuine_review + uncertain만
 # clause_label로 보낸다 (non_review는 LLOA 호출 절약 + 분석 가치 0). caller가
 # 명시적으로 ``include_genuineness=[]`` (빈 list) 또는 ``include_genuineness=
-# ["genuine_review","mixed","non_review"]`` 보내면 모든 doc 처리 가능.
-_DEFAULT_INCLUDE_GENUINENESS: list[str] = ["genuine_review", "mixed"]
+# ["genuine_review","uncertain","non_review"]`` 보내면 모든 doc 처리 가능.
+# silverone 2026-06-16 — legacy mixed tier 제거, uncertain으로 통합.
+_DEFAULT_INCLUDE_GENUINENESS: list[str] = ["genuine_review", "uncertain"]
 _DEFAULT_CONCURRENCY = 8
 
 
@@ -196,7 +197,7 @@ def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, 
     """doc_genuineness artifact를 읽어 doc_id -> tier map을 반환한다.
 
     Default 동작 (5/20 결정): payload에 ``include_genuineness`` 키가 없으면
-    ``["genuine_review", "mixed"]``로 필터링 (non_review는 LLOA 호출 절약 + 분석
+    ``["genuine_review", "uncertain"]``로 필터링 (non_review는 LLOA 호출 절약 + 분석
     가치 0). 명시적으로 빈 list ``[]`` 보내면 모든 doc 처리 (filter off).
     명시적으로 3 tier 모두 포함하면 사실상 모든 doc 처리지만 doc_genuineness ref는
     여전히 필요.
@@ -242,7 +243,21 @@ def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, 
                 )
                 continue
             doc_id = str(rec.get("doc_id") or "").strip()
-            tier = str(rec.get("genuineness") or "").strip()
+            # ADR-026 — verify artifact는 권위 라벨이 final_label. 단일 모델
+            # artifact는 genuineness(또는 옛 label). effective label 우선순위:
+            # final_label > genuineness > label.
+            tier = str(
+                rec.get("final_label") or rec.get("genuineness") or rec.get("label") or ""
+            ).strip()
+            if doc_id and tier:
+                tier_by_doc[doc_id] = tier
+    # 사람 보정(override)은 최상위 — control-plane이 payload로 넘긴 doc_id→tier로
+    # 덮는다(override > final_label > genuineness). overrides 없으면 무효.
+    overrides = payload.get("genuineness_overrides")
+    if isinstance(overrides, dict):
+        for raw_doc, raw_tier in overrides.items():
+            doc_id = str(raw_doc or "").strip()
+            tier = str(raw_tier or "").strip()
             if doc_id and tier:
                 tier_by_doc[doc_id] = tier
     return tiers, tier_by_doc

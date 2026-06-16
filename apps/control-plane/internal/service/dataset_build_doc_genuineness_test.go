@@ -84,7 +84,7 @@ func TestBuildDocGenuinenessHappyPath(t *testing.T) {
 					"processed_row_count": 50,
 					"tier_counts": map[string]any{
 						"genuine_review": 30,
-						"mixed":          12,
+						"uncertain":      12,
 						"non_review":     8,
 					},
 					"parse_failures":          0,

@@ -404,7 +404,11 @@ func (s *DatasetService) CreateDocGenuinenessJob(projectID, datasetID, datasetVe
 	if _, err := extractDocGenuinenessConfig(dataset.Metadata); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
-	if err := s.validateLLOAModelID(input.ModelID); err != nil {
+	if input.Verify != nil && *input.Verify {
+		if err := s.validateVerifyModels(input.ClassifyModels, input.JudgeModel); err != nil {
+			return domain.DatasetBuildJob{}, err
+		}
+	} else if err := s.validateLLOAModelID(input.ModelID); err != nil {
 		return domain.DatasetBuildJob{}, err
 	}
 	if status := cleanStatus(version); status == "queued" || status == "cleaning" || status == "failed" || status == "stale" {

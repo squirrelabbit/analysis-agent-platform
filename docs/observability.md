@@ -108,7 +108,7 @@
 - `cd workers/python-ai && uv run pytest -q`
 - `cd apps/control-plane && go test ./...`
 - `cd apps/control-plane && go vet ./...`
-- `cd apps/control-plane && ./dev/smoke.sh`
+- `cd apps/control-plane && ./dev/smoke.sh` (당시 canonical skill surface smoke — ADR-018로 해당 단계 삭제되며 스크립트도 제거됨)
 
 smoke 실행에서는 다음을 확인했다.
 

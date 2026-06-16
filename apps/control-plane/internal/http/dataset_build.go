@@ -47,6 +47,46 @@ func (s *Server) handleLLOAModelOptions(w stdhttp.ResponseWriter, _ *stdhttp.Req
 	writeJSON(w, stdhttp.StatusOK, map[string]any{"items": options})
 }
 
+// handleListDocGenuinenessRuns — 한 버전에 보관된 모델별 진성 분류 결과 목록
+// (비교 화면 dropdown용, silverone 2026-06-15).
+func (s *Server) handleListDocGenuinenessRuns(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	resp, err := s.datasetService.GetDocGenuinenessRuns(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, resp)
+}
+
+// handleCompareDocGenuineness — 진성 분류 모델 비교 (silverone 2026-06-15).
+// 한 버전에 보관된 두 모델 결과(model_a/model_b)를 doc_id 기준 1:1 비교한다.
+// limit/offset은 불일치 목록에만 적용.
+func (s *Server) handleCompareDocGenuineness(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	versionID := strings.TrimSpace(r.URL.Query().Get("version_id"))
+	modelA := strings.TrimSpace(r.URL.Query().Get("model_a"))
+	modelB := strings.TrimSpace(r.URL.Query().Get("model_b"))
+	if versionID == "" || modelA == "" || modelB == "" {
+		writeError(w, stdhttp.StatusBadRequest, "version_id, model_a, model_b query params are required")
+		return
+	}
+	limit, offset := parseArtifactPagination(r)
+	view, err := s.datasetService.CompareDocGenuineness(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		versionID, modelA, modelB,
+		limit, offset,
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, view)
+}
+
 // 화면 polling용 GET handler — clean / doc_genuineness / clause_label 3종.
 // POST와 같은 path. status / progress / error_message / (단계별) summary
 // items + applied를 한 응답으로 반환해 화면이 build job API를 직접
@@ -67,12 +107,16 @@ func (s *Server) handleGetCleanView(w stdhttp.ResponseWriter, r *stdhttp.Request
 func (s *Server) handleGetDocGenuinenessView(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	limit, offset := parseArtifactPagination(r)
 	genuineness := strings.TrimSpace(r.URL.Query().Get("genuineness"))
+	// 교차검증(verify) 검토 큐 필터 (ADR-026) — verify artifact에만 의미.
+	disagreementOnly := r.URL.Query().Get("disagreement") == "true"
+	needsReviewOnly := r.URL.Query().Get("needs_review") == "true"
 	view, err := s.datasetService.GetDocGenuinenessView(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
 		r.PathValue("version_id"),
 		limit, offset,
 		genuineness,
+		disagreementOnly, needsReviewOnly,
 	)
 	if err != nil {
 		s.writeServiceError(w, err)
