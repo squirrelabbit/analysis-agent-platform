@@ -60,6 +60,13 @@ const toSentiment = (raw: string): Sentiment =>
 const toPercent = (ratio: number): number =>
   Math.round(ratio <= 1 ? ratio * 100 : ratio);
 
+// 상세 표 감성 필터가 켜졌을 때 선택 pill을 감성색(연하게)으로 — 필터 적용을 눈에 띄게.
+const SENTIMENT_PILL_SELECTED: Record<Sentiment, string> = {
+  positive: "bg-emerald-50 text-emerald-600 border-emerald-200",
+  neutral: "bg-zinc-100 text-zinc-500 border-zinc-200",
+  negative: "bg-red-50 text-red-600 border-red-200",
+};
+
 // 건수 최다 aspect key (selected_aspect가 비었을 때 fallback).
 const topAspectKey = (aspect: Record<string, number>): string => {
   let best = "";
@@ -392,20 +399,25 @@ export function KeywordTab() {
         </td>
       ),
     },
-    {
-      header: "대표 감성",
-      headerClassName: "w-28",
-      cell: (it) => {
-        const s = toSentiment(it.dominantSentiment);
-        return (
-          <td className="px-4 py-3">
-            <Badge className={SENTIMENT_BADGE[s]}>
-              {SENTIMENT_LABELS[s]} {toPercent(it.dominantSentimentRatio)}%
-            </Badge>
-          </td>
-        );
-      },
-    },
+    // 대표 감성 — 감성 필터를 걸면 모든 행이 해당 감성 100%라 무의미. '전체'에서만 표시.
+    ...((sentiment
+      ? []
+      : [
+          {
+            header: "대표 감성",
+            headerClassName: "w-28",
+            cell: (it) => {
+              const s = toSentiment(it.dominantSentiment);
+              return (
+                <td className="px-4 py-3">
+                  <Badge className={SENTIMENT_BADGE[s]}>
+                    {SENTIMENT_LABELS[s]} {toPercent(it.dominantSentimentRatio)}%
+                  </Badge>
+                </td>
+              );
+            },
+          },
+        ]) as Column<KeywordItem>[]),
     {
       header: "연관 Aspect",
       headerClassName: "w-32",
@@ -726,6 +738,9 @@ export function KeywordTab() {
                 setSentiment(v);
                 setPage(1);
               }}
+              selectedClassName={(v) =>
+                v ? SENTIMENT_PILL_SELECTED[toSentiment(v)] : undefined
+              }
             />
           </>
         }

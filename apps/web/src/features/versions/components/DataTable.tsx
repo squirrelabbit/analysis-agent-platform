@@ -150,27 +150,34 @@ export function FilterPills({
   options,
   value,
   onChange,
+  selectedClassName,
 }: {
   options: { label: string; value: string }[];
   value: string;
   onChange: (value: string) => void;
+  /** 선택된 옵션의 색을 값별로 다르게 주고 싶을 때(예: 감성). 없으면 기본 검정 pill. */
+  selectedClassName?: (value: string) => string | undefined;
 }) {
   return (
     <>
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          onClick={() => onChange(opt.value)}
-          className={cn(
-            "px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
-            value === opt.value
-              ? "bg-zinc-800 text-white border-zinc-800"
-              : "bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50",
-          )}
-        >
-          {opt.label}
-        </button>
-      ))}
+      {options.map((opt) => {
+        const selected = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
+            className={cn(
+              "px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+              selected
+                ? (selectedClassName?.(opt.value) ??
+                  "bg-zinc-800 text-white border-zinc-800")
+                : "bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50",
+            )}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
     </>
   );
 }
