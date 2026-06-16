@@ -33,21 +33,6 @@ func ResolveDatasetSource(version DatasetVersion) DatasetResolvedSource {
 	return ResolveRawDatasetSource(version)
 }
 
-func ResolvePrepareInputSource(version DatasetVersion) DatasetResolvedSource {
-	if ref := cleanedDatasetRef(version); ref != "" {
-		textColumn := metadataStringValue(version.Metadata, "cleaned_text_column", "cleaned_text")
-		return DatasetResolvedSource{
-			DatasetName: ref,
-			TextColumn:  textColumn,
-			TextColumns: []string{textColumn},
-			Stage:       DatasetSourceStageClean,
-		}
-	}
-	source := ResolveRawDatasetSource(version)
-	source.TextColumns = nil
-	return source
-}
-
 func ResolveRawDatasetSource(version DatasetVersion) DatasetResolvedSource {
 	textColumns := metadataStringListValue(version.Metadata, "raw_text_columns")
 	if len(textColumns) == 0 {
@@ -76,15 +61,6 @@ func ResolveRawDatasetSource(version DatasetVersion) DatasetResolvedSource {
 
 // silverone 2026-05-28 (β2 cleanup PR2) — ResolveSentimentDatasetSource 제거.
 // β2로 sentiment stage 자체가 사라져 호출처 없음.
-
-func DatasetSourceDefaultTextColumn(version DatasetVersion) string {
-	return ResolveDatasetSource(version).TextColumn
-}
-
-func DatasetSourceRawTextColumn(version DatasetVersion) string {
-	source := ResolveRawDatasetSource(version)
-	return source.TextColumn
-}
 
 func DatasetSourceIsRawTextColumn(version DatasetVersion, column string) bool {
 	column = strings.TrimSpace(column)

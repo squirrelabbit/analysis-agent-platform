@@ -889,18 +889,6 @@ func (s *Server) handleCreateCleanJob(w stdhttp.ResponseWriter, r *stdhttp.Reque
 	writeJSON(w, stdhttp.StatusAccepted, response.AsAccepted())
 }
 
-// dataset_build deprecated endpoint helper. 호출처(dataset_build_v2.go 등)가
-// 다시 도입할 수 있으니 setDeprecatedBuildEndpointHeaders는 유지.
-const _deprecatedSunsetDate = "Mon, 15 Sep 2025 00:00:00 GMT"
-
-func setDeprecatedBuildEndpointHeaders(w stdhttp.ResponseWriter, replacementPath string) {
-	w.Header().Set("Deprecation", "true")
-	w.Header().Set("Sunset", _deprecatedSunsetDate)
-	if replacementPath != "" {
-		w.Header().Set("Link", `<`+replacementPath+`>; rel="successor-version"`)
-	}
-}
-
 func datasetVersionCreateRequestFromMultipart(form *multipart.Form) (domain.DatasetVersionCreateRequest, error) {
 	var payload domain.DatasetVersionCreateRequest
 	if form == nil {
@@ -1201,15 +1189,6 @@ func decodeJSONAllowEmpty(r *stdhttp.Request, dest any) error {
 		return err
 	}
 	return nil
-}
-
-func hasTextColumns(values []string) bool {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func writeError(w stdhttp.ResponseWriter, status int, message string) {

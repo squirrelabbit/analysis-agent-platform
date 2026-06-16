@@ -360,3 +360,9 @@ func buildCleanExportOrderClause(db *sql.DB, cleanedRef string) (string, error) 
 	}
 	return "ORDER BY " + strings.Join(parts, ", "), nil
 }
+
+// escapeDuckDBLiteral — DuckDB SQL literal 안의 작은따옴표를 escape (injection 방지).
+// artifact view / export 쿼리들이 공유한다.
+func escapeDuckDBLiteral(value string) string {
+	return strings.ReplaceAll(strings.TrimSpace(value), "'", "''")
+}
