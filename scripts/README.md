@@ -32,9 +32,8 @@ committed 단일 출처: `workers/python-ai/tests/fixtures/plan_v2_smoke/`
 
 | script | 용도 |
 |---|---|
-| `festival_5_query.sh` | festival dataset 5 query 자동화 (4/30 사용자 가치 검증) |
 | `migrate_dataset_build_v2.py` | ADR-012 후속 DB 정리 |
 | `migrate_drop_legacy_project_assets.sql` | aspect_taxonomy / garbage_rule / stopwords 9 테이블 drop |
 | `migrations/0001_drop_legacy_cluster_tables.sql` | (operator-run) ADR-018 β2 cluster staging 테이블 정리. boot path에서 제거됨 — 필요 시 수동 1회 실행. ⚠️ 운영 데이터 삭제 |
-| `skill_usage_summary.sh` | skill.usage obs log 집계 (δ-3에서 Go 측 emit 사라짐 — log line 자체가 더 안 나옴. 후속 instrumentation 시 재활용) |
-| `smoke_doc_genuineness.sh` / `smoke_preprocess_pipeline.sh` | dataset_build 단계별 smoke |
+| `smoke_preprocess_pipeline.sh` | dataset_build (clean → doc_genuineness → clause_label) 단계 smoke |
+| `smoke_doc_genuineness_verify.sh` | doc_genuineness 교차모델 검증(verify, ADR-026) end-to-end smoke. control plane을 AUTH_ENABLED=false로 띄운 뒤 실행 |
