@@ -51,13 +51,6 @@ func stringPointer(value string) *string {
 	return &value
 }
 
-func derefString(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
-}
-
 func latestDatasetBuildJobsByType(items []domain.DatasetBuildJob) map[string]domain.DatasetBuildJob {
 	latest := make(map[string]domain.DatasetBuildJob)
 	for _, item := range items {

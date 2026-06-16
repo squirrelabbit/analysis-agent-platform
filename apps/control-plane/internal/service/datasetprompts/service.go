@@ -471,47 +471,6 @@ func parsePromptFrontMatter(raw string) map[string]string {
 	return metadata
 }
 
-// InferPromptOperation — public export (옛 service.inferPromptOperation).
-// dataset_versions.go 등 외부 호출자 없으면 후속 PR에서 private로 회귀 가능.
-func InferPromptOperation(version string) string {
-	trimmed := strings.TrimSpace(version)
-	// ADR-015 Phase A5: order matters — "planner-meta-anthropic" must match
-	// before "planner-anthropic" (substring) and "issue-evidence-summary"
-	// before "issue-summary".
-	// (β2 / 5/19) prepare/sentiment infer 분기 제거 — dataset_build task β2 정리.
-	switch {
-	case strings.Contains(trimmed, "execution-final-answer"):
-		return "execution_final_answer"
-	case strings.Contains(trimmed, "planner-meta-anthropic"):
-		return "planner_meta"
-	case strings.Contains(trimmed, "planner-anthropic"):
-		return "planner"
-	case strings.Contains(trimmed, "issue-evidence-summary"):
-		return "issue_evidence_summary"
-	default:
-		return "custom"
-	}
-}
-
-// InferPromptDefaultGroups — public export (옛 service.inferPromptDefaultGroups).
-func InferPromptDefaultGroups(version string) []string {
-	// ADR-015 Phase A5: catalog defaults map to operation labels (matches
-	// Python prompt_registry._PROMPT_DEFAULT_GROUPS).
-	// (β2 / 5/19) prepare/sentiment 카탈로그 entry 제거.
-	switch strings.TrimSpace(version) {
-	case "execution-final-answer-v1":
-		return []string{"execution_final_answer"}
-	case "planner-meta-anthropic-v1":
-		return []string{"planner_meta"}
-	case "issue-evidence-summary-anthropic-v1":
-		return []string{"issue_evidence_summary"}
-	case "planner-anthropic-v1":
-		return []string{"planner"}
-	default:
-		return nil
-	}
-}
-
 func defaultPromptMetaValue(value string, fallback string) string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -704,11 +663,6 @@ func (s *Service) ResolveProjectPromptTemplates(projectID, version, rowOperation
 func sha256Hex(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
-}
-
-// PromptMetadataKey — export (옛 promptMetadataKey).
-func PromptMetadataKey(version, operation string) string {
-	return strings.TrimSpace(version) + "::" + strings.TrimSpace(operation)
 }
 
 // trimStringPointer — silverone 2026-05-28 subpackage 이동에 따른 helper 복사.

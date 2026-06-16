@@ -15,11 +15,7 @@ import (
 
 const DefaultEmbeddingModel = "intfloat/multilingual-e5-small"
 
-const (
-	defaultDatasetSourceSummarySampleLimit = 5
-	defaultDatasetBuildSampleRows          = 10
-	maxDatasetBuildSampleRows              = 20
-)
+const defaultDatasetSourceSummarySampleLimit = 5
 
 const (
 	datasetLLMModeDefault  = "default"

@@ -2,20 +2,12 @@ package store
 
 import (
 	"encoding/json"
-	"errors"
 	"sort"
 	"sync"
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
 )
-
-// errInvalidStoreInput은 store 호출에서 입력 invariant 위반 시 사용.
-// service layer가 ErrInvalidArgument로 wrapping하기 전 단계 — store는
-// 직접 contract 위반만 보고하면 된다.
-func errInvalidStoreInput(message string) error {
-	return errors.New("store: " + message)
-}
 
 type MemoryStore struct {
 	mu                   sync.RWMutex
@@ -242,14 +234,6 @@ func (s *MemoryStore) ListProjectPromptChanges(projectID, operation string) ([]d
 		out = append(out, change)
 	}
 	return out, nil
-}
-
-// 5/7 결정: rule/taxonomy/stopwords를 DB 기반으로 관리. 자산별 7 메서드 ×
-// 3 자산 = 21 메서드. PK는 (project_id, version). prompt 정책의 패턴을
-// 그대로 답습 — defaults는 1 프로젝트당 active 1개, changes는 append-only.
-
-func projectAssetKey(projectID, version string) string {
-	return projectID + "::" + version
 }
 
 func (s *MemoryStore) SaveDataset(dataset domain.Dataset) error {

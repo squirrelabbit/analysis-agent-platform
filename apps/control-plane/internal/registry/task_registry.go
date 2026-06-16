@@ -69,20 +69,6 @@ func TaskPathFor(name string) string {
 	return definition.TaskPath
 }
 
-// MustTaskPathFor — TaskPathFor + 등록되지 않은 경우 error 반환. 호출처가
-// task_name 오타를 빌드 타임에 못 잡으므로 런타임 fail-fast 채널로 사용.
-func MustTaskPathFor(name string) (string, error) {
-	path := TaskPathFor(name)
-	if path == "" {
-		return "", fmt.Errorf("registry: task %q not registered in task_registry.json", name)
-	}
-	return path, nil
-}
-
-func TaskRegistryVersion() string {
-	return taskRegistry().Version
-}
-
 func loadTaskRegistry() (TaskRegistry, error) {
 	path := resolveTaskRegistryPath()
 	content, err := os.ReadFile(path)

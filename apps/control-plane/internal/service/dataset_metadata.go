@@ -124,17 +124,6 @@ func datasetBuildTextColumnLabel(columns []string) string {
 	return strings.Join(normalized, " + ")
 }
 
-func metadataRawString(metadata map[string]any, key string) (string, bool) {
-	if metadata == nil {
-		return "", false
-	}
-	value, ok := metadata[key]
-	if !ok {
-		return "", false
-	}
-	return anyStringValue(value), true
-}
-
 func metadataTime(metadata map[string]any, key string) (time.Time, bool) {
 	if metadata == nil {
 		return time.Time{}, false
@@ -279,18 +268,6 @@ func buildCleanSummary(metadata map[string]any) *domain.DatasetCleanSummary {
 // silverone 2026-06-04 (ADR-018 β2 residue cleanup) — datasetSourceForUnstructured도
 // 제거된 embedding/cluster derive helper에서만 쓰여 함께 삭제.
 
-func textSelectionMatchesRawSource(version domain.DatasetVersion, textColumn string, textColumns []string) bool {
-	if domain.DatasetSourceIsRawTextColumn(version, textColumn) {
-		return true
-	}
-	for _, column := range textColumns {
-		if domain.DatasetSourceIsRawTextColumn(version, column) {
-			return true
-		}
-	}
-	return false
-}
-
 func defaultPrepareRequired(dataType string, value *bool) bool {
 	if value != nil {
 		return *value
@@ -311,9 +288,7 @@ func requiresClean(version domain.DatasetVersion) bool {
 // requiresSentiment / requiresEmbedding은 β2로 모두 dead. 호출처 stub
 // (datasetBuildTypePrepare/Sentiment/Embedding stage 자체가 not_applicable).
 // stage view 정리(PR3) 시 함수 자체 제거.
-func requiresPrepare(_ domain.DatasetVersion) bool   { return false }
-func requiresSentiment(_ domain.DatasetVersion) bool { return false }
-func requiresEmbedding(_ domain.DatasetVersion) bool { return false }
+func requiresPrepare(_ domain.DatasetVersion) bool { return false }
 
 func cleanStatus(version domain.DatasetVersion) string {
 	status := strings.TrimSpace(metadataString(version.Metadata, "clean_status", ""))
@@ -342,38 +317,13 @@ func prepareStatus(version domain.DatasetVersion) string {
 	return strings.TrimSpace(metadataString(version.Metadata, "prepare_status", ""))
 }
 
-func embeddingStatus(version domain.DatasetVersion) string {
-	return strings.TrimSpace(metadataString(version.Metadata, "embedding_status", ""))
-}
-
-// 5/7 결정 5-step pipeline 신규 status helper. struct 컬럼 추가는 회피하고
-// metadata jsonb의 *_status key만 사용 — DB schema 변경 0. 기존 4 status는
-// struct 필드 + metadata 둘 다지만 신규 4는 metadata only(비대칭). 후속 plan
-// 에서 통합 검토.
-
-func clauseLabelStatus(version domain.DatasetVersion) string {
-	return strings.TrimSpace(metadataString(version.Metadata, "clause_label_status", ""))
-}
-
-// isClauseLabelPreconditionSatisfied — embedding_cluster / keyword_index 전
-// 검사. clause_label ready 필수.
-func isClauseLabelPreconditionSatisfied(status string) bool {
-	switch status {
-	case "ready", "not_applicable", "not_requested", "":
-		return true
-	default:
-		return false
-	}
-}
-
 func isCleanReady(version domain.DatasetVersion) bool {
 	return cleanStatus(version) == "ready" && cleanArtifactRef(version) != ""
 }
 
 // silverone 2026-05-28 (β2 cleanup PR2) — β2 dead stage. struct 필드 제거.
 // stage 자체가 사용 안 되므로 항상 false.
-func isPrepareReady(_ domain.DatasetVersion) bool    { return false }
-func isSentimentReady(_ domain.DatasetVersion) bool  { return false }
+func isPrepareReady(_ domain.DatasetVersion) bool      { return false }
 func embeddingBuildReady(_ domain.DatasetVersion) bool { return false }
 
 func datasetClusterReady(version domain.DatasetVersion) bool {
@@ -422,39 +372,6 @@ func artifactString(artifact map[string]any, key string) string {
 	return strings.TrimSpace(fmt.Sprintf("%v", value))
 }
 
-func artifactMap(artifact map[string]any, key string) map[string]any {
-	if artifact == nil {
-		return nil
-	}
-	value, ok := artifact[key]
-	if !ok || value == nil {
-		return nil
-	}
-	typed, ok := value.(map[string]any)
-	if !ok || len(typed) == 0 {
-		return nil
-	}
-	return typed
-}
-
-func artifactBool(artifact map[string]any, key string) bool {
-	if artifact == nil {
-		return false
-	}
-	value, ok := artifact[key]
-	if !ok || value == nil {
-		return false
-	}
-	switch typed := value.(type) {
-	case bool:
-		return typed
-	case string:
-		return strings.EqualFold(strings.TrimSpace(typed), "true")
-	default:
-		return false
-	}
-}
-
 func artifactInt(artifact map[string]any, key string) (int, bool) {
 	if artifact == nil {
 		return 0, false
@@ -464,31 +381,6 @@ func artifactInt(artifact map[string]any, key string) (int, bool) {
 		return 0, false
 	}
 	return anyToInt(value)
-}
-
-func normalizeOptionalPositiveInt(value *int, fieldName string) (int, error) {
-	if value == nil {
-		return 0, nil
-	}
-	normalized := *value
-	if normalized <= 0 {
-		return 0, ErrInvalidArgument{Message: fmt.Sprintf("%s must be a positive integer", fieldName)}
-	}
-	return normalized, nil
-}
-
-func normalizeDatasetBuildSampleRows(value *int, fieldName string) (int, error) {
-	normalized, err := normalizeOptionalPositiveInt(value, fieldName)
-	if err != nil {
-		return 0, err
-	}
-	if normalized == 0 {
-		return defaultDatasetBuildSampleRows, nil
-	}
-	if normalized > maxDatasetBuildSampleRows {
-		return 0, ErrInvalidArgument{Message: fmt.Sprintf("%s must be less than or equal to %d", fieldName, maxDatasetBuildSampleRows)}
-	}
-	return normalized, nil
 }
 
 func inferArtifactFormat(path string, fallback string) string {
@@ -501,29 +393,6 @@ func inferArtifactFormat(path string, fallback string) string {
 	default:
 		return fallback
 	}
-}
-
-func resolveReadableArtifactRef(candidates ...string) string {
-	for _, candidate := range candidates {
-		trimmed := strings.TrimSpace(candidate)
-		if trimmed == "" {
-			continue
-		}
-		if _, err := os.Stat(trimmed); err == nil {
-			return trimmed
-		}
-	}
-	for _, candidate := range candidates {
-		trimmed := strings.TrimSpace(candidate)
-		if trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
-func resolveReadableEmbeddingRef(primary string, fallback string, versionURI *string) string {
-	return resolveReadableArtifactRef(primary, fallback, derefString(versionURI))
 }
 
 func anyToInt(value any) (int, bool) {
@@ -561,17 +430,6 @@ func intMapValue(value any) map[string]int {
 	}
 	if len(result) == 0 {
 		return nil
-	}
-	return result
-}
-
-func cloneStringIntMap(source map[string]int) map[string]int {
-	if len(source) == 0 {
-		return nil
-	}
-	result := make(map[string]int, len(source))
-	for key, value := range source {
-		result[key] = value
 	}
 	return result
 }

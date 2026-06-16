@@ -23,18 +23,6 @@ type workerTaskResponse struct {
 	Artifacts []map[string]any `json:"artifacts,omitempty"`
 }
 
-// allArtifacts는 worker response를 단일/multi artifact 양쪽 모두에서 추출.
-// list가 있으면 list 사용, 없으면 단일 artifact를 list로 wrap.
-func (r workerTaskResponse) allArtifacts() []map[string]any {
-	if len(r.Artifacts) > 0 {
-		return r.Artifacts
-	}
-	if r.Artifact != nil {
-		return []map[string]any{r.Artifact}
-	}
-	return nil
-}
-
 func (s *DatasetService) runWorkerTask(ctx context.Context, taskPath string, payload map[string]any) (workerTaskResponse, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(s.pythonAIWorkerURL), "/")
 	if baseURL == "" {
