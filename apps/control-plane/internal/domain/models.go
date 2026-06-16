@@ -726,6 +726,11 @@ type DatasetClauseLabelBuildRequest struct {
 	// silverone 2026-06-12 — 전처리 LLOA 모델 선택 (doc_genuineness와 동일 정책).
 	ModelID *string `json:"model_id,omitempty"`
 	Force   *bool   `json:"force,omitempty"`
+	// silverone 2026-06-16 (ADR-028) — verify 모드. true면 ClassifyModels 2개로
+	// 문장앵커 교차 분류 + 불일치 judge. 단일 모델 경로(ModelID)와 별도.
+	Verify         *bool    `json:"verify,omitempty"`
+	ClassifyModels []string `json:"classify_models,omitempty"`
+	JudgeModel     *string  `json:"judge_model,omitempty"`
 }
 
 // LLOAModelOption — 전처리(doc_genuineness/clause_label) 빌드에 선택 가능한

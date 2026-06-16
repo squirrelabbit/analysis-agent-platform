@@ -4617,4 +4617,14 @@ components:
         model_id:
           type: string
           description: "전처리에 사용할 LLOA 모델 id (2026-06-12 모델 선택). GET /lloa_model_options의 items[].model_id 값. 미지정 시 worker env(LLOA_MODEL) default. allowlist(config/lloa_models.json) 밖이면 400. 실사용 모델은 artifact summary.model에 기록된다."
+        verify:
+          type: boolean
+          description: "문장앵커 교차모델 검증 모드 (ADR-028). true면 classify_models 2개가 같은 문장(kiwipiepy 분리)에 라벨 → reconcile(agree/union/sentiment_auto) + 불일치만 judge. model_id(단일)와 동시 사용 안 함. 출력은 clause_label.verify.jsonl(기존 {doc_id,clause,sentiment,aspect} 호환 + resolution/needs_review)."
+        classify_models:
+          type: array
+          items: { type: string }
+          description: "verify 모드 분류 모델 2개 (서로 다른 allowlist model_id). verify=true면 필수."
+        judge_model:
+          type: string
+          description: "verify 모드 judge 모델 (allowlist model_id). 생략 시 classify_models[1]."
         force: { type: boolean }

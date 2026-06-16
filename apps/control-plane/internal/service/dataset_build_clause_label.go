@@ -36,13 +36,21 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 		return domain.DatasetVersion{}, ErrInvalidArgument{Message: "clean artifact ref missing — clause_label requires clean ready"}
 	}
 
-	outputPath := s.datasetArtifactPathOrFallback(version, "clause_label", "clause_label.jsonl")
+	// silverone 2026-06-16 (ADR-028) — verify면 문장앵커 교차모델 경로. 단일 모델
+	// 경로와 별도 artifact(clause_label.verify.jsonl) + clause_label_mode="verify".
+	isVerify := input.Verify != nil && *input.Verify
+	outputFallback := "clause_label.jsonl"
+	if isVerify {
+		outputFallback = "clause_label.verify.jsonl"
+	}
+	outputPath := s.datasetArtifactPathOrFallback(version, "clause_label", outputFallback)
 	progressPath := outputPath + ".progress.json"
 
 	if version.Metadata == nil {
 		version.Metadata = map[string]any{}
 	}
 	version.Metadata["clause_label_status"] = "running"
+	version.Metadata["clause_label_mode"] = clauseLabelMode(isVerify)
 	version.Metadata["clause_label_uri"] = outputPath
 	version.Metadata["clause_label_ref"] = outputPath
 	version.Metadata["clause_label_progress_ref"] = progressPath
@@ -65,7 +73,21 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 	}
 	// silverone 2026-06-12 — 전처리 모델 선택. allowlist 검증은 job 생성 시
 	// 완료(validateLLOAModelID). 생략 시 worker env(LLOA_MODEL) default.
-	if input.ModelID != nil && strings.TrimSpace(*input.ModelID) != "" {
+	// silverone 2026-06-16 (ADR-028) — verify면 classify_models 2개 + judge_model을
+	// 넘기고 단일 model_id는 생략(worker가 verify 경로로 위임).
+	if isVerify {
+		classify := make([]string, 0, len(input.ClassifyModels))
+		for _, m := range input.ClassifyModels {
+			if t := strings.TrimSpace(m); t != "" {
+				classify = append(classify, t)
+			}
+		}
+		payload["verify"] = true
+		payload["classify_models"] = classify
+		if input.JudgeModel != nil && strings.TrimSpace(*input.JudgeModel) != "" {
+			payload["judge_model"] = strings.TrimSpace(*input.JudgeModel)
+		}
+	} else if input.ModelID != nil && strings.TrimSpace(*input.ModelID) != "" {
 		payload["model_id"] = strings.TrimSpace(*input.ModelID)
 	}
 	// silverone 2026-05-28 — dataset.metadata.doc_genuineness를 doc_genuineness
@@ -161,4 +183,12 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 		return domain.DatasetVersion{}, err
 	}
 	return version, nil
+}
+
+// clauseLabelMode — verify 플래그를 metadata clause_label_mode 값으로 (ADR-028).
+func clauseLabelMode(verify bool) string {
+	if verify {
+		return "verify"
+	}
+	return "single"
 }
