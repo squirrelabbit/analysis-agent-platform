@@ -62,4 +62,28 @@ $PY $DIR/measure_sentence_anchor_multiaspect.py \
 - 불일치 ~80%가 boundary calibration (sentiment neutral↔pos 81%, aspect add/drop 78%)
 - splitter: kiwipiepy 진짜 bad-split ~3% (regex 52% 실격)
 
+## Gate 1 (ADR-028 구현 게이트 — 통과)
+
+production 수준 튜닝 프롬프트(`gate1_tuned_prompt.txt`) + kiwipiepy로 정제본 재측정.
+
+```bash
+$PY $DIR/measure_sentence_anchor_multiaspect.py \
+    --models wisenut/wise-lloa-max-v1.2.1,wisenut/wise-lloa-ultra-v1.1.0 \
+    --csv /tmp/prep_cleaned_1k/cleaned_filtered.csv --limit 202 \
+    --splitter kiwipiepy \
+    --system-prompt-file $DIR/gate1_tuned_prompt.txt \
+    --out-dir /tmp/gate1
+```
+
+결과(n≈10000): relevant kappa **0.757** ✅ / sentiment **88.0%** ✅ / aspect-set
+Jaccard **0.763**. → 문장 앵커 설계 통과.
+
+- **aspect raw Jaccard 0.80 바는 현 taxonomy서 비현실적**으로 확인(프롬프트 2회 iterate
+  plateau ~0.76). aspect는 raw 모델간 일치가 아니라 **judge/union reconciliation 후
+  품질**로 평가한다(ADR-028 결정).
+- v2(`etc 최후수단` 강제)는 두 모델이 서로 다른 구체 aspect를 골라 **regress** → 폐기.
+  같은 시도 반복 금지.
+- aspect 천장 원인 = `etc/ambiance_scenery/show_program/experience_booth` 경계 모호
+  → **taxonomy 재설계 별도 트랙**.
+
 상세·결론은 ADR-028 + vault 진단 문서 참조.
