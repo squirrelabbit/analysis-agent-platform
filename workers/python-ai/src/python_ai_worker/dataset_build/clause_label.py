@@ -310,7 +310,14 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
     cleaned doc(title + body) 단위로 LLOA 병렬 호출 (default concurrency 8)에
     festival-related 절 추출 + sentiment + aspect 라벨링까지 처리. schema:
     {doc_id, clause, sentiment, aspect, prompt_version, source}.
+
+    payload['verify']가 참이면 문장 앵커 교차모델 검증 경로(ADR-028)로 위임한다.
     """
+    if payload.get("verify"):
+        from .clause_label_verify import run_dataset_clause_label_verify
+
+        return run_dataset_clause_label_verify(payload)
+
     dataset_version_id = str(payload.get("dataset_version_id") or "").strip()
     clean_artifact_ref = str(payload.get("clean_artifact_ref") or "").strip()
     output_path_raw = str(payload.get("output_path") or "").strip()
