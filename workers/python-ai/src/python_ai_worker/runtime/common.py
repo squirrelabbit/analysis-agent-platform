@@ -354,15 +354,41 @@ def _extract_noun_tokens(
     if Kiwi is not None:
         try:
             kiwi = _get_kiwi(user_dictionary_path)
-            noun_tokens: list[str] = []
+            # silverone 2026-06-16 — kiwipiepy가 복합명사(푸드트럭→푸드+트럭)를
+            # 형태소로 쪼개므로, 원문에서 공백 없이 붙어 있던 인접 명사를 위치
+            # (start/len) 기준으로 도로 합쳐 복합어를 복원한다. 사전 불필요·도메인
+            # 무관. regex fallback은 공백 분리라 이미 복합어를 유지 → 두 경로 결과가
+            # 동일해진다. 합친 뒤 normalize·필터를 적용해 component가 stopword여도
+            # (예: 방문→방문객) 복합어는 살린다.
+            forms: list[str] = []
+            starts: list[int] = []
+            ends: list[int] = []
             for token in kiwi.tokenize(normalized_text):
                 tag = str(getattr(token, "tag", "") or "").strip().upper()
                 if prefixes and not any(tag.startswith(prefix) for prefix in prefixes):
                     continue
-                surface = _normalize_token(str(getattr(token, "form", "") or ""))
-                if not surface or len(surface) < min_length or surface in stopword_set:
+                form = str(getattr(token, "form", "") or "")
+                if not form:
                     continue
-                noun_tokens.append(surface)
+                start = int(getattr(token, "start", -1))
+                forms.append(form)
+                starts.append(start)
+                ends.append(start + int(getattr(token, "len", len(form))))
+            noun_tokens = []
+            i = 0
+            while i < len(forms):
+                merged = forms[i]
+                end = ends[i]
+                j = i + 1
+                # 다음 명사 start == 현재 end (사이 공백·다른 품사 없음) → 같은 복합어.
+                while j < len(forms) and starts[j] >= 0 and starts[j] == end:
+                    merged += forms[j]
+                    end = ends[j]
+                    j += 1
+                surface = _normalize_token(merged)
+                if surface and len(surface) >= min_length and surface not in stopword_set:
+                    noun_tokens.append(surface)
+                i = j
             return noun_tokens, "kiwi"
         except Exception as exc:
             # Codex round 3B silent fallback finding: kiwi tokenize failure
