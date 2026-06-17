@@ -121,14 +121,20 @@ func (c *PythonBuildClient) RunTask(ctx context.Context, taskPath string, payloa
 }
 
 // taskPath 별 timeout. 신규 build 단계 추가 시 case 1개 추가.
+//
+// 주의: doc_genuineness / clause_label은 datasetBuildExecuteActivityOptions의
+// StartToCloseTimeout(90분)와 맞춰야 한다. HTTP 타임아웃이 더 짧으면(과거 30분)
+// 액티비티가 90분을 허용해도 HTTP 호출이 먼저 끊겨 "worker_timeout"으로 빌드가
+// 실패한다 — 특히 교차검증(verify, 2모델+judge)은 2k doc 기준 25~50분 소요라
+// 30분 한도를 넘겼다 (2026-06-17). 두 값을 90분으로 정렬한다.
 func buildTaskTimeout(taskPath string) time.Duration {
 	switch strings.TrimSpace(taskPath) {
 	case "/tasks/dataset_clean":
 		return 20 * time.Minute
 	case "/tasks/dataset_clause_label":
-		return 30 * time.Minute
+		return 90 * time.Minute
 	case "/tasks/dataset_doc_genuineness":
-		return 30 * time.Minute
+		return 90 * time.Minute
 	default:
 		return 2 * time.Minute
 	}
