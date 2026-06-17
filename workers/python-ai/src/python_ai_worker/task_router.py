@@ -36,6 +36,7 @@ from .planner import (
 from .prompt_options import list_prompt_options
 from .taxonomies import (
     DEFAULT_TAXONOMY_ID,
+    TaxonomyError,
     TaxonomyMismatchError,
     check_taxonomy_compatibility,
     load_taxonomy,
@@ -70,10 +71,11 @@ def canonical_task_name(name: str) -> str:
     return name
 
 
-# taxonomy-driven config Phase 3-B (silverone 2026-05-27) — analyze 시
-# clause_label artifact의 taxonomy_id/hash와 비교할 planner active taxonomy.
-# Phase 3-A에서 planner schema description이 이 taxonomy에서 derive되므로
-# 동일 source. Phase 3-B 후속에서 dataset_version metadata 기반 동적 lookup.
+# analyze 정합성 체크의 fallback taxonomy (artifact에 taxonomy_id가 없는 옛
+# 데이터셋용). 2026-06-17 (Phase 3) — taxonomy_id가 더는 전역 고정이 아니라
+# per-dataset(artifact taxonomy_id)이라, analyze는 artifact taxonomy_id로 planner
+# taxonomy를 동적 로드한다(아래 _run_analyze). 이 모듈 전역은 그 값이 없을 때의
+# DEFAULT일 뿐.
 _PLANNER_TAXONOMY = load_taxonomy(DEFAULT_TAXONOMY_ID)
 
 
@@ -235,8 +237,18 @@ def _run_analyze(payload: dict[str, Any]) -> dict[str, Any]:
     artifact_taxonomy_hash = (
         clause_label_metadata.get("taxonomy_hash") if clause_label_metadata else None
     )
+    # Phase 3 — planner taxonomy를 artifact taxonomy_id로 per-request 로드해 그 데이터셋의
+    # taxonomy로 정합성 체크/스키마를 맞춘다. id가 없으면(옛 데이터셋) DEFAULT로 fallback,
+    # 알 수 없는 id면 DEFAULT와 비교돼 id_mismatch로 fail-loud.
+    planner_taxonomy = _PLANNER_TAXONOMY
+    _aid = (artifact_taxonomy_id or "").strip()
+    if _aid:
+        try:
+            planner_taxonomy = load_taxonomy(_aid)
+        except TaxonomyError:
+            planner_taxonomy = _PLANNER_TAXONOMY
     taxonomy_check = check_taxonomy_compatibility(
-        planner_taxonomy=_PLANNER_TAXONOMY,
+        planner_taxonomy=planner_taxonomy,
         artifact_taxonomy_id=artifact_taxonomy_id,
         artifact_taxonomy_hash=artifact_taxonomy_hash,
     )

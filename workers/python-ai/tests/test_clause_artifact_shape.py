@@ -254,6 +254,20 @@ class ClauseLabelTaxonomySourceTests(unittest.TestCase):
         festival = load_taxonomy("festival-gunsan")
         self.assertEqual(_ALLOWED_ASPECT, festival.aspect_keys_set)
 
+    def test_resolve_taxonomy_is_per_request(self) -> None:
+        # Phase 3 — payload['taxonomy_id']로 per-request 선택. 미지정 시 DEFAULT.
+        # (festival-v2 / gunsan은 aspect 키·설명이 같아 렌더 블록은 동일하지만
+        # taxonomy_id / taxonomy_hash가 달라 artifact·analyze 정합성에서 구분된다.)
+        from python_ai_worker.dataset_build.clause_label import (
+            resolve_clause_label_taxonomy,
+        )
+
+        v2 = resolve_clause_label_taxonomy({"taxonomy_id": "festival-v2"})
+        default = resolve_clause_label_taxonomy({})
+        self.assertEqual(v2.taxonomy_id, "festival-v2")
+        self.assertEqual(default.taxonomy_id, "festival-gunsan")
+        self.assertNotEqual(v2.taxonomy_hash, default.taxonomy_hash)
+
     def test_allowed_aspect_matches_hand_coded_lock(self) -> None:
         # Phase 2-A 도입 후에도 옛 hand-coded lock과 같은 9개 값이어야 함.
         from python_ai_worker.dataset_build.clause_label import _ALLOWED_ASPECT
