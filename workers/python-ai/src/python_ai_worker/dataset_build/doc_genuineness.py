@@ -22,9 +22,17 @@ from ..config_paths import resolve_config_dir
 from ..clients.lloa import LloaClient, LloaConfig, LloaResponseParseError
 from ..obs import get, skill_handler
 from ..prompt_options import load_prompt_body
+from ._chunking import build_sentence_chunks, split_anchor_sentences
 from ._common import write_progress
 
 LOGGER = get(__name__)
+
+# 긴 문서 chunk aggregate (ADR-029) — cleaned_text가 max_input_chars(기본 20000)를
+# 넘으면 truncate 대신 문장 window chunk로 나눠 각각 분류하고 "진성 hit 우선"으로
+# aggregate한다. 짧은 문서는 기존 truncate 경로 유지(계약 보존).
+_CHUNK_MAX_SENTENCES = 60
+_CHUNK_MAX_CHARS = 12000
+_CHUNK_OVERLAP_SENTENCES = 0
 
 # silverone 2026-06-02 — prompt는 task-folder(config/prompts/doc_genuineness/)에서
 # resolve. version은 payload(/prompt_options에서 고른 stem) > index.yaml default.
@@ -378,6 +386,13 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
 
     concurrency = _resolve_concurrency(payload)
     max_input_chars = _resolve_max_input_chars(payload)
+    # ADR-029 — 긴 문서 chunk aggregate. opt-in(기본 OFF)으로 기존 truncate 계약·
+    # 테스트 보존. payload['chunking']=true일 때만, 그 중 cleaned_text > max_input_chars인
+    # doc만 chunk 경로(나머지는 기존 단일 호출+truncate).
+    chunking_enabled = bool(payload.get("chunking", False))
+    chunk_max_sentences = max(1, int(payload.get("max_chunk_sentences") or _CHUNK_MAX_SENTENCES))
+    chunk_max_chars = max(1, int(payload.get("max_chunk_chars") or _CHUNK_MAX_CHARS))
+    chunk_overlap = max(0, int(payload.get("overlap_sentences") if payload.get("overlap_sentences") is not None else _CHUNK_OVERLAP_SENTENCES))
 
     tier_counts: dict[str, int] = {tier: 0 for tier in _ALLOWED_TIERS}
     parse_failures = 0
@@ -385,6 +400,10 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
     truncated_docs = 0
     total_prompt_tokens = 0
     total_completion_tokens = 0
+    chunked_doc_count = 0
+    total_chunk_count = 0
+    chunk_failure_count = 0
+    genuine_span_count = 0
 
     # silverone 2026-05-28 (D2) — clause_label 동일 3-패스 패턴:
     # (1) row scan으로 empty shortcut + LLOA target 분리,
@@ -418,8 +437,81 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
     # error_kind: None(성공) / "parse"(응답 파싱 실패) / "request"(HTTP 400·413·
     # timeout 등 호출 자체 실패). request 실패는 해당 doc만 uncertain으로 격리하고
     # build를 계속한다 (한 doc이 전체 build를 죽이지 않게).
+    def _process_chunked(doc_id: str, doc_text: str) -> dict[str, Any]:
+        """긴 문서 chunk aggregate (ADR-029). 문장 window chunk별 분류 → 진성 hit
+        우선 aggregate. chunk 실패는 그 chunk만 uncertain 취급(doc 안 죽임). genuine
+        chunk의 sentence span을 genuine_spans로 기록."""
+        sentences = split_anchor_sentences(doc_text)
+        chunks = build_sentence_chunks(
+            sentences, max_sentences=chunk_max_sentences, max_chars=chunk_max_chars, overlap=chunk_overlap,
+        )
+        tiers: list[str] = []
+        genuine_spans: list[dict[str, int]] = []
+        chunk_failures = 0
+        first_genuine_reason = ""
+        prompt_toks = comp_toks = 0
+        for ci, (start0, sub) in enumerate(chunks):
+            try:
+                r = _classify_doc(
+                    client, system_prompt=system_prompt, doc_id=f"{doc_id}#c{ci}",
+                    doc_text=" ".join(sub), max_tokens=max_tokens,
+                )
+                g = r["genuineness"]
+                usage = r.get("usage") or {}
+                prompt_toks += int(usage.get("prompt_tokens") or 0)
+                comp_toks += int(usage.get("completion_tokens") or 0)
+            except (LloaResponseParseError, OSError) as exc:
+                LOGGER.warning(
+                    "doc_genuineness.chunk_failed", doc_id=doc_id, chunk_index=ci,
+                    error_category=type(exc).__name__, error_message=str(exc),
+                )
+                g = "uncertain"  # 실패 chunk → uncertain 취급
+                chunk_failures += 1
+                r = None
+            tiers.append(g)
+            if g == "genuine_review":
+                genuine_spans.append({"chunk_index": ci, "sentence_start": start0 + 1, "sentence_end": start0 + len(sub)})
+                if not first_genuine_reason and r is not None:
+                    first_genuine_reason = str(r.get("reason") or "").strip()
+
+        if "genuine_review" in tiers:
+            final = "genuine_review"
+            reason = first_genuine_reason or f"{len(chunks)} chunk 중 일부에서 실제 방문/체험 후기 확인."
+        elif "uncertain" in tiers:
+            final = "uncertain"
+            reason = "긴 문서 chunk aggregate — 진성 chunk 없음, 불확실 chunk 존재."
+        else:
+            final = "non_review"
+            reason = "긴 문서 chunk aggregate — 모든 chunk non_review."
+
+        all_failed = len(chunks) > 0 and chunk_failures == len(chunks)
+        record: dict[str, Any] = {
+            "doc_id": doc_id,
+            "genuineness": final,
+            "reason": reason,
+            "prompt_version": prompt_version,
+            "source": "lloa_chunk_aggregate",
+            "original_length": len(doc_text),
+            "used_length": len(doc_text),  # chunk가 전체를 커버(truncate 아님)
+            "truncated": False,
+            "chunked": True,
+            "chunk_count": len(chunks),
+            "chunk_failure_count": chunk_failures,
+            "genuine_spans": genuine_spans,
+        }
+        if chunk_failures > 0:
+            record["needs_review"] = True
+        return {
+            "doc_id": doc_id, "chunked": True, "record": record, "tier": final,
+            "chunk_count": len(chunks), "chunk_failures": chunk_failures,
+            "genuine_span_count": len(genuine_spans), "all_failed": all_failed,
+            "usage": {"prompt_tokens": prompt_toks, "completion_tokens": comp_toks},
+        }
+
     def _process(item: tuple[int, str, str]) -> dict[str, Any]:
         _, target_doc_id, doc_text = item
+        if chunking_enabled and len(doc_text) > max_input_chars:
+            return _process_chunked(target_doc_id, doc_text)
         used_text, original_length, used_length, truncated = _truncate_text(
             doc_text, max_input_chars
         )
@@ -462,6 +554,26 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
             for future in as_completed(futures):
                 outcome = future.result()
                 doc_id = outcome["doc_id"]
+                if outcome.get("chunked"):
+                    chunked_doc_count += 1
+                    total_chunk_count += outcome["chunk_count"]
+                    chunk_failure_count += outcome["chunk_failures"]
+                    genuine_span_count += outcome["genuine_span_count"]
+                    if outcome["all_failed"]:
+                        # doc 전체 chunk 실패 → request_failure로 카운트(대량 실패 abort 안전망).
+                        request_failures += 1
+                    records_by_doc[doc_id] = outcome["record"]
+                    tier_counts[outcome["tier"]] += 1
+                    usage = outcome["usage"]
+                    total_prompt_tokens += int(usage.get("prompt_tokens") or 0)
+                    total_completion_tokens += int(usage.get("completion_tokens") or 0)
+                    completed += 1
+                    if progress_path and (completed % 10 == 0 or completed == total_rows):
+                        write_progress(
+                            progress_path, processed_rows=completed, total_rows=total_rows,
+                            started_at=started_at, message="doc_genuineness processing",
+                        )
+                    continue
                 length_fields = {
                     "original_length": outcome["original_length"],
                     "used_length": outcome["used_length"],
@@ -590,6 +702,18 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         "request_failures": request_failures,
         "truncated_docs": truncated_docs,
         "max_input_chars": max_input_chars,
+        "chunking": {
+            "enabled": chunking_enabled,
+            "strategy": "sentence_window",
+            "threshold_chars": max_input_chars,
+            "max_chunk_sentences": chunk_max_sentences,
+            "max_chunk_chars": chunk_max_chars,
+            "overlap_sentences": chunk_overlap,
+            "chunked_doc_count": chunked_doc_count,
+            "chunk_count": total_chunk_count,
+            "chunk_failure_count": chunk_failure_count,
+            "genuine_span_count": genuine_span_count,
+        },
         "prompt_version": prompt_version,
         "model": lloa_config.model,
         "concurrency": concurrency,
