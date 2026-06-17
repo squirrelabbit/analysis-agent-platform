@@ -26,6 +26,10 @@ from ..prompt_options import load_prompt_body
 from ._common import write_progress
 from .doc_genuineness import (
     _ALLOWED_TIERS,
+    _CHUNK_MAX_CHARS,
+    _CHUNK_MAX_SENTENCES,
+    _CHUNK_OVERLAP_SENTENCES,
+    _chunk_aggregate_classify,
     _classify_doc,
     _extract_doc_genuineness_config,
     _load_prompt_template,
@@ -34,6 +38,24 @@ from .doc_genuineness import (
     _resolve_max_input_chars,
     _truncate_text,
 )
+
+
+def _union_spans(*span_lists) -> list[dict[str, int]]:
+    """여러 모델의 genuine_spans를 (sentence_start, sentence_end) 기준 dedup union."""
+    seen: set[tuple[int, int]] = set()
+    out: list[dict[str, int]] = []
+    for spans in span_lists:
+        for sp in spans or []:
+            if not isinstance(sp, dict):
+                continue
+            try:
+                key = (int(sp["sentence_start"]), int(sp["sentence_end"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if key not in seen:
+                seen.add(key)
+                out.append({"chunk_index": sp.get("chunk_index", -1), "sentence_start": key[0], "sentence_end": key[1]})
+    return out
 
 _JUDGE_PROMPT_TASK = "doc_genuineness_judge"
 _JUDGE_DECISIONS = {"candidate_1", "candidate_2", "other", "review"}
@@ -195,6 +217,15 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
     judge_max_tokens = int(payload.get("judge_max_tokens") or 4096)
     concurrency = _resolve_concurrency(payload)
     max_input_chars = _resolve_max_input_chars(payload)
+    # ADR-029 — verify도 긴 문서 chunk aggregate. **기본 ON**(단일 모드와 동일):
+    # cleaned_text > max_input_chars면 모델별로 chunk aggregate한 라벨을 교차검증한다.
+    # judge 입력은 truncate(불일치 소수에만 도므로 v1 단순). chunking=false로 비활성화.
+    chunking_enabled = payload.get("chunking", True) is not False
+    chunk_max_sentences = max(1, int(payload.get("max_chunk_sentences") or _CHUNK_MAX_SENTENCES))
+    chunk_max_chars = max(1, int(payload.get("max_chunk_chars") or _CHUNK_MAX_CHARS))
+    chunk_overlap = max(0, int(payload.get("overlap_sentences") if payload.get("overlap_sentences") is not None else _CHUNK_OVERLAP_SENTENCES))
+    chunked_doc_count = 0
+    genuine_span_doc_count = 0
 
     rows = rt._iter_rows(clean_artifact_ref)
     total_rows = len(rows)
@@ -229,17 +260,25 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
     def _process(item: tuple[int, str, str]) -> dict[str, Any]:
         _, doc_id, doc_text = item
         used_text, _ol, _ul, _tr = _truncate_text(doc_text, max_input_chars)
+        use_chunking = chunking_enabled and len(doc_text) > max_input_chars
         rec: dict[str, Any] = {
             "doc_id": doc_id, "model_a": model_a, "model_b": model_b,
             "prompt_version": prompt_version, "source": "verify",
             "judge_required": False, "judge_result": None,
+            "chunked": use_chunking,
         }
 
-        # per-model 격리 — 한 모델이 실패해도 다른 모델 결과를 쓴다. classify가
-        # reasoning을 길게 토해 max_tokens를 소진하면 빈 content("did not contain
-        # content")가 나는데, 이를 doc 전체 실패로 죽이지 않는다.
+        # per-model 격리 — 한 모델이 실패해도 다른 모델 결과를 쓴다. 긴 문서(use_chunking)면
+        # 모델별로 chunk aggregate한 라벨을 쓴다(ADR-029). genuine_spans도 모델별로 받는다.
         def _classify_safe(client: LloaClient):
             try:
+                if use_chunking:
+                    agg = _chunk_aggregate_classify(
+                        client, system_prompt=classify_system_prompt, doc_id=doc_id, doc_text=doc_text,
+                        max_tokens=max_tokens, max_sentences=chunk_max_sentences,
+                        max_chars=chunk_max_chars, overlap=chunk_overlap,
+                    )
+                    return {"genuineness": agg["genuineness"], "reason": agg["reason"], "genuine_spans": agg["genuine_spans"]}, None
                 return _classify_doc(
                     client, system_prompt=classify_system_prompt,
                     doc_id=doc_id, doc_text=used_text, max_tokens=max_tokens,
@@ -268,6 +307,8 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
                 "resolution": "partial_classify", "needs_review": True,
                 "error": a_err or b_err,
             })
+            if ok["genuineness"] == "genuine_review" and ok.get("genuine_spans"):
+                rec["genuine_spans"] = _union_spans(ok.get("genuine_spans"))
             return rec
 
         if a["genuineness"] == b["genuineness"]:
@@ -275,6 +316,11 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
                 "is_disagreement": False, "final_label": a["genuineness"],
                 "resolution": "model_agreement", "needs_review": False,
             })
+            # 합의 + genuine → 두 모델 spans union(clause_label이 소비, ADR-029).
+            if a["genuineness"] == "genuine_review":
+                spans = _union_spans(a.get("genuine_spans"), b.get("genuine_spans"))
+                if spans:
+                    rec["genuine_spans"] = spans
             return rec
         # 불일치 → judge (익명 후보).
         rec["is_disagreement"] = True
@@ -325,6 +371,10 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
                     counters["revised"] += 1
             if rec.get("needs_review"):
                 counters["review"] += 1
+            if rec.get("chunked"):
+                chunked_doc_count += 1
+            if rec.get("genuine_spans"):
+                genuine_span_doc_count += 1
             processed += 1
             if progress_path and (processed % 10 == 0 or processed == len(targets)):
                 write_progress(
@@ -368,6 +418,16 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
         "partial_classify_count": counters["partial"],
         "final_tier_counts": final_tier_counts,
         "final_null_count": null_final,
+        "chunking": {
+            "enabled": chunking_enabled,
+            "strategy": "sentence_window",
+            "threshold_chars": max_input_chars,
+            "max_chunk_sentences": chunk_max_sentences,
+            "max_chunk_chars": chunk_max_chars,
+            "overlap_sentences": chunk_overlap,
+            "chunked_doc_count": chunked_doc_count,
+            "genuine_span_doc_count": genuine_span_doc_count,
+        },
         "models": {"a": model_a, "b": model_b, "judge": judge_model},
         "prompt_version": prompt_version,
         "judge_prompt_version": judge_prompt_version,
