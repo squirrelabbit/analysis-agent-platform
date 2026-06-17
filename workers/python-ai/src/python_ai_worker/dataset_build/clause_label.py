@@ -193,14 +193,18 @@ def _decode_clauses_response(body: Any) -> list[dict[str, Any]]:
     raise ValueError(f"clause_label expected JSON array, got {type(body).__name__}")
 
 
-def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, dict[str, str]]:
-    """doc_genuineness artifact를 읽어 doc_id -> tier map을 반환한다.
+def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, dict[str, str], dict[str, list]]:
+    """doc_genuineness artifact를 읽어 (include_tiers, doc_id→tier, doc_id→genuine_spans).
 
     Default 동작 (5/20 결정): payload에 ``include_genuineness`` 키가 없으면
     ``["genuine_review", "uncertain"]``로 필터링 (non_review는 LLOA 호출 절약 + 분석
     가치 0). 명시적으로 빈 list ``[]`` 보내면 모든 doc 처리 (filter off).
     명시적으로 3 tier 모두 포함하면 사실상 모든 doc 처리지만 doc_genuineness ref는
     여전히 필요.
+
+    genuine_spans (ADR-029): doc_genuineness chunk aggregate가 남긴 진성 chunk의
+    sentence span. verify가 이 구간만 처리하는 데 쓴다(없으면 전체 doc). filter off면
+    spans도 비운다(전체 처리).
     """
     if "include_genuineness" in payload:
         raw_filter = payload.get("include_genuineness")
@@ -208,7 +212,7 @@ def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, 
             raise ValueError("include_genuineness must be a list of genuineness tiers")
         if not raw_filter:
             # explicit opt-out — 모든 doc 처리
-            return None, {}
+            return None, {}, {}
     else:
         raw_filter = _DEFAULT_INCLUDE_GENUINENESS
 
@@ -221,13 +225,14 @@ def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, 
             )
         tiers.add(normalized)
     if not tiers:
-        return None, {}
+        return None, {}, {}
     ref = str(payload.get("doc_genuineness_ref") or "").strip()
     if not ref:
         raise ValueError(
             "include_genuineness filter active but doc_genuineness_ref missing — clause_label requires doc_genuineness artifact for filtering (5/20 default ON)"
         )
     tier_by_doc: dict[str, str] = {}
+    spans_by_doc: dict[str, list] = {}
     with Path(ref).open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -251,6 +256,9 @@ def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, 
             ).strip()
             if doc_id and tier:
                 tier_by_doc[doc_id] = tier
+            spans = rec.get("genuine_spans")
+            if doc_id and isinstance(spans, list) and spans:
+                spans_by_doc[doc_id] = spans
     # 사람 보정(override)은 최상위 — control-plane이 payload로 넘긴 doc_id→tier로
     # 덮는다(override > final_label > genuineness). overrides 없으면 무효.
     overrides = payload.get("genuineness_overrides")
@@ -260,7 +268,9 @@ def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, 
             tier = str(raw_tier or "").strip()
             if doc_id and tier:
                 tier_by_doc[doc_id] = tier
-    return tiers, tier_by_doc
+                # override가 tier를 바꾸면 옛 genuine_spans는 무효 — 전체 처리로 fallback.
+                spans_by_doc.pop(doc_id, None)
+    return tiers, tier_by_doc, spans_by_doc
 
 
 def _label_doc(
@@ -357,7 +367,9 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
     max_tokens = int(payload.get("max_tokens") or 8192)
     concurrency = max(1, int(payload.get("concurrency") or _DEFAULT_CONCURRENCY))
 
-    include_tiers, tier_by_doc = _load_genuineness_filter(payload)
+    # 단일 모드 clause_label은 문장 단위가 아니라 doc 통째 LLM 추출이라 genuine_spans는
+    # 적용 안 함(span 제한은 문장앵커 verify 경로 전용, ADR-029).
+    include_tiers, tier_by_doc, _genuine_spans = _load_genuineness_filter(payload)
 
     rows = rt._iter_rows(clean_artifact_ref)
     total_rows = len(rows)

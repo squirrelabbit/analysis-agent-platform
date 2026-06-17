@@ -384,7 +384,7 @@ class ClauseLabelGenuinenessFilterTests(unittest.TestCase):
                     f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
             # include_genuineness 미지정 → default {genuine_review, uncertain}
-            include_tiers, tier_by_doc = _load_genuineness_filter(
+            include_tiers, tier_by_doc, _spans = _load_genuineness_filter(
                 {"doc_genuineness_ref": str(ref)}
             )
 
