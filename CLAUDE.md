@@ -88,6 +88,17 @@ POST /projects/{pid}/datasets/{did}/versions/{vid}/analyze    ← explicit versi
 
 (ADR-018 β2 결정으로 prepare/sentiment/embedding/segment/embedding_cluster/keyword_index/document_cluster_profile/cluster_build 단계는 사용 안 함.)
 
+**교차검증(verify) + chunking** (ADR-026 / ADR-028 / ADR-029, 2026-06):
+- `doc_genuineness` / `clause_label` 둘 다 `verify:true` 옵션으로 **교차모델 검증** 경로
+  지원. doc_genuineness=2모델 분류+불일치 judge(ADR-026). clause_label=문장 앵커 단위
+  2모델 라벨+reconcile(agree/union/sentiment_auto)+충돌만 judge(ADR-028, 절이 아니라 문장).
+- **긴 문서 chunking (ADR-029)**: 문서(row/doc_id)는 안 쪼개고 LLM 호출 단위만 문장 chunk로
+  분할. doc_genuineness는 `cleaned_text > max_input_chars(20000)`면 **기본 ON 자동 chunk
+  aggregate**(진성 hit 우선, genuine 구간을 `genuine_spans` 기록. `chunking=false`로만 옛
+  truncate). clause_label verify는 genuine_spans 구간만 처리 + 자체 chunking. 두 skill은
+  공통 `dataset_build/_chunking.py` splitter를 써서 sentence_index가 정합한다.
+- worker: `dataset_build/doc_genuineness_verify.py` / `clause_label_verify.py` / `_chunking.py`.
+
 ### 주요 패키지 위치
 
 **Go (`apps/control-plane/internal/`)**:
