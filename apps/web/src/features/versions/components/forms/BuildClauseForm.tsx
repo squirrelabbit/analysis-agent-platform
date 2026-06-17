@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { AlertCircle } from "lucide-react";
 import PromptVersionField from "@/features/prompts/components/PromptVersionField";
 import LloaModelField from "./LloaModelField";
+import { useLloaModelOptions } from "../../hooks/build.query";
 
 const genuinenessOptions = [
   {
@@ -36,6 +37,13 @@ export function BuildClauseForm({
   const promptVersion = useWatch({ control, name: "promptVersion" }) ?? "";
   const currentInclude = useWatch({ control, name: "includeGenuineness" }) ?? [];
   const modelId = useWatch({ control, name: "modelId" }) ?? "";
+  const verify = useWatch({ control, name: "verify" }) ?? false;
+
+  // 교차검증 preset (ADR-028) — allowlist 앞 두 모델을 classify, 두 번째를 judge로.
+  const { data: models = [] } = useLloaModelOptions();
+  const canVerify = models.length >= 2;
+  const presetA = models[0];
+  const presetB = models[1];
 
   async function handleFormSubmit(data: BuildClauseFormValues) {
     await onSubmit(data);
@@ -57,11 +65,41 @@ export function BuildClauseForm({
           }
           errorMessage={errors.promptVersion?.message}
         />
-        <LloaModelField
-          value={modelId}
-          onChange={(v) => setValue("modelId", v, { shouldValidate: true })}
-          errorMessage={errors.modelId?.message}
-        />
+        {/* 교차검증 모드 토글 (ADR-028) */}
+        {canVerify && (
+          <div className="rounded-lg border border-zinc-200 p-3">
+            <label className="flex items-start gap-2">
+              <Checkbox
+                checked={verify}
+                onCheckedChange={(c) => setValue("verify", c === true)}
+                className="mt-0.5"
+              />
+              <span className="text-sm">
+                <span className="font-medium text-zinc-700">교차검증 모드</span>
+                <span className="ml-1 text-xs text-zinc-400">
+                  두 모델이 같은 문장을 라벨링 + 갈린 절만 judge가 결정
+                </span>
+              </span>
+            </label>
+            {verify && presetA && presetB && (
+              <p className="mt-2 pl-6 text-[11px] leading-relaxed text-zinc-500">
+                분류: <b>{presetA.label}</b> + <b>{presetB.label}</b> · judge:{" "}
+                <b>{presetB.label}</b>
+                <br />
+                합의 절은 그대로, 갈린 절만 judge가 검토합니다(시간 더 걸림).
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* 단일 모델 선택은 교차검증 OFF일 때만 */}
+        {!verify && (
+          <LloaModelField
+            value={modelId}
+            onChange={(v) => setValue("modelId", v, { shouldValidate: true })}
+            errorMessage={errors.modelId?.message}
+          />
+        )}
         <Field>
           <FieldLabel className="text-xs">
             포함할 리뷰 유형
