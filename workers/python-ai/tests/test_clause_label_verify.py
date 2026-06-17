@@ -362,10 +362,11 @@ class ClauseLabelVerifyGenuineSpansTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertEqual(result["artifact"]["summary"]["processed_row_count"], 0)
 
-    def test_progress_offsets_filtered_docs(self) -> None:
-        # genuineness 필터로 skip된 doc도 분모에 반영돼야 percent/ETA가 실제 대상 기준이
-        # 된다(없으면 분모가 전체 input이라 ETA 5배 부풀려짐). 2 doc(d1 genuine 처리, d2
-        # non_review skip) → "processing" write의 processed_rows = 1(target) + 1(skip) = 2.
+    def test_progress_denominator_is_target_count(self) -> None:
+        # 진행률 분모는 실제 LLM 처리 대상(targets) 기준이어야 한다. genuineness 필터로
+        # skip된 doc은 분모에서 빠진다(전체 input이 분모면 화면 총계/ETA가 부풀려짐).
+        # 2 doc(d1 genuine 처리, d2 non_review skip) → progress total_rows = 1(=대상),
+        # processed_rows = 1. (input 2건은 summary.input_row_count로 따로 노출.)
         from python_ai_worker.dataset_build import clause_label_verify as v
 
         clean = Path(self.tmp.name) / "clean2.jsonl"
@@ -405,9 +406,14 @@ class ClauseLabelVerifyGenuineSpansTests(unittest.TestCase):
         processing = [c for c in calls if "processing" in c["message"]]
         self.assertTrue(processing, "processing progress write 없음")
         last = processing[-1]
-        self.assertEqual(last["total_rows"], 2)
-        # 버그(offset 누락)면 processed_rows=1(50%). 수정 후 2(skip 1건 offset → 100%).
-        self.assertEqual(last["processed_rows"], 2)
+        # 분모 = 대상 1건(genuine), input 2건이 아니라. processed도 1.
+        self.assertEqual(last["total_rows"], 1)
+        self.assertEqual(last["processed_rows"], 1)
+        # 완료 write도 대상 기준 100%.
+        completed = [c for c in calls if "completed" in c["message"]]
+        self.assertTrue(completed)
+        self.assertEqual(completed[-1]["total_rows"], 1)
+        self.assertEqual(completed[-1]["processed_rows"], 1)
 
     def test_genuine_spans_across_multiple_chunks(self) -> None:
         # genuine_spans × chunking 상호작용: span 41~90(50문장) + max_chunk_sentences 20

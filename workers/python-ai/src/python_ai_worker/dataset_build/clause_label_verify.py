@@ -358,9 +358,7 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
     include_tiers, tier_by_doc, spans_by_doc = _load_genuineness_filter(payload)
 
     rows = rt._iter_rows(clean_artifact_ref)
-    total_rows = len(rows)
-    if progress_path:
-        write_progress(progress_path, processed_rows=0, total_rows=total_rows, started_at=started_at, message="clause_label verify queued")
+    total_rows = len(rows)  # 전체 input row 수 (summary.input_row_count 용)
 
     targets: list[tuple[int, str, str]] = []
     skipped_by_filter = 0
@@ -373,6 +371,13 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
             skipped_by_filter += 1
             continue
         targets.append((index, doc_id, cleaned_text))
+
+    # 진행률/ETA 분모는 실제 LLM 처리 대상(targets) 기준. genuineness 필터로 skip된
+    # doc은 LLM 호출이 없어 즉시 끝나므로 분모에서 제외해야 화면 총계/ETA가 정직하다.
+    # (전체 input은 summary.input_row_count로 따로 노출.)
+    target_count = len(targets)
+    if progress_path:
+        write_progress(progress_path, processed_rows=0, total_rows=target_count, started_at=started_at, message="clause_label verify queued")
 
     def _process_doc(item: tuple[int, str, str]) -> tuple[str, list[dict[str, Any]], dict[str, int], int]:
         _, doc_id, doc_text = item
@@ -506,11 +511,8 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
             if chunk_count > 1:
                 chunked_doc_count += 1
             processed += 1
-            if progress_path and (processed % 10 == 0 or processed == len(targets)):
-                # genuineness 필터로 skip된 doc(total_rows - len(targets))은 즉시 done으로
-                # offset해야 percent/ETA가 실제 대상(targets) 기준이 된다. offset이 빠지면
-                # 분모가 전체 input(2121)이라 ETA가 5배 부풀려진다 (doc_genuineness_verify와 동일 패턴).
-                write_progress(progress_path, processed_rows=processed + (total_rows - len(targets)), total_rows=total_rows, started_at=started_at, message="clause_label verify processing")
+            if progress_path and (processed % 10 == 0 or processed == target_count):
+                write_progress(progress_path, processed_rows=processed, total_rows=target_count, started_at=started_at, message="clause_label verify processing")
 
     clause_count = 0
     sentiment_counts: dict[str, int] = {s: 0 for s in _ALLOWED_SENTIMENT}
@@ -527,7 +529,7 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
                 aspect_counts[rec["aspect"]] = aspect_counts.get(rec["aspect"], 0) + 1
 
     if progress_path:
-        write_progress(progress_path, processed_rows=total_rows, total_rows=total_rows, started_at=started_at, message="clause_label verify completed")
+        write_progress(progress_path, processed_rows=target_count, total_rows=target_count, started_at=started_at, message="clause_label verify completed")
 
     summary = {
         "mode": "verify",
