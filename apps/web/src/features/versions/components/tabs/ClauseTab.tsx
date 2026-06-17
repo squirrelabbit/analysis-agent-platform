@@ -22,9 +22,9 @@ import {
   SENTIMENT_BADGE,
   type Sentiment,
 } from "@/features/versions/constants/sentiment";
-import type { ClauseBuild, ClauseItem } from "../../models/build";
+import type { ClauseBuild, ClauseItem, ClauseModelResult } from "../../models/build";
 import { Badge } from "@/components/ui/badge";
-import { useBuildVersion } from "../../hooks/build.query";
+import { useBuildVersion, useLloaModelOptions } from "../../hooks/build.query";
 import { useClauseLabelOverride } from "../../hooks/build.mutation";
 import {
   Select,
@@ -59,6 +59,16 @@ const SENTIMENT_FILTER_OPTIONS: { label: string; value: string | "" }[] = [
   { label: "중립", value: "neutral" },
   { label: "부정", value: "negative" },
 ];
+
+// 교차검증(verify, ADR-028) resolution 한글 라벨.
+const RESOLUTION_LABEL: Record<string, string> = {
+  agree: "모델 합의",
+  union: "aspect 통합",
+  sentiment_auto: "감성 자동",
+  judge: "judge 결정",
+  needs_review: "검토 필요",
+  partial_classify: "부분 분류",
+};
 
 function SentimentBadge({ value }: { value: string }) {
   return (
@@ -101,10 +111,17 @@ function IconBtn({
 export function ClauseTab() {
   const [filter, setFilter] = useState<string | "">("");
   const [aspectFilter, setAspectFilter] = useState<string>("all");
+  // 교차검증 검토 큐 필터 (ADR-028): "" | "disagreement" | "needs_review".
+  const [reviewFilter, setReviewFilter] = useState<string>("");
   const [page, setPage] = useState(1);
   // 드릴다운: 선택된 aspect key (null이면 건수 1위 aspect로 fallback)
   const [activeAspect, setActiveAspect] = useState<string | null>(null);
   const pageSize = 10;
+
+  // 교차검증 배너의 모델 id→표시명 변환 (allowlist).
+  const { data: lloaModels = [] } = useLloaModelOptions();
+  const modelLabelOf = (id?: string) =>
+    lloaModels.find((m) => m.model_id === id)?.label ?? id ?? "";
 
   // 절 aspect/sentiment 수동 보정 — row 단위 inline edit.
   const override = useClauseLabelOverride();
@@ -122,6 +139,8 @@ export function ClauseTab() {
       offset: (page - 1) * pageSize,
       aspect: aspectFilter === "all" ? undefined : aspectFilter,
       sentiment: filter || undefined,
+      disagreement: reviewFilter === "disagreement" || undefined,
+      needs_review: reviewFilter === "needs_review" || undefined,
     },
   ) as {
     data: ClauseBuild | undefined;
@@ -246,6 +265,18 @@ export function ClauseTab() {
   // pagination.total은 (필터 적용된) 전체 건수. 표/페이지 계산의 기준.
   const totalCount = pagination?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  // 교차검증(verify) 모드 — 검토 큐 필터/배너/검증 컬럼 노출.
+  const isVerify = summary.mode === "verify";
+
+  // classify 모델 1개 결과를 "감성 / aspect" 형태로 요약. 무관/미분류 분기.
+  const fmtModelResult = (r?: ClauseModelResult | null): string => {
+    if (!r) return "—";
+    if (r.relevant === false) return "무관";
+    const sent = SENTIMENT_LABELS[r.sentiment as Sentiment] ?? r.sentiment ?? "";
+    const asp = (r.aspects ?? []).map((a) => aspectLabelOf(taxonomy, a)).join("·");
+    return [sent, asp].filter(Boolean).join(" / ") || "—";
+  };
 
   function startEdit(item: ClauseItem) {
     if (savingClauseId) return;
@@ -375,6 +406,62 @@ export function ClauseTab() {
         );
       },
     },
+    ...(isVerify
+      ? [
+          {
+            header: "검증",
+            headerClassName: "w-72",
+            cell: (item: ClauseItem) => (
+              <td className="px-4 py-3 align-top text-[11px] leading-relaxed">
+                {item.resolution ? (
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 font-semibold text-zinc-600">
+                        {RESOLUTION_LABEL[item.resolution] ?? item.resolution}
+                      </span>
+                      {item.needsReview && (
+                        <span className="rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700">
+                          검토 필요
+                        </span>
+                      )}
+                      {typeof item.chunkIndex === "number" &&
+                        item.chunkIndex > 0 && (
+                          <span
+                            className="rounded-full bg-sky-50 px-1.5 py-0.5 font-medium text-sky-600"
+                            title="긴 문서 chunk 분할 (ADR-029)"
+                          >
+                            chunk {item.chunkIndex}
+                          </span>
+                        )}
+                    </div>
+                    {item.resolution !== "agree" &&
+                      (item.modelAResult || item.modelBResult) && (
+                        <div className="rounded-md bg-zinc-50 px-2 py-1 text-zinc-600">
+                          <span>
+                            모델 A: <b>{fmtModelResult(item.modelAResult)}</b> · 모델 B:{" "}
+                            <b>{fmtModelResult(item.modelBResult)}</b>
+                          </span>
+                          {item.judgeResult && (
+                            <span>
+                              {" "}→ judge: <b>{fmtModelResult(item.judgeResult)}</b>
+                              {item.judgeResult.reason && (
+                                <span className="text-zinc-400">
+                                  {" "}({item.judgeResult.reason})
+                                </span>
+                              )}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                  </div>
+                ) : (
+                  <span className="text-zinc-300">—</span>
+                )}
+              </td>
+            ),
+          } as Column<ClauseItem>,
+        ]
+      : []),
     {
       header: "",
       headerClassName: "w-20 text-right",
@@ -457,6 +544,48 @@ export function ClauseTab() {
           />
         ))}
       </div>
+
+      {/* 교차검증(verify) 요약 배너 (ADR-028) */}
+      {isVerify && (
+        <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-4 text-sm">
+          <div className="font-bold text-violet-800">교차검증 결과</div>
+          <p className="mt-1 text-zinc-700">
+            {(() => {
+              const rc = summary.resolution ?? {};
+              const agree = rc["agree"] ?? 0;
+              const judge = rc["judge"] ?? 0;
+              const review = rc["needs_review"] ?? 0;
+              const reconciled =
+                (rc["union"] ?? 0) +
+                (rc["sentiment_auto"] ?? 0) +
+                judge +
+                (rc["partial_classify"] ?? 0) +
+                review;
+              return (
+                <>
+                  모델 합의 <b>{agree.toLocaleString()}</b>건 · 재조정{" "}
+                  <b>{reconciled.toLocaleString()}</b>건(judge 처리{" "}
+                  {judge.toLocaleString()}건) · 검토 필요{" "}
+                  <b>{review.toLocaleString()}</b>건.
+                </>
+              );
+            })()}
+          </p>
+          {summary.models && (
+            <p className="mt-1 text-xs text-zinc-500">
+              모델 A = {modelLabelOf(summary.models.a)}, 모델 B ={" "}
+              {modelLabelOf(summary.models.b)}
+              {summary.models.judge && (
+                <> · judge = {modelLabelOf(summary.models.judge)}</>
+              )}
+            </p>
+          )}
+          <p className="mt-1 text-[11px] text-zinc-400">
+            두 모델이 같은 문장을 라벨링해 합의는 신뢰 신호, 갈린 절만 judge가 라벨
+            기준으로 재검토합니다. judge 미해소 절은 검토 필요로 격리됩니다.
+          </p>
+        </div>
+      )}
 
       {/* Aspect별 감성 분포 (전체 + aspect 드릴다운) */}
       <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
@@ -567,6 +696,20 @@ export function ClauseTab() {
                 setPage(1);
               }}
             />
+            {isVerify && (
+              <FilterPills
+                options={[
+                  { label: "전체", value: "" },
+                  { label: "불일치만", value: "disagreement" },
+                  { label: "검토 필요", value: "needs_review" },
+                ]}
+                value={reviewFilter}
+                onChange={(value) => {
+                  setReviewFilter(value);
+                  setPage(1);
+                }}
+              />
+            )}
           </>
         }
         page={page}

@@ -130,6 +130,20 @@ export default function BuildDialog({
             <BuildClauseForm
               formId={formId}
               onSubmit={async (data: BuildClauseFormValues) => {
+                // 교차검증 모드(ADR-028): allowlist 앞 두 모델을 classify, 두 번째를 judge로(고정 preset).
+                if (data.verify && lloaModels.length >= 2) {
+                  await mutateAsync({
+                    type: "clause_label",
+                    req: compactObject({
+                      clause_label_prompt_version: data.promptVersion,
+                      include_genuineness: data.includeGenuineness,
+                      verify: true,
+                      classify_models: [lloaModels[0].model_id, lloaModels[1].model_id],
+                      judge_model: lloaModels[1].model_id,
+                    }),
+                  });
+                  return;
+                }
                 await mutateAsync({
                   type: "clause_label",
                   req: compactObject({
