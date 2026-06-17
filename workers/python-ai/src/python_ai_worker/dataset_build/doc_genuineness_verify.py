@@ -217,9 +217,10 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
     judge_max_tokens = int(payload.get("judge_max_tokens") or 4096)
     concurrency = _resolve_concurrency(payload)
     max_input_chars = _resolve_max_input_chars(payload)
-    # ADR-029 — verify도 긴 문서 chunk aggregate(opt-in). 모델별로 chunk aggregate한
-    # 라벨을 교차검증한다. judge 입력은 truncate(불일치 소수에만 도므로 v1 단순).
-    chunking_enabled = bool(payload.get("chunking", False))
+    # ADR-029 — verify도 긴 문서 chunk aggregate. **기본 ON**(단일 모드와 동일):
+    # cleaned_text > max_input_chars면 모델별로 chunk aggregate한 라벨을 교차검증한다.
+    # judge 입력은 truncate(불일치 소수에만 도므로 v1 단순). chunking=false로 비활성화.
+    chunking_enabled = payload.get("chunking", True) is not False
     chunk_max_sentences = max(1, int(payload.get("max_chunk_sentences") or _CHUNK_MAX_SENTENCES))
     chunk_max_chars = max(1, int(payload.get("max_chunk_chars") or _CHUNK_MAX_CHARS))
     chunk_overlap = max(0, int(payload.get("overlap_sentences") if payload.get("overlap_sentences") is not None else _CHUNK_OVERLAP_SENTENCES))

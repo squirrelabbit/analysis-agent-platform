@@ -440,10 +440,10 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
 
     concurrency = _resolve_concurrency(payload)
     max_input_chars = _resolve_max_input_chars(payload)
-    # ADR-029 — 긴 문서 chunk aggregate. opt-in(기본 OFF)으로 기존 truncate 계약·
-    # 테스트 보존. payload['chunking']=true일 때만, 그 중 cleaned_text > max_input_chars인
-    # doc만 chunk 경로(나머지는 기존 단일 호출+truncate).
-    chunking_enabled = bool(payload.get("chunking", False))
+    # ADR-029 — 긴 문서 chunk aggregate. **기본 ON**: cleaned_text > max_input_chars인
+    # doc는 자동으로 chunk 경로(별도 플래그·Go 배선 불필요). 짧은 doc은 기존 단일 호출.
+    # payload['chunking']=false로 명시 비활성화하면 옛 truncate 경로로 fallback.
+    chunking_enabled = payload.get("chunking", True) is not False
     chunk_max_sentences = max(1, int(payload.get("max_chunk_sentences") or _CHUNK_MAX_SENTENCES))
     chunk_max_chars = max(1, int(payload.get("max_chunk_chars") or _CHUNK_MAX_CHARS))
     chunk_overlap = max(0, int(payload.get("overlap_sentences") if payload.get("overlap_sentences") is not None else _CHUNK_OVERLAP_SENTENCES))

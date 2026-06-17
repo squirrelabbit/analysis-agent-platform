@@ -273,6 +273,8 @@ class DocGenuinenessTruncateIsolateTests(DocGenuinenessTests):
 
     def test_long_doc_truncated_before_lloa(self) -> None:
         # max_input_chars를 작게 줘서 비어 있지 않은 3 doc 모두 truncate되게 한다.
+        # ADR-029 — chunking 기본 ON이라 긴 doc은 자동 chunk. truncate 경로는 명시
+        # chunking=false일 때만이므로 여기서 비활성화하고 truncate 동작을 잠근다.
         responses = {
             "row:1": _llm_completion('{"doc_id":"row:1","genuineness":"genuine_review","reason":"후기."}'),
             "row:2": _llm_completion('{"doc_id":"row:2","genuineness":"non_review","reason":"안내."}'),
@@ -280,7 +282,7 @@ class DocGenuinenessTruncateIsolateTests(DocGenuinenessTests):
         }
         fake_urlopen, log = _fake_urlopen_with_failures(responses, set())
         result = self._patch_config_and_run(
-            fake_urlopen, payload=self._payload(max_input_chars=10)
+            fake_urlopen, payload=self._payload(max_input_chars=10, chunking=False)
         )
 
         # LLOA에 실제 보낸 doc_text는 10자로 잘려야 한다.
@@ -1083,7 +1085,7 @@ class DocGenuinenessChunkAggregateTests(unittest.TestCase):
         with self.clean.open("w", encoding="utf-8") as f:
             f.write(json.dumps({"row_id": "d1", "cleaned_text": "x" * 500}, ensure_ascii=False) + "\n")
 
-    def _run(self, *, tier_fn, max_input_chars=10, chunking=True, max_chunk_sentences=2):
+    def _run(self, *, tier_fn, max_input_chars=10, chunking=None, max_chunk_sentences=2):
         from python_ai_worker.dataset_build import doc_genuineness as dg
         from python_ai_worker.config import WorkerConfig
 
@@ -1120,8 +1122,10 @@ class DocGenuinenessChunkAggregateTests(unittest.TestCase):
         payload = {
             "dataset_version_id": "v", "clean_artifact_ref": str(self.clean), "output_path": str(self.out),
             "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉"},
-            "chunking": chunking, "max_input_chars": max_input_chars, "max_chunk_sentences": max_chunk_sentences,
+            "max_input_chars": max_input_chars, "max_chunk_sentences": max_chunk_sentences,
         }
+        if chunking is not None:  # None이면 키 생략 → 기본 동작(ON) 검증
+            payload["chunking"] = chunking
         with patch.object(dg, "load_config", return_value=fake_config), \
              patch.object(dg.LloaClient, "__init__", _init), \
              patch.object(dg, "split_anchor_sentences", return_value=self.SENTENCES):
@@ -1168,8 +1172,16 @@ class DocGenuinenessChunkAggregateTests(unittest.TestCase):
         self.assertEqual(recs[0]["source"], "lloa")
         self.assertEqual(result["artifact"]["summary"]["chunking"]["chunked_doc_count"], 0)
 
-    def test_chunking_off_by_default(self) -> None:
-        # chunking 미지정(기본 OFF) + 긴 doc → truncate 경로(기존 계약 보존).
+    def test_chunking_on_by_default(self) -> None:
+        # ADR-029 — chunking 미지정(키 생략) + 긴 doc(>max_input_chars) → 자동 chunk.
+        # 별도 플래그·Go 배선 없이 기본 동작.
+        result, recs = self._run(tier_fn=lambda t: "non_review", chunking=None, max_input_chars=10)
+        self.assertTrue(recs[0]["chunked"])
+        self.assertTrue(result["artifact"]["summary"]["chunking"]["enabled"])
+        self.assertGreaterEqual(result["artifact"]["summary"]["chunking"]["chunked_doc_count"], 1)
+
+    def test_chunking_false_uses_truncate(self) -> None:
+        # 명시 chunking=false → 옛 truncate 경로(fallback).
         _result, recs = self._run(tier_fn=lambda t: "non_review", chunking=False, max_input_chars=10)
         self.assertNotIn("chunked", recs[0])
 
