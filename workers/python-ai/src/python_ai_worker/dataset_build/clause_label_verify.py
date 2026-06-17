@@ -507,7 +507,10 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
                 chunked_doc_count += 1
             processed += 1
             if progress_path and (processed % 10 == 0 or processed == len(targets)):
-                write_progress(progress_path, processed_rows=processed, total_rows=total_rows, started_at=started_at, message="clause_label verify processing")
+                # genuineness 필터로 skip된 doc(total_rows - len(targets))은 즉시 done으로
+                # offset해야 percent/ETA가 실제 대상(targets) 기준이 된다. offset이 빠지면
+                # 분모가 전체 input(2121)이라 ETA가 5배 부풀려진다 (doc_genuineness_verify와 동일 패턴).
+                write_progress(progress_path, processed_rows=processed + (total_rows - len(targets)), total_rows=total_rows, started_at=started_at, message="clause_label verify processing")
 
     clause_count = 0
     sentiment_counts: dict[str, int] = {s: 0 for s in _ALLOWED_SENTIMENT}

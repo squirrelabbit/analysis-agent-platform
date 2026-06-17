@@ -362,6 +362,53 @@ class ClauseLabelVerifyGenuineSpansTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertEqual(result["artifact"]["summary"]["processed_row_count"], 0)
 
+    def test_progress_offsets_filtered_docs(self) -> None:
+        # genuineness 필터로 skip된 doc도 분모에 반영돼야 percent/ETA가 실제 대상 기준이
+        # 된다(없으면 분모가 전체 input이라 ETA 5배 부풀려짐). 2 doc(d1 genuine 처리, d2
+        # non_review skip) → "processing" write의 processed_rows = 1(target) + 1(skip) = 2.
+        from python_ai_worker.dataset_build import clause_label_verify as v
+
+        clean = Path(self.tmp.name) / "clean2.jsonl"
+        gen = Path(self.tmp.name) / "gen2.jsonl"
+        out = Path(self.tmp.name) / "out2.jsonl"
+        with clean.open("w", encoding="utf-8") as f:
+            f.write(json.dumps({"row_id": "d1", "cleaned_text": "x" * 200}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"row_id": "d2", "cleaned_text": "y" * 200}, ensure_ascii=False) + "\n")
+        with gen.open("w", encoding="utf-8") as f:
+            f.write(json.dumps({"doc_id": "d1", "genuineness": "genuine_review"}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"doc_id": "d2", "genuineness": "non_review"}, ensure_ascii=False) + "\n")
+
+        calls: list[dict] = []
+
+        def _spy(path, *, processed_rows, total_rows, started_at, message, **kw):
+            calls.append({"processed_rows": processed_rows, "total_rows": total_rows, "message": message})
+
+        original_init = v.LloaClient.__init__
+
+        def _init(self, config, *, urlopen=None):
+            original_init(self, config, urlopen=_chunk_urlopen(config.model))
+
+        payload = {
+            "dataset_version_id": "ver1", "clean_artifact_ref": str(clean),
+            "output_path": str(out), "progress_path": str(self.tmp.name) + "/prog.json",
+            "verify": True, "classify_models": ["model-a", "model-b"], "judge_model": "model-judge",
+            "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉 국가유산야행"},
+            "concurrency": 1, "include_genuineness": ["genuine_review", "uncertain"],
+            "doc_genuineness_ref": str(gen),
+        }
+        with patch.object(v, "write_progress", _spy), \
+             patch.object(v, "load_config", return_value=_fake_config()), \
+             patch.object(v.LloaClient, "__init__", _init), \
+             patch.object(v, "_split_anchor_sentences", return_value=self.SENTENCES):
+            v.run_dataset_clause_label_verify(payload)
+
+        processing = [c for c in calls if "processing" in c["message"]]
+        self.assertTrue(processing, "processing progress write 없음")
+        last = processing[-1]
+        self.assertEqual(last["total_rows"], 2)
+        # 버그(offset 누락)면 processed_rows=1(50%). 수정 후 2(skip 1건 offset → 100%).
+        self.assertEqual(last["processed_rows"], 2)
+
     def test_genuine_spans_across_multiple_chunks(self) -> None:
         # genuine_spans × chunking 상호작용: span 41~90(50문장) + max_chunk_sentences 20
         # → 허용문장이 3 chunk(20/20/10)로 나뉘어도 전역 sentence_index 보존, chunk 경계
