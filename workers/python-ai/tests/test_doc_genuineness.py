@@ -1069,5 +1069,110 @@ class DocGenuinenessVerifyTests(unittest.TestCase):
 
 
 
+class DocGenuinenessChunkAggregateTests(unittest.TestCase):
+    """긴 문서 chunk aggregate 잠금 (ADR-029). opt-in(chunking=true) + cleaned_text >
+    max_input_chars일 때만 chunk 경로. split_anchor_sentences를 patch해 결정론적."""
+
+    SENTENCES = ["문장하나.", "문장둘.", "진짜방문후기셋.", "문장넷.", "문장다섯.", "문장여섯."]
+
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.clean = Path(self.tmpdir.name) / "clean.jsonl"
+        self.out = Path(self.tmpdir.name) / "out.jsonl"
+        with self.clean.open("w", encoding="utf-8") as f:
+            f.write(json.dumps({"row_id": "d1", "cleaned_text": "x" * 500}, ensure_ascii=False) + "\n")
+
+    def _run(self, *, tier_fn, max_input_chars=10, chunking=True, max_chunk_sentences=2):
+        from python_ai_worker.dataset_build import doc_genuineness as dg
+        from python_ai_worker.config import WorkerConfig
+
+        fake_config = WorkerConfig(
+            lloa_api_key="k", lloa_api_url="http://x/v1/chat/completions", lloa_model="m",
+            lloa_max_tokens=2048, lloa_timeout_sec=30, lloa_reasoning_effort=None, lloa_prepend_no_think=True,
+        )
+
+        class _Resp:
+            def __init__(self, payload):
+                self._p = payload
+
+            def read(self):
+                return json.dumps(self._p).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return None
+
+        def fake_urlopen(req, timeout=None):
+            user = json.loads(json.loads(req.data.decode("utf-8"))["messages"][1]["content"])
+            tier = tier_fn(user["doc_text"])
+            if tier is None:  # 실패 시뮬 — 빈 content → parse 실패
+                return _Resp(_llm_completion(""))
+            return _Resp(_llm_completion(json.dumps({"genuineness": tier, "reason": "r"}, ensure_ascii=False)))
+
+        orig = dg.LloaClient.__init__
+
+        def _init(self, config, *, urlopen=None):
+            orig(self, config, urlopen=fake_urlopen)
+
+        payload = {
+            "dataset_version_id": "v", "clean_artifact_ref": str(self.clean), "output_path": str(self.out),
+            "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉"},
+            "chunking": chunking, "max_input_chars": max_input_chars, "max_chunk_sentences": max_chunk_sentences,
+        }
+        with patch.object(dg, "load_config", return_value=fake_config), \
+             patch.object(dg.LloaClient, "__init__", _init), \
+             patch.object(dg, "split_anchor_sentences", return_value=self.SENTENCES):
+            result = dg.run_dataset_doc_genuineness(payload)
+        recs = [json.loads(line) for line in self.out.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return result, recs
+
+    def test_genuine_hit_wins_over_non_review(self) -> None:
+        # chunk1(진짜방문후기 포함)만 genuine, 나머지 non_review → final genuine_review.
+        result, recs = self._run(tier_fn=lambda t: "genuine_review" if "진짜방문후기" in t else "non_review")
+        self.assertEqual(len(recs), 1)
+        rec = recs[0]
+        self.assertEqual(rec["genuineness"], "genuine_review")
+        self.assertTrue(rec["chunked"])
+        self.assertEqual(rec["chunk_count"], 3)
+        self.assertEqual(rec["genuine_spans"], [{"chunk_index": 1, "sentence_start": 3, "sentence_end": 4}])
+        ch = result["artifact"]["summary"]["chunking"]
+        self.assertTrue(ch["enabled"])
+        self.assertEqual(ch["chunked_doc_count"], 1)
+        self.assertEqual(ch["chunk_count"], 3)
+        self.assertEqual(ch["genuine_span_count"], 1)
+
+    def test_all_non_review(self) -> None:
+        _result, recs = self._run(tier_fn=lambda t: "non_review")
+        self.assertEqual(recs[0]["genuineness"], "non_review")
+        self.assertEqual(recs[0]["genuine_spans"], [])
+
+    def test_uncertain_when_no_genuine_but_uncertain_present(self) -> None:
+        _result, recs = self._run(tier_fn=lambda t: "uncertain" if "진짜방문후기" in t else "non_review")
+        self.assertEqual(recs[0]["genuineness"], "uncertain")
+
+    def test_chunk_failure_isolated(self) -> None:
+        # chunk1 classify 실패 → uncertain 취급, build 계속, chunk_failure_count↑, needs_review.
+        result, recs = self._run(tier_fn=lambda t: None if "진짜방문후기" in t else "non_review")
+        self.assertEqual(recs[0]["genuineness"], "uncertain")  # 실패 chunk=uncertain, 나머지 non_review
+        self.assertTrue(recs[0]["needs_review"])
+        self.assertEqual(recs[0]["chunk_failure_count"], 1)
+        self.assertEqual(result["artifact"]["summary"]["chunking"]["chunk_failure_count"], 1)
+
+    def test_short_doc_uses_truncate_not_chunk(self) -> None:
+        # max_input_chars 크게 → 500자 doc은 threshold 이하라 단일 호출(truncate 경로).
+        result, recs = self._run(tier_fn=lambda t: "non_review", max_input_chars=10000)
+        self.assertNotIn("chunked", recs[0])
+        self.assertEqual(recs[0]["source"], "lloa")
+        self.assertEqual(result["artifact"]["summary"]["chunking"]["chunked_doc_count"], 0)
+
+    def test_chunking_off_by_default(self) -> None:
+        # chunking 미지정(기본 OFF) + 긴 doc → truncate 경로(기존 계약 보존).
+        _result, recs = self._run(tier_fn=lambda t: "non_review", chunking=False, max_input_chars=10)
+        self.assertNotIn("chunked", recs[0])
+
+
 if __name__ == "__main__":
     unittest.main()

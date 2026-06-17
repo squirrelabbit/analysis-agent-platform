@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -31,6 +30,7 @@ from .. import runtime as rt
 from ..clients.lloa import LloaClient, LloaConfig, LloaResponseParseError
 from ..config import load_config
 from ..prompt_options import load_prompt_body
+from ._chunking import build_sentence_chunks, split_anchor_sentences as _split_anchor_sentences
 from ._common import write_progress
 from .clause_label import (
     _ALLOWED_ASPECT,
@@ -57,67 +57,12 @@ _MAX_CHUNK_SENTENCES = 40
 _MAX_CHUNK_CHARS = 12000
 _DEFAULT_OVERLAP_SENTENCES = 0
 
-_NON_ALNUM_KO = re.compile(r"[^가-힣A-Za-z0-9]")
-
-_kiwi_singleton: Any = None
+# 문장 splitter·chunk helper는 _chunking 공통 모듈로 이전(ADR-029) — doc_genuineness와
+# 동일 splitter를 써야 genuine_spans의 sentence_index가 정합한다.
 
 
 def is_verify_mode(payload: dict[str, Any]) -> bool:
     return bool(payload.get("verify"))
-
-
-def _get_kiwi():
-    global _kiwi_singleton
-    if _kiwi_singleton is None:
-        try:
-            from kiwipiepy import Kiwi
-
-            _kiwi_singleton = Kiwi()
-        except Exception:  # noqa: BLE001 — 미설치/로드 실패 시 regex fallback
-            _kiwi_singleton = False
-    return _kiwi_singleton or None
-
-
-def _split_anchor_sentences(text: str) -> list[str]:
-    """kiwipiepy 문장 분리 + 구두점-only 조각 drop(clean ". ." 잔재). kiwipiepy 미설치
-    시 runtime regex fallback(품질 낮음 — production은 kiwipiepy 의존성 보장)."""
-    kiwi = _get_kiwi()
-    sents: list[str]
-    if kiwi is not None:
-        try:
-            sents = [s.text.strip() for s in kiwi.split_into_sents(text)]
-        except Exception:  # noqa: BLE001
-            sents = rt._split_sentences(text, language="ko")[0]
-    else:
-        sents = rt._split_sentences(text, language="ko")[0]
-    return [s for s in sents if s and _NON_ALNUM_KO.sub("", s)]
-
-
-def build_sentence_chunks(
-    sentences: list[str], *, max_sentences: int, max_chars: int, overlap: int
-) -> list[tuple[int, list[str]]]:
-    """문장 리스트를 (start0, sub) chunk로 나눈다. start0은 doc 전체 기준 0-based 오프셋.
-    max_sentences/max_chars 중 먼저 도달하는 한도로 끊고, overlap만큼 다음 chunk가
-    앞 chunk 끝과 겹친다(overlap=0이면 안 겹침). 단일 문장이 max_chars를 넘어도
-    최소 1개는 넣는다(빈 chunk 방지)."""
-    max_sentences = max(1, int(max_sentences))
-    max_chars = max(1, int(max_chars))
-    overlap = max(0, int(overlap))
-    n = len(sentences)
-    chunks: list[tuple[int, list[str]]] = []
-    i = 0
-    while i < n:
-        end = i
-        chars = 0
-        while end < n and (end - i) < max_sentences and (end == i or chars + len(sentences[end]) <= max_chars):
-            chars += len(sentences[end])
-            end += 1
-        chunks.append((i, sentences[i:end]))
-        if end >= n:
-            break
-        nxt = end - overlap if overlap > 0 else end
-        i = nxt if nxt > i else end  # 진행 보장(overlap >= chunk size 방어)
-    return chunks
 
 
 def _client_for_model(config, model: str, *, reasoning_effort, prepend_no_think: bool) -> LloaClient:
