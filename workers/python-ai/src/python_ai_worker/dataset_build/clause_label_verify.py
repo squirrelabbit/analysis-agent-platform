@@ -39,6 +39,7 @@ from .clause_label import (
     _FALLBACK_ASPECT,
     _extract_subject_config,
     _inject_taxonomy,
+    _load_genuineness_filter,
     _render_subject_prompt,
 )
 
@@ -320,17 +321,26 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
     max_chunk_chars = max(1, int(payload.get("max_chunk_chars") or _MAX_CHUNK_CHARS))
     overlap_sentences = max(0, int(payload.get("overlap_sentences") if payload.get("overlap_sentences") is not None else _DEFAULT_OVERLAP_SENTENCES))
 
+    # tier 필터(non_review skip) + genuine_spans (ADR-029) — 단일 모드 clause_label과
+    # 동일 정책. spans가 있으면 _process_doc이 그 문장 구간만 처리한다.
+    include_tiers, tier_by_doc, spans_by_doc = _load_genuineness_filter(payload)
+
     rows = rt._iter_rows(clean_artifact_ref)
     total_rows = len(rows)
     if progress_path:
         write_progress(progress_path, processed_rows=0, total_rows=total_rows, started_at=started_at, message="clause_label verify queued")
 
     targets: list[tuple[int, str, str]] = []
+    skipped_by_filter = 0
     for index, row in enumerate(rows):
         doc_id = str(row.get("row_id") or f"{dataset_version_id}:row:{index}")
         cleaned_text = str(row.get("cleaned_text") or "").strip()
-        if cleaned_text:
-            targets.append((index, doc_id, cleaned_text))
+        if not cleaned_text:
+            continue
+        if include_tiers is not None and tier_by_doc.get(doc_id) not in include_tiers:
+            skipped_by_filter += 1
+            continue
+        targets.append((index, doc_id, cleaned_text))
 
     def _process_doc(item: tuple[int, str, str]) -> tuple[str, list[dict[str, Any]], dict[str, int], int]:
         _, doc_id, doc_text = item
@@ -340,15 +350,38 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
         if not sentences:
             return doc_id, rows_out, stats, 0
 
-        # 문장 앵커 chunking — doc은 쪼개지 않고 classify LLM 호출만 chunk로 나눈다.
+        # genuine_spans 제한 (ADR-029) — doc_genuineness chunk aggregate가 진성 구간을
+        # 주면 그 문장만 처리(non_review 구간 재처리 안 함). 없으면 전체 doc. 두 skill이
+        # 공통 splitter라 sentence_index 정합 — 출력은 전역 1-based index를 그대로 보존.
+        spans = spans_by_doc.get(doc_id)
+        if spans:
+            allowed: set[int] = set()
+            for sp in spans:
+                if not isinstance(sp, dict):
+                    continue
+                try:
+                    s0 = int(sp.get("sentence_start"))
+                    s1 = int(sp.get("sentence_end"))
+                except (TypeError, ValueError):
+                    continue
+                for gi in range(max(1, s0), min(len(sentences), s1) + 1):
+                    allowed.add(gi)
+            pairs = [(gi, sentences[gi - 1]) for gi in sorted(allowed)]
+        else:
+            pairs = list(enumerate(sentences, start=1))
+        if not pairs:
+            return doc_id, rows_out, stats, 0
+
+        # 문장 앵커 chunking — classify LLM 호출만 chunk로 나눈다(처리 대상 문장 기준).
+        allowed_sentences = [s for _, s in pairs]
         chunks = build_sentence_chunks(
-            sentences, max_sentences=max_chunk_sentences, max_chars=max_chunk_chars, overlap=overlap_sentences,
+            allowed_sentences, max_sentences=max_chunk_sentences, max_chars=max_chunk_chars, overlap=overlap_sentences,
         )
 
         def _label_doc_chunked(client: LloaClient) -> tuple[dict[int, dict[str, Any]], dict[int, int], int]:
-            """chunk별 classify → doc 전체 1-based sentence_index 기준 merge. chunk 실패는
-            그 chunk 문장만 label 없음(merge에서 partial/needs_review). overlap이면 먼저
-            본 chunk 우선(결정론적)."""
+            """chunk별 classify → 전역 sentence_index 기준 merge. chunk-local index를 pairs로
+            전역 index 복원(genuine_spans면 비연속). chunk 실패는 그 문장만 label 없음
+            (merge에서 partial/needs_review). overlap이면 먼저 본 chunk 우선(결정론적)."""
             labels: dict[int, dict[str, Any]] = {}
             chunk_of: dict[int, int] = {}
             fails = 0
@@ -359,10 +392,12 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
                     fails += 1
                     continue
                 for li, label in local.items():
-                    gi = start0 + li  # global 1-based = chunk 0-based offset + chunk-내 1-based
-                    if gi not in labels:
-                        labels[gi] = label
-                        chunk_of[gi] = ci
+                    pos = start0 + (li - 1)  # 0-based into allowed pairs
+                    if 0 <= pos < len(pairs):
+                        gi = pairs[pos][0]  # 전역 1-based sentence_index
+                        if gi not in labels:
+                            labels[gi] = label
+                            chunk_of[gi] = ci
             return labels, chunk_of, fails
 
         la, chunk_a, fa = _label_doc_chunked(client_a)
@@ -373,25 +408,25 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
             return chunk_a.get(i, chunk_b.get(i, 0))
 
         disputed: list[dict[str, Any]] = []
-        for i, sentence in enumerate(sentences, start=1):
-            a = la.get(i)
-            b = lb.get(i)
-            ci = _chunk_idx(i)
+        for gi, sentence in pairs:
+            a = la.get(gi)
+            b = lb.get(gi)
+            ci = _chunk_idx(gi)
             rec = _reconcile_sentence(a, b)
             status = rec["status"]
             if status == "drop":
                 stats["dropped"] += 1
             elif status == "final":
                 stats[rec["resolution"]] += 1
-                rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], False, sentence_index=i, chunk_index=ci))
+                rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], False, sentence_index=gi, chunk_index=ci))
             elif status == "review":
                 stats["needs_review"] += 1
                 if rec["resolution"] == "partial_classify":
                     stats["partial"] += 1
                 if rec["relevant"]:
-                    rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], True, sentence_index=i, chunk_index=ci))
+                    rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], True, sentence_index=gi, chunk_index=ci))
             elif status == "judge":
-                disputed.append({"idx": i, "sentence": sentence, "a": a, "b": b, "chunk_index": ci})
+                disputed.append({"idx": gi, "sentence": sentence, "a": a, "b": b, "chunk_index": ci})
 
         if disputed:
             try:

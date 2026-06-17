@@ -31,7 +31,7 @@ class GenuinenessFilterTests(unittest.TestCase):
             {"doc_id": "d1", "final_label": "non_review", "genuineness": "genuine_review"},
             {"doc_id": "d2", "genuineness": "genuine_review"},  # 단일 모델(final_label 없음)
         ])
-        tiers, tier_by_doc = _load_genuineness_filter({
+        tiers, tier_by_doc, _spans = _load_genuineness_filter({
             "include_genuineness": ["genuine_review"],
             "doc_genuineness_ref": str(self.ref),
         })
@@ -43,7 +43,7 @@ class GenuinenessFilterTests(unittest.TestCase):
         _write(self.ref, [
             {"doc_id": "d1", "final_label": "non_review"},
         ])
-        _tiers, tier_by_doc = _load_genuineness_filter({
+        _tiers, tier_by_doc, _spans = _load_genuineness_filter({
             "include_genuineness": ["genuine_review"],
             "doc_genuineness_ref": str(self.ref),
             "genuineness_overrides": {"d1": "genuine_review"},  # 사람 보정 최상위
@@ -52,7 +52,7 @@ class GenuinenessFilterTests(unittest.TestCase):
 
     def test_legacy_label_field_fallback(self) -> None:
         _write(self.ref, [{"doc_id": "d1", "label": "non_review"}])
-        _tiers, tier_by_doc = _load_genuineness_filter({
+        _tiers, tier_by_doc, _spans = _load_genuineness_filter({
             "include_genuineness": ["non_review"],
             "doc_genuineness_ref": str(self.ref),
         })

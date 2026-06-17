@@ -99,7 +99,7 @@ class ClauseLabelVerifyTests(unittest.TestCase):
             "output_path": str(self.out),
             "verify": True,
             "classify_models": ["model-a", "model-b"],
-            "judge_model": "model-judge",
+            "judge_model": "model-judge", "include_genuineness": [],
             "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉 국가유산야행"},
             "concurrency": 1,
         }
@@ -236,7 +236,7 @@ class ClauseLabelVerifyChunkingTests(unittest.TestCase):
         payload = {
             "dataset_version_id": "ver1", "clean_artifact_ref": str(self.clean),
             "output_path": str(self.out), "verify": True,
-            "classify_models": ["model-a", "model-b"], "judge_model": "model-judge",
+            "classify_models": ["model-a", "model-b"], "judge_model": "model-judge", "include_genuineness": [],
             "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉 국가유산야행"},
             "concurrency": 1, "max_chunk_sentences": max_chunk_sentences,
         }
@@ -276,6 +276,66 @@ class ClauseLabelVerifyChunkingTests(unittest.TestCase):
         self.assertFalse(by_idx[10]["needs_review"])
         self.assertEqual(by_idx[10]["resolution"], "agree")
         self.assertGreaterEqual(result["artifact"]["summary"]["chunking"]["chunk_failure_count"], 1)
+
+
+class ClauseLabelVerifyGenuineSpansTests(unittest.TestCase):
+    """genuine_spans 소비 + tier 필터 (ADR-029). 진성 구간만 처리, sentence_index 전역
+    보존. non_review는 tier 필터로 skip."""
+
+    SENTENCES = [f"sent{i:03d}" for i in range(1, 7)]  # 6문장
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.clean = Path(self.tmp.name) / "clean.jsonl"
+        self.gen = Path(self.tmp.name) / "gen.jsonl"
+        self.out = Path(self.tmp.name) / "out.jsonl"
+        with self.clean.open("w", encoding="utf-8") as f:
+            f.write(json.dumps({"row_id": "d1", "cleaned_text": "x" * 200}, ensure_ascii=False) + "\n")
+
+    def _write_gen(self, rec: dict) -> None:
+        with self.gen.open("w", encoding="utf-8") as f:
+            f.write(json.dumps({"doc_id": "d1", **rec}, ensure_ascii=False) + "\n")
+
+    def _run(self, *, include_genuineness):
+        from python_ai_worker.dataset_build import clause_label_verify as v
+
+        original_init = v.LloaClient.__init__
+
+        def _init(self, config, *, urlopen=None):
+            original_init(self, config, urlopen=_chunk_urlopen(config.model))
+
+        payload = {
+            "dataset_version_id": "ver1", "clean_artifact_ref": str(self.clean),
+            "output_path": str(self.out), "verify": True,
+            "classify_models": ["model-a", "model-b"], "judge_model": "model-judge",
+            "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉 국가유산야행"},
+            "concurrency": 1, "include_genuineness": include_genuineness,
+            "doc_genuineness_ref": str(self.gen),
+        }
+        with patch.object(v, "load_config", return_value=_fake_config()), \
+             patch.object(v.LloaClient, "__init__", _init), \
+             patch.object(v, "_split_anchor_sentences", return_value=self.SENTENCES):
+            result = v.run_dataset_clause_label_verify(payload)
+        rows = [json.loads(line) for line in self.out.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return result, rows
+
+    def test_processes_only_genuine_spans(self) -> None:
+        self._write_gen({"genuineness": "genuine_review",
+                         "genuine_spans": [{"chunk_index": 1, "sentence_start": 3, "sentence_end": 4}]})
+        _result, rows = self._run(include_genuineness=["genuine_review", "uncertain"])
+        self.assertEqual({r["sentence_index"] for r in rows}, {3, 4})  # 전역 index 보존
+
+    def test_no_spans_processes_full_doc(self) -> None:
+        self._write_gen({"genuineness": "genuine_review"})  # spans 없음 → 전체 처리
+        _result, rows = self._run(include_genuineness=["genuine_review", "uncertain"])
+        self.assertEqual({r["sentence_index"] for r in rows}, set(range(1, 7)))
+
+    def test_non_review_skipped_by_tier_filter(self) -> None:
+        self._write_gen({"genuineness": "non_review"})
+        result, rows = self._run(include_genuineness=["genuine_review", "uncertain"])
+        self.assertEqual(rows, [])
+        self.assertEqual(result["artifact"]["summary"]["processed_row_count"], 0)
 
 
 if __name__ == "__main__":
