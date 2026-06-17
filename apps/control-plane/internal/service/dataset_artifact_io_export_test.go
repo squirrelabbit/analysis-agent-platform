@@ -456,3 +456,80 @@ func TestDeriveDownloadFilenameAppendsTimestamp(t *testing.T) {
 		}
 	}
 }
+
+// silverone 2026-06-17 — ADR-026/028 verify(교차모델) artifact 다운로드 잠금.
+// verify jsonl은 genuineness 컬럼이 없고 final_label + model_a/b_result +
+// judge_result를 갖는다. 단일 모델 exporter로 돌리면 DuckDB Binder Error가
+// 났었다(군산 데이터 회귀). verify exporter가 평탄화 컬럼으로 성공하는지 검증.
+func writeDocGenuinenessVerifyJSONL(t *testing.T, dir string, lines []string) string {
+	t.Helper()
+	path := filepath.Join(dir, "dg-verify-"+randomSuffix(t)+".verify.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatalf("write verify jsonl: %v", err)
+	}
+	return path
+}
+
+func TestExportDocGenuinenessVerifyEnrichedCSV(t *testing.T) {
+	dir := t.TempDir()
+	jsonl := writeDocGenuinenessVerifyJSONL(t, dir, []string{
+		`{"doc_id":"v:row:0","model_a":"wisenut/max","model_b":"wisenut/ultra","prompt_version":"v1","source":"lloa","model_a_result":{"genuineness":"genuine_review","reason":"a reason"},"model_b_result":{"genuineness":"genuine_review","reason":"b reason"},"judge_result":null,"is_disagreement":false,"final_label":"genuine_review","resolution":"model_agreement","needs_review":false}`,
+		`{"doc_id":"v:row:1","model_a":"wisenut/max","model_b":"wisenut/ultra","prompt_version":"v1","source":"lloa","model_a_result":{"genuineness":"genuine_review","reason":"a says review"},"model_b_result":{"genuineness":"non_review","reason":"b says ad"},"judge_result":{"decision":"accept_a","final_label":"genuine_review","confidence":0.76,"reason":"judge picks a"},"is_disagreement":true,"final_label":"genuine_review","resolution":"judge_on_disagreement","needs_review":false}`,
+	})
+	parquet := writeCleanParquet(t, dir, []cleanRow{
+		{rowID: "v:row:0", cleaned: "cleaned 0", raw: "raw 0", createdAt: "2026-01-01T00:00:00Z", srcIdx: 0},
+		{rowID: "v:row:1", cleaned: "cleaned 1", raw: "raw 1", createdAt: "2026-01-02T00:00:00Z", srcIdx: 1},
+	})
+
+	csvPath, err := exportDocGenuinenessVerifyEnrichedCSV(jsonl, parquet)
+	if err != nil {
+		t.Fatalf("exportDocGenuinenessVerifyEnrichedCSV: %v", err)
+	}
+	defer os.Remove(csvPath)
+
+	header, rows := readCSV(t, csvPath)
+	wantHeader := []string{
+		"doc_id", "final_label", "resolution", "needs_review", "is_disagreement",
+		"model_a", "model_a_genuineness", "model_a_reason",
+		"model_b", "model_b_genuineness", "model_b_reason",
+		"judge_decision", "judge_final_label", "judge_confidence", "judge_reason",
+		"prompt_version", "source",
+		"cleaned_text", "raw_text", "created_at", "source_row_index",
+	}
+	assertHeader(t, header, wantHeader)
+	if len(rows) != 2 {
+		t.Fatalf("rows: want 2, got %d", len(rows))
+	}
+	idx := func(name string) int {
+		for i, h := range header {
+			if h == name {
+				return i
+			}
+		}
+		t.Fatalf("column %q missing", name)
+		return -1
+	}
+	// row0 = 합의 (judge 없음).
+	if rows[0][idx("doc_id")] != "v:row:0" || rows[0][idx("final_label")] != "genuine_review" {
+		t.Errorf("row0 mismatch: %v", rows[0])
+	}
+	if rows[0][idx("model_a_genuineness")] != "genuine_review" {
+		t.Errorf("row0 model_a_genuineness: %q", rows[0][idx("model_a_genuineness")])
+	}
+	if rows[0][idx("judge_decision")] != "" {
+		t.Errorf("row0 judge_decision should be empty (agreement), got %q", rows[0][idx("judge_decision")])
+	}
+	if rows[0][idx("cleaned_text")] != "cleaned 0" {
+		t.Errorf("row0 cleaned_text: %q", rows[0][idx("cleaned_text")])
+	}
+	// row1 = 불일치 + judge.
+	if rows[1][idx("model_b_genuineness")] != "non_review" {
+		t.Errorf("row1 model_b_genuineness: %q", rows[1][idx("model_b_genuineness")])
+	}
+	if rows[1][idx("judge_decision")] != "accept_a" {
+		t.Errorf("row1 judge_decision: %q", rows[1][idx("judge_decision")])
+	}
+	if rows[1][idx("judge_confidence")] != "0.76" {
+		t.Errorf("row1 judge_confidence: %q", rows[1][idx("judge_confidence")])
+	}
+}
