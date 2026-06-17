@@ -44,7 +44,9 @@ from .clause_label import (
     resolve_clause_label_taxonomy,
 )
 
-_CLASSIFY_PROMPT_TASK = "clause_label_verify"
+# 2026-06-17 — 단일·교차검증 통일: classify 프롬프트를 단일 모드와 동일한
+# clause_label(문장 형식 v3/v4)로 일원화. 옛 clause_label_verify 프롬프트는 제거.
+_CLASSIFY_PROMPT_TASK = "clause_label"
 _JUDGE_PROMPT_TASK = "clause_label_verify_judge"
 
 # judge batch 가드
@@ -358,7 +360,7 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
     allowed_aspect = taxonomy.aspect_keys_set
     fallback_aspect = taxonomy.fallback_aspect
     classify_body, classify_version = load_prompt_body(
-        _CLASSIFY_PROMPT_TASK, str(payload.get("clause_label_verify_prompt_version") or "").strip() or None
+        _CLASSIFY_PROMPT_TASK, str(payload.get("clause_label_prompt_version") or "").strip() or None
     )
     classify_system_prompt = _render_subject_prompt(_inject_taxonomy(classify_body, taxonomy), subject_config)
     judge_body, judge_version = load_prompt_body(

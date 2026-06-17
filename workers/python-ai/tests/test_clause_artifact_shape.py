@@ -69,9 +69,9 @@ def _llm_completion(content: str, *, finish_reason: str = "stop") -> dict:
     }
 
 
-def _fake_urlopen_with_clauses(clauses_by_doc: dict[str, list[dict]]):
-    """doc_id별 LLOA 응답 (5/20 prompt — 최외곽 array). doc_id는 user message의
-    ``제목: ... 본문: ...`` 첫 줄 제목으로 매핑."""
+def _fake_urlopen_sentences(labels: list[dict]):
+    """문장 classify mock (2026-06-17 단일=문장앵커). 입력 번호 문장 수만큼
+    {index, relevant, sentiment, aspects} 배열 반환. labels[i] = 문장 i+1의 라벨."""
     class _Resp:
         def __init__(self, payload: dict) -> None:
             self._payload = payload
@@ -86,16 +86,8 @@ def _fake_urlopen_with_clauses(clauses_by_doc: dict[str, list[dict]]):
             return None
 
     def _fake(req, timeout=None):  # type: ignore[no-untyped-def]
-        body = json.loads(req.data.decode("utf-8"))
-        user_text = body["messages"][1]["content"]
-        # user content는 "제목: <title>\n본문: <text>" 형식. clauses_by_doc dict
-        # key를 doc id 대신 *body 첫 30자* prefix로 매칭 (test fixture만 의도).
-        # 더 단순화: 첫 doc만 처리하는 test가 대부분.
-        doc_key = next(iter(clauses_by_doc))
-        clauses = clauses_by_doc.get(doc_key, [])
-        # 5/20 prompt — 최외곽 array. 단 worker는 dict wrapper도 hint로 받음.
-        completion = json.dumps(clauses, ensure_ascii=False)
-        return _Resp(_llm_completion(completion))
+        arr = [{"index": i + 1, **lab} for i, lab in enumerate(labels)]
+        return _Resp(_llm_completion(json.dumps(arr, ensure_ascii=False)))
 
     return _fake
 
@@ -114,7 +106,7 @@ class ClauseArtifactShapeTests(unittest.TestCase):
             for row in rows:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    def _run(self, clauses_by_doc: dict[str, list[dict]]) -> list[dict]:
+    def _run(self, sentences: list[str], labels: list[dict]) -> list[dict]:
         from python_ai_worker.dataset_build import clause_label
         from python_ai_worker.config import WorkerConfig
 
@@ -128,12 +120,13 @@ class ClauseArtifactShapeTests(unittest.TestCase):
             lloa_prepend_no_think=True,
         )
         original_init = clause_label.LloaClient.__init__
-        fake_urlopen = _fake_urlopen_with_clauses(clauses_by_doc)
+        fake_urlopen = _fake_urlopen_sentences(labels)
 
         def _init_with_fake(self, config, *, urlopen=None):
             original_init(self, config, urlopen=fake_urlopen)
 
         with patch.object(clause_label, "load_config", return_value=fake_config), \
+             patch.object(clause_label, "split_anchor_sentences", return_value=sentences), \
              patch.object(clause_label.LloaClient, "__init__", _init_with_fake):
             clause_label.run_dataset_clause_label({
                 "dataset_version_id": "dvid:test",
@@ -154,79 +147,80 @@ class ClauseArtifactShapeTests(unittest.TestCase):
                     records.append(json.loads(line))
         return records
 
+    # 2026-06-17 — 단일 모드가 문장 앵커로 통일됨. mock은 문장별 {relevant, sentiment,
+    # aspects} 라벨, 출력은 문장(=clause) × aspect별 행.
     def test_locked_keys_present(self) -> None:
-        records = self._run({
-            "row:1": [
-                {"clause": "사람이 정말 많았는데", "sentiment": "neutral", "aspect": "ambiance_scenery"},
-                {"clause": "야경은 환상적이었어요", "sentiment": "positive", "aspect": "ambiance_scenery"},
+        records = self._run(
+            ["사람이 정말 많았는데", "야경은 환상적이었어요"],
+            [
+                {"relevant": True, "sentiment": "neutral", "aspects": ["ambiance_scenery"]},
+                {"relevant": True, "sentiment": "positive", "aspects": ["ambiance_scenery"]},
             ],
-        })
+        )
         self.assertEqual(len(records), 2)
         for clause in records:
             for key in _LOCKED_CLAUSE_KEYS:
                 self.assertIn(key, clause, f"clause record missing locked key: {key}")
 
     def test_removed_legacy_keys_absent(self) -> None:
-        records = self._run({
-            "row:1": [
-                {"clause": "야경은 환상적이었어요", "sentiment": "positive", "aspect": "ambiance_scenery"},
-            ],
-        })
+        records = self._run(
+            ["야경은 환상적이었어요"],
+            [{"relevant": True, "sentiment": "positive", "aspects": ["ambiance_scenery"]}],
+        )
+        self.assertTrue(records)
         for clause in records:
             for legacy_key in _REMOVED_LEGACY_KEYS:
                 self.assertNotIn(legacy_key, clause, f"legacy key leaked: {legacy_key}")
 
     def test_sentiment_within_three_label_set(self) -> None:
-        records = self._run({
-            "row:1": [
-                {"clause": "야경 환상적", "sentiment": "positive", "aspect": "ambiance_scenery"},
-            ],
-        })
+        records = self._run(
+            ["야경 환상적"],
+            [{"relevant": True, "sentiment": "positive", "aspects": ["ambiance_scenery"]}],
+        )
+        self.assertTrue(records)
         for clause in records:
             self.assertIn(clause["sentiment"], _LOCKED_SENTIMENT_LABELS)
 
     def test_aspect_within_seven_label_set(self) -> None:
-        records = self._run({
-            "row:1": [
-                {"clause": "야경 환상적", "sentiment": "positive", "aspect": "ambiance_scenery"},
-                {"clause": "음식 맛있음", "sentiment": "positive", "aspect": "food"},
+        records = self._run(
+            ["야경 환상적", "음식 맛있음"],
+            [
+                {"relevant": True, "sentiment": "positive", "aspects": ["ambiance_scenery"]},
+                {"relevant": True, "sentiment": "positive", "aspects": ["food"]},
             ],
-        })
+        )
+        self.assertTrue(records)
         for clause in records:
             self.assertIn(clause["aspect"], _LOCKED_ASPECT_LABELS)
 
     def test_invalid_sentiment_falls_back_to_neutral(self) -> None:
         # LLOA가 schema 위반("great" 등)을 보내면 worker가 neutral로 정규화.
-        records = self._run({
-            "row:1": [
-                {"clause": "야경 환상적", "sentiment": "great", "aspect": "ambiance_scenery"},
-            ],
-        })
+        records = self._run(
+            ["야경 환상적"],
+            [{"relevant": True, "sentiment": "great", "aspects": ["ambiance_scenery"]}],
+        )
         self.assertEqual(records[0]["sentiment"], "neutral")
 
     def test_invalid_aspect_falls_back_to_etc(self) -> None:
-        # LLOA가 aspect taxonomy 밖 값을 보내면 worker가 etc로 정규화.
-        records = self._run({
-            "row:1": [
-                {"clause": "야경 환상적", "sentiment": "positive", "aspect": "scenery"},
-            ],
-        })
+        # LLOA가 aspect taxonomy 밖 값을 보내면 worker가 etc로 정규화(relevant+빈 aspect→etc).
+        records = self._run(
+            ["야경 환상적"],
+            [{"relevant": True, "sentiment": "positive", "aspects": ["scenery"]}],
+        )
         self.assertEqual(records[0]["aspect"], "etc")
 
     def test_prompt_version_locked_to_v3(self) -> None:
-        records = self._run({
-            "row:1": [
-                {"clause": "야경 환상적", "sentiment": "positive", "aspect": "ambiance_scenery"},
-            ],
-        })
+        records = self._run(
+            ["야경 환상적"],
+            [{"relevant": True, "sentiment": "positive", "aspects": ["ambiance_scenery"]}],
+        )
         self.assertEqual(records[0]["prompt_version"], "v3")
 
     def test_source_marked_lloa_on_success(self) -> None:
-        records = self._run({
-            "row:1": [
-                {"clause": "야경 환상적", "sentiment": "positive", "aspect": "ambiance_scenery"},
-            ],
-        })
+        records = self._run(
+            ["야경 환상적"],
+            [{"relevant": True, "sentiment": "positive", "aspects": ["ambiance_scenery"]}],
+        )
         self.assertEqual(records[0]["source"], "lloa")
 
 

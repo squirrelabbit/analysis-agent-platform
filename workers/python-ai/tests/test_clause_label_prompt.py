@@ -52,9 +52,10 @@ class ClauseLabelSubjectRenderTests(unittest.TestCase):
         self.assertNotIn("specializing in festival reviews", rendered)
         self.assertNotIn("clauses related to the festival", rendered)
 
-        # Examples는 festival 기준 그대로 유지 (calibration 보존)
+        # Examples는 festival 기준 그대로 유지 (calibration 보존). 2026-06-17 문장
+        # 형식 전환으로 예시 문장이 바뀌어 calibration 단어를 현 v3 예시 기준으로 갱신.
         self.assertIn("드론쇼", rendered)
-        self.assertIn("푸드트럭", rendered)
+        self.assertIn("스탬프", rendered)
 
         # aspect taxonomy 표는 그대로 inject됨
         self.assertIn("show_program", rendered)

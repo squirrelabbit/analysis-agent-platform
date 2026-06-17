@@ -28,6 +28,7 @@ from ..prompt_options import load_prompt_body
 from ..clients.lloa import LloaClient, LloaConfig, LloaResponseParseError
 from ..obs import get, skill_handler
 from ..taxonomies import DEFAULT_TAXONOMY_ID, Taxonomy, load_taxonomy, render_aspect_taxonomy_block
+from ._chunking import build_sentence_chunks, split_anchor_sentences
 from ._common import write_progress
 
 LOGGER = get(__name__)
@@ -425,20 +426,41 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
     completed_docs = 0
     clauses_by_doc: dict[str, list[dict[str, Any]]] = {}
 
+    # 단일 모드도 문장 앵커(2026-06-17): kiwipiepy로 문장을 고정 분리 → 1모델 classify →
+    # 문장별 explode. 교차검증(verify)과 동일 분석 방법·동일 프롬프트(clause_label/<버전>).
+    # _label_sentences는 verify와 공유(deferred import — 순환 회피). split/chunk는 모듈
+    # 레벨 import(아래)라 테스트에서 patch 가능.
+    from .clause_label_verify import _label_sentences
+
+    allowed_aspect = taxonomy.aspect_keys_set
+    fallback_aspect = taxonomy.fallback_aspect
+
     def _process(item: tuple[int, str, str, str]) -> tuple[str, list[dict[str, Any]], Exception | None]:
-        _, doc_id, doc_title, doc_text = item
+        _, doc_id, _doc_title, doc_text = item
         try:
-            clauses = _label_doc(
-                client,
-                system_prompt=system_prompt,
-                doc_id=doc_id,
-                doc_title=doc_title,
-                doc_text=doc_text,
-                max_tokens=max_tokens,
-                taxonomy=taxonomy,
-            )
-            return doc_id, clauses, None
-        except (LloaResponseParseError, ValueError) as exc:
+            sentences = split_anchor_sentences(doc_text)
+            if not sentences:
+                return doc_id, [], None
+            # LLM 호출만 chunk로 나눈다(문장/sentence_index는 전역 보존).
+            chunks = build_sentence_chunks(sentences, max_sentences=40, max_chars=12000, overlap=0)
+            labels: dict[int, dict[str, Any]] = {}
+            for start0, sub in chunks:
+                local = _label_sentences(client, system_prompt, sub, max_tokens, allowed_aspect, fallback_aspect)
+                for li, label in local.items():
+                    gi = start0 + li  # start0(0-based chunk offset) + li(1-based) = 전역 1-based
+                    if gi not in labels and 1 <= gi <= len(sentences):
+                        labels[gi] = label
+            rows_out: list[dict[str, Any]] = []
+            for gi, sentence in enumerate(sentences, start=1):
+                lab = labels.get(gi)
+                if not lab or not lab["relevant"]:
+                    continue
+                for aspect in (lab["aspects"] or [fallback_aspect]):
+                    rows_out.append(
+                        {"doc_id": doc_id, "clause": sentence, "sentiment": lab["sentiment"], "aspect": aspect}
+                    )
+            return doc_id, rows_out, None
+        except (LloaResponseParseError, OSError, ValueError) as exc:
             return doc_id, [], exc
 
     if target_docs:
