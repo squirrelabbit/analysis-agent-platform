@@ -14,7 +14,7 @@ silverone 2026-05-21 결정:
 
 from dataclasses import dataclass, field
 
-from ..taxonomies import load_taxonomy
+from ..taxonomies import DEFAULT_TAXONOMY_ID, load_taxonomy
 # Skill Contract v2 Step 2 (silverone 2026-06-04) — calculate/present의 prompt
 # params_schema는 skill_specs.py의 spec에서 생성한다 (단일 source). 생성값이 기존
 # 하드코딩과 byte 동일함은 test_skill_specs가 잠근다 → prompt 출력 불변.
@@ -23,10 +23,12 @@ from .skill_specs import CALCULATE_SPEC, PRESENT_SPEC, render_params_schema
 
 PLAN_VERSION = "v2"
 
-# taxonomy-driven config Phase 3-A (2026-05-27) — clauses.aspect description을
-# config/taxonomies/festival-v2.json에서 derive. Phase 3-B에서 dataset_version
-# metadata 기반 동적 lookup으로 전환 예정 — 현재는 single taxonomy 고정.
-_FESTIVAL_TAXONOMY = load_taxonomy("festival-v2")
+# planner prompt의 clauses.aspect 컬럼 enum을 taxonomy에서 derive. 단일 source인
+# taxonomies.DEFAULT_TAXONOMY_ID를 따른다(더는 별도 리터럴 하드코딩 아님).
+# 주의: 이 prompt enum은 aspect *키*만 쓰므로 현재 taxonomy들(festival-v2/gunsan)은
+# 동일하다. aspect 키가 다른 taxonomy를 도입하면 planner prompt도 per-dataset(artifact
+# taxonomy_id)로 derive하도록 확장 필요(후속). 빌드/analyze 정합성은 이미 per-request.
+_FESTIVAL_TAXONOMY = load_taxonomy(DEFAULT_TAXONOMY_ID)
 
 # step id로 사용 금지. multi-table input ``input`` 필드와의 충돌을 방지하기 위해
 # 예약한다. clause_keywords는 optional artifact(키워드 build이 돈 dataset에만 존재)지만

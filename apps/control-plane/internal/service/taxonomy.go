@@ -56,6 +56,41 @@ func (s *DatasetService) GetTaxonomy(ctx context.Context, taxonomyID string) (js
 	return json.RawMessage(buf.Bytes()), nil
 }
 
+// ListTaxonomies는 사용 가능한 taxonomy 목록(요약)을 Python worker로 proxy해서
+// 반환한다. taxonomy 선택 UI(데이터셋 metadata.taxonomy_id)용. GetTaxonomy와 동일
+// 위임 패턴 — worker `/tasks/taxonomies`가 config/taxonomies/*.json을 스캔한다.
+func (s *DatasetService) ListTaxonomies(ctx context.Context) (json.RawMessage, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(s.pythonAIWorkerURL), "/")
+	if baseURL == "" {
+		return nil, ErrInvalidArgument{Message: "python-ai worker is not configured"}
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, baseURL+"/tasks/taxonomies", bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return nil, fmt.Errorf("taxonomies request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("taxonomies worker call: %w", err)
+	}
+	defer resp.Body.Close()
+	buf := new(bytes.Buffer)
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		return nil, fmt.Errorf("taxonomies worker read: %w", err)
+	}
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		return nil, ErrInvalidArgument{Message: taxonomyErrorMessage(buf.Bytes())}
+	}
+	if resp.StatusCode >= 500 {
+		return nil, fmt.Errorf("taxonomies worker returned %d: %s", resp.StatusCode, buf.String())
+	}
+	return json.RawMessage(buf.Bytes()), nil
+}
+
 // taxonomyErrorMessage는 worker 응답 body({"error": "..."})에서 메시지를 추출한다.
 // 파싱 실패 시 raw body를 그대로 반환.
 func taxonomyErrorMessage(raw []byte) string {

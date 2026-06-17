@@ -204,6 +204,200 @@ func exportClauseLabelEnrichedCSV(jsonlRef string, cleanRef string, dgRef string
 	return runExportCopy(db2, csvPath2, fallbackQuery)
 }
 
+// exportDocGenuinenessVerifyEnrichedCSV — ADR-026 verify(교차모델) artifact를
+// CSV로 변환한다. verify jsonl은 단일 모델과 schema가 달라(genuineness 컬럼이
+// 없고 final_label + nested model_a/b_result + judge_result 보유) 별도 exporter가
+// 필요하다. nested 결과는 json_extract_string으로 운영자 가독 컬럼으로 평탄화.
+// cleaned.parquet LEFT JOIN 패턴은 단일 모델 exporter와 동일.
+//
+// 출력 컬럼 순서 (CSV header 고정):
+//
+//	doc_id, final_label, resolution, needs_review, is_disagreement,
+//	model_a, model_a_genuineness, model_a_reason,
+//	model_b, model_b_genuineness, model_b_reason,
+//	judge_decision, judge_final_label, judge_confidence, judge_reason,
+//	prompt_version, source,
+//	cleaned_text, raw_text, created_at, source_row_index
+func exportDocGenuinenessVerifyEnrichedCSV(jsonlRef string, cleanRef string) (string, error) {
+	jsonlRef = strings.TrimSpace(jsonlRef)
+	cleanRef = strings.TrimSpace(cleanRef)
+	if jsonlRef == "" {
+		return "", ErrInvalidArgument{Message: "doc_genuineness artifact ref is required"}
+	}
+	if _, err := os.Stat(jsonlRef); err != nil {
+		if os.IsNotExist(err) {
+			return "", ErrNotFound{Resource: "doc_genuineness artifact"}
+		}
+		return "", err
+	}
+	if cleanRef != "" {
+		if _, err := os.Stat(cleanRef); err != nil {
+			cleanRef = ""
+		}
+	}
+
+	csvPath, db, cleanup, err := prepareExportDuckDB("doc_genuineness")
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+
+	jsonlSource := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(jsonlRef))
+	// verify 평탄화 — nested struct를 to_json 후 json_extract_string으로 추출
+	// (struct 필드 직접 접근은 schema에 없는 필드면 Binder Error라 회피).
+	verifyCols := func(p string) string {
+		return fmt.Sprintf(
+			`%[1]sdoc_id, %[1]sfinal_label, %[1]sresolution, `+
+				`CAST(%[1]sneeds_review AS VARCHAR) AS needs_review, `+
+				`CAST(%[1]sis_disagreement AS VARCHAR) AS is_disagreement, `+
+				`%[1]smodel_a, `+
+				`json_extract_string(to_json(%[1]smodel_a_result), '$.genuineness') AS model_a_genuineness, `+
+				`json_extract_string(to_json(%[1]smodel_a_result), '$.reason') AS model_a_reason, `+
+				`%[1]smodel_b, `+
+				`json_extract_string(to_json(%[1]smodel_b_result), '$.genuineness') AS model_b_genuineness, `+
+				`json_extract_string(to_json(%[1]smodel_b_result), '$.reason') AS model_b_reason, `+
+				`json_extract_string(to_json(%[1]sjudge_result), '$.decision') AS judge_decision, `+
+				`json_extract_string(to_json(%[1]sjudge_result), '$.final_label') AS judge_final_label, `+
+				`json_extract_string(to_json(%[1]sjudge_result), '$.confidence') AS judge_confidence, `+
+				`json_extract_string(to_json(%[1]sjudge_result), '$.reason') AS judge_reason, `+
+				`%[1]sprompt_version, %[1]ssource`,
+			p,
+		)
+	}
+	emptyClean := `NULL AS cleaned_text, NULL AS raw_text, NULL AS created_at, NULL AS source_row_index`
+
+	if cleanRef == "" {
+		return runExportCopy(db, csvPath, fmt.Sprintf(
+			`SELECT %s, %s FROM %s AS dg ORDER BY dg.doc_id`,
+			verifyCols("dg."), emptyClean, jsonlSource,
+		))
+	}
+
+	cleanSource := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+	enrichedQuery := fmt.Sprintf(
+		`SELECT %s, c.cleaned_text, c.raw_text, c.created_at, c.source_row_index
+		 FROM %s AS dg LEFT JOIN %s AS c ON dg.doc_id = c.row_id
+		 ORDER BY c.source_row_index NULLS LAST, dg.doc_id`,
+		verifyCols("dg."), jsonlSource, cleanSource,
+	)
+	if path, err := runExportCopy(db, csvPath, enrichedQuery); err == nil {
+		return path, nil
+	}
+	// JOIN 실패 (옛 cleaned.parquet에 row_id 없음 등) — jsonl 단독 fallback.
+	_ = os.Remove(csvPath)
+	csvPath2, db2, cleanup2, err := prepareExportDuckDB("doc_genuineness")
+	if err != nil {
+		return "", err
+	}
+	defer cleanup2()
+	return runExportCopy(db2, csvPath2, fmt.Sprintf(
+		`SELECT %s, %s FROM %s AS dg ORDER BY dg.doc_id`,
+		verifyCols("dg."), emptyClean, jsonlSource,
+	))
+}
+
+// exportClauseLabelVerifyEnrichedCSV — ADR-028 verify(교차모델) clause_label
+// artifact를 CSV로 변환한다. 검토 큐 필드(resolution/needs_review) + model A/B/
+// judge 결과를 포함한다. nested 결과는 schema가 단일 모델만큼 안정적이지 않아
+// to_json 직렬화 컬럼으로 둔다(운영자가 필요 시 파싱). genuineness 교차 join은
+// dg artifact도 verify면 schema가 달라 생략한다(본문/추적 컬럼만 enrich).
+//
+// 출력 컬럼 순서 (CSV header 고정):
+//
+//	doc_id, clause_id, clause_text, aspect, sentiment, resolution, needs_review,
+//	sentence_index, chunk_index, model_a_result, model_b_result, judge_result,
+//	source, cleaned_text, raw_text, created_at, source_row_index
+func exportClauseLabelVerifyEnrichedCSV(jsonlRef string, cleanRef string) (string, error) {
+	jsonlRef = strings.TrimSpace(jsonlRef)
+	cleanRef = strings.TrimSpace(cleanRef)
+	if jsonlRef == "" {
+		return "", ErrInvalidArgument{Message: "clause_label artifact ref is required"}
+	}
+	if _, err := os.Stat(jsonlRef); err != nil {
+		if os.IsNotExist(err) {
+			return "", ErrNotFound{Resource: "clause_label artifact"}
+		}
+		return "", err
+	}
+	if cleanRef != "" {
+		if _, err := os.Stat(cleanRef); err != nil {
+			cleanRef = ""
+		}
+	}
+
+	csvPath, db, cleanup, err := prepareExportDuckDB("clause_label")
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+
+	jsonlSource := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(jsonlRef))
+	// clause_id는 GetClauseLabelView verify 로더와 동일(doc_id 내 0-base index).
+	baseSelect := fmt.Sprintf(`WITH ordered AS (
+	    SELECT *, ROW_NUMBER() OVER () AS _rn
+	    FROM %s
+	),
+	clauses AS (
+	    SELECT
+	        doc_id,
+	        doc_id || '-' || CAST(ROW_NUMBER() OVER (PARTITION BY doc_id ORDER BY _rn) - 1 AS VARCHAR) AS clause_id,
+	        clause AS clause_text,
+	        aspect, sentiment, resolution,
+	        CAST(needs_review AS VARCHAR) AS needs_review,
+	        CAST(sentence_index AS VARCHAR) AS sentence_index,
+	        CAST(chunk_index AS VARCHAR) AS chunk_index,
+	        CAST(to_json(model_a_result) AS VARCHAR) AS model_a_result,
+	        CAST(to_json(model_b_result) AS VARCHAR) AS model_b_result,
+	        CAST(to_json(judge_result) AS VARCHAR) AS judge_result,
+	        source,
+	        _rn
+	    FROM ordered
+	)`, jsonlSource)
+
+	joinClause := ""
+	cleanColumns := "NULL AS cleaned_text, NULL AS raw_text, NULL AS created_at, NULL AS source_row_index"
+	orderBy := "ORDER BY cl._rn"
+	if cleanRef != "" {
+		joinClause = fmt.Sprintf(" LEFT JOIN read_parquet('%s') AS c ON cl.doc_id = c.row_id",
+			escapeDuckDBLiteral(cleanRef))
+		cleanColumns = "c.cleaned_text, c.raw_text, c.created_at, c.source_row_index"
+		orderBy = "ORDER BY c.source_row_index NULLS LAST, cl._rn"
+	}
+
+	enrichedQuery := fmt.Sprintf(
+		`%s
+		 SELECT cl.doc_id, cl.clause_id, cl.clause_text, cl.aspect, cl.sentiment,
+		        cl.resolution, cl.needs_review, cl.sentence_index, cl.chunk_index,
+		        cl.model_a_result, cl.model_b_result, cl.judge_result, cl.source,
+		        %s
+		 FROM clauses AS cl%s
+		 %s`,
+		baseSelect, cleanColumns, joinClause, orderBy,
+	)
+	if path, err := runExportCopy(db, csvPath, enrichedQuery); err == nil {
+		return path, nil
+	}
+	// JOIN 실패 시 jsonl 단독 fallback.
+	_ = os.Remove(csvPath)
+	csvPath2, db2, cleanup2, err := prepareExportDuckDB("clause_label")
+	if err != nil {
+		return "", err
+	}
+	defer cleanup2()
+	fallbackQuery := fmt.Sprintf(
+		`%s
+		 SELECT cl.doc_id, cl.clause_id, cl.clause_text, cl.aspect, cl.sentiment,
+		        cl.resolution, cl.needs_review, cl.sentence_index, cl.chunk_index,
+		        cl.model_a_result, cl.model_b_result, cl.judge_result, cl.source,
+		        NULL AS cleaned_text, NULL AS raw_text,
+		        NULL AS created_at, NULL AS source_row_index
+		 FROM clauses AS cl
+		 ORDER BY cl._rn`,
+		baseSelect,
+	)
+	return runExportCopy(db2, csvPath2, fallbackQuery)
+}
+
 // prepareExportDuckDB — temp CSV 경로 + temp DuckDB handle + cleanup callback
 // 생성. exportDocGenuinenessEnrichedCSV / exportClauseLabelEnrichedCSV 공유.
 func prepareExportDuckDB(kind string) (string, *sql.DB, func(), error) {

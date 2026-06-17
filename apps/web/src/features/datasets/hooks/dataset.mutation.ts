@@ -4,7 +4,7 @@ import type { DatasetFormValues, DatasetMeta } from "../schemas/dataset";
 import { datasetApi } from "../api/dataset.api";
 import {
   mapDatasetFormToRequest,
-  mapMetadataRequest,
+  mapDatasetMetadataRequest,
 } from "../models/mapper";
 import { datasetKeys } from "../api/dataset.key";
 import { projectKeys } from "@/features/projects/api/project.keys";
@@ -54,7 +54,7 @@ export const useEditMetadata = () => {
   return useMutation({
     mutationFn: ({ req, datasetId }: { req: DatasetMeta; datasetId: string }) =>
       datasetApi.patchMetadata(projectId, datasetId, {
-        metadata: { doc_genuineness: mapMetadataRequest(req) },
+        metadata: mapDatasetMetadataRequest(req),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: datasetKeys.all });

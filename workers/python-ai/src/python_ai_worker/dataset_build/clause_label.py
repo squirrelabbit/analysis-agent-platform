@@ -27,7 +27,8 @@ from ..config_paths import resolve_config_dir
 from ..prompt_options import load_prompt_body
 from ..clients.lloa import LloaClient, LloaConfig, LloaResponseParseError
 from ..obs import get, skill_handler
-from ..taxonomies import load_taxonomy, render_aspect_taxonomy_block
+from ..taxonomies import DEFAULT_TAXONOMY_ID, Taxonomy, load_taxonomy, render_aspect_taxonomy_block
+from ._chunking import build_sentence_chunks, split_anchor_sentences
 from ._common import write_progress
 
 LOGGER = get(__name__)
@@ -38,13 +39,23 @@ LOGGER = get(__name__)
 _PROMPT_TASK = "clause_label"
 _ALLOWED_SENTIMENT = {"positive", "negative", "neutral"}
 
-# taxonomy-driven config Phase 2-A (2026-05-27) — _ALLOWED_ASPECT를
-# config/taxonomies/festival-v2.json에서 derive. Phase 3에서 dataset_version
-# metadata 기반 동적 lookup으로 전환 예정. 현재는 single taxonomy 고정.
-DEFAULT_CLAUSE_LABEL_TAXONOMY_ID = "festival-v2"
+# taxonomy-driven config (2026-05-27~) — aspect 정의를 config/taxonomies/<id>.json
+# 에서 derive. 2026-06-17 (Phase 3) — taxonomy_id가 더는 전역 고정이 아니라 빌드
+# payload(`taxonomy_id`, control-plane이 dataset.metadata에서 주입)로 per-request
+# 선택된다. 아래 모듈 전역(_TAXONOMY/_ALLOWED_ASPECT/_FALLBACK_ASPECT)은 payload에
+# taxonomy_id가 없을 때의 **DEFAULT** 및 옛 호환(test / verify import)용으로만 남는다.
+DEFAULT_CLAUSE_LABEL_TAXONOMY_ID = DEFAULT_TAXONOMY_ID
 _TAXONOMY = load_taxonomy(DEFAULT_CLAUSE_LABEL_TAXONOMY_ID)
 _ALLOWED_ASPECT: frozenset[str] = _TAXONOMY.aspect_keys_set
 _FALLBACK_ASPECT: str = _TAXONOMY.fallback_aspect
+
+
+def resolve_clause_label_taxonomy(payload: dict[str, Any]) -> Taxonomy:
+    """payload['taxonomy_id'](control-plane이 dataset.metadata.taxonomy_id에서 주입)로
+    taxonomy를 per-request 로드. 미지정이면 DEFAULT. clause_label / clause_label_verify
+    공용."""
+    taxonomy_id = str(payload.get("taxonomy_id") or "").strip() or DEFAULT_CLAUSE_LABEL_TAXONOMY_ID
+    return load_taxonomy(taxonomy_id)
 _ALLOWED_GENUINENESS_FILTER = {"genuine_review", "non_review", "uncertain"}
 # 5/20 결정 — default ON. doc_genuineness 결과 중 genuine_review + uncertain만
 # clause_label로 보낸다 (non_review는 LLOA 호출 절약 + 분석 가치 0). caller가
@@ -83,14 +94,14 @@ def _strip_front_matter(template: str) -> str:
 _ASPECT_TAXONOMY_PLACEHOLDER = "{{ASPECT_TAXONOMY}}"
 
 
-def _inject_taxonomy(template: str) -> str:
-    """Phase 2-B (2026-05-27) — prompt template의 ``{{ASPECT_TAXONOMY}}``를
-    config/taxonomies/festival-v2.json에서 렌더한 markdown table로 치환한다.
+def _inject_taxonomy(template: str, taxonomy: Taxonomy = _TAXONOMY) -> str:
+    """prompt template의 ``{{ASPECT_TAXONOMY}}``를 주어진 taxonomy에서 렌더한 markdown
+    table로 치환한다. taxonomy 미지정 시 모듈 DEFAULT(_TAXONOMY) 사용(옛 호환).
     placeholder가 없는 inline prompt(옛 호환)는 그대로 통과시킨다."""
 
     if _ASPECT_TAXONOMY_PLACEHOLDER not in template:
         return template
-    rendered = render_aspect_taxonomy_block(_TAXONOMY)
+    rendered = render_aspect_taxonomy_block(taxonomy)
     return template.replace(_ASPECT_TAXONOMY_PLACEHOLDER, rendered)
 
 
@@ -165,32 +176,18 @@ def _render_subject_prompt(template: str, config: dict[str, Any]) -> str:
     return rendered
 
 
-def _load_prompt_template(payload: dict[str, Any]) -> tuple[str, str]:
+def _load_prompt_template(payload: dict[str, Any], taxonomy: Taxonomy = _TAXONOMY) -> tuple[str, str]:
     inline = payload.get("clause_label_prompt_content")
     if isinstance(inline, str) and inline.strip():
         version = str(payload.get("clause_label_prompt_version") or "request_inline").strip()
-        return _inject_taxonomy(inline), version
+        return _inject_taxonomy(inline, taxonomy), version
     # silverone 2026-06-02 — 카탈로그 빌드. /prompt_options에서 고른 version(stem)을
     # payload['clause_label_prompt_version']로 받아 그 version 파일을 로드. 미지정이면
     # index.yaml default. unknown version은 load_prompt_body가 400으로 reject.
     # artifact prompt_version은 resolve된 stem을 기록 (감사 가능).
     requested = str(payload.get("clause_label_prompt_version") or "").strip() or None
     body, stem = load_prompt_body(_PROMPT_TASK, requested)
-    return _inject_taxonomy(body), stem
-
-
-def _decode_clauses_response(body: Any) -> list[dict[str, Any]]:
-    """LLOA response body를 clause list로 변환. silverone 5/20 prompt는 *최외곽
-    array*를 반환하지만, LLM이 가끔 ``{"clauses": [...]}`` 또는 ``{"result": [...]}``
-    형태로 wrap하는 경우도 hint로 받아줌."""
-    if isinstance(body, list):
-        return [item for item in body if isinstance(item, dict)]
-    if isinstance(body, dict):
-        for key in ("clauses", "result", "data"):
-            value = body.get(key)
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
-    raise ValueError(f"clause_label expected JSON array, got {type(body).__name__}")
+    return _inject_taxonomy(body, taxonomy), stem
 
 
 def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, dict[str, str], dict[str, list]]:
@@ -273,46 +270,6 @@ def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, 
     return tiers, tier_by_doc, spans_by_doc
 
 
-def _label_doc(
-    client: LloaClient,
-    *,
-    system_prompt: str,
-    doc_id: str,
-    doc_title: str,
-    doc_text: str,
-    max_tokens: int,
-) -> list[dict[str, Any]]:
-    """단일 doc LLOA 호출 + 응답 파싱. 5/20 prompt는 user에 ``제목: ...\\n본문: ...``
-    plaintext 형식, output은 *최외곽 JSON array* (clauses_json wrapper 없음)."""
-    user_payload = f"제목: {doc_title}\n본문: {doc_text}"
-    response = client.create_json_response(
-        system=system_prompt,
-        user=user_payload,
-        max_tokens=max_tokens,
-    )
-    raw_clauses = _decode_clauses_response(response.body)
-    out: list[dict[str, Any]] = []
-    for raw in raw_clauses:
-        clause_text = str(raw.get("clause") or "").strip()
-        if not clause_text:
-            continue
-        sentiment = str(raw.get("sentiment") or "neutral").strip()
-        if sentiment not in _ALLOWED_SENTIMENT:
-            sentiment = "neutral"
-        aspect = str(raw.get("aspect") or _FALLBACK_ASPECT).strip()
-        if aspect not in _ALLOWED_ASPECT:
-            aspect = _FALLBACK_ASPECT
-        out.append(
-            {
-                "doc_id": doc_id,
-                "clause": clause_text,
-                "sentiment": sentiment,
-                "aspect": aspect,
-            }
-        )
-    return out
-
-
 @skill_handler("python-ai")
 def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
     """ADR-018 (β2) 5-step pipeline STEP 3 (5/20 schema 단순화 + concurrency 8).
@@ -361,7 +318,10 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
     )
     client = LloaClient(lloa_config)
 
-    template, prompt_version = _load_prompt_template(payload)
+    # taxonomy per-request (Phase 3) — payload['taxonomy_id'](control-plane이
+    # dataset.metadata.taxonomy_id에서 주입)로 선택. 미지정 시 DEFAULT.
+    taxonomy = resolve_clause_label_taxonomy(payload)
+    template, prompt_version = _load_prompt_template(payload, taxonomy)
     subject_config = _extract_subject_config(payload)
     system_prompt = _render_subject_prompt(template, subject_config)
     max_tokens = int(payload.get("max_tokens") or 8192)
@@ -404,23 +364,45 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
     parse_failures = 0
     clause_count = 0
     sentiment_counts: dict[str, int] = {tier: 0 for tier in _ALLOWED_SENTIMENT}
-    aspect_counts: dict[str, int] = {asp: 0 for asp in _ALLOWED_ASPECT}
+    aspect_counts: dict[str, int] = {asp: 0 for asp in taxonomy.aspect_keys_set}
     completed_docs = 0
     clauses_by_doc: dict[str, list[dict[str, Any]]] = {}
 
+    # 단일 모드도 문장 앵커(2026-06-17): kiwipiepy로 문장을 고정 분리 → 1모델 classify →
+    # 문장별 explode. 교차검증(verify)과 동일 분석 방법·동일 프롬프트(clause_label/<버전>).
+    # _label_sentences는 verify와 공유(deferred import — 순환 회피). split/chunk는 모듈
+    # 레벨 import(아래)라 테스트에서 patch 가능.
+    from .clause_label_verify import _label_sentences
+
+    allowed_aspect = taxonomy.aspect_keys_set
+    fallback_aspect = taxonomy.fallback_aspect
+
     def _process(item: tuple[int, str, str, str]) -> tuple[str, list[dict[str, Any]], Exception | None]:
-        _, doc_id, doc_title, doc_text = item
+        _, doc_id, _doc_title, doc_text = item
         try:
-            clauses = _label_doc(
-                client,
-                system_prompt=system_prompt,
-                doc_id=doc_id,
-                doc_title=doc_title,
-                doc_text=doc_text,
-                max_tokens=max_tokens,
-            )
-            return doc_id, clauses, None
-        except (LloaResponseParseError, ValueError) as exc:
+            sentences = split_anchor_sentences(doc_text)
+            if not sentences:
+                return doc_id, [], None
+            # LLM 호출만 chunk로 나눈다(문장/sentence_index는 전역 보존).
+            chunks = build_sentence_chunks(sentences, max_sentences=40, max_chars=12000, overlap=0)
+            labels: dict[int, dict[str, Any]] = {}
+            for start0, sub in chunks:
+                local = _label_sentences(client, system_prompt, sub, max_tokens, allowed_aspect, fallback_aspect)
+                for li, label in local.items():
+                    gi = start0 + li  # start0(0-based chunk offset) + li(1-based) = 전역 1-based
+                    if gi not in labels and 1 <= gi <= len(sentences):
+                        labels[gi] = label
+            rows_out: list[dict[str, Any]] = []
+            for gi, sentence in enumerate(sentences, start=1):
+                lab = labels.get(gi)
+                if not lab or not lab["relevant"]:
+                    continue
+                for aspect in (lab["aspects"] or [fallback_aspect]):
+                    rows_out.append(
+                        {"doc_id": doc_id, "clause": sentence, "sentiment": lab["sentiment"], "aspect": aspect}
+                    )
+            return doc_id, rows_out, None
+        except (LloaResponseParseError, OSError, ValueError) as exc:
             return doc_id, [], exc
 
     if target_docs:
@@ -504,8 +486,8 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
         # taxonomy-driven config Phase 2-B (2026-05-27) — artifact가 어떤
         # aspect taxonomy로 빌드됐는지 추적. Phase 3에서 analyze 시 artifact
         # taxonomy_id ↔ planner taxonomy_id 정합성 체크에 사용.
-        "taxonomy_id": _TAXONOMY.taxonomy_id,
-        "taxonomy_hash": _TAXONOMY.taxonomy_hash,
+        "taxonomy_id": taxonomy.taxonomy_id,
+        "taxonomy_hash": taxonomy.taxonomy_hash,
         # silverone 2026-05-28 — 실행 당시 적용된 subject variables snapshot.
         # doc_genuineness PR-α2와 동일한 패턴. subject metadata가 누락된 옛
         # dataset이면 festival default값이 기록된다.

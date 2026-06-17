@@ -3,13 +3,25 @@ import { datasetMetaSchema, type DatasetMeta } from "../../schemas/dataset";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { KeywordInput } from "../KeywordInput";
+import { useTaxonomies } from "@/features/taxonomy/hooks/taxonomy.query";
+
+// Radix Select은 빈 문자열 value를 허용하지 않아 "기본값" 항목용 sentinel을 둔다.
+const TAXONOMY_DEFAULT = "__default__";
 
 export default function DatasetMetaForm({
   onSubmit,
 }: {
   onSubmit: (data: DatasetMeta) => void;
 }) {
+  const { data: taxonomies } = useTaxonomies();
   const {
     register,
     handleSubmit,
@@ -22,6 +34,7 @@ export default function DatasetMetaForm({
       subjectName: "",
       subjectAliases: [],
       recruitmentKeywords: [],
+      taxonomyId: "",
     },
   });
 
@@ -50,6 +63,43 @@ export default function DatasetMetaForm({
             <p className="text-xs text-red-500">{errors.subjectName.message}</p>
           )}
         </Field>
+      </div>
+
+      {/* aspect taxonomy (per-dataset). 절 라벨링/분석이 이 aspect 체계를 쓴다. */}
+      <div className="mt-2">
+        <Controller
+          control={control}
+          name="taxonomyId"
+          render={({ field }) => (
+            <Field>
+              <FieldLabel className="text-xs">Aspect 분류 체계 (taxonomy)</FieldLabel>
+              <Select
+                value={field.value ? field.value : TAXONOMY_DEFAULT}
+                onValueChange={(v) =>
+                  field.onChange(v === TAXONOMY_DEFAULT ? "" : v)
+                }
+              >
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue placeholder="기본값" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={TAXONOMY_DEFAULT}>
+                    기본값{taxonomies?.default ? ` (${taxonomies.default})` : ""}
+                  </SelectItem>
+                  {(taxonomies?.items ?? []).map((t) => (
+                    <SelectItem key={t.taxonomy_id} value={t.taxonomy_id}>
+                      {t.taxonomy_id}
+                      {t.is_default ? " · 기본" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FieldDescription className="text-xs">
+                절 분리·감성·aspect 라벨링에 쓸 aspect 체계입니다. 미선택 시 기본값.
+              </FieldDescription>
+            </Field>
+          )}
+        />
       </div>
 
       {/* 키워드 설정 */}

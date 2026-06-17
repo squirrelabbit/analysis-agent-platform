@@ -41,9 +41,12 @@ from .clause_label import (
     _inject_taxonomy,
     _load_genuineness_filter,
     _render_subject_prompt,
+    resolve_clause_label_taxonomy,
 )
 
-_CLASSIFY_PROMPT_TASK = "clause_label_verify"
+# 2026-06-17 — 단일·교차검증 통일: classify 프롬프트를 단일 모드와 동일한
+# clause_label(문장 형식 v3/v4)로 일원화. 옛 clause_label_verify 프롬프트는 제거.
+_CLASSIFY_PROMPT_TASK = "clause_label"
 _JUDGE_PROMPT_TASK = "clause_label_verify_judge"
 
 # judge batch 가드
@@ -80,15 +83,19 @@ def _client_for_model(config, model: str, *, reasoning_effort, prepend_no_think:
     )
 
 
-def _parse_label_item(item: dict[str, Any]) -> tuple[int, dict[str, Any]] | None:
+def _parse_label_item(
+    item: dict[str, Any],
+    allowed_aspect: frozenset[str] = _ALLOWED_ASPECT,
+    fallback_aspect: str = _FALLBACK_ASPECT,
+) -> tuple[int, dict[str, Any]] | None:
     try:
         idx = int(item.get("index"))
     except (TypeError, ValueError):
         return None
     relevant = bool(item.get("relevant"))
-    aspects = {a for a in (str(x).strip() for x in item.get("aspects") or []) if a in _ALLOWED_ASPECT}
+    aspects = {a for a in (str(x).strip() for x in item.get("aspects") or []) if a in allowed_aspect}
     if relevant and not aspects:
-        aspects = {_FALLBACK_ASPECT}
+        aspects = {fallback_aspect}
     sentiment = str(item.get("sentiment") or "neutral").strip()
     if sentiment not in _ALLOWED_SENTIMENT:
         sentiment = "neutral"
@@ -105,7 +112,14 @@ def _coerce_array(body: Any) -> list | None:
     return None
 
 
-def _label_sentences(client: LloaClient, system_prompt: str, sentences: list[str], max_tokens: int) -> dict[int, dict[str, Any]]:
+def _label_sentences(
+    client: LloaClient,
+    system_prompt: str,
+    sentences: list[str],
+    max_tokens: int,
+    allowed_aspect: frozenset[str] = _ALLOWED_ASPECT,
+    fallback_aspect: str = _FALLBACK_ASPECT,
+) -> dict[int, dict[str, Any]]:
     numbered = "\n".join(f"{i}. {s}" for i, s in enumerate(sentences, start=1))
     response = client.create_json_response(system=system_prompt, user=numbered, max_tokens=max_tokens)
     arr = _coerce_array(response.body)
@@ -118,7 +132,7 @@ def _label_sentences(client: LloaClient, system_prompt: str, sentences: list[str
     out: dict[int, dict[str, Any]] = {}
     for item in arr:
         if isinstance(item, dict):
-            parsed = _parse_label_item(item)
+            parsed = _parse_label_item(item, allowed_aspect, fallback_aspect)
             if parsed is not None:
                 out[parsed[0]] = parsed[1]
     return out
@@ -174,6 +188,7 @@ def _judge_batch(
     doc_id: str,
     disputed: list[dict[str, Any]],
     max_tokens: int,
+    allowed_aspect: frozenset[str] = _ALLOWED_ASPECT,
 ) -> dict[int, dict[str, Any]]:
     """분쟁 문장 batch judge. disputed item: {idx, sentence, a, b}. 반환 idx→{relevant,
     sentiment, aspects, chosen, reason} (un-anonymized). chunk 가드 적용."""
@@ -213,7 +228,7 @@ def _judge_batch(
                 idx = int(item.get("sentence_index"))
             except (TypeError, ValueError):
                 continue
-            results[idx] = _parse_judge_item(item)
+            results[idx] = _parse_judge_item(item, allowed_aspect)
 
     for it in disputed:
         approx = len(it["sentence"]) + 80
@@ -230,13 +245,15 @@ def _cand(label: dict[str, Any]) -> dict[str, Any]:
     return {"relevant": label["relevant"], "sentiment": label["sentiment"], "aspects": label["aspects"]}
 
 
-def _parse_judge_item(item: dict[str, Any]) -> dict[str, Any]:
+def _parse_judge_item(
+    item: dict[str, Any], allowed_aspect: frozenset[str] = _ALLOWED_ASPECT
+) -> dict[str, Any]:
     """judge 출력 1문장 파싱. invalid aspect는 fallback 없이 표시(needs_review 트리거)."""
     chosen = str(item.get("chosen") or "").strip()
     relevant = bool(item.get("relevant"))
     raw_aspects = [str(x).strip() for x in item.get("aspects") or []]
-    invalid = [a for a in raw_aspects if a not in _ALLOWED_ASPECT]
-    aspects = [a for a in raw_aspects if a in _ALLOWED_ASPECT]
+    invalid = [a for a in raw_aspects if a not in allowed_aspect]
+    aspects = [a for a in raw_aspects if a in allowed_aspect]
     sentiment = str(item.get("sentiment") or "neutral").strip()
     sentiment_invalid = sentiment not in _ALLOWED_SENTIMENT
     if sentiment_invalid:
@@ -278,13 +295,13 @@ def _explode(
     doc_id: str, sentence: str, sentiment: str, aspects: list[str],
     resolution: str, needs_review: bool, *, sentence_index: int, chunk_index: int,
     model_a: dict[str, Any] | None = None, model_b: dict[str, Any] | None = None,
-    judge: dict[str, Any] | None = None,
+    judge: dict[str, Any] | None = None, fallback_aspect: str = _FALLBACK_ASPECT,
 ) -> list[dict[str, Any]]:
     """문장 → aspect별 clause 행. 기존 clause_label {doc_id, clause, sentiment, aspect}
     호환 + verify 추가 필드(resolution/needs_review/sentence_index/chunk_index) +
     검토 큐용 model A/B/judge snapshot(ADR-028 풍부 검토 큐)."""
     if not aspects:
-        aspects = [_FALLBACK_ASPECT]
+        aspects = [fallback_aspect]
     model_a_result = _model_result_obj(model_a)
     model_b_result = _model_result_obj(model_b)
     judge_result = _judge_result_obj(judge)
@@ -337,14 +354,19 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
     judge_client = _client_for_model(config, judge_model, reasoning_effort=judge_effort, prepend_no_think=False)
 
     subject_config = _extract_subject_config(payload)
+    # taxonomy per-request (Phase 3) — payload['taxonomy_id']로 선택. aspect 주입·
+    # validation·fallback 전부 이 taxonomy 기준. 미지정 시 DEFAULT.
+    taxonomy = resolve_clause_label_taxonomy(payload)
+    allowed_aspect = taxonomy.aspect_keys_set
+    fallback_aspect = taxonomy.fallback_aspect
     classify_body, classify_version = load_prompt_body(
-        _CLASSIFY_PROMPT_TASK, str(payload.get("clause_label_verify_prompt_version") or "").strip() or None
+        _CLASSIFY_PROMPT_TASK, str(payload.get("clause_label_prompt_version") or "").strip() or None
     )
-    classify_system_prompt = _render_subject_prompt(_inject_taxonomy(classify_body), subject_config)
+    classify_system_prompt = _render_subject_prompt(_inject_taxonomy(classify_body, taxonomy), subject_config)
     judge_body, judge_version = load_prompt_body(
         _JUDGE_PROMPT_TASK, str(payload.get("judge_prompt_version") or "").strip() or None
     )
-    judge_system_prompt = _render_subject_prompt(_inject_taxonomy(judge_body), subject_config)
+    judge_system_prompt = _render_subject_prompt(_inject_taxonomy(judge_body, taxonomy), subject_config)
 
     max_tokens = int(payload.get("max_tokens") or 8192)
     judge_max_tokens = int(payload.get("judge_max_tokens") or 4096)
@@ -424,7 +446,7 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
             fails = 0
             for ci, (start0, sub) in enumerate(chunks):
                 try:
-                    local = _label_sentences(client, classify_system_prompt, sub, max_tokens)
+                    local = _label_sentences(client, classify_system_prompt, sub, max_tokens, allowed_aspect, fallback_aspect)
                 except (LloaResponseParseError, OSError, ValueError):
                     fails += 1
                     continue
@@ -455,13 +477,13 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
                 stats["dropped"] += 1
             elif status == "final":
                 stats[rec["resolution"]] += 1
-                rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], False, sentence_index=gi, chunk_index=ci, model_a=a, model_b=b))
+                rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], False, sentence_index=gi, chunk_index=ci, model_a=a, model_b=b, fallback_aspect=fallback_aspect))
             elif status == "review":
                 stats["needs_review"] += 1
                 if rec["resolution"] == "partial_classify":
                     stats["partial"] += 1
                 if rec["relevant"]:
-                    rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], True, sentence_index=gi, chunk_index=ci, model_a=a, model_b=b))
+                    rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], True, sentence_index=gi, chunk_index=ci, model_a=a, model_b=b, fallback_aspect=fallback_aspect))
             elif status == "judge":
                 disputed.append({"idx": gi, "sentence": sentence, "a": a, "b": b, "chunk_index": ci})
 
@@ -469,7 +491,7 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
             try:
                 judged = _judge_batch(
                     judge_client, system_prompt=judge_system_prompt, doc_id=doc_id,
-                    disputed=disputed, max_tokens=judge_max_tokens,
+                    disputed=disputed, max_tokens=judge_max_tokens, allowed_aspect=allowed_aspect,
                 )
             except (LloaResponseParseError, OSError, ValueError):
                 judged = {}  # judge 호출 실패 → 분쟁 문장 전부 needs_review로 격리
@@ -481,7 +503,7 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
                     union_aspects = sorted(set(d["a"]["aspects"] if d["a"] else []) | set(d["b"]["aspects"] if d["b"] else []))
                     stats["judge"] += 1
                     stats["needs_review"] += 1
-                    rows_out.extend(_explode(doc_id, sentence, "neutral", union_aspects, "needs_review", True, sentence_index=idx, chunk_index=ci, model_a=d["a"], model_b=d["b"]))
+                    rows_out.extend(_explode(doc_id, sentence, "neutral", union_aspects, "needs_review", True, sentence_index=idx, chunk_index=ci, model_a=d["a"], model_b=d["b"], fallback_aspect=fallback_aspect))
                     continue
                 stats["judge"] += 1
                 if not jr["relevant"]:
@@ -490,9 +512,9 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
                 if jr["invalid"] or not jr["aspects"]:
                     # invalid aspect / 빈 aspect → fallback 없이 needs_review
                     stats["needs_review"] += 1
-                    rows_out.extend(_explode(doc_id, sentence, jr["sentiment"], jr["aspects"], "needs_review", True, sentence_index=idx, chunk_index=ci, model_a=d["a"], model_b=d["b"], judge=jr))
+                    rows_out.extend(_explode(doc_id, sentence, jr["sentiment"], jr["aspects"], "needs_review", True, sentence_index=idx, chunk_index=ci, model_a=d["a"], model_b=d["b"], judge=jr, fallback_aspect=fallback_aspect))
                 else:
-                    rows_out.extend(_explode(doc_id, sentence, jr["sentiment"], jr["aspects"], "judge", False, sentence_index=idx, chunk_index=ci, model_a=d["a"], model_b=d["b"], judge=jr))
+                    rows_out.extend(_explode(doc_id, sentence, jr["sentiment"], jr["aspects"], "judge", False, sentence_index=idx, chunk_index=ci, model_a=d["a"], model_b=d["b"], judge=jr, fallback_aspect=fallback_aspect))
         return doc_id, rows_out, stats, len(chunks)
 
     rows_by_doc: dict[str, list[dict[str, Any]]] = {}
@@ -516,7 +538,7 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
 
     clause_count = 0
     sentiment_counts: dict[str, int] = {s: 0 for s in _ALLOWED_SENTIMENT}
-    aspect_counts: dict[str, int] = {a: 0 for a in _ALLOWED_ASPECT}
+    aspect_counts: dict[str, int] = {a: 0 for a in taxonomy.aspect_keys_set}
     with output_path.open("w", encoding="utf-8") as dst:
         for index, row in enumerate(rows):
             doc_id = str(row.get("row_id") or f"{dataset_version_id}:row:{index}")
@@ -555,6 +577,10 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
             "chunk_failure_count": agg["chunk_failures"],
         },
         "models": {"a": model_a, "b": model_b, "judge": judge_model},
+        # 어떤 aspect taxonomy로 빌드됐는지 — analyze 시 planner taxonomy_id와 정합성
+        # 체크에 사용 (single 모드와 동일 계약). per-request taxonomy(Phase 3).
+        "taxonomy_id": taxonomy.taxonomy_id,
+        "taxonomy_hash": taxonomy.taxonomy_hash,
         "prompt_version": classify_version,
         "judge_prompt_version": judge_version,
         "applied": {

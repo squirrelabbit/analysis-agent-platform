@@ -36,8 +36,10 @@ from .planner import (
 from .prompt_options import list_prompt_options
 from .taxonomies import (
     DEFAULT_TAXONOMY_ID,
+    TaxonomyError,
     TaxonomyMismatchError,
     check_taxonomy_compatibility,
+    list_taxonomies,
     load_taxonomy,
     taxonomy_payload,
 )
@@ -70,10 +72,11 @@ def canonical_task_name(name: str) -> str:
     return name
 
 
-# taxonomy-driven config Phase 3-B (silverone 2026-05-27) — analyze 시
-# clause_label artifact의 taxonomy_id/hash와 비교할 planner active taxonomy.
-# Phase 3-A에서 planner schema description이 이 taxonomy에서 derive되므로
-# 동일 source. Phase 3-B 후속에서 dataset_version metadata 기반 동적 lookup.
+# analyze 정합성 체크의 fallback taxonomy (artifact에 taxonomy_id가 없는 옛
+# 데이터셋용). 2026-06-17 (Phase 3) — taxonomy_id가 더는 전역 고정이 아니라
+# per-dataset(artifact taxonomy_id)이라, analyze는 artifact taxonomy_id로 planner
+# taxonomy를 동적 로드한다(아래 _run_analyze). 이 모듈 전역은 그 값이 없을 때의
+# DEFAULT일 뿐.
 _PLANNER_TAXONOMY = load_taxonomy(DEFAULT_TAXONOMY_ID)
 
 
@@ -108,6 +111,7 @@ def supported_capabilities() -> list[TaskCapability]:
         TaskCapability(name=_ANALYZE_TASK_NAME, description="plan_v2 executor — plan or user_question + artifact_paths → result."),
         TaskCapability(name="prompt_options", description="List prompt versions/default/label for a task-folder prompt (read-only)."),
         TaskCapability(name="taxonomy", description="Return aspect/sentiment taxonomy definition (key/label/description) for a taxonomy_id (read-only)."),
+        TaskCapability(name="taxonomies", description="List available taxonomies (id/domain/aspect_count/default) for selection (read-only)."),
     ]
 
 
@@ -119,6 +123,7 @@ def task_handlers() -> dict[str, Any]:
         "dataset_clause_keywords": run_dataset_clause_keywords,
         "prompt_options": _run_prompt_options,
         "taxonomy": _run_taxonomy,
+        "taxonomies": _run_taxonomies,
     }
 
 
@@ -140,11 +145,17 @@ def _run_taxonomy(payload: dict[str, Any]) -> dict[str, Any]:
 
     Go control-plane이 ``GET /taxonomy?taxonomy_id=<id>``를 이 task로 proxy한다.
     Go는 config 파일을 직접 읽지 않는다. taxonomy_id 미지정 시
-    ``DEFAULT_TAXONOMY_ID`` (현재 festival-v2). unknown id / parse 실패는
-    ``TaxonomyError(ValueError)`` → main.py에서 HTTP 400.
+    ``DEFAULT_TAXONOMY_ID`` (config/taxonomies/index.yaml의 default). unknown id /
+    parse 실패는 ``TaxonomyError(ValueError)`` → main.py에서 HTTP 400.
     """
     taxonomy_id = str(payload.get("taxonomy_id") or "").strip() or DEFAULT_TAXONOMY_ID
     return taxonomy_payload(load_taxonomy(taxonomy_id))
+
+
+def _run_taxonomies(payload: dict[str, Any]) -> dict[str, Any]:
+    """taxonomies task — 사용 가능한 taxonomy 목록(요약) 반환. 선택 UI/목록 endpoint용.
+    Go control-plane이 ``GET /taxonomies``를 이 task로 proxy한다 (read-only)."""
+    return {"items": list_taxonomies(), "default": DEFAULT_TAXONOMY_ID}
 
 
 def run_task(name: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -235,8 +246,18 @@ def _run_analyze(payload: dict[str, Any]) -> dict[str, Any]:
     artifact_taxonomy_hash = (
         clause_label_metadata.get("taxonomy_hash") if clause_label_metadata else None
     )
+    # Phase 3 — planner taxonomy를 artifact taxonomy_id로 per-request 로드해 그 데이터셋의
+    # taxonomy로 정합성 체크/스키마를 맞춘다. id가 없으면(옛 데이터셋) DEFAULT로 fallback,
+    # 알 수 없는 id면 DEFAULT와 비교돼 id_mismatch로 fail-loud.
+    planner_taxonomy = _PLANNER_TAXONOMY
+    _aid = (artifact_taxonomy_id or "").strip()
+    if _aid:
+        try:
+            planner_taxonomy = load_taxonomy(_aid)
+        except TaxonomyError:
+            planner_taxonomy = _PLANNER_TAXONOMY
     taxonomy_check = check_taxonomy_compatibility(
-        planner_taxonomy=_PLANNER_TAXONOMY,
+        planner_taxonomy=planner_taxonomy,
         artifact_taxonomy_id=artifact_taxonomy_id,
         artifact_taxonomy_hash=artifact_taxonomy_hash,
     )

@@ -18,6 +18,7 @@ export interface DatasetResponse {
   created_at: string;
   metadata?: {
     doc_genuineness?: DocGenuinenessMeta;
+    taxonomy_id?: string;
   };
 }
 
@@ -33,6 +34,7 @@ export interface MetadataRequest {
       subject_aliases: string[];
       recruitment_keywords: string[];
     };
+    taxonomy_id?: string;
   };
 }
 

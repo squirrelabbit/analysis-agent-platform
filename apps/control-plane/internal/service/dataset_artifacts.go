@@ -149,7 +149,14 @@ func (s *DatasetService) ResolveDocGenuinenessDownload(projectID, datasetID, dat
 	if cleanRef == "" {
 		cleanRef = strings.TrimSpace(metadataString(version.Metadata, "clean_uri", ""))
 	}
-	exportPath, err := exportDocGenuinenessEnrichedCSV(ref, cleanRef)
+	// verify(교차모델, ADR-026) 모드는 artifact schema가 달라(final_label + model
+	// A/B/judge, genuineness 컬럼 없음) 전용 exporter를 쓴다. 단일 모델 경로 유지.
+	var exportPath string
+	if metadataString(version.Metadata, "doc_genuineness_mode", "") == "verify" {
+		exportPath, err = exportDocGenuinenessVerifyEnrichedCSV(ref, cleanRef)
+	} else {
+		exportPath, err = exportDocGenuinenessEnrichedCSV(ref, cleanRef)
+	}
 	if err != nil {
 		return "", "", err
 	}
@@ -180,6 +187,15 @@ func (s *DatasetService) ResolveClauseLabelDownload(projectID, datasetID, datase
 	cleanRef := strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
 	if cleanRef == "" {
 		cleanRef = strings.TrimSpace(metadataString(version.Metadata, "clean_uri", ""))
+	}
+	// verify(교차모델, ADR-028) 모드는 schema가 달라(검토 큐 필드 + model A/B/judge)
+	// 전용 exporter를 쓴다. 단일 모델 경로는 dg genuineness join 포함 그대로 유지.
+	if metadataString(version.Metadata, "clause_label_mode", "") == "verify" {
+		exportPath, err := exportClauseLabelVerifyEnrichedCSV(ref, cleanRef)
+		if err != nil {
+			return "", "", err
+		}
+		return exportPath, deriveDownloadFilename(ref, "clause_label.csv"), nil
 	}
 	dgRef := strings.TrimSpace(metadataString(version.Metadata, "doc_genuineness_ref", ""))
 	if dgRef == "" {

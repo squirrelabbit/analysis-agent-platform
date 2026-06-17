@@ -25,15 +25,42 @@ from .config_paths import resolve_config_dir
 # 가능 (prompts dir과 같은 패턴).
 TAXONOMIES_DIR_ENV = "PYTHON_AI_TAXONOMIES_DIR"
 
-# 현재 단일 taxonomy 고정 (silverone 2026-06-04). taxonomy endpoint 기본 id +
-# 신규 callsite의 하드코딩 격리용. artifact/version 단위 taxonomy_id 전달이
-# 생기면 이 default를 동적 lookup으로 교체한다 (후속 PR). 기존 callsite
-# (planner schema / clause_label)의 "festival-v2" 하드코딩 정리는 별도 작업.
-DEFAULT_TAXONOMY_ID = "festival-v2"
+_INDEX_FILENAME = "index.yaml"
+# index.yaml이 없거나 default 필드가 비었을 때만 쓰는 비상 fallback(코드 리터럴).
+# 정상 경로는 config/taxonomies/index.yaml의 ``default`` — 그걸 바꾸면 코드 변경 없이
+# 전역 default taxonomy를 교체할 수 있다 (프롬프트 index.yaml과 동일 패턴).
+_DEFAULT_TAXONOMY_FALLBACK = "festival-gunsan"
 
 
 def default_taxonomies_dir() -> Path:
     return resolve_config_dir(TAXONOMIES_DIR_ENV, __file__, "taxonomies")
+
+
+def _read_default_taxonomy_id() -> str:
+    """``config/taxonomies/index.yaml``의 ``default`` taxonomy_id를 읽는다. 프롬프트
+    index.yaml과 동일한 의존성 없는 단순 파서(``key: value`` 한 줄, ``#`` 주석 허용).
+    파일/필드 누락은 비상 fallback(_DEFAULT_TAXONOMY_FALLBACK)으로 — worker boot가
+    index.yaml 부재로 깨지지 않게 한다."""
+    try:
+        index_path = default_taxonomies_dir() / _INDEX_FILENAME
+        for raw_line in index_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.split("#", 1)[0].strip()
+            if not line or ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            if key.strip() == "default":
+                resolved = value.strip().strip('"').strip("'")
+                if resolved:
+                    return resolved
+                break
+    except OSError:
+        pass
+    return _DEFAULT_TAXONOMY_FALLBACK
+
+
+# 전역 default taxonomy_id — index.yaml에서 import 시점 1회 resolve. taxonomy endpoint
+# 기본 id + clause_label/planner의 per-dataset 미지정 fallback으로 쓰인다.
+DEFAULT_TAXONOMY_ID = _read_default_taxonomy_id()
 
 
 class TaxonomyError(ValueError):
@@ -298,6 +325,31 @@ def taxonomy_payload(taxonomy: Taxonomy) -> dict[str, Any]:
     }
 
 
+def list_taxonomies() -> list[dict[str, Any]]:
+    """config/taxonomies/*.json을 스캔해 사용 가능한 taxonomy 목록(요약)을 반환한다.
+    선택 UI / 목록 endpoint용. 파싱 실패 파일은 건너뛴다(한 파일이 목록 전체를
+    깨지 않게). taxonomy_id 사전순 정렬."""
+    base = default_taxonomies_dir()
+    out: list[dict[str, Any]] = []
+    if not base.is_dir():
+        return out
+    for path in sorted(base.glob("*.json")):
+        try:
+            tx = load_taxonomy(path.stem, base_dir=base)
+        except (TaxonomyError, OSError):
+            continue
+        out.append(
+            {
+                "taxonomy_id": tx.taxonomy_id,
+                "domain": tx.domain,
+                "aspect_count": len(tx.aspects),
+                "taxonomy_hash": tx.taxonomy_hash,
+                "is_default": tx.taxonomy_id == DEFAULT_TAXONOMY_ID,
+            }
+        )
+    return out
+
+
 def render_aspect_taxonomy_block(taxonomy: Taxonomy) -> str:
     """taxonomy의 aspect를 prompt에 inject 가능한 markdown table로 변환.
 
@@ -341,6 +393,7 @@ __all__ = [
     "TaxonomyMismatchError",
     "check_taxonomy_compatibility",
     "default_taxonomies_dir",
+    "list_taxonomies",
     "load_taxonomy",
     "parse_taxonomy",
     "render_aspect_taxonomy_block",

@@ -97,6 +97,12 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 	if rawDocGen, ok := dataset.Metadata["doc_genuineness"].(map[string]any); ok && len(rawDocGen) > 0 {
 		payload["doc_genuineness"] = rawDocGen
 	}
+	// silverone 2026-06-17 (Phase 3) — taxonomy_id per-dataset. dataset.metadata.taxonomy_id
+	// 를 payload로 넘겨 worker가 그 taxonomy로 aspect 라벨링/검증/주입한다(subject_name과
+	// 동일 레일). 미설정이면 worker DEFAULT(taxonomies.DEFAULT_TAXONOMY_ID)로 fallback.
+	if tid, ok := dataset.Metadata["taxonomy_id"].(string); ok && strings.TrimSpace(tid) != "" {
+		payload["taxonomy_id"] = strings.TrimSpace(tid)
+	}
 
 	// 5/20 결정 — default ON. caller가 ``IncludeGenuineness``를 명시 안 하면
 	// ``["genuine_review", "uncertain"]``로 자동 필터링 (non_review skip → LLOA
