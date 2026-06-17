@@ -315,6 +315,60 @@ def _classify_doc(
 
 
 @skill_handler("python-ai")
+def _chunk_aggregate_classify(
+    client: LloaClient, *, system_prompt: str, doc_id: str, doc_text: str,
+    max_tokens: int, max_sentences: int, max_chars: int, overlap: int,
+) -> dict[str, Any]:
+    """긴 문서를 문장 window chunk로 나눠 각 chunk를 분류하고 "진성 hit 우선"으로
+    aggregate (ADR-029). chunk 실패는 그 chunk만 uncertain 취급(doc 안 죽임). genuine
+    chunk의 sentence span을 genuine_spans로 기록. 단일 모드·verify 공통 코어."""
+    sentences = split_anchor_sentences(doc_text)
+    chunks = build_sentence_chunks(sentences, max_sentences=max_sentences, max_chars=max_chars, overlap=overlap)
+    tiers: list[str] = []
+    genuine_spans: list[dict[str, int]] = []
+    chunk_failures = 0
+    first_genuine_reason = ""
+    prompt_toks = comp_toks = 0
+    for ci, (start0, sub) in enumerate(chunks):
+        try:
+            r = _classify_doc(
+                client, system_prompt=system_prompt, doc_id=f"{doc_id}#c{ci}",
+                doc_text=" ".join(sub), max_tokens=max_tokens,
+            )
+            g = r["genuineness"]
+            usage = r.get("usage") or {}
+            prompt_toks += int(usage.get("prompt_tokens") or 0)
+            comp_toks += int(usage.get("completion_tokens") or 0)
+        except (LloaResponseParseError, OSError) as exc:
+            LOGGER.warning(
+                "doc_genuineness.chunk_failed", doc_id=doc_id, chunk_index=ci,
+                error_category=type(exc).__name__, error_message=str(exc),
+            )
+            g = "uncertain"
+            chunk_failures += 1
+            r = None
+        tiers.append(g)
+        if g == "genuine_review":
+            genuine_spans.append({"chunk_index": ci, "sentence_start": start0 + 1, "sentence_end": start0 + len(sub)})
+            if not first_genuine_reason and r is not None:
+                first_genuine_reason = str(r.get("reason") or "").strip()
+    if "genuine_review" in tiers:
+        final = "genuine_review"
+        reason = first_genuine_reason or f"{len(chunks)} chunk 중 일부에서 실제 방문/체험 후기 확인."
+    elif "uncertain" in tiers:
+        final = "uncertain"
+        reason = "긴 문서 chunk aggregate — 진성 chunk 없음, 불확실 chunk 존재."
+    else:
+        final = "non_review"
+        reason = "긴 문서 chunk aggregate — 모든 chunk non_review."
+    return {
+        "genuineness": final, "reason": reason, "genuine_spans": genuine_spans,
+        "chunk_count": len(chunks), "chunk_failures": chunk_failures,
+        "all_failed": len(chunks) > 0 and chunk_failures == len(chunks),
+        "usage": {"prompt_tokens": prompt_toks, "completion_tokens": comp_toks},
+    }
+
+
 def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
     """ADR-017 / 5/19 결정 — clean 직후 doc-level 3-tier 진성 분류.
 
@@ -438,74 +492,34 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
     # timeout 등 호출 자체 실패). request 실패는 해당 doc만 uncertain으로 격리하고
     # build를 계속한다 (한 doc이 전체 build를 죽이지 않게).
     def _process_chunked(doc_id: str, doc_text: str) -> dict[str, Any]:
-        """긴 문서 chunk aggregate (ADR-029). 문장 window chunk별 분류 → 진성 hit
-        우선 aggregate. chunk 실패는 그 chunk만 uncertain 취급(doc 안 죽임). genuine
-        chunk의 sentence span을 genuine_spans로 기록."""
-        sentences = split_anchor_sentences(doc_text)
-        chunks = build_sentence_chunks(
-            sentences, max_sentences=chunk_max_sentences, max_chars=chunk_max_chars, overlap=chunk_overlap,
+        """긴 문서 chunk aggregate (ADR-029) — 공통 코어 호출 + 단일모드 record 빌드."""
+        agg = _chunk_aggregate_classify(
+            client, system_prompt=system_prompt, doc_id=doc_id, doc_text=doc_text,
+            max_tokens=max_tokens, max_sentences=chunk_max_sentences,
+            max_chars=chunk_max_chars, overlap=chunk_overlap,
         )
-        tiers: list[str] = []
-        genuine_spans: list[dict[str, int]] = []
-        chunk_failures = 0
-        first_genuine_reason = ""
-        prompt_toks = comp_toks = 0
-        for ci, (start0, sub) in enumerate(chunks):
-            try:
-                r = _classify_doc(
-                    client, system_prompt=system_prompt, doc_id=f"{doc_id}#c{ci}",
-                    doc_text=" ".join(sub), max_tokens=max_tokens,
-                )
-                g = r["genuineness"]
-                usage = r.get("usage") or {}
-                prompt_toks += int(usage.get("prompt_tokens") or 0)
-                comp_toks += int(usage.get("completion_tokens") or 0)
-            except (LloaResponseParseError, OSError) as exc:
-                LOGGER.warning(
-                    "doc_genuineness.chunk_failed", doc_id=doc_id, chunk_index=ci,
-                    error_category=type(exc).__name__, error_message=str(exc),
-                )
-                g = "uncertain"  # 실패 chunk → uncertain 취급
-                chunk_failures += 1
-                r = None
-            tiers.append(g)
-            if g == "genuine_review":
-                genuine_spans.append({"chunk_index": ci, "sentence_start": start0 + 1, "sentence_end": start0 + len(sub)})
-                if not first_genuine_reason and r is not None:
-                    first_genuine_reason = str(r.get("reason") or "").strip()
-
-        if "genuine_review" in tiers:
-            final = "genuine_review"
-            reason = first_genuine_reason or f"{len(chunks)} chunk 중 일부에서 실제 방문/체험 후기 확인."
-        elif "uncertain" in tiers:
-            final = "uncertain"
-            reason = "긴 문서 chunk aggregate — 진성 chunk 없음, 불확실 chunk 존재."
-        else:
-            final = "non_review"
-            reason = "긴 문서 chunk aggregate — 모든 chunk non_review."
-
-        all_failed = len(chunks) > 0 and chunk_failures == len(chunks)
+        final = agg["genuineness"]
         record: dict[str, Any] = {
             "doc_id": doc_id,
             "genuineness": final,
-            "reason": reason,
+            "reason": agg["reason"],
             "prompt_version": prompt_version,
             "source": "lloa_chunk_aggregate",
             "original_length": len(doc_text),
             "used_length": len(doc_text),  # chunk가 전체를 커버(truncate 아님)
             "truncated": False,
             "chunked": True,
-            "chunk_count": len(chunks),
-            "chunk_failure_count": chunk_failures,
-            "genuine_spans": genuine_spans,
+            "chunk_count": agg["chunk_count"],
+            "chunk_failure_count": agg["chunk_failures"],
+            "genuine_spans": agg["genuine_spans"],
         }
-        if chunk_failures > 0:
+        if agg["chunk_failures"] > 0:
             record["needs_review"] = True
         return {
             "doc_id": doc_id, "chunked": True, "record": record, "tier": final,
-            "chunk_count": len(chunks), "chunk_failures": chunk_failures,
-            "genuine_span_count": len(genuine_spans), "all_failed": all_failed,
-            "usage": {"prompt_tokens": prompt_toks, "completion_tokens": comp_toks},
+            "chunk_count": agg["chunk_count"], "chunk_failures": agg["chunk_failures"],
+            "genuine_span_count": len(agg["genuine_spans"]), "all_failed": agg["all_failed"],
+            "usage": agg["usage"],
         }
 
     def _process(item: tuple[int, str, str]) -> dict[str, Any]:

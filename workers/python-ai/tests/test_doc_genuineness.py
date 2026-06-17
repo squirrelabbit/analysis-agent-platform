@@ -1174,5 +1174,74 @@ class DocGenuinenessChunkAggregateTests(unittest.TestCase):
         self.assertNotIn("chunked", recs[0])
 
 
+class DocGenuinenessVerifyChunkingTests(unittest.TestCase):
+    """verify 경로 chunk aggregate (ADR-029 step5). 모델별 chunk aggregate → 교차검증 +
+    합의 genuine 시 genuine_spans union. chunking opt-in."""
+
+    SENTENCES = ["문장하나.", "문장둘.", "진짜방문후기셋.", "문장넷.", "문장다섯.", "문장여섯."]
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.clean = Path(self.tmp.name) / "clean.jsonl"
+        self.out = Path(self.tmp.name) / "out.jsonl"
+        with self.clean.open("w", encoding="utf-8") as f:
+            f.write(json.dumps({"row_id": "d1", "cleaned_text": "x" * 500}, ensure_ascii=False) + "\n")
+
+    def test_verify_chunk_aggregate_genuine_agreement(self) -> None:
+        from python_ai_worker.dataset_build import doc_genuineness as dg
+        from python_ai_worker.dataset_build import doc_genuineness_verify as dgv
+        from python_ai_worker.config import WorkerConfig
+
+        cfg = WorkerConfig(
+            lloa_api_key="k", lloa_api_url="http://x/v1/chat/completions", lloa_model="m",
+            lloa_max_tokens=2048, lloa_timeout_sec=30, lloa_reasoning_effort=None, lloa_prepend_no_think=True,
+        )
+
+        class _Resp:
+            def __init__(self, p):
+                self._p = p
+
+            def read(self):
+                return json.dumps(self._p).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return None
+
+        def fake_urlopen(req, timeout=None):
+            user = json.loads(json.loads(req.data.decode("utf-8"))["messages"][1]["content"])
+            tier = "genuine_review" if "진짜방문후기" in user.get("doc_text", "") else "non_review"
+            return _Resp(_llm_completion(json.dumps({"genuineness": tier, "reason": "r"}, ensure_ascii=False)))
+
+        orig = dgv.LloaClient.__init__
+
+        def _init(self, config, *, urlopen=None):
+            orig(self, config, urlopen=fake_urlopen)
+
+        payload = {
+            "dataset_version_id": "v", "clean_artifact_ref": str(self.clean), "output_path": str(self.out),
+            "verify": True, "classify_models": ["model-a", "model-b"], "judge_model": "model-judge",
+            "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉"},
+            "chunking": True, "max_input_chars": 10, "max_chunk_sentences": 2,
+        }
+        with patch.object(dgv, "load_config", return_value=cfg), \
+             patch.object(dgv.LloaClient, "__init__", _init), \
+             patch.object(dg, "split_anchor_sentences", return_value=self.SENTENCES):
+            result = dg.run_dataset_doc_genuineness(payload)  # verify=true → 위임
+        rec = [json.loads(line) for line in self.out.read_text(encoding="utf-8").splitlines() if line.strip()][0]
+        self.assertEqual(rec["final_label"], "genuine_review")
+        self.assertEqual(rec["resolution"], "model_agreement")
+        self.assertTrue(rec["chunked"])
+        # 두 모델 합의 genuine → union spans (chunk1 = 문장 3~4).
+        self.assertEqual(rec["genuine_spans"], [{"chunk_index": 1, "sentence_start": 3, "sentence_end": 4}])
+        ch = result["artifact"]["summary"]["chunking"]
+        self.assertTrue(ch["enabled"])
+        self.assertEqual(ch["chunked_doc_count"], 1)
+        self.assertEqual(ch["genuine_span_doc_count"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
