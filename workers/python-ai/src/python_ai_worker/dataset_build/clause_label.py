@@ -190,20 +190,6 @@ def _load_prompt_template(payload: dict[str, Any], taxonomy: Taxonomy = _TAXONOM
     return _inject_taxonomy(body, taxonomy), stem
 
 
-def _decode_clauses_response(body: Any) -> list[dict[str, Any]]:
-    """LLOA response body를 clause list로 변환. silverone 5/20 prompt는 *최외곽
-    array*를 반환하지만, LLM이 가끔 ``{"clauses": [...]}`` 또는 ``{"result": [...]}``
-    형태로 wrap하는 경우도 hint로 받아줌."""
-    if isinstance(body, list):
-        return [item for item in body if isinstance(item, dict)]
-    if isinstance(body, dict):
-        for key in ("clauses", "result", "data"):
-            value = body.get(key)
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
-    raise ValueError(f"clause_label expected JSON array, got {type(body).__name__}")
-
-
 def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, dict[str, str], dict[str, list]]:
     """doc_genuineness artifact를 읽어 (include_tiers, doc_id→tier, doc_id→genuine_spans).
 
@@ -282,50 +268,6 @@ def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, 
                 # override가 tier를 바꾸면 옛 genuine_spans는 무효 — 전체 처리로 fallback.
                 spans_by_doc.pop(doc_id, None)
     return tiers, tier_by_doc, spans_by_doc
-
-
-def _label_doc(
-    client: LloaClient,
-    *,
-    system_prompt: str,
-    doc_id: str,
-    doc_title: str,
-    doc_text: str,
-    max_tokens: int,
-    taxonomy: Taxonomy = _TAXONOMY,
-) -> list[dict[str, Any]]:
-    """단일 doc LLOA 호출 + 응답 파싱. 5/20 prompt는 user에 ``제목: ...\\n본문: ...``
-    plaintext 형식, output은 *최외곽 JSON array* (clauses_json wrapper 없음).
-    aspect validation/fallback은 주어진 taxonomy 기준(미지정 시 DEFAULT)."""
-    allowed_aspect = taxonomy.aspect_keys_set
-    fallback_aspect = taxonomy.fallback_aspect
-    user_payload = f"제목: {doc_title}\n본문: {doc_text}"
-    response = client.create_json_response(
-        system=system_prompt,
-        user=user_payload,
-        max_tokens=max_tokens,
-    )
-    raw_clauses = _decode_clauses_response(response.body)
-    out: list[dict[str, Any]] = []
-    for raw in raw_clauses:
-        clause_text = str(raw.get("clause") or "").strip()
-        if not clause_text:
-            continue
-        sentiment = str(raw.get("sentiment") or "neutral").strip()
-        if sentiment not in _ALLOWED_SENTIMENT:
-            sentiment = "neutral"
-        aspect = str(raw.get("aspect") or fallback_aspect).strip()
-        if aspect not in allowed_aspect:
-            aspect = fallback_aspect
-        out.append(
-            {
-                "doc_id": doc_id,
-                "clause": clause_text,
-                "sentiment": sentiment,
-                "aspect": aspect,
-            }
-        )
-    return out
 
 
 @skill_handler("python-ai")
