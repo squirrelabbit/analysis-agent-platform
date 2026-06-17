@@ -180,5 +180,103 @@ class ClauseLabelVerifyTests(unittest.TestCase):
                 })
 
 
+class BuildSentenceChunksTests(unittest.TestCase):
+    def test_overlap_zero_and_three(self) -> None:
+        from python_ai_worker.dataset_build.clause_label_verify import build_sentence_chunks
+
+        s = [f"s{i}" for i in range(100)]
+        c0 = build_sentence_chunks(s, max_sentences=40, max_chars=99999, overlap=0)
+        self.assertEqual([(st, len(sub)) for st, sub in c0], [(0, 40), (40, 40), (80, 20)])
+        c3 = build_sentence_chunks(s, max_sentences=40, max_chars=99999, overlap=3)
+        self.assertEqual([st for st, _ in c3], [0, 37, 74])
+
+    def test_char_bound_and_oversized_single(self) -> None:
+        from python_ai_worker.dataset_build.clause_label_verify import build_sentence_chunks
+
+        # 문장당 5000자, max 12000 → 2문장씩.
+        c = build_sentence_chunks(["x" * 5000] * 5, max_sentences=40, max_chars=12000, overlap=0)
+        self.assertEqual([len(sub) for _, sub in c], [2, 2, 1])
+        # 단일 문장이 max_chars 초과해도 1개는 넣는다(빈 chunk 방지).
+        c2 = build_sentence_chunks(["y" * 50000], max_sentences=40, max_chars=12000, overlap=0)
+        self.assertEqual([len(sub) for _, sub in c2], [1])
+
+
+def _chunk_urlopen(model, *, fail_if=None):
+    """chunk별 classify mock — 입력 문장 수만큼 동일 라벨(positive/food) 반환.
+    fail_if(model, user)가 참인 chunk는 빈 content로 parse 실패시킨다."""
+    def _fake(req, timeout=None):  # type: ignore[no-untyped-def]
+        user = json.loads(req.data.decode("utf-8"))["messages"][1]["content"]
+        if "candidate_1" in user:
+            return _Resp(_completion("[]"))
+        if fail_if is not None and fail_if(model, user):
+            return _Resp(_completion(""))  # 빈 content → LloaResponseParseError
+        n = sum(1 for ln in user.splitlines() if ln.split(".")[0].strip().isdigit())
+        arr = [{"index": i, "relevant": True, "sentiment": "positive", "aspects": ["food"]} for i in range(1, n + 1)]
+        return _Resp(_completion(json.dumps(arr, ensure_ascii=False)))
+    return _fake
+
+
+class ClauseLabelVerifyChunkingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.clean = Path(self.tmp.name) / "clean.jsonl"
+        self.out = Path(self.tmp.name) / "out.jsonl"
+        with self.clean.open("w", encoding="utf-8") as f:
+            f.write(json.dumps({"row_id": "d1", "cleaned_text": "본문"}, ensure_ascii=False) + "\n")
+
+    def _run(self, sentences, *, fail_if=None, max_chunk_sentences=40):
+        from python_ai_worker.dataset_build import clause_label_verify as v
+
+        original_init = v.LloaClient.__init__
+
+        def _init(self, config, *, urlopen=None):
+            original_init(self, config, urlopen=_chunk_urlopen(config.model, fail_if=fail_if))
+
+        payload = {
+            "dataset_version_id": "ver1", "clean_artifact_ref": str(self.clean),
+            "output_path": str(self.out), "verify": True,
+            "classify_models": ["model-a", "model-b"], "judge_model": "model-judge",
+            "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉 국가유산야행"},
+            "concurrency": 1, "max_chunk_sentences": max_chunk_sentences,
+        }
+        with patch.object(v, "load_config", return_value=_fake_config()), \
+             patch.object(v.LloaClient, "__init__", _init), \
+             patch.object(v, "_split_anchor_sentences", return_value=sentences):
+            result = v.run_dataset_clause_label_verify(payload)
+        rows = [json.loads(line) for line in self.out.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return result, rows
+
+    def test_long_doc_chunks_preserve_sentence_index(self) -> None:
+        sentences = [f"sent{i:03d}" for i in range(1, 101)]  # 100문장 → 40/40/20 = 3 chunk
+        result, rows = self._run(sentences)
+        # 모든 문장 agree → 문장당 1 row(food) = 100 rows.
+        self.assertEqual(len(rows), 100)
+        self.assertEqual({r["sentence_index"] for r in rows}, set(range(1, 101)))
+        self.assertEqual({r["chunk_index"] for r in rows}, {0, 1, 2})
+        ch = result["artifact"]["summary"]["chunking"]
+        self.assertEqual(ch["chunk_count"], 3)
+        self.assertEqual(ch["chunked_doc_count"], 1)
+        self.assertEqual(ch["chunk_failure_count"], 0)
+        # chunk 경계: sent041은 chunk_index 1.
+        by_idx = {r["sentence_index"]: r for r in rows}
+        self.assertEqual(by_idx[40]["chunk_index"], 0)
+        self.assertEqual(by_idx[41]["chunk_index"], 1)
+        self.assertEqual(by_idx[81]["chunk_index"], 2)
+
+    def test_chunk_classify_failure_isolated(self) -> None:
+        sentences = [f"sent{i:03d}" for i in range(1, 101)]
+        # model-a의 chunk1(sent041~080)만 실패 → 그 문장들 partial_classify/needs_review.
+        result, rows = self._run(sentences, fail_if=lambda model, user: model == "model-a" and "sent041" in user)
+        by_idx = {r["sentence_index"]: r for r in rows}
+        # 실패 chunk 문장: a 없음 → partial_classify + needs_review.
+        self.assertTrue(by_idx[50]["needs_review"])
+        self.assertEqual(by_idx[50]["resolution"], "partial_classify")
+        # 정상 chunk 문장: agree.
+        self.assertFalse(by_idx[10]["needs_review"])
+        self.assertEqual(by_idx[10]["resolution"], "agree")
+        self.assertGreaterEqual(result["artifact"]["summary"]["chunking"]["chunk_failure_count"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

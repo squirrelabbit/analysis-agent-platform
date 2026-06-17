@@ -49,6 +49,14 @@ _JUDGE_PROMPT_TASK = "clause_label_verify_judge"
 _MAX_DISPUTED_PER_JUDGE_CALL = 20
 _MAX_JUDGE_INPUT_CHARS = 8000
 
+# classify chunking (silverone 2026-06-16) — 긴 doc은 문장이 많아 classify 한 콜의
+# 입력·출력이 커져 truncation/parse 실패를 일으킨다. 문장 앵커는 이미 고정 단위라
+# doc을 쪼개지 않고 *LLM 호출 단위*만 chunk로 나눈다(doc_id·sentence_index 보존).
+# doc_genuineness의 truncate와 성격이 다르다(그쪽은 row 1개 유지 + 입력 truncate).
+_MAX_CHUNK_SENTENCES = 40
+_MAX_CHUNK_CHARS = 12000
+_DEFAULT_OVERLAP_SENTENCES = 0
+
 _NON_ALNUM_KO = re.compile(r"[^가-힣A-Za-z0-9]")
 
 _kiwi_singleton: Any = None
@@ -83,6 +91,33 @@ def _split_anchor_sentences(text: str) -> list[str]:
     else:
         sents = rt._split_sentences(text, language="ko")[0]
     return [s for s in sents if s and _NON_ALNUM_KO.sub("", s)]
+
+
+def build_sentence_chunks(
+    sentences: list[str], *, max_sentences: int, max_chars: int, overlap: int
+) -> list[tuple[int, list[str]]]:
+    """문장 리스트를 (start0, sub) chunk로 나눈다. start0은 doc 전체 기준 0-based 오프셋.
+    max_sentences/max_chars 중 먼저 도달하는 한도로 끊고, overlap만큼 다음 chunk가
+    앞 chunk 끝과 겹친다(overlap=0이면 안 겹침). 단일 문장이 max_chars를 넘어도
+    최소 1개는 넣는다(빈 chunk 방지)."""
+    max_sentences = max(1, int(max_sentences))
+    max_chars = max(1, int(max_chars))
+    overlap = max(0, int(overlap))
+    n = len(sentences)
+    chunks: list[tuple[int, list[str]]] = []
+    i = 0
+    while i < n:
+        end = i
+        chars = 0
+        while end < n and (end - i) < max_sentences and (end == i or chars + len(sentences[end]) <= max_chars):
+            chars += len(sentences[end])
+            end += 1
+        chunks.append((i, sentences[i:end]))
+        if end >= n:
+            break
+        nxt = end - overlap if overlap > 0 else end
+        i = nxt if nxt > i else end  # 진행 보장(overlap >= chunk size 방어)
+    return chunks
 
 
 def _client_for_model(config, model: str, *, reasoning_effort, prepend_no_think: bool) -> LloaClient:
@@ -270,8 +305,12 @@ def _parse_judge_item(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _explode(doc_id: str, sentence: str, sentiment: str, aspects: list[str], resolution: str, needs_review: bool) -> list[dict[str, Any]]:
-    """문장 → aspect별 clause 행. 기존 clause_label {doc_id, clause, sentiment, aspect} 호환."""
+def _explode(
+    doc_id: str, sentence: str, sentiment: str, aspects: list[str],
+    resolution: str, needs_review: bool, *, sentence_index: int, chunk_index: int,
+) -> list[dict[str, Any]]:
+    """문장 → aspect별 clause 행. 기존 clause_label {doc_id, clause, sentiment, aspect}
+    호환 + verify 추가 필드(resolution/needs_review/sentence_index/chunk_index)."""
     if not aspects:
         aspects = [_FALLBACK_ASPECT]
     rows = []
@@ -283,6 +322,8 @@ def _explode(doc_id: str, sentence: str, sentiment: str, aspects: list[str], res
             "aspect": aspect,
             "resolution": resolution,
             "needs_review": needs_review,
+            "sentence_index": sentence_index,
+            "chunk_index": chunk_index,
             "source": "verify",
         })
     return rows
@@ -330,6 +371,9 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
     max_tokens = int(payload.get("max_tokens") or 8192)
     judge_max_tokens = int(payload.get("judge_max_tokens") or 4096)
     concurrency = max(1, int(payload.get("concurrency") or _DEFAULT_CONCURRENCY))
+    max_chunk_sentences = max(1, int(payload.get("max_chunk_sentences") or _MAX_CHUNK_SENTENCES))
+    max_chunk_chars = max(1, int(payload.get("max_chunk_chars") or _MAX_CHUNK_CHARS))
+    overlap_sentences = max(0, int(payload.get("overlap_sentences") if payload.get("overlap_sentences") is not None else _DEFAULT_OVERLAP_SENTENCES))
 
     rows = rt._iter_rows(clean_artifact_ref)
     total_rows = len(rows)
@@ -343,44 +387,66 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
         if cleaned_text:
             targets.append((index, doc_id, cleaned_text))
 
-    def _process_doc(item: tuple[int, str, str]) -> tuple[str, list[dict[str, Any]], dict[str, int]]:
+    def _process_doc(item: tuple[int, str, str]) -> tuple[str, list[dict[str, Any]], dict[str, int], int]:
         _, doc_id, doc_text = item
         sentences = _split_anchor_sentences(doc_text)
-        stats = {k: 0 for k in ("agree", "union", "sentiment_auto", "judge", "needs_review", "dropped", "partial")}
+        stats = {k: 0 for k in ("agree", "union", "sentiment_auto", "judge", "needs_review", "dropped", "partial", "chunk_failures")}
         rows_out: list[dict[str, Any]] = []
         if not sentences:
-            return doc_id, rows_out, stats
+            return doc_id, rows_out, stats, 0
 
-        def _label_safe(client: LloaClient):
-            try:
-                return _label_sentences(client, classify_system_prompt, sentences, max_tokens)
-            except (LloaResponseParseError, OSError, ValueError):
-                return None
+        # 문장 앵커 chunking — doc은 쪼개지 않고 classify LLM 호출만 chunk로 나눈다.
+        chunks = build_sentence_chunks(
+            sentences, max_sentences=max_chunk_sentences, max_chars=max_chunk_chars, overlap=overlap_sentences,
+        )
 
-        la = _label_safe(client_a)
-        lb = _label_safe(client_b)
+        def _label_doc_chunked(client: LloaClient) -> tuple[dict[int, dict[str, Any]], dict[int, int], int]:
+            """chunk별 classify → doc 전체 1-based sentence_index 기준 merge. chunk 실패는
+            그 chunk 문장만 label 없음(merge에서 partial/needs_review). overlap이면 먼저
+            본 chunk 우선(결정론적)."""
+            labels: dict[int, dict[str, Any]] = {}
+            chunk_of: dict[int, int] = {}
+            fails = 0
+            for ci, (start0, sub) in enumerate(chunks):
+                try:
+                    local = _label_sentences(client, classify_system_prompt, sub, max_tokens)
+                except (LloaResponseParseError, OSError, ValueError):
+                    fails += 1
+                    continue
+                for li, label in local.items():
+                    gi = start0 + li  # global 1-based = chunk 0-based offset + chunk-내 1-based
+                    if gi not in labels:
+                        labels[gi] = label
+                        chunk_of[gi] = ci
+            return labels, chunk_of, fails
+
+        la, chunk_a, fa = _label_doc_chunked(client_a)
+        lb, chunk_b, fb = _label_doc_chunked(client_b)
+        stats["chunk_failures"] = fa + fb
+
+        def _chunk_idx(i: int) -> int:
+            return chunk_a.get(i, chunk_b.get(i, 0))
 
         disputed: list[dict[str, Any]] = []
-        pending: list[dict[str, Any]] = []  # 최종 행 자리 보존(judge 후 채움)
         for i, sentence in enumerate(sentences, start=1):
-            a = la.get(i) if la else None
-            b = lb.get(i) if lb else None
+            a = la.get(i)
+            b = lb.get(i)
+            ci = _chunk_idx(i)
             rec = _reconcile_sentence(a, b)
             status = rec["status"]
             if status == "drop":
                 stats["dropped"] += 1
-                continue
-            if status == "final":
+            elif status == "final":
                 stats[rec["resolution"]] += 1
-                rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], False))
+                rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], False, sentence_index=i, chunk_index=ci))
             elif status == "review":
                 stats["needs_review"] += 1
                 if rec["resolution"] == "partial_classify":
                     stats["partial"] += 1
                 if rec["relevant"]:
-                    rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], True))
+                    rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], True, sentence_index=i, chunk_index=ci))
             elif status == "judge":
-                disputed.append({"idx": i, "sentence": sentence, "a": a, "b": b})
+                disputed.append({"idx": i, "sentence": sentence, "a": a, "b": b, "chunk_index": ci})
 
         if disputed:
             try:
@@ -391,14 +457,14 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
             except (LloaResponseParseError, OSError, ValueError):
                 judged = {}  # judge 호출 실패 → 분쟁 문장 전부 needs_review로 격리
             for d in disputed:
-                idx, sentence = d["idx"], d["sentence"]
+                idx, sentence, ci = d["idx"], d["sentence"], d["chunk_index"]
                 jr = judged.get(idx)
                 if jr is None:
                     # judge 결과 누락 → needs_review (union aspects + neutral, 보수)
                     union_aspects = sorted(set(d["a"]["aspects"] if d["a"] else []) | set(d["b"]["aspects"] if d["b"] else []))
                     stats["judge"] += 1
                     stats["needs_review"] += 1
-                    rows_out.extend(_explode(doc_id, sentence, "neutral", union_aspects, "needs_review", True))
+                    rows_out.extend(_explode(doc_id, sentence, "neutral", union_aspects, "needs_review", True, sentence_index=idx, chunk_index=ci))
                     continue
                 stats["judge"] += 1
                 if not jr["relevant"]:
@@ -407,21 +473,26 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
                 if jr["invalid"] or not jr["aspects"]:
                     # invalid aspect / 빈 aspect → fallback 없이 needs_review
                     stats["needs_review"] += 1
-                    rows_out.extend(_explode(doc_id, sentence, jr["sentiment"], jr["aspects"], "needs_review", True))
+                    rows_out.extend(_explode(doc_id, sentence, jr["sentiment"], jr["aspects"], "needs_review", True, sentence_index=idx, chunk_index=ci))
                 else:
-                    rows_out.extend(_explode(doc_id, sentence, jr["sentiment"], jr["aspects"], "judge", False))
-        return doc_id, rows_out, stats
+                    rows_out.extend(_explode(doc_id, sentence, jr["sentiment"], jr["aspects"], "judge", False, sentence_index=idx, chunk_index=ci))
+        return doc_id, rows_out, stats, len(chunks)
 
     rows_by_doc: dict[str, list[dict[str, Any]]] = {}
-    agg = {k: 0 for k in ("agree", "union", "sentiment_auto", "judge", "needs_review", "dropped", "partial")}
+    agg = {k: 0 for k in ("agree", "union", "sentiment_auto", "judge", "needs_review", "dropped", "partial", "chunk_failures")}
+    total_chunks = 0
+    chunked_doc_count = 0
     processed = 0
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = {executor.submit(_process_doc, t): t for t in targets}
         for future in as_completed(futures):
-            doc_id, recs, stats = future.result()
+            doc_id, recs, stats, chunk_count = future.result()
             rows_by_doc[doc_id] = recs
             for k, v in stats.items():
                 agg[k] += v
+            total_chunks += chunk_count
+            if chunk_count > 1:
+                chunked_doc_count += 1
             processed += 1
             if progress_path and (processed % 10 == 0 or processed == len(targets)):
                 write_progress(progress_path, processed_rows=processed, total_rows=total_rows, started_at=started_at, message="clause_label verify processing")
@@ -456,6 +527,16 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
         "sentiment_counts": sentiment_counts,
         "aspect_counts": aspect_counts,
         "concurrency": concurrency,
+        "chunking": {
+            "enabled": True,
+            "strategy": "sentence_window",
+            "max_chunk_sentences": max_chunk_sentences,
+            "max_chunk_chars": max_chunk_chars,
+            "overlap_sentences": overlap_sentences,
+            "chunk_count": total_chunks,
+            "chunked_doc_count": chunked_doc_count,
+            "chunk_failure_count": agg["chunk_failures"],
+        },
         "models": {"a": model_a, "b": model_b, "judge": judge_model},
         "prompt_version": classify_version,
         "judge_prompt_version": judge_version,
