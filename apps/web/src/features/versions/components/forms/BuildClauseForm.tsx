@@ -9,14 +9,17 @@ import PromptVersionField from "@/features/prompts/components/PromptVersionField
 import LloaModelField from "./LloaModelField";
 import { useLloaModelOptions } from "../../hooks/build.query";
 
+// 2026-06-17 — 옛 "mixed" tier는 백엔드에서 제거되고 "uncertain"으로 통합됨
+// (_ALLOWED_GENUINENESS_FILTER = genuine_review/non_review/uncertain). value를
+// uncertain으로 맞추지 않으면 worker가 "invalid include_genuineness tier" 400.
 const genuinenessOptions = [
   {
     label: "실제 리뷰",
     value: "genuine_review",
   },
   {
-    label: "혼합",
-    value: "mixed",
+    label: "불확실(혼합)",
+    value: "uncertain",
   },
 ];
 

@@ -12,14 +12,26 @@ import {
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { KeywordInput } from "../components/KeywordInput";
 import type { Dataset } from "../models/model";
 import { useEditDatasetInfo, useEditMetadata } from "../hooks/dataset.mutation";
+import { useTaxonomies } from "@/features/taxonomy/hooks/taxonomy.query";
 
-// 통합 수정 폼: 이름/설명 + 진정 분석 설정(metadata). 이름만 필수, 나머지는 선택.
+// Radix Select은 빈 문자열 value를 허용하지 않아 "기본값" 항목용 sentinel을 둔다.
+const TAXONOMY_DEFAULT = "__default__";
+
+// 통합 수정 폼: 이름/설명 + aspect taxonomy + 진정 분석 설정(metadata). 이름만 필수, 나머지는 선택.
 const editSchema = z.object({
   name: z.string().trim().min(1, "이름은 필수입니다"),
   description: z.string(),
+  taxonomyId: z.string().optional(),
   subjectType: z.string(),
   subjectName: z.string(),
   subjectAliases: z.array(z.string()),
@@ -43,6 +55,7 @@ export default function EditInfoDialogControlled({
 }) {
   const { mutateAsync: editInfo } = useEditDatasetInfo();
   const { mutateAsync: editMeta } = useEditMetadata();
+  const { data: taxonomies } = useTaxonomies();
 
   const dg = dataset.docGenuineness;
   const {
@@ -55,6 +68,7 @@ export default function EditInfoDialogControlled({
     defaultValues: {
       name: dataset.name,
       description: dataset.description ?? "",
+      taxonomyId: dg?.taxonomyId ?? "",
       subjectType: dg?.subjectType ?? "",
       subjectName: dg?.subjectName ?? "",
       subjectAliases: dg?.subjectAliases ?? [],
@@ -71,6 +85,7 @@ export default function EditInfoDialogControlled({
     await editMeta({
       datasetId: dataset.id,
       req: {
+        taxonomyId: data.taxonomyId,
         subjectType: data.subjectType,
         subjectName: data.subjectName,
         subjectAliases: data.subjectAliases,
@@ -110,6 +125,43 @@ export default function EditInfoDialogControlled({
                 rows={2}
               />
             </Field>
+
+            {/* aspect taxonomy (per-dataset). 절 라벨링/분석이 이 aspect 체계를 쓴다. */}
+            <Controller
+              control={control}
+              name="taxonomyId"
+              render={({ field }) => (
+                <Field>
+                  <FieldLabel className="text-xs">
+                    Aspect 분류 체계 (taxonomy)
+                  </FieldLabel>
+                  <Select
+                    value={field.value ? field.value : TAXONOMY_DEFAULT}
+                    onValueChange={(v) =>
+                      field.onChange(v === TAXONOMY_DEFAULT ? "" : v)
+                    }
+                  >
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="기본값" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={TAXONOMY_DEFAULT}>
+                        기본값{taxonomies?.default ? ` (${taxonomies.default})` : ""}
+                      </SelectItem>
+                      {(taxonomies?.items ?? []).map((t) => (
+                        <SelectItem key={t.taxonomy_id} value={t.taxonomy_id}>
+                          {t.taxonomy_id}
+                          {t.is_default ? " · 기본" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription className="text-xs">
+                    절 분리·감성·aspect 라벨링에 쓸 aspect 체계입니다. 미선택 시 기본값.
+                  </FieldDescription>
+                </Field>
+              )}
+            />
 
             {/* 진정 분석 설정 */}
             <div className="mt-1 rounded-lg border border-slate-200 bg-slate-50 p-4 flex flex-col gap-4">
