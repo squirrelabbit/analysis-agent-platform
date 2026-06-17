@@ -1346,6 +1346,16 @@ paths:
             summary는 전체 분포 유지.
           schema:
             type: string
+        - name: disagreement
+          in: query
+          required: false
+          description: "교차검증(verify) 검토 큐 필터 (ADR-028). true면 두 모델이 갈린(resolution≠agree) 절만 반환. verify 모드 artifact에만 의미."
+          schema: { type: boolean }
+        - name: needs_review
+          in: query
+          required: false
+          description: "교차검증(verify) 검토 큐 필터 (ADR-028). true면 needs_review=true(judge 누락/invalid/partial) 절만 반환."
+          schema: { type: boolean }
       responses:
         "200":
           description: clause_label artifact view
@@ -4372,6 +4382,29 @@ components:
                             percent:
                               type: number
                               description: "해당 aspect total 대비 백분율 (소수 1자리)"
+                mode:
+                  type: string
+                  description: "verify 모드 artifact일 때만 'verify' (ADR-028 교차모델 검증). 단일 모드는 생략."
+                resolution:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                  description: "verify 모드 — resolution별 절 분포(agree/union/sentiment_auto/judge/needs_review/partial_classify). 필터 무관 전체."
+                resolution_counts:
+                  type: object
+                  description: "verify 모드 — build 당시 resolution 집계 snapshot (clause_label_summary metadata)."
+                  additionalProperties:
+                    type: integer
+                models:
+                  type: object
+                  description: "verify 모드 — 교차검증에 쓰인 classify model a/b + judge model."
+                  properties:
+                    a: { type: string }
+                    b: { type: string }
+                    judge: { type: string }
+                chunking:
+                  type: object
+                  description: "verify 모드 — 긴 문서 chunking 집계 (ADR-029). enabled/chunk_count/chunk_failure_count 등."
             items:
               type: array
               items:
@@ -4396,6 +4429,56 @@ components:
                     type:
                       - string
                       - "null"
+                  resolution:
+                    type: string
+                    description: "verify 모드 — agree | union | sentiment_auto | judge | needs_review | partial_classify (ADR-028)."
+                  needs_review:
+                    type: boolean
+                    description: "verify 모드 — judge 누락/invalid aspect/partial 등으로 운영자 검토가 필요한 절."
+                  sentence_index:
+                    type:
+                      - integer
+                      - "null"
+                    description: "verify 모드 — doc 내 1-base 문장 앵커 index (chunking 시에도 전역 보존)."
+                  chunk_index:
+                    type:
+                      - integer
+                      - "null"
+                    description: "verify 모드 — 해당 문장이 처리된 LLM 호출 chunk index (ADR-029 긴 문서)."
+                  model_a_result:
+                    description: "verify 모드 — classify model A의 절 결과 snapshot. 미분류면 null."
+                    type:
+                      - object
+                      - "null"
+                    properties:
+                      relevant: { type: boolean }
+                      sentiment: { type: string }
+                      aspects:
+                        type: array
+                        items: { type: string }
+                  model_b_result:
+                    description: "verify 모드 — classify model B의 절 결과 snapshot. 미분류면 null."
+                    type:
+                      - object
+                      - "null"
+                    properties:
+                      relevant: { type: boolean }
+                      sentiment: { type: string }
+                      aspects:
+                        type: array
+                        items: { type: string }
+                  judge_result:
+                    description: "verify 모드 — 불일치 해소 judge 결과 + 사유. judge 미개입(합의/자동)이면 null."
+                    type:
+                      - object
+                      - "null"
+                    properties:
+                      relevant: { type: boolean }
+                      sentiment: { type: string }
+                      aspects:
+                        type: array
+                        items: { type: string }
+                      reason: { type: string }
             pagination:
               $ref: "#/components/schemas/ArtifactPagination"
     DatasetBuildJobAccepted:

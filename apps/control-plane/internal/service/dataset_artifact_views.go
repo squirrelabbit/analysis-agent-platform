@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -265,6 +266,7 @@ func (s *DatasetService) GetClauseLabelView(
 	projectID, datasetID, datasetVersionID string,
 	limit, offset int,
 	aspect, sentiment string,
+	disagreementOnly, needsReviewOnly bool,
 ) (domain.DatasetArtifactView, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
@@ -302,7 +304,18 @@ func (s *DatasetService) GetClauseLabelView(
 	// clause_label_prompt_version은 build 완료 시 metadata에 저장되므로 먼저 본다.
 	// 없으면 DuckDB로 첫 행 prompt_version을 회수한다 (Applied source single).
 	prompt := strings.TrimSpace(metadataString(version.Metadata, "clause_label_prompt_version", ""))
-	summary, fallbackPrompt, total, items, err := loadClauseLabelArtifact(ref, limit, offset, aspect, sentiment)
+	// verify 모드(ADR-028)는 schema가 달라(검토 큐 필드 + model A/B/judge) 전용
+	// 로더로 읽고, 단일 모델 artifact는 기존 로더를 유지한다.
+	verifyMode := metadataString(version.Metadata, "clause_label_mode", "") == "verify"
+	var summary map[string]any
+	var fallbackPrompt string
+	var total int
+	var items []map[string]any
+	if verifyMode {
+		summary, fallbackPrompt, total, items, err = loadClauseLabelVerifyArtifact(ref, limit, offset, aspect, sentiment, disagreementOnly, needsReviewOnly)
+	} else {
+		summary, fallbackPrompt, total, items, err = loadClauseLabelArtifact(ref, limit, offset, aspect, sentiment)
+	}
 	if err != nil {
 		return domain.DatasetArtifactView{}, err
 	}
@@ -310,19 +323,39 @@ func (s *DatasetService) GetClauseLabelView(
 	if prompt == "" {
 		prompt = fallbackPrompt
 	}
-	// model은 build 당시 clause_label_summary metadata의 raw 모델 id(snapshot).
-	// per-clause record에는 없어 metadata에서 회수한다. model_display_name은 응답
-	// 시점에 env로 입힌다(빌드 재실행 불필요).
-	model := summaryMetadataString(version.Metadata, "clause_label_summary", "model")
 	applied := map[string]any{}
+	if verifyMode {
+		// verify artifact는 top-level prompt_version이 없어 summary metadata에서 회수.
+		// 단일 model 대신 build 당시 applied(classify_models/judge_model) + verify
+		// 집계(resolution_counts/models/chunking)를 노출.
+		view.Summary["mode"] = "verify"
+		if prompt == "" {
+			prompt = summaryMetadataString(version.Metadata, "clause_label_summary", "prompt_version")
+		}
+		if storedApplied, ok := summaryMetadataMap(version.Metadata, "clause_label_summary", "applied"); ok {
+			for k, v := range storedApplied {
+				applied[k] = v
+			}
+		}
+		for _, key := range []string{"resolution_counts", "models", "chunking", "dropped_irrelevant_count", "judge_prompt_version"} {
+			if v, ok := summaryMetadataValue(version.Metadata, "clause_label_summary", key); ok {
+				view.Summary[key] = v
+			}
+		}
+	} else {
+		// model은 build 당시 clause_label_summary metadata의 raw 모델 id(snapshot).
+		// per-clause record에는 없어 metadata에서 회수한다. model_display_name은 응답
+		// 시점에 env로 입힌다(빌드 재실행 불필요).
+		model := summaryMetadataString(version.Metadata, "clause_label_summary", "model")
+		if model != "" {
+			applied["model"] = model
+		}
+		if display := s.modelDisplayNameFor(model); display != "" {
+			applied["model_display_name"] = display
+		}
+	}
 	if prompt != "" {
 		applied["prompt_version"] = prompt
-	}
-	if model != "" {
-		applied["model"] = model
-	}
-	if display := s.modelDisplayNameFor(model); display != "" {
-		applied["model_display_name"] = display
 	}
 	if len(applied) > 0 {
 		view.Applied = applied
@@ -794,6 +827,148 @@ func buildClauseFilter(aspect, sentiment string) string {
 		return ""
 	}
 	return "WHERE " + strings.Join(conds, " AND ")
+}
+
+// loadClauseLabelVerifyArtifact — clause_label verify artifact(ADR-028) 로더.
+// 단일 모드와 차트 호환(sentiment/aspect/aspect_sentiment)을 유지하되 검토 큐용
+// resolution 분포와 행별 resolution/needs_review/sentence_index/chunk_index +
+// model A/B/judge snapshot을 노출한다. 필터: aspect/sentiment + 불일치(resolution
+// != 'agree')만 + 검토 필요(needs_review)만. AND 결합.
+func loadClauseLabelVerifyArtifact(ref string, limit, offset int, aspect, sentiment string, disagreementOnly, needsReviewOnly bool) (map[string]any, string, int, []map[string]any, error) {
+	db, cleanup, err := openTempDuckDB()
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
+	defer cleanup()
+
+	source := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(ref))
+
+	// summary 분포(필터 미적용) — 단일 모드와 동일 + resolution 분포 추가.
+	total, bySentiment, err := aggregateGroupedCounts(db, source, "sentiment")
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
+	_, byAspect, err := aggregateGroupedCounts(db, source, "aspect")
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
+	aspectSentiment, err := aggregateAspectSentiment(db, source)
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
+	_, byResolution, err := aggregateGroupedCounts(db, source, "resolution")
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
+	summary := map[string]any{
+		"total":            total,
+		"sentiment":        bySentiment,
+		"aspect":           byAspect,
+		"aspect_sentiment": aspectSentiment,
+		"resolution":       byResolution,
+	}
+
+	// 필터 WHERE 절(검토 큐). 비면 전체.
+	conds := make([]string, 0, 4)
+	if a := strings.TrimSpace(aspect); a != "" {
+		conds = append(conds, fmt.Sprintf("aspect = '%s'", escapeDuckDBLiteral(a)))
+	}
+	if s := strings.TrimSpace(sentiment); s != "" {
+		conds = append(conds, fmt.Sprintf("sentiment = '%s'", escapeDuckDBLiteral(s)))
+	}
+	if disagreementOnly {
+		conds = append(conds, "resolution <> 'agree'")
+	}
+	if needsReviewOnly {
+		conds = append(conds, "needs_review = true")
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
+	}
+
+	filteredTotal := total
+	if where != "" {
+		filteredTotal, err = countRowsWhere(db, source, where)
+		if err != nil {
+			return nil, "", 0, nil, err
+		}
+	}
+
+	// clause_id는 단일 모드와 동일(doc_id 내 0-base index). model A/B/judge는
+	// to_json으로 직렬화해 Go에서 객체로 복원(genuineness verify와 동일 패턴).
+	itemQuery := fmt.Sprintf(
+		`WITH ordered AS (
+		    SELECT *, ROW_NUMBER() OVER () AS _rn
+		    FROM %s
+		 ),
+		 numbered AS (
+		    SELECT
+		       doc_id,
+		       doc_id || '-' || CAST(ROW_NUMBER() OVER (PARTITION BY doc_id ORDER BY _rn) - 1 AS VARCHAR) AS clause_id,
+		       clause, sentiment, aspect, source, resolution,
+		       CAST(needs_review AS VARCHAR) AS needs_review,
+		       CAST(sentence_index AS VARCHAR) AS sentence_index,
+		       CAST(chunk_index AS VARCHAR) AS chunk_index,
+		       CAST(to_json(model_a_result) AS VARCHAR) AS model_a_result,
+		       CAST(to_json(model_b_result) AS VARCHAR) AS model_b_result,
+		       CAST(to_json(judge_result) AS VARCHAR) AS judge_result,
+		       _rn
+		    FROM ordered
+		 )
+		 SELECT doc_id, clause_id, clause, sentiment, aspect, source, resolution,
+		        needs_review, sentence_index, chunk_index,
+		        model_a_result, model_b_result, judge_result
+		 FROM numbered
+		 %s
+		 ORDER BY _rn
+		 LIMIT %d OFFSET %d`,
+		source, where, limit, offset,
+	)
+	cols := []string{
+		"doc_id", "clause_id", "clause", "sentiment", "aspect", "source", "resolution",
+		"needs_review", "sentence_index", "chunk_index",
+		"model_a_result", "model_b_result", "judge_result",
+	}
+	rawItems, err := scanArtifactRows(db, itemQuery, cols)
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
+
+	items := make([]map[string]any, 0, len(rawItems))
+	for _, raw := range rawItems {
+		item := map[string]any{
+			"doc_id":         raw["doc_id"],
+			"clause_id":      raw["clause_id"],
+			"clause":         raw["clause"],
+			"sentiment":      raw["sentiment"],
+			"aspect":         raw["aspect"],
+			"source":         raw["source"],
+			"resolution":     raw["resolution"],
+			"needs_review":   docVerifyBool(raw["needs_review"]),
+			"sentence_index": clauseVerifyInt(raw["sentence_index"]),
+			"chunk_index":    clauseVerifyInt(raw["chunk_index"]),
+		}
+		item["model_a_result"] = objOrNil(docVerifyObject(raw["model_a_result"]))
+		item["model_b_result"] = objOrNil(docVerifyObject(raw["model_b_result"]))
+		item["judge_result"] = objOrNil(docVerifyObject(raw["judge_result"]))
+		items = append(items, item)
+	}
+	return summary, "", filteredTotal, items, nil
+}
+
+// clauseVerifyInt — NullString 스캔 결과를 int로. 빈 값/파싱 실패는 nil.
+func clauseVerifyInt(v any) any {
+	s, _ := v.(string)
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return nil
+	}
+	return n
 }
 
 // countRowsWhere — source에서 where 조건 행 수.

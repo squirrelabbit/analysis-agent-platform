@@ -164,12 +164,16 @@ func (s *Server) handleGetClauseLabelView(w stdhttp.ResponseWriter, r *stdhttp.R
 	limit, offset := parseArtifactPagination(r)
 	aspect := strings.TrimSpace(r.URL.Query().Get("aspect"))
 	sentiment := strings.TrimSpace(r.URL.Query().Get("sentiment"))
+	// 교차검증(verify) 검토 큐 필터 (ADR-028) — verify artifact에만 의미.
+	disagreementOnly := r.URL.Query().Get("disagreement") == "true"
+	needsReviewOnly := r.URL.Query().Get("needs_review") == "true"
 	view, err := s.datasetService.GetClauseLabelView(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
 		r.PathValue("version_id"),
 		limit, offset,
 		aspect, sentiment,
+		disagreementOnly, needsReviewOnly,
 	)
 	if err != nil {
 		s.writeServiceError(w, err)

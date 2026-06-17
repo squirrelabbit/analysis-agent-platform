@@ -251,14 +251,43 @@ def _parse_judge_item(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _model_result_obj(label: dict[str, Any] | None) -> dict[str, Any] | None:
+    """classify 모델 1개 결과 snapshot. 검토 큐의 model A/B 비교용. None이면 미분류."""
+    if not label:
+        return None
+    return {
+        "relevant": bool(label.get("relevant")),
+        "sentiment": str(label.get("sentiment") or "neutral"),
+        "aspects": [str(a) for a in (label.get("aspects") or [])],
+    }
+
+
+def _judge_result_obj(jr: dict[str, Any] | None) -> dict[str, Any] | None:
+    """judge 결과 snapshot(불일치 해소 사유 포함). None이면 judge 미개입(합의/자동)."""
+    if not jr:
+        return None
+    return {
+        "relevant": bool(jr.get("relevant")),
+        "sentiment": str(jr.get("sentiment") or "neutral"),
+        "aspects": [str(a) for a in (jr.get("aspects") or [])],
+        "reason": str(jr.get("reason") or ""),
+    }
+
+
 def _explode(
     doc_id: str, sentence: str, sentiment: str, aspects: list[str],
     resolution: str, needs_review: bool, *, sentence_index: int, chunk_index: int,
+    model_a: dict[str, Any] | None = None, model_b: dict[str, Any] | None = None,
+    judge: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """문장 → aspect별 clause 행. 기존 clause_label {doc_id, clause, sentiment, aspect}
-    호환 + verify 추가 필드(resolution/needs_review/sentence_index/chunk_index)."""
+    호환 + verify 추가 필드(resolution/needs_review/sentence_index/chunk_index) +
+    검토 큐용 model A/B/judge snapshot(ADR-028 풍부 검토 큐)."""
     if not aspects:
         aspects = [_FALLBACK_ASPECT]
+    model_a_result = _model_result_obj(model_a)
+    model_b_result = _model_result_obj(model_b)
+    judge_result = _judge_result_obj(judge)
     rows = []
     for aspect in aspects:
         rows.append({
@@ -270,6 +299,9 @@ def _explode(
             "needs_review": needs_review,
             "sentence_index": sentence_index,
             "chunk_index": chunk_index,
+            "model_a_result": model_a_result,
+            "model_b_result": model_b_result,
+            "judge_result": judge_result,
             "source": "verify",
         })
     return rows
@@ -418,13 +450,13 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
                 stats["dropped"] += 1
             elif status == "final":
                 stats[rec["resolution"]] += 1
-                rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], False, sentence_index=gi, chunk_index=ci))
+                rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], False, sentence_index=gi, chunk_index=ci, model_a=a, model_b=b))
             elif status == "review":
                 stats["needs_review"] += 1
                 if rec["resolution"] == "partial_classify":
                     stats["partial"] += 1
                 if rec["relevant"]:
-                    rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], True, sentence_index=gi, chunk_index=ci))
+                    rows_out.extend(_explode(doc_id, sentence, rec["sentiment"], rec["aspects"], rec["resolution"], True, sentence_index=gi, chunk_index=ci, model_a=a, model_b=b))
             elif status == "judge":
                 disputed.append({"idx": gi, "sentence": sentence, "a": a, "b": b, "chunk_index": ci})
 
@@ -444,7 +476,7 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
                     union_aspects = sorted(set(d["a"]["aspects"] if d["a"] else []) | set(d["b"]["aspects"] if d["b"] else []))
                     stats["judge"] += 1
                     stats["needs_review"] += 1
-                    rows_out.extend(_explode(doc_id, sentence, "neutral", union_aspects, "needs_review", True, sentence_index=idx, chunk_index=ci))
+                    rows_out.extend(_explode(doc_id, sentence, "neutral", union_aspects, "needs_review", True, sentence_index=idx, chunk_index=ci, model_a=d["a"], model_b=d["b"]))
                     continue
                 stats["judge"] += 1
                 if not jr["relevant"]:
@@ -453,9 +485,9 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
                 if jr["invalid"] or not jr["aspects"]:
                     # invalid aspect / 빈 aspect → fallback 없이 needs_review
                     stats["needs_review"] += 1
-                    rows_out.extend(_explode(doc_id, sentence, jr["sentiment"], jr["aspects"], "needs_review", True, sentence_index=idx, chunk_index=ci))
+                    rows_out.extend(_explode(doc_id, sentence, jr["sentiment"], jr["aspects"], "needs_review", True, sentence_index=idx, chunk_index=ci, model_a=d["a"], model_b=d["b"], judge=jr))
                 else:
-                    rows_out.extend(_explode(doc_id, sentence, jr["sentiment"], jr["aspects"], "judge", False, sentence_index=idx, chunk_index=ci))
+                    rows_out.extend(_explode(doc_id, sentence, jr["sentiment"], jr["aspects"], "judge", False, sentence_index=idx, chunk_index=ci, model_a=d["a"], model_b=d["b"], judge=jr))
         return doc_id, rows_out, stats, len(chunks)
 
     rows_by_doc: dict[str, list[dict[str, Any]]] = {}
