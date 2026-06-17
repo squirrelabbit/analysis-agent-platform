@@ -148,6 +148,31 @@ class ClauseLabelVerifyTests(unittest.TestCase):
         self.assertEqual(rc["union"], 1)
         self.assertEqual(rc["judge"], 1)
 
+    def test_rows_carry_model_ab_and_judge_snapshots(self) -> None:
+        # 풍부 검토 큐(ADR-028): 각 행에 model A/B snapshot + judge 사유 보존.
+        _result, rows = self._run(judge_item={
+            "sentence_index": 3, "relevant": True, "sentiment": "positive",
+            "aspects": ["food"], "chosen": "candidate_1", "reason": "음식 맥락",
+        })
+        by_sent: dict[str, list[dict]] = {}
+        for r in rows:
+            by_sent.setdefault(r["clause"], []).append(r)
+
+        # 합의(s1): model A/B snapshot 존재, judge는 미개입(None).
+        s1 = by_sent[SENTENCES[0]][0]
+        self.assertIsNotNone(s1["model_a_result"])
+        self.assertIsNotNone(s1["model_b_result"])
+        self.assertIn("sentiment", s1["model_a_result"])
+        self.assertIn("aspects", s1["model_b_result"])
+        self.assertIsNone(s1["judge_result"])
+
+        # judge 해소(s3): judge_result에 사유 포함 + model A/B 스냅샷 보존.
+        s3 = by_sent[SENTENCES[2]][0]
+        self.assertIsNotNone(s3["judge_result"])
+        self.assertEqual(s3["judge_result"]["reason"], "음식 맥락")
+        self.assertIsNotNone(s3["model_a_result"])
+        self.assertIsNotNone(s3["model_b_result"])
+
     def test_judge_invalid_aspect_marks_needs_review(self) -> None:
         # judge가 s3에 invalid aspect → fallback 없이 needs_review
         _result, rows = self._run(judge_item={
