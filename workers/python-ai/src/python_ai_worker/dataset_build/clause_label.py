@@ -39,9 +39,10 @@ _PROMPT_TASK = "clause_label"
 _ALLOWED_SENTIMENT = {"positive", "negative", "neutral"}
 
 # taxonomy-driven config Phase 2-A (2026-05-27) — _ALLOWED_ASPECT를
-# config/taxonomies/festival-v2.json에서 derive. Phase 3에서 dataset_version
-# metadata 기반 동적 lookup으로 전환 예정. 현재는 single taxonomy 고정.
-DEFAULT_CLAUSE_LABEL_TAXONOMY_ID = "festival-v2"
+# config/taxonomies/<id>.json에서 derive. 2026-06-17 군산 분석 위해 전역 default를
+# festival-gunsan으로 전환. Phase 3에서 dataset_version metadata 기반 동적 lookup
+# 으로 전환 예정. 현재는 single taxonomy 고정.
+DEFAULT_CLAUSE_LABEL_TAXONOMY_ID = "festival-gunsan"
 _TAXONOMY = load_taxonomy(DEFAULT_CLAUSE_LABEL_TAXONOMY_ID)
 _ALLOWED_ASPECT: frozenset[str] = _TAXONOMY.aspect_keys_set
 _FALLBACK_ASPECT: str = _TAXONOMY.fallback_aspect

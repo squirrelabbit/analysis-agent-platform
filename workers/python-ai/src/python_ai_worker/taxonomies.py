@@ -27,9 +27,10 @@ TAXONOMIES_DIR_ENV = "PYTHON_AI_TAXONOMIES_DIR"
 
 # 현재 단일 taxonomy 고정 (silverone 2026-06-04). taxonomy endpoint 기본 id +
 # 신규 callsite의 하드코딩 격리용. artifact/version 단위 taxonomy_id 전달이
-# 생기면 이 default를 동적 lookup으로 교체한다 (후속 PR). 기존 callsite
-# (planner schema / clause_label)의 "festival-v2" 하드코딩 정리는 별도 작업.
-DEFAULT_TAXONOMY_ID = "festival-v2"
+# 생기면 이 default를 동적 lookup으로 교체한다 (후속 PR). 2026-06-17 — 군산 축제
+# 분석을 위해 전역 default를 festival-gunsan으로 전환 (clause_label / planner도 동일).
+# per-build taxonomy 선택(Phase 3)은 여전히 별도 작업.
+DEFAULT_TAXONOMY_ID = "festival-gunsan"
 
 
 def default_taxonomies_dir() -> Path:

@@ -24,9 +24,10 @@ from .skill_specs import CALCULATE_SPEC, PRESENT_SPEC, render_params_schema
 PLAN_VERSION = "v2"
 
 # taxonomy-driven config Phase 3-A (2026-05-27) — clauses.aspect description을
-# config/taxonomies/festival-v2.json에서 derive. Phase 3-B에서 dataset_version
+# config/taxonomies/<id>.json에서 derive. 2026-06-17 군산 분석 위해 festival-gunsan
+# 으로 전환 (clause_label artifact taxonomy_id와 정합). Phase 3-B에서 dataset_version
 # metadata 기반 동적 lookup으로 전환 예정 — 현재는 single taxonomy 고정.
-_FESTIVAL_TAXONOMY = load_taxonomy("festival-v2")
+_FESTIVAL_TAXONOMY = load_taxonomy("festival-gunsan")
 
 # step id로 사용 금지. multi-table input ``input`` 필드와의 충돌을 방지하기 위해
 # 예약한다. clause_keywords는 optional artifact(키워드 build이 돈 dataset에만 존재)지만

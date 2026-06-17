@@ -239,18 +239,19 @@ class ClauseLabelTaxonomySourceTests(unittest.TestCase):
     taxonomy config가 single source 역할을 하면서 옛 값과 호환된다.
     """
 
-    def test_default_taxonomy_id_is_festival_v2(self) -> None:
+    def test_default_taxonomy_id_is_festival_gunsan(self) -> None:
         from python_ai_worker.dataset_build.clause_label import (
             DEFAULT_CLAUSE_LABEL_TAXONOMY_ID,
         )
 
-        self.assertEqual(DEFAULT_CLAUSE_LABEL_TAXONOMY_ID, "festival-v2")
+        # 2026-06-17 — 전역 taxonomy를 festival-gunsan으로 전환 (군산 축제 분석).
+        self.assertEqual(DEFAULT_CLAUSE_LABEL_TAXONOMY_ID, "festival-gunsan")
 
-    def test_allowed_aspect_matches_festival_v2_keys(self) -> None:
+    def test_allowed_aspect_matches_active_taxonomy_keys(self) -> None:
         from python_ai_worker.dataset_build.clause_label import _ALLOWED_ASPECT
         from python_ai_worker.taxonomies import load_taxonomy
 
-        festival = load_taxonomy("festival-v2")
+        festival = load_taxonomy("festival-gunsan")
         self.assertEqual(_ALLOWED_ASPECT, festival.aspect_keys_set)
 
     def test_allowed_aspect_matches_hand_coded_lock(self) -> None:
@@ -341,10 +342,10 @@ class ClauseLabelTaxonomyMetadataTests(unittest.TestCase):
         from python_ai_worker.dataset_build import clause_label as cl
         from python_ai_worker.taxonomies import load_taxonomy
 
-        # _TAXONOMY와 festival-v2 file이 일치하는지 + 정의된 id/hash가 summary에
-        # 넣을 값과 같은지. summary 자체는 build를 돌려야 만들어지므로 본 test는
-        # *source* 잠금.
-        expected = load_taxonomy("festival-v2")
+        # _TAXONOMY와 active taxonomy file(festival-gunsan)이 일치하는지 + 정의된
+        # id/hash가 summary에 넣을 값과 같은지. summary 자체는 build를 돌려야
+        # 만들어지므로 본 test는 *source* 잠금.
+        expected = load_taxonomy("festival-gunsan")
         self.assertEqual(cl._TAXONOMY.taxonomy_id, expected.taxonomy_id)
         self.assertEqual(cl._TAXONOMY.taxonomy_hash, expected.taxonomy_hash)
 
