@@ -337,6 +337,44 @@ class ClauseLabelVerifyGenuineSpansTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertEqual(result["artifact"]["summary"]["processed_row_count"], 0)
 
+    def test_genuine_spans_across_multiple_chunks(self) -> None:
+        # genuine_spans × chunking 상호작용: span 41~90(50문장) + max_chunk_sentences 20
+        # → 허용문장이 3 chunk(20/20/10)로 나뉘어도 전역 sentence_index 보존, chunk 경계
+        # 매핑 정확. (기존 genuine_spans 테스트는 1 chunk만 다뤄 이 조합이 미검증이었음)
+        from python_ai_worker.dataset_build import clause_label_verify as v
+
+        sentences = [f"sent{i:03d}" for i in range(1, 101)]
+        self._write_gen({"genuineness": "genuine_review",
+                         "genuine_spans": [{"chunk_index": 0, "sentence_start": 41, "sentence_end": 90}]})
+
+        original_init = v.LloaClient.__init__
+
+        def _init(self, config, *, urlopen=None):
+            original_init(self, config, urlopen=_chunk_urlopen(config.model))
+
+        payload = {
+            "dataset_version_id": "ver1", "clean_artifact_ref": str(self.clean),
+            "output_path": str(self.out), "verify": True,
+            "classify_models": ["model-a", "model-b"], "judge_model": "model-judge",
+            "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉 국가유산야행"},
+            "concurrency": 1, "include_genuineness": ["genuine_review", "uncertain"],
+            "doc_genuineness_ref": str(self.gen), "max_chunk_sentences": 20,
+        }
+        with patch.object(v, "load_config", return_value=_fake_config()), \
+             patch.object(v.LloaClient, "__init__", _init), \
+             patch.object(v, "_split_anchor_sentences", return_value=sentences):
+            v.run_dataset_clause_label_verify(payload)
+        rows = [json.loads(line) for line in self.out.read_text(encoding="utf-8").splitlines() if line.strip()]
+        # span 41~90만, 전역 index 보존.
+        self.assertEqual({r["sentence_index"] for r in rows}, set(range(41, 91)))
+        # 50 허용문장 → 3 chunk(20/20/10), 경계 매핑.
+        by_idx = {r["sentence_index"]: r for r in rows}
+        self.assertEqual(by_idx[41]["chunk_index"], 0)
+        self.assertEqual(by_idx[60]["chunk_index"], 0)
+        self.assertEqual(by_idx[61]["chunk_index"], 1)
+        self.assertEqual(by_idx[81]["chunk_index"], 2)
+        self.assertEqual({r["chunk_index"] for r in rows}, {0, 1, 2})
+
 
 if __name__ == "__main__":
     unittest.main()
