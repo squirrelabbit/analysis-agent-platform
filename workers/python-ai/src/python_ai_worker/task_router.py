@@ -145,8 +145,8 @@ def _run_taxonomy(payload: dict[str, Any]) -> dict[str, Any]:
 
     Go control-plane이 ``GET /taxonomy?taxonomy_id=<id>``를 이 task로 proxy한다.
     Go는 config 파일을 직접 읽지 않는다. taxonomy_id 미지정 시
-    ``DEFAULT_TAXONOMY_ID`` (현재 festival-v2). unknown id / parse 실패는
-    ``TaxonomyError(ValueError)`` → main.py에서 HTTP 400.
+    ``DEFAULT_TAXONOMY_ID`` (config/taxonomies/index.yaml의 default). unknown id /
+    parse 실패는 ``TaxonomyError(ValueError)`` → main.py에서 HTTP 400.
     """
     taxonomy_id = str(payload.get("taxonomy_id") or "").strip() or DEFAULT_TAXONOMY_ID
     return taxonomy_payload(load_taxonomy(taxonomy_id))
