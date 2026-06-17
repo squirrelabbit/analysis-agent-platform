@@ -102,6 +102,8 @@ func (s *Server) routes() {
 	// 전역 read-only taxonomy 정의. aspect key→한글 label 매핑 등을 Python
 	// worker로 proxy해 반환 (프론트 표시용).
 	s.mux.HandleFunc("GET /taxonomy", s.handleTaxonomy)
+	// 사용 가능한 taxonomy 목록 (선택 UI — 데이터셋 metadata.taxonomy_id용).
+	s.mux.HandleFunc("GET /taxonomies", s.handleTaxonomies)
 	s.mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPI)
 	s.mux.HandleFunc("GET /openapi.frontend.yaml", s.handleFrontendOpenAPI)
 	s.mux.HandleFunc("GET /swagger", s.handleSwaggerUI)
@@ -330,6 +332,19 @@ func (s *Server) handlePromptOptions(w stdhttp.ResponseWriter, r *stdhttp.Reques
 func (s *Server) handleTaxonomy(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	taxonomyID := strings.TrimSpace(r.URL.Query().Get("taxonomy_id"))
 	raw, err := s.datasetService.GetTaxonomy(r.Context(), taxonomyID)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(stdhttp.StatusOK)
+	_, _ = w.Write(raw)
+}
+
+// handleTaxonomies — GET /taxonomies. 사용 가능한 taxonomy 목록(요약)을 Python
+// worker proxy로 반환한다 (선택 UI용). {items: [...], default: "<id>"}.
+func (s *Server) handleTaxonomies(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	raw, err := s.datasetService.ListTaxonomies(r.Context())
 	if err != nil {
 		s.writeServiceError(w, err)
 		return

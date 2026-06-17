@@ -299,6 +299,31 @@ def taxonomy_payload(taxonomy: Taxonomy) -> dict[str, Any]:
     }
 
 
+def list_taxonomies() -> list[dict[str, Any]]:
+    """config/taxonomies/*.json을 스캔해 사용 가능한 taxonomy 목록(요약)을 반환한다.
+    선택 UI / 목록 endpoint용. 파싱 실패 파일은 건너뛴다(한 파일이 목록 전체를
+    깨지 않게). taxonomy_id 사전순 정렬."""
+    base = default_taxonomies_dir()
+    out: list[dict[str, Any]] = []
+    if not base.is_dir():
+        return out
+    for path in sorted(base.glob("*.json")):
+        try:
+            tx = load_taxonomy(path.stem, base_dir=base)
+        except (TaxonomyError, OSError):
+            continue
+        out.append(
+            {
+                "taxonomy_id": tx.taxonomy_id,
+                "domain": tx.domain,
+                "aspect_count": len(tx.aspects),
+                "taxonomy_hash": tx.taxonomy_hash,
+                "is_default": tx.taxonomy_id == DEFAULT_TAXONOMY_ID,
+            }
+        )
+    return out
+
+
 def render_aspect_taxonomy_block(taxonomy: Taxonomy) -> str:
     """taxonomy의 aspect를 prompt에 inject 가능한 markdown table로 변환.
 
@@ -342,6 +367,7 @@ __all__ = [
     "TaxonomyMismatchError",
     "check_taxonomy_compatibility",
     "default_taxonomies_dir",
+    "list_taxonomies",
     "load_taxonomy",
     "parse_taxonomy",
     "render_aspect_taxonomy_block",

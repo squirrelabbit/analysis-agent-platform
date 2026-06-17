@@ -39,6 +39,7 @@ from .taxonomies import (
     TaxonomyError,
     TaxonomyMismatchError,
     check_taxonomy_compatibility,
+    list_taxonomies,
     load_taxonomy,
     taxonomy_payload,
 )
@@ -110,6 +111,7 @@ def supported_capabilities() -> list[TaskCapability]:
         TaskCapability(name=_ANALYZE_TASK_NAME, description="plan_v2 executor — plan or user_question + artifact_paths → result."),
         TaskCapability(name="prompt_options", description="List prompt versions/default/label for a task-folder prompt (read-only)."),
         TaskCapability(name="taxonomy", description="Return aspect/sentiment taxonomy definition (key/label/description) for a taxonomy_id (read-only)."),
+        TaskCapability(name="taxonomies", description="List available taxonomies (id/domain/aspect_count/default) for selection (read-only)."),
     ]
 
 
@@ -121,6 +123,7 @@ def task_handlers() -> dict[str, Any]:
         "dataset_clause_keywords": run_dataset_clause_keywords,
         "prompt_options": _run_prompt_options,
         "taxonomy": _run_taxonomy,
+        "taxonomies": _run_taxonomies,
     }
 
 
@@ -147,6 +150,12 @@ def _run_taxonomy(payload: dict[str, Any]) -> dict[str, Any]:
     """
     taxonomy_id = str(payload.get("taxonomy_id") or "").strip() or DEFAULT_TAXONOMY_ID
     return taxonomy_payload(load_taxonomy(taxonomy_id))
+
+
+def _run_taxonomies(payload: dict[str, Any]) -> dict[str, Any]:
+    """taxonomies task — 사용 가능한 taxonomy 목록(요약) 반환. 선택 UI/목록 endpoint용.
+    Go control-plane이 ``GET /taxonomies``를 이 task로 proxy한다 (read-only)."""
+    return {"items": list_taxonomies(), "default": DEFAULT_TAXONOMY_ID}
 
 
 def run_task(name: str, payload: dict[str, Any]) -> dict[str, Any]:

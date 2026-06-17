@@ -15,3 +15,12 @@ export const useTaxonomy = (taxonomyId?: string) =>
     // 조회 실패해도 화면은 영문 key로 동작하므로 재시도 1회만.
     retry: 1,
   });
+
+// 사용 가능한 taxonomy 목록 — 데이터셋 metadata.taxonomy_id 선택 UI용.
+export const useTaxonomies = () =>
+  useQuery({
+    queryKey: taxonomyKeys.list(),
+    queryFn: () => taxonomyApi.list(),
+    staleTime: STALE_MS,
+    retry: 1,
+  });
