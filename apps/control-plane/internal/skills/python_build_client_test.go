@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"go.temporal.io/sdk/temporal"
 )
@@ -124,3 +125,20 @@ func TestPythonBuildClient_AllArtifacts_FallsBackToSingle(t *testing.T) {
 
 // dataset_document_cluster_profile은 β2 (5/19) 결정으로 제거됨 — 관련 lock test
 // 삭제.
+
+// silverone 2026-06-17 — doc_genuineness/clause_label HTTP 타임아웃은 액티비티
+// StartToCloseTimeout(datasetBuildExecuteActivityOptions, 90분)와 정렬돼야 한다.
+// 더 짧으면 교차검증(verify) 같은 장시간 build에서 HTTP가 먼저 끊겨 worker_timeout
+// 으로 실패한다 (과거 30분 → 437 doc verify가 66%에서 실패).
+func TestBuildTaskTimeoutAlignedWithActivity(t *testing.T) {
+	cases := map[string]time.Duration{
+		"/tasks/dataset_clause_label":    90 * time.Minute,
+		"/tasks/dataset_doc_genuineness": 90 * time.Minute,
+		"/tasks/dataset_clean":           20 * time.Minute,
+	}
+	for path, want := range cases {
+		if got := buildTaskTimeout(path); got != want {
+			t.Errorf("buildTaskTimeout(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
