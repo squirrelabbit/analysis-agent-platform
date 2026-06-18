@@ -44,6 +44,17 @@ func TestLoadClauseLabelVerifyArtifact_NoFilter(t *testing.T) {
 		}
 	}
 
+	// silverone 2026-06-18 — 검토 큐 크기는 needs_review 불리언 행 수여야 한다(표
+	// needs_review 필터와 동일). fixture는 partial_classify 1건만 needs_review=true이고
+	// resolution=='needs_review'는 0건 → 배너가 resolution['needs_review']를 읽으면 0으로
+	// 표(1건)와 어긋난다. needs_review_count가 1인지, resolution['needs_review']가 0인지 잠근다.
+	if nrc, ok := summary["needs_review_count"].(int); !ok || nrc != 1 {
+		t.Fatalf("summary.needs_review_count = %v (%T), want 1", summary["needs_review_count"], summary["needs_review_count"])
+	}
+	if res["needs_review"] != 0 {
+		t.Fatalf("resolution['needs_review']=%d, want 0", res["needs_review"])
+	}
+
 	// model A/B/judge snapshot 복원 확인 (judge 행).
 	var judgeRow map[string]any
 	for _, it := range items {

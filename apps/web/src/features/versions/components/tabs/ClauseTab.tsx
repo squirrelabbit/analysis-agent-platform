@@ -564,13 +564,18 @@ export function ClauseTab() {
               const rc = summary.resolution ?? {};
               const agree = rc["agree"] ?? 0;
               const judge = rc["judge"] ?? 0;
-              const review = rc["needs_review"] ?? 0;
+              // 재조정 = total - agree = 비합의 resolution 합 (resolution 분할).
               const reconciled =
                 (rc["union"] ?? 0) +
                 (rc["sentiment_auto"] ?? 0) +
                 judge +
                 (rc["partial_classify"] ?? 0) +
-                review;
+                (rc["needs_review"] ?? 0);
+              // 검토 필요 = needs_review 불리언 카운트(표 needs_review 필터와 동일).
+              // resolution=='needs_review'(5)만 세면 partial_classify 등 needs_review=true
+              // 인 다른 행을 누락한다. 옛 artifact는 resolution 값으로 fallback.
+              const review =
+                summary.needsReviewCount ?? rc["needs_review"] ?? 0;
               return (
                 <>
                   모델 합의 <b>{agree.toLocaleString()}</b>건 · 재조정{" "}

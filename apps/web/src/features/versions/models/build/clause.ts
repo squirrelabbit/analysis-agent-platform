@@ -57,6 +57,9 @@ export interface ClauseSummaryDto {
   mode?: string;
   resolution?: Record<string, number>;
   resolution_counts?: Record<string, number>;
+  // 검토 큐 크기 = needs_review 불리언 행 수(표 needs_review 필터와 동일).
+  // resolution['needs_review']와 다름(그건 resolution 값이 needs_review인 행만).
+  needs_review_count?: number;
   models?: { a?: string; b?: string; judge?: string };
 }
 
@@ -121,6 +124,8 @@ export interface ClauseSummary {
   mode?: string;
   resolution?: Record<string, number>;
   resolutionCounts?: Record<string, number>;
+  // 검토 큐 크기 = needs_review 불리언 행 수(표 needs_review 필터와 동일).
+  needsReviewCount?: number;
   models?: { a?: string; b?: string; judge?: string };
 }
 
@@ -166,6 +171,7 @@ export const mapClauseSummary = (dto: ClauseSummaryDto): ClauseSummary => ({
   mode: dto.mode,
   resolution: dto.resolution,
   resolutionCounts: dto.resolution_counts,
+  needsReviewCount: dto.needs_review_count,
   models: dto.models,
 });
 
