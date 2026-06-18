@@ -67,14 +67,23 @@ func (s *DatasetService) runWorkerTask(ctx context.Context, taskPath string, pay
 	return decoded, nil
 }
 
+// workerTaskTimeout — runWorkerTask(서비스 경로)가 Python worker HTTP 호출에 거는
+// 컨텍스트 타임아웃. dataset build(clause_label/doc_genuineness)는 이 경로가 Temporal
+// 활동 안에서 호출되므로 활동 StartToCloseTimeout(datasetBuildExecuteActivityOptions,
+// 90분) 및 python_build_client.buildTaskTimeout(90분)과 반드시 정렬해야 한다.
+//
+// silverone 2026-06-18 — verify(2모델+judge)+chunking 빌드가 30.8분 걸려 30분 한도를
+// 1분 차로 넘겨 worker_timeout으로 실패(데이터는 정상 기록)한 사례 확인. faba3996이
+// buildTaskTimeout만 90분으로 올렸으나 build 경로는 이 함수(runWorkerTask)를 쓰므로
+// 30분이 그대로 binding이었다. 두 LLOA 단계를 90분으로 정렬한다.
 func workerTaskTimeout(taskPath string) time.Duration {
 	switch strings.TrimSpace(taskPath) {
 	case "/tasks/dataset_clean":
 		return 20 * time.Minute
 	case "/tasks/dataset_clause_label":
-		return 30 * time.Minute
+		return 90 * time.Minute
 	case "/tasks/dataset_doc_genuineness":
-		return 30 * time.Minute
+		return 90 * time.Minute
 	default:
 		return 2 * time.Minute
 	}

@@ -291,6 +291,15 @@ func (s *DatasetService) GetClauseLabelView(
 	view.Status = resolveArtifactStatus(ref, latestJob, metadataString(version.Metadata, "clause_label_status", ""))
 	enrichViewWithJob(&view, latestJob, version.Metadata, clauseLabelBuildType)
 
+	// silverone 2026-06-17 — 진행 중(running/queued) 빌드의 "이번 실행" 메타를
+	// in-flight job Request에서 회수한다. 완료 artifact summary는 직전(stale) 빌드
+	// 것이라, 재실행 화면이 옛 prompt_version을 보이거나(버전 불일치) 첫/실패-후
+	// 실행이 prompt·소요시간을 못 보이던 문제를 막는다(요청에 명시 안 된 값은 omit).
+	runningApplied := s.runningClauseLabelApplied(latestJob)
+	if runningApplied != nil {
+		view.Applied = runningApplied
+	}
+
 	if !artifactReadyForView(ref) {
 		return view, nil
 	}
@@ -357,6 +366,11 @@ func (s *DatasetService) GetClauseLabelView(
 	if prompt != "" {
 		applied["prompt_version"] = prompt
 	}
+	// 진행 중이면 직전 summary 값 위에 in-flight 요청값(prompt_version/model)을 덮어
+	// 화면이 "이번 실행"을 가리키게 한다(재실행 시 버전 불일치 방지).
+	for k, v := range runningApplied {
+		applied[k] = v
+	}
 	if len(applied) > 0 {
 		view.Applied = applied
 	}
@@ -394,6 +408,42 @@ func (s *DatasetService) modelDisplayNameFor(model string) string {
 		return ""
 	}
 	return s.lloaModelDisplayName
+}
+
+// runningClauseLabelApplied — 진행 중(running/queued) clause_label 빌드의 "이번
+// 실행" 메타(prompt_version/model)를 job Request에서 회수한다. 완료 artifact summary는
+// 직전(stale) 빌드 것이라, 진행 중 화면이 잘못된 버전을 보이지 않도록 in-flight
+// 요청값을 우선 노출한다. 요청에 명시 안 된 값(default)은 omit — 잘못된 값보다 미표시.
+// verify 모드는 단일 model_id를 안 넘기므로 prompt_version만 회수된다.
+func (s *DatasetService) runningClauseLabelApplied(job *domain.DatasetBuildJob) map[string]any {
+	if job == nil || (job.Status != "running" && job.Status != "queued") {
+		return nil
+	}
+	applied := map[string]any{}
+	if v := jobRequestString(job, "clause_label_prompt_version"); v != "" {
+		applied["prompt_version"] = v
+	}
+	if m := jobRequestString(job, "model_id"); m != "" {
+		applied["model"] = m
+		if d := s.modelDisplayNameFor(m); d != "" {
+			applied["model_display_name"] = d
+		}
+	}
+	if len(applied) == 0 {
+		return nil
+	}
+	return applied
+}
+
+// jobRequestString — job Request map에서 string 값을 trim해 회수. 없으면 "".
+func jobRequestString(job *domain.DatasetBuildJob, key string) string {
+	if job == nil || job.Request == nil {
+		return ""
+	}
+	if v, ok := job.Request[key].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
 }
 
 func normalizeArtifactPagination(limit, offset int) (int, int) {
