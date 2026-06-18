@@ -291,12 +291,14 @@ class ClauseLabelVerifyChunkingTests(unittest.TestCase):
 
     def test_chunk_classify_failure_isolated(self) -> None:
         sentences = [f"sent{i:03d}" for i in range(1, 101)]
-        # model-a의 chunk1(sent041~080)만 실패 → 그 문장들 partial_classify/needs_review.
+        # model-a의 chunk1(sent041~080)만 실패 → 그 문장들은 b만 라벨 → judge로 라우팅
+        # (2026-06-18). _chunk_urlopen의 judge mock은 []를 반환하므로 judge 미해소 →
+        # needs_review로 격리된다(옛 partial_classify 아님).
         result, rows = self._run(sentences, fail_if=lambda model, user: model == "model-a" and "sent041" in user)
         by_idx = {r["sentence_index"]: r for r in rows}
-        # 실패 chunk 문장: a 없음 → partial_classify + needs_review.
+        # 실패 chunk 문장: a 없음 → judge 라우팅 → judge 빈응답 → needs_review.
         self.assertTrue(by_idx[50]["needs_review"])
-        self.assertEqual(by_idx[50]["resolution"], "partial_classify")
+        self.assertEqual(by_idx[50]["resolution"], "needs_review")
         # 정상 chunk 문장: agree.
         self.assertFalse(by_idx[10]["needs_review"])
         self.assertEqual(by_idx[10]["resolution"], "agree")
@@ -452,6 +454,87 @@ class ClauseLabelVerifyGenuineSpansTests(unittest.TestCase):
         self.assertEqual(by_idx[61]["chunk_index"], 1)
         self.assertEqual(by_idx[81]["chunk_index"], 2)
         self.assertEqual({r["chunk_index"] for r in rows}, {0, 1, 2})
+
+
+class ClauseLabelVerifyPartialJudgeTests(unittest.TestCase):
+    """partial(한 모델 미분류) → judge 라우팅 (2026-06-18). 옛 partial_classify(단일
+    라벨 무비판 채택 + 검토 큐 격리) 대신 judge가 권위 라벨을 낸다."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.clean = Path(self.tmp.name) / "clean.jsonl"
+        self.out = Path(self.tmp.name) / "out.jsonl"
+        with self.clean.open("w", encoding="utf-8") as f:
+            f.write(json.dumps({"row_id": "d1", "cleaned_text": "본문"}, ensure_ascii=False) + "\n")
+
+    def test_reconcile_partial_routes_to_judge(self) -> None:
+        from python_ai_worker.dataset_build.clause_label_verify import _reconcile_sentence
+
+        lbl = {"relevant": True, "sentiment": "positive", "aspects": ["food"]}
+        # 한쪽만 라벨 → judge로 라우팅(옛 partial_classify/review 아님).
+        self.assertEqual(_reconcile_sentence(lbl, None)["status"], "judge")
+        self.assertEqual(_reconcile_sentence(None, lbl)["status"], "judge")
+        # 둘 다 미분류 → judge에 보낼 후보 없음 → classify_missing(review) 유지.
+        both = _reconcile_sentence(None, None)
+        self.assertEqual(both["status"], "review")
+        self.assertEqual(both["resolution"], "classify_missing")
+
+    def test_partial_resolved_by_judge(self) -> None:
+        from python_ai_worker.dataset_build import clause_label_verify as v
+
+        sentences = ["맛집 음식이 최고였다", "공연이 멋졌다"]
+        labels_a = [
+            {"index": 1, "relevant": True, "sentiment": "positive", "aspects": ["food"]},
+            {"index": 2, "relevant": True, "sentiment": "positive", "aspects": ["show_program"]},
+        ]
+        labels_b = [  # s2(index 2) 누락 → partial → judge
+            {"index": 1, "relevant": True, "sentiment": "positive", "aspects": ["food"]},
+        ]
+        judge_item = {
+            "sentence_index": 2, "relevant": True, "sentiment": "positive",
+            "aspects": ["show_program"], "chosen": "candidate_1", "reason": "공연 호평",
+        }
+
+        def make_urlopen(model: str):
+            def _fake(req, timeout=None):  # type: ignore[no-untyped-def]
+                user = json.loads(req.data.decode("utf-8"))["messages"][1]["content"]
+                if "candidate_1" in user:  # judge 호출
+                    return _Resp(_completion(json.dumps([judge_item], ensure_ascii=False)))
+                arr = labels_a if model == "model-a" else labels_b
+                return _Resp(_completion(json.dumps(arr, ensure_ascii=False)))
+
+            return _fake
+
+        original_init = v.LloaClient.__init__
+
+        def _init(self, config, *, urlopen=None):
+            original_init(self, config, urlopen=make_urlopen(config.model))
+
+        payload = {
+            "dataset_version_id": "ver1", "clean_artifact_ref": str(self.clean),
+            "output_path": str(self.out), "verify": True,
+            "classify_models": ["model-a", "model-b"], "judge_model": "model-judge",
+            "include_genuineness": [],
+            "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉 국가유산야행"},
+            "concurrency": 1,
+        }
+        with patch.object(v, "load_config", return_value=_fake_config()), \
+             patch.object(v.LloaClient, "__init__", _init), \
+             patch.object(v, "_split_anchor_sentences", return_value=sentences):
+            v.run_dataset_clause_label_verify(payload)
+        rows = [json.loads(line) for line in self.out.read_text(encoding="utf-8").splitlines() if line.strip()]
+        by_idx = {r["sentence_index"]: r for r in rows}
+
+        # s1: 두 모델 합의.
+        self.assertEqual(by_idx[1]["resolution"], "agree")
+        # s2: model-b 미분류 → judge가 해소 → resolution=judge, 검토 불필요.
+        self.assertEqual(by_idx[2]["resolution"], "judge")
+        self.assertFalse(by_idx[2]["needs_review"])
+        self.assertEqual(by_idx[2]["aspect"], "show_program")
+        # 검토 큐 snapshot: model_b는 null(미분류), judge 결과는 존재.
+        self.assertIsNone(by_idx[2]["model_b_result"])
+        self.assertIsNotNone(by_idx[2]["judge_result"])
 
 
 if __name__ == "__main__":

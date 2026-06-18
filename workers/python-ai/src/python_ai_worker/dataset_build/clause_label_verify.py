@@ -164,7 +164,11 @@ def _reconcile_sentence(a: dict | None, b: dict | None) -> dict[str, Any]:
         ok = a if a is not None else b
         if ok is None:
             return {"status": "review", "relevant": False, "sentiment": "neutral", "aspects": [], "resolution": "classify_missing"}
-        return {"status": "review", "relevant": ok["relevant"], "sentiment": ok["sentiment"], "aspects": ok["aspects"], "resolution": "partial_classify"}
+        # silverone 2026-06-18 — 한 모델만 라벨(다른 모델이 문장 드롭) → judge로 보내
+        # 권위 라벨을 받는다. 옛 partial_classify(단일 라벨 무비판 채택 + 검토 큐 격리)
+        # 대신 judge가 원문 기준으로 독립 판정한다(후보 1개 + null 후보). judge가
+        # 못 가린 것만 needs_review로 남아 검토 큐가 진짜 어려운 절만 갖게 된다.
+        return {"status": "judge", "trigger": "partial_classify"}
     if not a["relevant"] and not b["relevant"]:
         return {"status": "drop", "resolution": "both_irrelevant"}
     if a["relevant"] != b["relevant"]:
@@ -241,7 +245,11 @@ def _judge_batch(
     return results
 
 
-def _cand(label: dict[str, Any]) -> dict[str, Any]:
+def _cand(label: dict[str, Any] | None) -> dict[str, Any] | None:
+    # partial(한 모델 미분류) → None을 judge에 null 후보로 전달. judge는 후보를 무시하고
+    # 원문 기준으로 독립 판정하므로 null 후보가 있어도 권위 라벨을 낸다.
+    if label is None:
+        return None
     return {"relevant": label["relevant"], "sentiment": label["sentiment"], "aspects": label["aspects"]}
 
 
