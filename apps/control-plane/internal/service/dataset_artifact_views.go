@@ -910,12 +910,21 @@ func loadClauseLabelVerifyArtifact(ref string, limit, offset int, aspect, sentim
 	if err != nil {
 		return nil, "", 0, nil, err
 	}
+	// silverone 2026-06-18 — 검토 큐 크기는 needs_review 불리언(=표 필터와 동일)으로
+	// 센다. byResolution["needs_review"]는 resolution 값이 'needs_review'인 행만이라
+	// partial_classify 등 needs_review=true인 다른 resolution을 누락해 배너(5)와 표(85)가
+	// 어긋났다. 배너가 이 값을 읽어 표 needs_review 필터와 일치하게 한다.
+	needsReviewCount, err := countRowsWhere(db, source, "WHERE needs_review = true")
+	if err != nil {
+		return nil, "", 0, nil, err
+	}
 	summary := map[string]any{
-		"total":            total,
-		"sentiment":        bySentiment,
-		"aspect":           byAspect,
-		"aspect_sentiment": aspectSentiment,
-		"resolution":       byResolution,
+		"total":              total,
+		"sentiment":          bySentiment,
+		"aspect":             byAspect,
+		"aspect_sentiment":   aspectSentiment,
+		"resolution":         byResolution,
+		"needs_review_count": needsReviewCount,
 	}
 
 	// 필터 WHERE 절(검토 큐). 비면 전체.
