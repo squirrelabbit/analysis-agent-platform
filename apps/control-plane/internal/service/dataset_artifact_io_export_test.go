@@ -533,3 +533,78 @@ func TestExportDocGenuinenessVerifyEnrichedCSV(t *testing.T) {
 		t.Errorf("row1 judge_confidence: %q", rows[1][idx("judge_confidence")])
 	}
 }
+
+// silverone 2026-06-18 — clause_label verify 다운로드는 "최종 라벨만" (사용자 결정).
+// model_a/b/judge snapshot(JSON 통째)이 행마다·aspect explode마다 반복돼 CSV를 JSON으로
+// 도배하던 걸 제거했다. 이 테스트가 다운로드 header를 잠근다: 최종 라벨 + resolution/
+// needs_review + enrich만, JSON snapshot / sentence_index / chunk_index / source 없음.
+func writeClauseLabelVerifyJSONL(t *testing.T, dir string, lines []string) string {
+	t.Helper()
+	path := filepath.Join(dir, "clause-verify-"+randomSuffix(t)+".verify.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatalf("write clause verify jsonl: %v", err)
+	}
+	return path
+}
+
+func TestExportClauseLabelVerifyEnrichedCSV(t *testing.T) {
+	dir := t.TempDir()
+	jsonl := writeClauseLabelVerifyJSONL(t, dir, []string{
+		`{"doc_id":"d1","clause":"분위기 좋아요","sentiment":"positive","aspect":"ambiance_scenery","resolution":"agree","needs_review":false,"sentence_index":1,"chunk_index":0,"model_a_result":{"relevant":true,"sentiment":"positive","aspects":["ambiance_scenery"]},"model_b_result":{"relevant":true,"sentiment":"positive","aspects":["ambiance_scenery"]},"judge_result":null,"source":"verify"}`,
+		`{"doc_id":"d2","clause":"티켓 매진","sentiment":"negative","aspect":"operation_service","resolution":"judge","needs_review":true,"sentence_index":1,"chunk_index":1,"model_a_result":{"relevant":true,"sentiment":"negative","aspects":["operation_service"]},"model_b_result":{"relevant":true,"sentiment":"neutral","aspects":["operation_service"]},"judge_result":{"relevant":true,"sentiment":"negative","aspects":["operation_service"],"reason":"불만 맥락"},"source":"verify"}`,
+	})
+	parquet := writeCleanParquet(t, dir, []cleanRow{
+		{rowID: "d1", cleaned: "분위기 좋아요", raw: "분위기 너무 좋아요!!", createdAt: "2026-01-01T00:00:00Z", srcIdx: 0},
+		{rowID: "d2", cleaned: "티켓 매진", raw: "티켓 매진이라니", createdAt: "2026-01-02T00:00:00Z", srcIdx: 1},
+	})
+
+	csvPath, err := exportClauseLabelVerifyEnrichedCSV(jsonl, parquet)
+	if err != nil {
+		t.Fatalf("exportClauseLabelVerifyEnrichedCSV: %v", err)
+	}
+	defer os.Remove(csvPath)
+
+	header, rows := readCSV(t, csvPath)
+	wantHeader := []string{
+		"doc_id", "clause_id", "clause_text", "aspect", "sentiment",
+		"resolution", "needs_review",
+		"cleaned_text", "raw_text", "created_at", "source_row_index",
+	}
+	assertHeader(t, header, wantHeader)
+
+	// JSON snapshot / 내부 컬럼은 다운로드에서 빠져야 한다 (회귀 방지 잠금).
+	for _, banned := range []string{"model_a_result", "model_b_result", "judge_result", "sentence_index", "chunk_index", "source"} {
+		for _, h := range header {
+			if h == banned {
+				t.Errorf("다운로드 header에 %q가 남아 있다 — 최종 라벨만 노출해야 함", banned)
+			}
+		}
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows: want 2, got %d", len(rows))
+	}
+	idx := func(name string) int {
+		for i, h := range header {
+			if h == name {
+				return i
+			}
+		}
+		t.Fatalf("column %q missing", name)
+		return -1
+	}
+	if rows[0][idx("doc_id")] != "d1" || rows[0][idx("clause_id")] != "d1-0" {
+		t.Errorf("row0 doc/clause id mismatch: %v", rows[0])
+	}
+	if rows[0][idx("aspect")] != "ambiance_scenery" || rows[0][idx("sentiment")] != "positive" {
+		t.Errorf("row0 label mismatch: %v", rows[0])
+	}
+	if rows[0][idx("resolution")] != "agree" || rows[0][idx("needs_review")] != "false" {
+		t.Errorf("row0 resolution/needs_review mismatch: %v", rows[0])
+	}
+	if rows[0][idx("cleaned_text")] != "분위기 좋아요" {
+		t.Errorf("row0 cleaned_text: %q", rows[0][idx("cleaned_text")])
+	}
+	if rows[1][idx("resolution")] != "judge" || rows[1][idx("needs_review")] != "true" {
+		t.Errorf("row1 resolution/needs_review mismatch: %v", rows[1])
+	}
+}

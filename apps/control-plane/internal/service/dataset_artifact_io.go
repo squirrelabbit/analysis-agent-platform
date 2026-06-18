@@ -344,15 +344,14 @@ func exportClauseLabelVerifyEnrichedCSV(jsonlRef string, cleanRef string) (strin
 	        clause AS clause_text,
 	        aspect, sentiment, resolution,
 	        CAST(needs_review AS VARCHAR) AS needs_review,
-	        CAST(sentence_index AS VARCHAR) AS sentence_index,
-	        CAST(chunk_index AS VARCHAR) AS chunk_index,
-	        CAST(to_json(model_a_result) AS VARCHAR) AS model_a_result,
-	        CAST(to_json(model_b_result) AS VARCHAR) AS model_b_result,
-	        CAST(to_json(judge_result) AS VARCHAR) AS judge_result,
-	        source,
 	        _rn
 	    FROM ordered
 	)`, jsonlSource)
+	// silverone 2026-06-18 — 다운로드는 "최종 라벨만" (사용자 결정). model_a/b/judge
+	// snapshot(JSON 통째)은 행마다·aspect explode마다 반복돼 CSV를 JSON으로 도배했다.
+	// 모델별 비교는 화면 검토 큐(GetClauseLabelView verify)에만 두고, 분석용 CSV는
+	// reconcile된 최종 라벨 + resolution/needs_review(스칼라) + enrich만 노출한다.
+	// sentence_index/chunk_index/source도 분석용 다운로드에선 제외.
 
 	joinClause := ""
 	cleanColumns := "NULL AS cleaned_text, NULL AS raw_text, NULL AS created_at, NULL AS source_row_index"
@@ -367,8 +366,7 @@ func exportClauseLabelVerifyEnrichedCSV(jsonlRef string, cleanRef string) (strin
 	enrichedQuery := fmt.Sprintf(
 		`%s
 		 SELECT cl.doc_id, cl.clause_id, cl.clause_text, cl.aspect, cl.sentiment,
-		        cl.resolution, cl.needs_review, cl.sentence_index, cl.chunk_index,
-		        cl.model_a_result, cl.model_b_result, cl.judge_result, cl.source,
+		        cl.resolution, cl.needs_review,
 		        %s
 		 FROM clauses AS cl%s
 		 %s`,
@@ -387,8 +385,7 @@ func exportClauseLabelVerifyEnrichedCSV(jsonlRef string, cleanRef string) (strin
 	fallbackQuery := fmt.Sprintf(
 		`%s
 		 SELECT cl.doc_id, cl.clause_id, cl.clause_text, cl.aspect, cl.sentiment,
-		        cl.resolution, cl.needs_review, cl.sentence_index, cl.chunk_index,
-		        cl.model_a_result, cl.model_b_result, cl.judge_result, cl.source,
+		        cl.resolution, cl.needs_review,
 		        NULL AS cleaned_text, NULL AS raw_text,
 		        NULL AS created_at, NULL AS source_row_index
 		 FROM clauses AS cl
