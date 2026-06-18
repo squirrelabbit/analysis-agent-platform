@@ -163,12 +163,22 @@ export function ClauseTab() {
 
   if (isLoading) return <BuildTabLoading />;
   if (!summary) {
+    // 이전 빌드 결과(summary)가 없는 첫 실행/실패-후 실행. 진행 중이면 경과시간 +
+    // 이번 실행 프롬프트(백엔드가 in-flight job에서 내려줌)를 메타 행으로 보여준다.
+    // 완료 artifact가 없어 결과 표는 아직 없으므로 메타 + 진행 배너만 렌더한다.
     return isBuildRunning(status) ? (
-      <BuildRunningBanner
-        status={status}
-        progress={progress}
-        hasPrevious={false}
-      />
+      <div className="space-y-5">
+        <BuildMetaBar
+          status={status}
+          durationSeconds={durationSeconds}
+          applied={applied}
+        />
+        <BuildRunningBanner
+          status={status}
+          progress={progress}
+          hasPrevious={false}
+        />
+      </div>
     ) : (
       <BuildTabEmpty type="clause_label" status={status} />
     );
