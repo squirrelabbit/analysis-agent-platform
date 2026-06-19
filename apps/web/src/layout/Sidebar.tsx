@@ -3,6 +3,8 @@ import { NavLink, useLocation } from "react-router-dom";
 import { Database, FileText, MessageCircle, PanelLeft } from "lucide-react";
 import type { Project } from "@/features/projects/models/model";
 import { useReports } from "@/features/reports/hooks/reportDoc.query";
+import { useChatNav } from "@/features/chats/context/ChatNavContext";
+import ChatHistory from "@/features/chats/components/ChatHistory";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -17,6 +19,7 @@ const SIDEBAR_COLLAPSED_KEY = "sidebar_collapsed";
 export default function Sidebar({ project }: { project: Project }) {
   const { pathname } = useLocation();
   const basePath = `/projects/${project.id}`;
+  const nav = useChatNav();
 
   // 보고서 개수는 Project 메타에 없어 목록 훅으로 가져온다(목록 페이지와 캐시 공유).
   const { data: reports } = useReports(project.id);
@@ -173,6 +176,9 @@ export default function Sidebar({ project }: { project: Project }) {
             );
           })}
         </nav>
+
+        {/* 대화 이력: 메뉴 탭(보고서) 아래, 사이드바 하단을 채운다(채팅 라우트·펼침 한정). */}
+        {nav.isChatRoute && !isCollapsed && <ChatHistory />}
       </TooltipProvider>
     </aside>
   );

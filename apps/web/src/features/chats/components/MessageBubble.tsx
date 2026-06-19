@@ -1,3 +1,4 @@
+import { Pencil } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "../models";
@@ -8,11 +9,9 @@ import EvidenceCardList from "./EvidenceCardList";
 import MetricCompareView from "./MetricCompareView";
 import MessageWarnings from "./MessageWarnings";
 import PlanPanel from "./PlanPanel";
-import ResultCardActions, { type ReportSaveState } from "./ResultCardActions";
+import ResultCardActions from "./ResultCardActions";
 import RunStatus from "./RunStatus";
-
-// 결과 카드 저장 상태 타입은 ResultCardActions가 소유. 호환을 위해 재노출.
-export type { ReportSaveState };
+import EditableText from "./EditableText";
 
 // 메시지 하나에 chart/table을 동시에 펼치지 않는다 — recommended_view 기준
 // 단일 메인 결과 + 필요 시 상세 데이터 접이식.
@@ -22,18 +21,24 @@ export type { ReportSaveState };
 //   display도 없으면 텍스트만
 interface MessageBubbleProps {
   message: ChatMessage;
-  // 보고서 보관함 저장 — assistant 결과 메시지에만 연결. 핸들러가 없으면
-  // 저장 아이콘만 빠지고 나머지 결과 액션은 그대로(이력 로딩 중·user 메시지 등).
-  onSaveToReport?: () => void;
-  saveState?: ReportSaveState;
+  // 보고서 패널 적재 — assistant 결과 메시지(runId 보유)에만 연결. 핸들러가 없으면
+  // 1차 액션만 빠지고 나머지 결과 액션은 그대로(이력 로딩 중·user 메시지 등).
+  onAddToReport?: () => void;
+  isAdded?: boolean;
+  // 편집 가능한 결과 카드 제목 — 패널 카드와 양방향 동기화(같은 cardState 공유).
+  // title/onTitleChange가 함께 있을 때만 노출(runId 있는 결과 메시지).
+  title?: string;
+  onTitleChange?: (value: string) => void;
   // 결과 액션(복사/다운로드/스텁) 피드백 토스트.
   onToast?: (message: string) => void;
 }
 
 export default function MessageBubble({
   message,
-  onSaveToReport,
-  saveState = "idle",
+  onAddToReport,
+  isAdded = false,
+  title,
+  onTitleChange,
   onToast,
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
@@ -99,6 +104,19 @@ export default function MessageBubble({
           </p>
         )}
 
+        {/* 편집 가능한 결과 카드 제목 — 패널/보고서와 공유. 결과 메시지에만. */}
+        {hasResult && onTitleChange && title !== undefined && (
+          <div className="group mt-2 flex items-center gap-1.5">
+            <EditableText
+              value={title}
+              onChange={onTitleChange}
+              ariaLabel="결과 카드 제목"
+              className="min-w-0 flex-1 cursor-text rounded-md px-1.5 py-0.5 text-[13.5px] font-bold leading-snug text-zinc-900 hover:bg-zinc-50 focus:bg-white focus:ring-2 focus:ring-violet-200"
+            />
+            <Pencil className="h-3.25 w-3.25 shrink-0 text-zinc-300 opacity-0 transition group-hover:opacity-100" />
+          </div>
+        )}
+
         {/* 메인 결과 — metric > evidence > chart > table */}
         {metricMain && metric && <MetricCompareView metric={metric} />}
         {evidenceMain && evidence && <EvidenceCardList evidence={evidence} />}
@@ -120,8 +138,8 @@ export default function MessageBubble({
         {showActions && (
           <ResultCardActions
             message={message}
-            onSave={onSaveToReport}
-            saveState={saveState}
+            onAddToReport={onAddToReport}
+            isAdded={isAdded}
             onToast={onToast ?? (() => {})}
           />
         )}
