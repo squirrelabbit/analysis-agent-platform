@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Loader2, Search } from "lucide-react";
 import { useClauseKeywordClauses } from "../hooks/build.query";
 import { Pagination } from "./Pagination";
@@ -9,9 +9,37 @@ import { Pagination } from "./Pagination";
 
 const PAGE_SIZE = 20;
 
+// 절 텍스트에서 keyword 출현 위치를 <mark>로 감싼다(부분일치, 정규식 없이).
+function highlightClause(text: string, kw: string) {
+  if (!kw) return text;
+  const out: ReactNode[] = [];
+  let from = 0;
+  let idx = text.indexOf(kw);
+  let key = 0;
+  while (idx !== -1) {
+    if (idx > from) out.push(text.slice(from, idx));
+    out.push(
+      <mark
+        key={key++}
+        className="rounded bg-yellow-200 px-0.5 text-zinc-900"
+      >
+        {kw}
+      </mark>,
+    );
+    from = idx + kw.length;
+    idx = text.indexOf(kw, from);
+  }
+  out.push(text.slice(from));
+  return out;
+}
+
 export default function KeywordClauseTable() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  // 클릭한 키워드 → 그 절에서 위치 하이라이트. {row index, keyword}.
+  const [selected, setSelected] = useState<{ row: number; kw: string } | null>(
+    null,
+  );
 
   const { data, isLoading, isPlaceholderData } = useClauseKeywordClauses({
     q: search.trim() || undefined,
@@ -30,6 +58,10 @@ export default function KeywordClauseTable() {
   useEffect(() => {
     setPage(1);
   }, [search]);
+  // 페이지/검색이 바뀌면 행이 달라지므로 선택 하이라이트 해제.
+  useEffect(() => {
+    setSelected(null);
+  }, [page, search]);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-zinc-100 bg-white shadow-sm">
@@ -86,7 +118,9 @@ export default function KeywordClauseTable() {
               rows.map((r, i) => (
                 <tr key={i} className="transition-colors hover:bg-zinc-50/60">
                   <td className="px-4 py-3 align-top text-[13px] leading-relaxed text-zinc-700">
-                    {r.clause}
+                    {selected?.row === i
+                      ? highlightClause(r.clause, selected.kw)
+                      : r.clause}
                     {r.occurrenceCount > 1 && (
                       <span
                         className="ml-1.5 inline-block rounded bg-zinc-100 px-1.5 py-0.5 align-middle text-[11px] font-semibold text-zinc-500"
@@ -98,14 +132,26 @@ export default function KeywordClauseTable() {
                   </td>
                   <td className="px-4 py-3 align-top">
                     <div className="flex flex-wrap gap-1.5">
-                      {r.keywords.map((k) => (
-                        <span
-                          key={k}
-                          className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-violet-700"
-                        >
-                          {k}
-                        </span>
-                      ))}
+                      {r.keywords.map((k) => {
+                        const on = selected?.row === i && selected.kw === k;
+                        return (
+                          <button
+                            key={k}
+                            type="button"
+                            title="클릭하면 절에서 위치를 하이라이트"
+                            onClick={() =>
+                              setSelected(on ? null : { row: i, kw: k })
+                            }
+                            className={`rounded-full px-2.5 py-1 text-xs font-bold transition-colors ${
+                              on
+                                ? "bg-yellow-200 text-zinc-900 ring-1 ring-yellow-400"
+                                : "bg-violet-50 text-violet-700 hover:bg-violet-100"
+                            }`}
+                          >
+                            {k}
+                          </button>
+                        );
+                      })}
                     </div>
                   </td>
                 </tr>

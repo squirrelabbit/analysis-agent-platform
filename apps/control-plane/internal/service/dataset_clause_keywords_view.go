@@ -210,8 +210,9 @@ func loadClauseKeywordsArtifact(ref string, limit, offset int, aspect, sentiment
 // loadClauseGroupedKeywords — 절 중심 item table. SNS 리포스트/복붙으로 같은 절 텍스트가
 // 여러 doc에 반복되므로, clause_id가 아니라 **절 텍스트로 묶어 중복 제거**한다(고유 절만).
 // occurrence_count로 그 절이 몇 번 등장했는지 함께 준다. 절(clause)마다 추출된 키워드를
-// 배열로 묶어 {clause, keywords[], occurrence_count}로 돌려준다. q(절 본문 또는 키워드
-// 부분일치)로 절을 거르고, 키워드 많은 절 우선 정렬.
+// 배열로 묶어 {clause, keywords[], occurrence_count}로 돌려준다. 키워드는 절에서 뽑힌
+// 순서(keyword_rank_in_clause)대로 정렬한다(프론트 하이라이트가 절 위치와 맞도록).
+// q(절 본문 또는 키워드 부분일치)로 절을 거르고, 키워드 많은 절 우선 정렬.
 func loadClauseGroupedKeywords(db *sql.DB, source string, limit, offset int, q string) (int, []map[string]any, error) {
 	clauseFilter := ""
 	if term := strings.TrimSpace(q); term != "" {
@@ -229,20 +230,30 @@ func loadClauseGroupedKeywords(db *sql.DB, source string, limit, offset int, q s
 		return 0, nil, err
 	}
 
+	// base: 절 텍스트 dedup 전 행. kw: 절×키워드 dedup(중복 절의 같은 키워드는 최소 rank로).
+	// keywords는 list(... ORDER BY rk)로 절 등장 순서 유지.
 	itemQuery := fmt.Sprintf(
-		`WITH grouped AS (
+		`WITH base AS (
+		    SELECT clause, keyword, clause_id, keyword_rank_in_clause AS rk
+		    FROM %[1]s
+		    WHERE keyword IS NOT NULL %[2]s
+		 ),
+		 kw AS (
+		    SELECT clause, keyword, MIN(rk) AS rk FROM base GROUP BY clause, keyword
+		 ),
+		 occ AS (
+		    SELECT clause, COUNT(DISTINCT clause_id) AS occurrence_count FROM base GROUP BY clause
+		 ),
+		 grouped AS (
 		    SELECT clause,
-		           CAST(to_json(list(DISTINCT keyword)) AS VARCHAR) AS keywords,
-		           COUNT(DISTINCT keyword) AS keyword_count,
-		           COUNT(DISTINCT clause_id) AS occurrence_count
-		    FROM %s
-		    WHERE keyword IS NOT NULL %s
-		    GROUP BY clause
+		           CAST(to_json(list(keyword ORDER BY rk, keyword)) AS VARCHAR) AS keywords,
+		           COUNT(*) AS keyword_count
+		    FROM kw GROUP BY clause
 		 )
-		 SELECT clause, keywords, occurrence_count
-		 FROM grouped
-		 ORDER BY keyword_count DESC, clause
-		 LIMIT %d OFFSET %d`,
+		 SELECT g.clause, g.keywords, o.occurrence_count
+		 FROM grouped g JOIN occ o ON g.clause = o.clause
+		 ORDER BY g.keyword_count DESC, g.clause
+		 LIMIT %[3]d OFFSET %[4]d`,
 		source, clauseFilter, limit, offset,
 	)
 	rows, err := scanArtifactRows(db, itemQuery, []string{"clause", "keywords", "occurrence_count"})
