@@ -49,6 +49,7 @@ import {
   BuildTabLoading,
   isBuildRunning,
 } from "../BuildStatusMeta";
+import ClauseDocDialog from "../ClauseDocDialog";
 
 // 드릴다운 selector의 "전체" 항목 sentinel key (실제 aspect key와 충돌 방지).
 const ALL_KEY = "__all__";
@@ -116,6 +117,8 @@ export function ClauseTab() {
   const [page, setPage] = useState(1);
   // 드릴다운: 선택된 aspect key (null이면 건수 1위 aspect로 fallback)
   const [activeAspect, setActiveAspect] = useState<string | null>(null);
+  // 문서 ID 클릭 시 원본 텍스트 + 추출된 절 다이얼로그를 띄울 대상 docId.
+  const [docDialogId, setDocDialogId] = useState<string | null>(null);
   const pageSize = 10;
 
   // 교차검증 배너의 모델 id→표시명 변환 (allowlist).
@@ -327,6 +330,22 @@ export function ClauseTab() {
   }
 
   const columns: Column<ClauseItem>[] = [
+    {
+      header: "문서 ID",
+      headerClassName: "w-30",
+      cell: (item) => (
+        <td className="px-4 py-3">
+          <button
+            type="button"
+            onClick={() => setDocDialogId(item.docId)}
+            title="원본 텍스트와 추출된 절 보기"
+            className="block cursor-pointer max-w-35 truncate border-b border-dashed text-xs  transition-colors hover:border-violet-500 hover:text-violet-700"
+          >
+            {item.docId}
+          </button>
+        </td>
+      ),
+    },
     {
       header: "문장",
       headerClassName: "w-80",
@@ -732,6 +751,13 @@ export function ClauseTab() {
         totalCount={totalCount}
         onPageChange={setPage}
         loading={tableLoading}
+      />
+
+      {/* 문서 ID 클릭 → 원본 텍스트 + 추출된 절 다이얼로그 */}
+      <ClauseDocDialog
+        docId={docDialogId}
+        items={items ?? []}
+        onClose={() => setDocDialogId(null)}
       />
     </div>
   );

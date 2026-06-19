@@ -7,10 +7,10 @@ import type { BuildJobType } from "@/shared/types/common";
  */
 export const BUILD_LABELS: Record<BuildJobType, string> = {
   source: "원본",
-  clean: "데이터 정제",
-  doc_genuineness: "진성 분석",
-  clause_label: "절 라벨링",
-  clause_keywords: "키워드 분석",
+  clean: "키워드 기반 정제",
+  doc_genuineness: "진성 문서 분류",
+  clause_label: "절 추출 및 라벨링",
+  clause_keywords: "키워드 추출",
 };
 
 export const buildLabel = (type: BuildJobType): string =>
