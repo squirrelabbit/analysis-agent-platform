@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Loader2, Search } from "lucide-react";
 import { useClauseKeywordClauses } from "../hooks/build.query";
 import { Pagination } from "./Pagination";
@@ -12,7 +12,7 @@ const PAGE_SIZE = 20;
 // 절 텍스트에서 keyword 출현 위치를 <mark>로 감싼다(부분일치, 정규식 없이).
 function highlightClause(text: string, kw: string) {
   if (!kw) return text;
-  const out: (string | JSX.Element)[] = [];
+  const out: ReactNode[] = [];
   let from = 0;
   let idx = text.indexOf(kw);
   let key = 0;
