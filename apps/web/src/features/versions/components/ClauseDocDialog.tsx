@@ -13,8 +13,8 @@ import {
   type Sentiment,
 } from "@/features/versions/constants/sentiment";
 import { cn } from "@/lib/utils";
-import type { ClauseItem } from "../../models/build";
-import { FilterPills } from "../DataTable";
+import type { ClauseItem } from "../models/build";
+import { FilterPills } from "./DataTable";
 
 // 시안 「처리 현황 대시보드 (키워드 분석 탭 추가)」의 문서 다이얼로그.
 // 문서 ID를 누르면 그 문서의 "원본 텍스트(추출된 절을 감성색으로 강조)" + "추출된 절"

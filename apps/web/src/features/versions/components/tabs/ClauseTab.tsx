@@ -49,7 +49,7 @@ import {
   BuildTabLoading,
   isBuildRunning,
 } from "../BuildStatusMeta";
-import ClauseDocDialog from "./ClauseDocDialog";
+import ClauseDocDialog from "../ClauseDocDialog";
 
 // 드릴다운 selector의 "전체" 항목 sentinel key (실제 aspect key와 충돌 방지).
 const ALL_KEY = "__all__";
