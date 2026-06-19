@@ -324,9 +324,9 @@ func TestLoadClauseKeywords_ClauseGroup(t *testing.T) {
 	if len(kws) != 2 {
 		t.Fatalf("first clause keywords = %v, want 2 (가격·푸드트럭)", kws)
 	}
-	joined := strings.Join(kws, ",")
-	if !strings.Contains(joined, "가격") || !strings.Contains(joined, "푸드트럭") {
-		t.Fatalf("first clause keywords = %v, want 가격·푸드트럭", kws)
+	// 키워드는 절에서 뽑힌 순서(keyword_rank_in_clause)대로: 가격(rank1) → 푸드트럭(rank2).
+	if kws[0] != "가격" || kws[1] != "푸드트럭" {
+		t.Fatalf("키워드 순서 = %v, want [가격, 푸드트럭] (rank 순)", kws)
 	}
 }
 
