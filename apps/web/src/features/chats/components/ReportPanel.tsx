@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileText, Loader2, Pencil, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ReportPanelApi } from "../hooks/useReportPanel";
@@ -39,6 +39,49 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 
+  // 드래그로 카드 순서 변경 시, 리스트 위/아래 가장자리에서 자동 스크롤.
+  // (HTML5 DnD는 컨테이너를 자동 스크롤해 주지 않아 화면 밖으로 못 옮기는 문제 해결.)
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const autoScroll = useRef<{ vy: number; raf: number }>({ vy: 0, raf: 0 });
+
+  const tickAutoScroll = () => {
+    const el = scrollRef.current;
+    const { vy } = autoScroll.current;
+    if (el && vy !== 0) {
+      el.scrollTop += vy;
+      autoScroll.current.raf = requestAnimationFrame(tickAutoScroll);
+    } else {
+      autoScroll.current.raf = 0;
+    }
+  };
+
+  const updateAutoScroll = (clientY: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const EDGE = 56; // 가장자리 감지 영역(px)
+    const MAX = 16; // 프레임당 최대 스크롤(px)
+    let vy = 0;
+    if (clientY < r.top + EDGE)
+      vy = -MAX * Math.min(1, (r.top + EDGE - clientY) / EDGE);
+    else if (clientY > r.bottom - EDGE)
+      vy = MAX * Math.min(1, (clientY - (r.bottom - EDGE)) / EDGE);
+    autoScroll.current.vy = vy;
+    if (vy !== 0 && !autoScroll.current.raf)
+      autoScroll.current.raf = requestAnimationFrame(tickAutoScroll);
+  };
+
+  const stopAutoScroll = () => {
+    autoScroll.current.vy = 0;
+    if (autoScroll.current.raf) {
+      cancelAnimationFrame(autoScroll.current.raf);
+      autoScroll.current.raf = 0;
+    }
+  };
+
+  // 언마운트 시 진행 중인 자동 스크롤 정리.
+  useEffect(() => stopAutoScroll, []);
+
   function handleDrop() {
     if (dragIndex !== null && dropTarget !== null && dropTarget.index !== dragIndex) {
       const from = dragIndex;
@@ -48,6 +91,7 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
     }
     setDragIndex(null);
     setDropTarget(null);
+    stopAutoScroll();
   }
 
   function dropHintFor(index: number): DropHint {
@@ -61,10 +105,10 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
     <div
       className={cn(
         "flex shrink-0 flex-col overflow-hidden border-l border-zinc-200 bg-white transition-[width] duration-300 ease-in-out",
-        panelOpen ? "w-[432px]" : "w-0",
+        panelOpen ? "w-108" : "w-0",
       )}
     >
-      <div className="flex h-full w-[432px] flex-col">
+      <div className="flex h-full w-108 flex-col">
         {/* header */}
         <div className="flex shrink-0 items-center gap-2.5 border-b border-zinc-200 px-4 py-3.5">
           <span className="grid h-7.5 w-7.5 place-items-center rounded-lg bg-violet-50 text-violet-700">
@@ -93,7 +137,7 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
             <h4 className="text-[14.5px] font-bold text-zinc-600">
               아직 추가된 결과가 없습니다
             </h4>
-            <p className="max-w-[230px] text-[12.5px] leading-relaxed text-zinc-400">
+            <p className="max-w-57.5 text-[12.5px] leading-relaxed text-zinc-400">
               분석 결과 카드의 <b className="font-semibold">보고서에 추가</b>를 누르면
               여기에 쌓이고, 한 번에 보고서로 만들 수 있습니다.
             </p>
@@ -117,7 +161,14 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
             </div>
 
             {/* card list */}
-            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3.5">
+            <div
+              ref={scrollRef}
+              onDragOver={(e) => {
+                if (dragIndex === null) return;
+                updateAutoScroll(e.clientY);
+              }}
+              className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3.5"
+            >
               {staged.map((runId, index) => {
                 const msg = messageOf(runId);
                 if (!msg) return null;
@@ -126,7 +177,6 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
                   <ReportPanelCard
                     key={runId}
                     message={msg}
-                    index={index}
                     title={cs.title}
                     note={cs.note}
                     onTitleChange={(v) => setTitle(runId, v)}
@@ -140,6 +190,7 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
                     onDragEndCard={() => {
                       setDragIndex(null);
                       setDropTarget(null);
+                      stopAutoScroll();
                     }}
                   />
                 );
