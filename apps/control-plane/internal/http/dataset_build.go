@@ -265,12 +265,13 @@ func (s *Server) handleGetClauseKeywordsView(w stdhttp.ResponseWriter, r *stdhtt
 	aspect := strings.TrimSpace(r.URL.Query().Get("aspect"))
 	sentiment := strings.TrimSpace(r.URL.Query().Get("sentiment"))
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	group := strings.TrimSpace(r.URL.Query().Get("group"))
 	view, err := s.datasetService.GetClauseKeywordsView(
 		r.PathValue("project_id"),
 		r.PathValue("dataset_id"),
 		r.PathValue("version_id"),
 		limit, offset,
-		aspect, sentiment, q,
+		aspect, sentiment, q, group,
 	)
 	if err != nil {
 		s.writeServiceError(w, err)

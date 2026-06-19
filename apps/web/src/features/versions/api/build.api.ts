@@ -12,6 +12,8 @@ export interface BuildViewParams {
   needs_review?: boolean;
   // 키워드/절 부분일치 검색 (clause_keywords 등).
   q?: string;
+  // clause_keywords item 집계 단위. "clause"면 절 중심({clause, keywords[]}).
+  group?: string;
 }
 
 // 전처리 빌드(doc_genuineness/clause_label) 모델 선택지 (LLOA_MODELS allowlist).

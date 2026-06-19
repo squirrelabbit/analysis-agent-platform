@@ -48,7 +48,7 @@ func setupClauseKeywordsFixture(t *testing.T) string {
 
 func TestLoadClauseKeywords_SummaryKPI(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	summary, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "")
+	summary, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestLoadClauseKeywords_SummaryKPI(t *testing.T) {
 
 func TestLoadClauseKeywords_ItemColumns(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	_, _, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "")
+	_, _, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestLoadClauseKeywords_ItemColumns(t *testing.T) {
 
 func TestLoadClauseKeywords_AspectSummary(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "")
+	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestLoadClauseKeywords_AspectSummary(t *testing.T) {
 func TestLoadClauseKeywords_SelectedAspectSentiment(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
 	// aspect=food 선택 → 그 aspect 안의 sentiment 분포.
-	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "food", "", "")
+	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "food", "", "", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestLoadClauseKeywords_SelectedAspectSentiment(t *testing.T) {
 
 func TestLoadClauseKeywords_TopKeywords(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "")
+	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestLoadClauseKeywords_TopKeywords(t *testing.T) {
 func TestLoadClauseKeywords_Filters(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
 	// aspect=food + sentiment=negative → 행 가격,푸드트럭,가격 → distinct keyword 2(가격,푸드트럭).
-	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "food", "negative", "")
+	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "food", "negative", "", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestLoadClauseKeywords_Filters(t *testing.T) {
 func TestLoadClauseKeywords_QFilter(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
 	// q=맛 → keyword '맛' 또는 clause '맛 좋음' 부분일치 → keyword 맛 1종.
-	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "맛")
+	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "맛", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestLoadClauseKeywords_QFilter(t *testing.T) {
 
 func TestLoadClauseKeywords_Pagination(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	_, total, items, err := loadClauseKeywordsArtifact(path, 2, 0, "", "", "")
+	_, total, items, err := loadClauseKeywordsArtifact(path, 2, 0, "", "", "", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestLoadClauseKeywords_Pagination(t *testing.T) {
 
 func TestLoadClauseKeywords_AspectSentimentKeywords(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "")
+	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestLoadClauseKeywords_WordCloudCap30(t *testing.T) {
 	if err := os.WriteFile(path, []byte(joinLines(lines)), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "")
+	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -290,13 +290,58 @@ func TestLoadClauseKeywords_TopCardCappedAt5(t *testing.T) {
 	if err := os.WriteFile(path, []byte(joinLines(lines)), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "")
+	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	neg := summary["top_keywords_negative"].([]map[string]any)
 	if len(neg) != 5 {
 		t.Fatalf("top_keywords_negative = %d, want 5 (card cap)", len(neg))
+	}
+}
+
+// silverone 2026-06-19 — group=clause: "절에서 추출된 키워드" 표용 절 중심 집계.
+// 절(clause_id)마다 {clause, keywords[]}. 키워드 많은 절 우선.
+func TestLoadClauseKeywords_ClauseGroup(t *testing.T) {
+	path := setupClauseKeywordsFixture(t)
+	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "clause")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// distinct clause = 5 (d1__1/d1__2/d2__1/d2__2/d3__1).
+	if total != 5 || len(items) != 5 {
+		t.Fatalf("clause group total=%d items=%d, want 5/5", total, len(items))
+	}
+	// 키워드 2개인 d1__1 "푸드트럭 가격이 비쌈"이 먼저(keyword_count DESC).
+	first := items[0]
+	if fmt.Sprint(first["clause"]) != "푸드트럭 가격이 비쌈" {
+		t.Fatalf("first clause = %v, want 푸드트럭 가격이 비쌈", first["clause"])
+	}
+	kws, ok := first["keywords"].([]string)
+	if !ok {
+		t.Fatalf("keywords type = %T, want []string", first["keywords"])
+	}
+	if len(kws) != 2 {
+		t.Fatalf("first clause keywords = %v, want 2 (가격·푸드트럭)", kws)
+	}
+	joined := strings.Join(kws, ",")
+	if !strings.Contains(joined, "가격") || !strings.Contains(joined, "푸드트럭") {
+		t.Fatalf("first clause keywords = %v, want 가격·푸드트럭", kws)
+	}
+}
+
+func TestLoadClauseKeywords_ClauseGroupSearch(t *testing.T) {
+	path := setupClauseKeywordsFixture(t)
+	// q=친절 → clause '직원 친절' 또는 keyword '친절' 매칭 → 절 1개.
+	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "친절", "clause")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("q=친절 clause group total=%d items=%d, want 1/1", total, len(items))
+	}
+	if fmt.Sprint(items[0]["clause"]) != "직원 친절" {
+		t.Fatalf("q=친절 clause = %v, want 직원 친절", items[0]["clause"])
 	}
 }
 
