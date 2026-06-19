@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { buildKeys } from "../api/version.key";
 import { useVersionParams } from "@/shared/hooks/useRouteParams";
 import { buildApi, type BuildViewParams } from "../api/build.api";
-import { mapBuild } from "../models/build";
+import { mapBuild, mapKeywordClauseView } from "../models/build";
 import type { BuildJobType } from "@/shared/types/common";
 
 // 전처리 모델 선택지 — env allowlist라 거의 변하지 않으므로 stale을 길게.
@@ -73,5 +73,26 @@ export const useBuildVersion = (
     },
 
     select: mapBuild,
+  });
+};
+
+// "절에서 추출된 키워드" 표 전용 — clause_keywords를 group=clause로 조회.
+// mapBuild(키워드 중심)와 item shape이 달라 별도 hook + 매퍼를 쓴다. 서버 q 검색 +
+// limit/offset 페이징.
+export const useClauseKeywordClauses = (params?: BuildViewParams) => {
+  const { projectId, datasetId, versionId } = useVersionParams();
+  return useQuery({
+    queryKey: [
+      ...buildKeys.build(versionId, "clause_keywords", undefined),
+      "clause-group",
+      params ?? {},
+    ],
+    queryFn: () =>
+      buildApi.getBuildVersion(projectId, datasetId, versionId, "clause_keywords", {
+        ...(params ?? {}),
+        group: "clause",
+      }),
+    select: mapKeywordClauseView,
+    placeholderData: keepPreviousData,
   });
 };
