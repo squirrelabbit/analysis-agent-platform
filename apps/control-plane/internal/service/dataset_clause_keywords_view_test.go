@@ -345,6 +345,43 @@ func TestLoadClauseKeywords_ClauseGroupSearch(t *testing.T) {
 	}
 }
 
+// silverone 2026-06-19 — SNS 리포스트로 같은 절 텍스트가 여러 doc에 반복 → 절 표는
+// 절 텍스트로 dedup. 같은 clause 2개 clause_id면 1행 + occurrence_count=2.
+func TestLoadClauseKeywords_ClauseGroupDedup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ck.jsonl")
+	lines := []string{
+		// 동일 절 "맛 좋음"이 서로 다른 doc/clause_id로 2번 (리포스트).
+		`{"doc_id":"d1","clause_id":"d1__1","clause":"맛 좋음","aspect":"food","sentiment":"positive","keyword":"맛","keyword_rank_in_clause":1,"source":"kiwi","extractor_version":"v"}`,
+		`{"doc_id":"d2","clause_id":"d2__1","clause":"맛 좋음","aspect":"food","sentiment":"positive","keyword":"맛","keyword_rank_in_clause":1,"source":"kiwi","extractor_version":"v"}`,
+		`{"doc_id":"d3","clause_id":"d3__1","clause":"공연 최고","aspect":"program","sentiment":"positive","keyword":"공연","keyword_rank_in_clause":1,"source":"kiwi","extractor_version":"v"}`,
+	}
+	if err := os.WriteFile(path, []byte(joinLines(lines)), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "clause")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// clause_id는 3개지만 고유 절 텍스트는 2개 → dedup으로 2행.
+	if total != 2 || len(items) != 2 {
+		t.Fatalf("dedup total=%d items=%d, want 2/2 (고유 절)", total, len(items))
+	}
+	// "맛 좋음"의 occurrence_count = 2.
+	var found bool
+	for _, it := range items {
+		if fmt.Sprint(it["clause"]) == "맛 좋음" {
+			found = true
+			if fmt.Sprint(it["occurrence_count"]) != "2" {
+				t.Fatalf("'맛 좋음' occurrence_count=%v, want 2", it["occurrence_count"])
+			}
+		}
+	}
+	if !found {
+		t.Fatal("'맛 좋음' 행이 없음")
+	}
+}
+
 func TestBuildKeywordFilter(t *testing.T) {
 	if got := buildKeywordFilter("", "", ""); got != "" {
 		t.Fatalf("empty filter = %q, want empty", got)

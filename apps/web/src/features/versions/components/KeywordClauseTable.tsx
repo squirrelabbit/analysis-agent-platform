@@ -87,6 +87,14 @@ export default function KeywordClauseTable() {
                 <tr key={i} className="transition-colors hover:bg-zinc-50/60">
                   <td className="px-4 py-3 align-top text-[13px] leading-relaxed text-zinc-700">
                     {r.clause}
+                    {r.occurrenceCount > 1 && (
+                      <span
+                        className="ml-1.5 inline-block rounded bg-zinc-100 px-1.5 py-0.5 align-middle text-[11px] font-semibold text-zinc-500"
+                        title={`같은 문장이 ${r.occurrenceCount}개 문서에 등장 (리포스트/복붙)`}
+                      >
+                        ×{r.occurrenceCount}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 align-top">
                     <div className="flex flex-wrap gap-1.5">

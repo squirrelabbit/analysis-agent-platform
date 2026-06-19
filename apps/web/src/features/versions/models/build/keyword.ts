@@ -166,6 +166,8 @@ export const mapKeywordSummary = (dto: KeywordSummaryDto): KeywordSummary => ({
 export interface KeywordClauseRow {
   clause: string;
   keywords: string[];
+  // 같은 절 텍스트가 등장한 횟수(리포스트 dedup). 1이면 단일.
+  occurrenceCount: number;
 }
 export interface KeywordClauseView {
   status?: string;
@@ -174,13 +176,14 @@ export interface KeywordClauseView {
 }
 export const mapKeywordClauseView = (dto: {
   status?: string;
-  items?: { clause?: string; keywords?: string[] }[];
+  items?: { clause?: string; keywords?: string[]; occurrence_count?: number | string }[];
   pagination?: { total?: number };
 }): KeywordClauseView => ({
   status: dto?.status,
   items: (dto?.items ?? []).map((r) => ({
     clause: String(r?.clause ?? ""),
     keywords: Array.isArray(r?.keywords) ? r.keywords.map(String) : [],
+    occurrenceCount: Number(r?.occurrence_count ?? 1),
   })),
   total: dto?.pagination?.total ?? 0,
 });
