@@ -136,16 +136,23 @@ class ExecutorContext:
     def _register_genuineness(self) -> None:
         path = self._require_existing(self._artifact_paths.genuineness, "genuineness")
         literal = self._escape_path_literal(path)
+        source = f"read_json('{literal}', format='newline_delimited')"
+        # 단일모드 산출물은 ``genuineness``/``reason`` 컬럼, 교차검증(verify, ADR-026) 산출물은
+        # ``final_label``(+ reason 없음)을 쓴다. 둘 다 doc-level 3-tier 최종 라벨이므로 plan_v2
+        # 호환을 위해 ``genuineness`` 컬럼으로 통일해 노출한다.
+        cols = {row[0] for row in self._con.execute(f"DESCRIBE SELECT * FROM {source}").fetchall()}
+        genuineness_expr = "genuineness" if "genuineness" in cols else "final_label AS genuineness"
+        reason_expr = "reason" if "reason" in cols else "CAST(NULL AS VARCHAR) AS reason"
         self._con.execute(
             f"""
             CREATE OR REPLACE VIEW genuineness AS
             SELECT
               doc_id,
-              genuineness,
-              reason,
+              {genuineness_expr},
+              {reason_expr},
               prompt_version,
               source
-            FROM read_json('{literal}', format='newline_delimited')
+            FROM {source}
             """
         )
 

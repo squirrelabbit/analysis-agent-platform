@@ -537,5 +537,74 @@ class ClauseLabelVerifyPartialJudgeTests(unittest.TestCase):
         self.assertIsNotNone(by_idx[2]["judge_result"])
 
 
+class ClauseLabelVerifyPrimaryAreaTests(unittest.TestCase):
+    """ADR-030 Phase 1 — primary_area 병렬 관측. summary 통계 + row snapshot 잠금.
+    primary_area는 reconcile에 안 쓰고(aspects/sentiment 판정 독립) 관측만 한다."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.clean = Path(self.tmp.name) / "clean.jsonl"
+        self.out = Path(self.tmp.name) / "out.jsonl"
+        with self.clean.open("w", encoding="utf-8") as f:
+            f.write(json.dumps({"row_id": "d1", "cleaned_text": "본문"}, ensure_ascii=False) + "\n")
+
+    def test_primary_area_collected(self) -> None:
+        from python_ai_worker.dataset_build import clause_label_verify as v
+
+        sentences = ["맥주 맛있었다", "공연 좋았다"]
+        # 두 모델 모두 primary_area emit. s1 일치(food), s2 aspect/sentiment는 합의지만
+        # primary_area는 불일치(content vs overall) → reconcile은 agree, primary_area만 갈림.
+        la = [
+            {"index": 1, "relevant": True, "sentiment": "positive", "aspects": ["food"], "primary_area": "food_beverage"},
+            {"index": 2, "relevant": True, "sentiment": "positive", "aspects": ["show_program"], "primary_area": "content_program"},
+        ]
+        lb = [
+            {"index": 1, "relevant": True, "sentiment": "positive", "aspects": ["food"], "primary_area": "food_beverage"},
+            {"index": 2, "relevant": True, "sentiment": "positive", "aspects": ["show_program"], "primary_area": "overall"},
+        ]
+
+        def make(model: str):
+            def _fake(req, timeout=None):  # type: ignore[no-untyped-def]
+                user = json.loads(req.data.decode("utf-8"))["messages"][1]["content"]
+                if "candidate_1" in user:
+                    return _Resp(_completion("[]"))
+                return _Resp(_completion(json.dumps(la if model == "model-a" else lb, ensure_ascii=False)))
+            return _fake
+
+        orig = v.LloaClient.__init__
+
+        def _init(self, config, *, urlopen=None):
+            orig(self, config, urlopen=make(config.model))
+
+        payload = {
+            "dataset_version_id": "ver1", "clean_artifact_ref": str(self.clean),
+            "output_path": str(self.out), "verify": True,
+            "classify_models": ["model-a", "model-b"], "judge_model": "model-judge",
+            "include_genuineness": [],
+            "doc_genuineness": {"subject_type": "festival", "subject_name": "테스트축제"},
+            "concurrency": 1,
+        }
+        with patch.object(v, "load_config", return_value=_fake_config()), \
+             patch.object(v.LloaClient, "__init__", _init), \
+             patch.object(v, "_split_anchor_sentences", return_value=sentences):
+            result = v.run_dataset_clause_label_verify(payload)
+
+        pa = result["artifact"]["summary"]["primary_area"]
+        self.assertEqual(pa["both_count"], 2)
+        self.assertEqual(pa["agree_count"], 1)         # s1만 일치
+        self.assertEqual(pa["agreement_rate"], 0.5)
+        self.assertIn("food_beverage", pa["distribution_model_a"])
+        self.assertIn("content_program↔overall", pa["confusion_top"])
+
+        # primary_area는 reconcile에 안 쓰임 — s2도 aspect/sentiment 합의라 resolution=agree.
+        rows = [json.loads(l) for l in self.out.read_text(encoding="utf-8").splitlines() if l.strip()]
+        self.assertTrue(all(r["resolution"] == "agree" for r in rows))
+        # row snapshot에 primary_area 적재.
+        s1 = next(r for r in rows if r["sentence_index"] == 1)
+        self.assertEqual(s1["model_a_result"]["primary_area"], "food_beverage")
+        self.assertEqual(s1["model_b_result"]["primary_area"], "food_beverage")
+
+
 if __name__ == "__main__":
     unittest.main()
