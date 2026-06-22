@@ -5,7 +5,7 @@
   "note": "축제/행사 SNS 후기 family 공유 MECE. aspect taxonomy(config/taxonomies/*.json, per-dataset)와 달리 도메인 공유라 단일 파일. 프롬프트에 {{PRIMARY_AREA}}로 주입.",
   "areas": [
     {"key": "food_beverage", "desc": "먹고 마시는 것(음식·음료·맥주·안주·맛·메뉴). 가격은 제외."},
-    {"key": "content_program", "desc": "보고 듣는 프로그램(공연·음악·드론쇼·쇼·MC). 관람형."},
+    {"key": "content_program", "desc": "관람형 콘텐츠 전반 — 공연·음악·드론쇼·퍼레이드·전시·문화재 관람·야간 개방·해설 프로그램·패션쇼 등 방문자가 보고 즐기는 프로그램. (직접 만들기/참여=hands_on, 야경·분위기만 말하면 atmosphere)"},
     {"key": "hands_on_experience", "desc": "직접 하는 참여 활동(만들기·스탬프·포토·게임·시식부스·이벤트). 참여형."},
     {"key": "operation_admission", "desc": "운영·입장·결제·안내·진행 방식 자체(입장권·결제·쿠폰·환급·증정 운영·안내·기획)."},
     {"key": "site_facility", "desc": "행사장 물리 시설·공간(천막·자리·테이블·화장실·음향장비·무대구조)."},
@@ -19,6 +19,6 @@
     "먹는것/맛/메뉴 자체=food_beverage. 그 음식의 줄·결제·부스 운영=operation_admission (시음은 맛 평가면 food).",
     "입장·결제·안내·진행=operation_admission, 천막·자리·화장실·음향=site_facility.",
     "현장 분위기·경관 묘사=atmosphere (overall 아님). overall은 '축제 전체' 종합평·재방문·추천만.",
-    "관람=content_program, 참여=hands_on_experience."
+    "보는 콘텐츠(공연·전시·문화재 관람·야간개방·해설)=content_program / 직접 만들기·참여·스탬프·게임=hands_on_experience / 야경·분위기만=atmosphere / 축제 전체 추천·재방문·종합만족=overall."
   ]
 }
