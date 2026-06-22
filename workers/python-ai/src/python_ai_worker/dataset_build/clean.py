@@ -217,8 +217,6 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
             # 신호라 거친 제거가 해롭다. 남은 책임은 known noise phrase strip +
             # whitespace 정규화. 도메인 필터링은 regex_rule_names로 명시.
             cleaned_text = rt._strip_known_noise_phrases(scrubbed_text)
-            source_input_char_count += len(raw_text)
-            cleaned_input_char_count += len(cleaned_text)
             if not cleaned_text:
                 dropped_count += 1
                 continue
@@ -237,6 +235,10 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
                     continue
                 seen_cleaned_texts.add(cleaned_text)
 
+            # char 통계는 실제 유지된 행만 집계(중복/빈 행 제외) — '원본 대비 정제'가
+            # 출력 데이터와 일치하도록. (dedup 도입 전엔 빈 행 raw도 셌으나 kept 기준으로 정정.)
+            source_input_char_count += len(raw_text)
+            cleaned_input_char_count += len(cleaned_text)
             kept_count += 1
             # silverone 2026-05-28 (clean 정식화) — 표준 9 컬럼만 build.
             # 원본 row(한글/BOM/괄호 포함)는 source_json에 직렬화 보존.
