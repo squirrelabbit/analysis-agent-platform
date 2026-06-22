@@ -277,6 +277,69 @@ class AnalysisColumnMaterializationTests(CleanRunIntegrationTests):
             )
             self.assertEqual(result["artifact"]["summary"]["analysis_columns"], [])
 
+    def test_dedup_removes_duplicate_content(self):
+        # silverone 2026-06-22 — 검색 키워드 팬아웃 재현: 같은 본문이 keyword만
+        # 다르게 3번 + 고유 1건. 본문(cleaned_text) 기준 dedup으로 2건만 유지.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            csv_path = self._write_csv(
+                tmp_path,
+                rows=[
+                    {"uuid": "p1", "keyword": "kw_a", "본문": "행사장 준비 잘 해놨네요"},
+                    {"uuid": "p1", "keyword": "kw_b", "본문": "행사장 준비 잘 해놨네요"},
+                    {"uuid": "p1", "keyword": "kw_c", "본문": "행사장 준비 잘 해놨네요"},
+                    {"uuid": "p2", "keyword": "kw_a", "본문": "맥주가 맛있네요"},
+                ],
+                header=["uuid", "keyword", "본문"],
+            )
+            output_path = tmp_path / "cleaned.parquet"
+            result = self._run_clean(
+                {
+                    "dataset_version_id": "test-dedup",
+                    "dataset_name": str(csv_path),
+                    "text_columns": ["본문"],
+                    "output_path": str(output_path),
+                    "progress_path": str(tmp_path / "progress.json"),
+                }
+            )
+            kept = pq.read_table(output_path).to_pylist()
+            self.assertEqual(len(kept), 2, "본문 중복 제거 후 2건이어야 함")
+            self.assertEqual(
+                sorted(r["cleaned_text"] for r in kept),
+                ["맥주가 맛있네요", "행사장 준비 잘 해놨네요"],
+            )
+            summary = result["artifact"]["summary"]
+            self.assertEqual(summary["deduped_count"], 2)
+            self.assertEqual(summary["kept_count"], 2)
+            self.assertTrue(summary["dedup_enabled"])
+
+    def test_dedup_disabled_keeps_duplicates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            csv_path = self._write_csv(
+                tmp_path,
+                rows=[
+                    {"uuid": "p1", "keyword": "kw_a", "본문": "같은 본문"},
+                    {"uuid": "p1", "keyword": "kw_b", "본문": "같은 본문"},
+                ],
+                header=["uuid", "keyword", "본문"],
+            )
+            output_path = tmp_path / "cleaned.parquet"
+            result = self._run_clean(
+                {
+                    "dataset_version_id": "test-nodedup",
+                    "dataset_name": str(csv_path),
+                    "text_columns": ["본문"],
+                    "output_path": str(output_path),
+                    "progress_path": str(tmp_path / "progress.json"),
+                    "dedup": False,
+                }
+            )
+            kept = pq.read_table(output_path).to_pylist()
+            self.assertEqual(len(kept), 2, "dedup=False면 본문 중복 유지")
+            self.assertEqual(result["artifact"]["summary"]["deduped_count"], 0)
+            self.assertFalse(result["artifact"]["summary"]["dedup_enabled"])
+
 
 if __name__ == "__main__":
     unittest.main()

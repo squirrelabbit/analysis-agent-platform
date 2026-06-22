@@ -88,6 +88,7 @@ func cleanSummaryToMap(summary *domain.DatasetCleanSummary) map[string]any {
 		"output_row_count": summary.OutputRowCount,
 		"kept_count":       summary.KeptCount,
 		"dropped_count":    summary.DroppedCount,
+		"deduped_count":    summary.DedupedCount,
 	}
 	if summary.SkippedRowCount > 0 {
 		result["skipped_row_count"] = summary.SkippedRowCount

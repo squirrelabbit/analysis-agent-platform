@@ -169,6 +169,13 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
     kept_count = 0
     dropped_count = 0
     skipped_rows = 0
+    # silverone 2026-06-22 — 본문 중복 제거. SNS 수집은 검색 키워드 팬아웃으로
+    # 같은 글(uuid/URL 동일, keyword만 다름)이 여러 번 들어온다(군산 35% 중복 진단).
+    # 정제 텍스트(cleaned_text) 기준으로 첫 등장만 유지 — 어떤 메타 컬럼이 달라도
+    # 본문이 같으면 같은 문서로 본다. payload `dedup=false`로 끌 수 있다(default ON).
+    dedup_enabled = bool(payload.get("dedup", True))
+    seen_cleaned_texts: set[str] = set()
+    deduped_count = 0
     regex_rule_hits: Counter[str] = Counter()
     source_input_char_count = 0
     cleaned_input_char_count = 0
@@ -215,6 +222,20 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
             if not cleaned_text:
                 dropped_count += 1
                 continue
+
+            # 본문 중복 제거 — 같은 cleaned_text가 이미 나왔으면 skip(첫 등장만 유지).
+            if dedup_enabled:
+                if cleaned_text in seen_cleaned_texts:
+                    deduped_count += 1
+                    write_progress(
+                        progress_path,
+                        processed_rows=source_index + 1,
+                        total_rows=source_row_count,
+                        started_at=started_at,
+                        message="clean dedup",
+                    )
+                    continue
+                seen_cleaned_texts.add(cleaned_text)
 
             kept_count += 1
             # silverone 2026-05-28 (clean 정식화) — 표준 9 컬럼만 build.
@@ -280,6 +301,9 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
         "kept_count": kept_count,
         "dropped_count": dropped_count,
         "skipped_row_count": skipped_rows,
+        # silverone 2026-06-22 — 본문 중복(검색 키워드 팬아웃 등)으로 제거된 행 수.
+        "deduped_count": deduped_count,
+        "dedup_enabled": dedup_enabled,
         "text_column": normalized["text_column"],
         "text_columns": list(normalized["text_columns"]),
         "text_joiner": normalized["text_joiner"],
