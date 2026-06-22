@@ -11,6 +11,7 @@ export interface CleanSummaryDto {
   clean_reduced_char_count?: number;
   cleaned_input_char_count?: number;
   dropped_count?: number;
+  deduped_count?: number;
   input_row_count?: number;
   kept_count?: number;
   output_row_count?: number;
@@ -27,6 +28,7 @@ export interface CleanSummary {
   cleanReducedCharCount: number;
   cleanedInputCharCount: number;
   droppedCount: number;
+  dedupedCount: number;
   inputRowCount: number;
   keptCount: number;
   outputRowCount: number;
@@ -43,6 +45,7 @@ export const mapCleanSummary = (dto: CleanSummaryDto): CleanSummary => ({
   cleanReducedCharCount: dto.clean_reduced_char_count ?? 0,
   cleanedInputCharCount: dto.cleaned_input_char_count ?? 0,
   droppedCount: dto.dropped_count ?? 0,
+  dedupedCount: dto.deduped_count ?? 0,
   inputRowCount: dto.input_row_count ?? 0,
   keptCount: dto.kept_count ?? 0,
   outputRowCount: dto.output_row_count ?? 0,

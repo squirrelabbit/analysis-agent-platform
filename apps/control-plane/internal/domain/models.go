@@ -655,6 +655,7 @@ type DatasetCleanSummary struct {
 	OutputRowCount        int            `json:"output_row_count"`
 	KeptCount             int            `json:"kept_count"`
 	DroppedCount          int            `json:"dropped_count"`
+	DedupedCount          int            `json:"deduped_count,omitempty"`
 	SkippedRowCount       int            `json:"skipped_row_count,omitempty"`
 	TextColumn            string         `json:"text_column,omitempty"`
 	TextColumns           []string       `json:"text_columns,omitempty"`
