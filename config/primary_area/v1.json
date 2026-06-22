@@ -11,13 +11,14 @@
     {"key": "site_facility", "desc": "행사장 물리 시설·공간(천막·자리·테이블·화장실·음향장비·무대구조)."},
     {"key": "access_transport", "desc": "접근·주차·교통·위치."},
     {"key": "atmosphere", "desc": "현장 분위기·경관·감각 인상(밤분위기·노을·야경·바람·무드)."},
-    {"key": "overall", "desc": "축제 전반 종합 평가·재방문·추천 (명시적 전체평일 때만 — 특정 대상 칭찬은 그 area로)."},
-    {"key": "etc", "desc": "위에 안 들어가는 잡음·메타·정말 애매."}
+    {"key": "overall", "desc": "축제 *전체*에 대한 종합 평가·재방문 의사·추천을 **명시적으로** 말할 때만. 특정 대상(음식/공연/분위기) 칭찬은 overall 아님 — 그 area로. 분위기 인상은 atmosphere."},
+    {"key": "etc", "desc": "대상이 **아예 없을 때만**(메타/제목/인사/링크/홍보·모집/순수 일상잡담). 대상이 있으면 애매해도 etc 쓰지 말고 가장 가까운 area로."}
   ],
   "boundary_rules": [
-    "먹는것/맛=food_beverage, 만들기/체험=hands_on_experience (시음은 맛 평가면 food).",
+    "먼저 대상이 있으면 etc 금지 — 가장 가까운 area를 고른다. etc는 대상이 없을 때만.",
+    "먹는것/맛/메뉴 자체=food_beverage. 그 음식의 줄·결제·부스 운영=operation_admission (시음은 맛 평가면 food).",
     "입장·결제·안내·진행=operation_admission, 천막·자리·화장실·음향=site_facility.",
-    "분위기 묘사=atmosphere, 재방문·추천·종합만족=overall.",
+    "현장 분위기·경관 묘사=atmosphere (overall 아님). overall은 '축제 전체' 종합평·재방문·추천만.",
     "관람=content_program, 참여=hands_on_experience."
   ]
 }
