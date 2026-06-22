@@ -23,6 +23,9 @@ COPY config/noise_patterns /app/config/noise_patterns
 # taxonomy-driven config Phase 1 (2026-05-27) — aspect/sentiment taxonomy
 # single source. clause_label / planner schema가 점진적으로 여기서 derive.
 COPY config/taxonomies /app/config/taxonomies
+# ADR-030 — primary_area(대상 축) 공유 taxonomy. clause_label import 시점에 로드되므로
+# 누락 시 worker가 import 실패로 crash. taxonomies와 동일하게 반드시 동봉.
+COPY config/primary_area /app/config/primary_area
 
 EXPOSE 8090
 
