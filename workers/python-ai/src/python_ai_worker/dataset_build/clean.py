@@ -205,6 +205,10 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
                 )
                 continue
 
+            # 원본 글자수는 전체 입력 기준(중복·정제로 빠질 행 포함). '원본 대비 정제'의
+            # 감소량이 키워드 기반 정제 + 중복제거를 모두 반영하도록 한다.
+            source_input_char_count += len(raw_text)
+
             regex_cleaned_text, applied_regex_rules = rt._apply_prepare_regex_rules(raw_text, normalized["regex_rule_names"])
             regex_rule_hits.update(applied_regex_rules)
             # 5/11: inline noise scrub — placeholder 문자열 strip (row 차단 X)
@@ -235,9 +239,8 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
                     continue
                 seen_cleaned_texts.add(cleaned_text)
 
-            # char 통계는 실제 유지된 행만 집계(중복/빈 행 제외) — '원본 대비 정제'가
-            # 출력 데이터와 일치하도록. (dedup 도입 전엔 빈 행 raw도 셌으나 kept 기준으로 정정.)
-            source_input_char_count += len(raw_text)
+            # 정제후 글자수는 실제 유지된 행만(중복/정제 제거 행 제외). 원본(전체)−정제후(kept)
+            # = 키워드 기반 정제 + 중복제거 합산 감소량.
             cleaned_input_char_count += len(cleaned_text)
             kept_count += 1
             # silverone 2026-05-28 (clean 정식화) — 표준 9 컬럼만 build.
