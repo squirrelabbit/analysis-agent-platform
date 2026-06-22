@@ -1287,11 +1287,12 @@ paths:
         - { name: aspect, in: query, required: false, schema: { type: string }, description: "aspect 필터 + 선택 aspect sentiment 분포 트리거" }
         - { name: sentiment, in: query, required: false, schema: { type: string }, description: "sentiment 필터 (positive|neutral|negative)" }
         - { name: q, in: query, required: false, schema: { type: string }, description: "keyword/clause 부분일치 검색" }
+        - { name: group, in: query, required: false, schema: { type: string, enum: [keyword, clause] }, description: "item table 집계 단위. 미지정/keyword=키워드 중심(keyword/count/대표절). clause=절 중심({clause, keywords[], occurrence_count}) — '절에서 추출된 키워드' 표용. 절 텍스트로 중복제거(리포스트/복붙 collapse), occurrence_count=등장 횟수. q만 적용(aspect/sentiment 무시)" }
         - { name: limit, in: query, required: false, schema: { type: integer, default: 100 } }
         - { name: offset, in: query, required: false, schema: { type: integer, default: 0 } }
       responses:
         "200":
-          description: clause_keywords view (status + summary + items)
+          description: clause_keywords view (status + summary + items). group=clause면 items가 {clause, keywords[]}
           content:
             application/json:
               schema:

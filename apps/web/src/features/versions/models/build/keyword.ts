@@ -161,6 +161,33 @@ export const mapKeywordSummary = (dto: KeywordSummaryDto): KeywordSummary => ({
   ),
 });
 
+// ── 절 중심(group=clause) view: "절에서 추출된 키워드" 표용 ────────────────
+// GET clause_keywords?group=clause → items가 {clause, keywords[]}.
+export interface KeywordClauseRow {
+  clause: string;
+  keywords: string[];
+  // 같은 절 텍스트가 등장한 횟수(리포스트 dedup). 1이면 단일.
+  occurrenceCount: number;
+}
+export interface KeywordClauseView {
+  status?: string;
+  items: KeywordClauseRow[];
+  total: number;
+}
+export const mapKeywordClauseView = (dto: {
+  status?: string;
+  items?: { clause?: string; keywords?: string[]; occurrence_count?: number | string }[];
+  pagination?: { total?: number };
+}): KeywordClauseView => ({
+  status: dto?.status,
+  items: (dto?.items ?? []).map((r) => ({
+    clause: String(r?.clause ?? ""),
+    keywords: Array.isArray(r?.keywords) ? r.keywords.map(String) : [],
+    occurrenceCount: Number(r?.occurrence_count ?? 1),
+  })),
+  total: dto?.pagination?.total ?? 0,
+});
+
 export const mapKeywordBuild = (dto: KeywordBuildResponse): KeywordBuild => ({
   buildType: dto.build_type,
   status: dto.status,

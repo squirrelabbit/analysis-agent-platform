@@ -2,6 +2,7 @@ package service
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -21,10 +22,12 @@ const (
 // long-format(절-키워드 1행) artifact를 DuckDB on-demand 집계로 읽어 dashboard
 // summary + 필터/페이징된 item table을 만든다. 별도 저장 구조 없이 read_json 집계.
 // clause_keywords가 없는 version은 status만 채운 빈 view를 돌려준다(analyze 흐름과 무관).
+// group=="clause"면 item table을 키워드 중심이 아니라 절 중심
+// ({clause, keywords[]})으로 돌려준다 (silverone 2026-06-19, "절에서 추출된 키워드" 표).
 func (s *DatasetService) GetClauseKeywordsView(
 	projectID, datasetID, datasetVersionID string,
 	limit, offset int,
-	aspect, sentiment, q string,
+	aspect, sentiment, q, group string,
 ) (domain.DatasetArtifactView, error) {
 	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
 	if err != nil {
@@ -59,7 +62,7 @@ func (s *DatasetService) GetClauseKeywordsView(
 		return domain.DatasetArtifactView{}, err
 	}
 
-	summary, total, items, err := loadClauseKeywordsArtifact(ref, limit, offset, aspect, sentiment, q)
+	summary, total, items, err := loadClauseKeywordsArtifact(ref, limit, offset, aspect, sentiment, q, group)
 	if err != nil {
 		return domain.DatasetArtifactView{}, err
 	}
@@ -75,7 +78,7 @@ func (s *DatasetService) GetClauseKeywordsView(
 
 // loadClauseKeywordsArtifact — clause_keywords long-format jsonl을 DuckDB로 집계.
 // 반환: dashboard summary / 필터 적용 total(페이징용) / 페이징된 item rows.
-func loadClauseKeywordsArtifact(ref string, limit, offset int, aspect, sentiment, q string) (map[string]any, int, []map[string]any, error) {
+func loadClauseKeywordsArtifact(ref string, limit, offset int, aspect, sentiment, q, group string) (map[string]any, int, []map[string]any, error) {
 	db, cleanup, err := openTempDuckDB()
 	if err != nil {
 		return nil, 0, nil, err
@@ -142,6 +145,17 @@ func loadClauseKeywordsArtifact(ref string, limit, offset int, aspect, sentiment
 		summary["selected_aspect_sentiment"] = selSentiment
 	}
 
+	// ── group=clause: item table을 절 중심({clause, keywords[]})으로 ──────────
+	// "절에서 추출된 키워드" 표용. aspect/sentiment 필터는 절표에서 안 쓰고 q(절·키워드
+	// 부분일치)만 적용한다. 매칭되는 절은 그 절의 전체 키워드를 함께 보여준다.
+	if strings.TrimSpace(group) == "clause" {
+		clauseTotal, clauseItems, err := loadClauseGroupedKeywords(db, source, limit, offset, q)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		return summary, clauseTotal, clauseItems, nil
+	}
+
 	// ── item table = 키워드 집계 행 (필터 적용 후 keyword GROUP BY) ───────────
 	// 프론트 1차 화면은 raw 절-키워드가 아니라 "키워드별: 언급수/문서수/우세감성/
 	// 대표 aspect/대표 절". 필터(aspect/sentiment/q)는 집계 *전* 행에 적용하고,
@@ -191,6 +205,84 @@ func loadClauseKeywordsArtifact(ref string, limit, offset int, aspect, sentiment
 		return nil, 0, nil, err
 	}
 	return summary, filteredTotal, items, nil
+}
+
+// loadClauseGroupedKeywords — 절 중심 item table. SNS 리포스트/복붙으로 같은 절 텍스트가
+// 여러 doc에 반복되므로, clause_id가 아니라 **절 텍스트로 묶어 중복 제거**한다(고유 절만).
+// occurrence_count로 그 절이 몇 번 등장했는지 함께 준다. 절(clause)마다 추출된 키워드를
+// 배열로 묶어 {clause, keywords[], occurrence_count}로 돌려준다. 키워드는 절에서 뽑힌
+// 순서(keyword_rank_in_clause)대로 정렬한다(프론트 하이라이트가 절 위치와 맞도록).
+// q(절 본문 또는 키워드 부분일치)로 절을 거르고, 키워드 많은 절 우선 정렬.
+func loadClauseGroupedKeywords(db *sql.DB, source string, limit, offset int, q string) (int, []map[string]any, error) {
+	clauseFilter := ""
+	if term := strings.TrimSpace(q); term != "" {
+		esc := escapeDuckDBLiteral(term)
+		clauseFilter = fmt.Sprintf(
+			"AND clause IN (SELECT DISTINCT clause FROM %s WHERE keyword IS NOT NULL AND (clause ILIKE '%%%s%%' OR keyword ILIKE '%%%s%%'))",
+			source, esc, esc)
+	}
+
+	// 고유 절 텍스트 수(중복 제거 후).
+	total, err := scalarCount(db, fmt.Sprintf(
+		"SELECT COUNT(DISTINCT clause) FROM %s WHERE keyword IS NOT NULL %s",
+		source, clauseFilter))
+	if err != nil {
+		return 0, nil, err
+	}
+
+	// base: 절 텍스트 dedup 전 행. kw: 절×키워드 dedup(중복 절의 같은 키워드는 최소 rank로).
+	// keywords는 list(... ORDER BY rk)로 절 등장 순서 유지.
+	itemQuery := fmt.Sprintf(
+		`WITH base AS (
+		    SELECT clause, keyword, clause_id, keyword_rank_in_clause AS rk
+		    FROM %[1]s
+		    WHERE keyword IS NOT NULL %[2]s
+		 ),
+		 kw AS (
+		    SELECT clause, keyword, MIN(rk) AS rk FROM base GROUP BY clause, keyword
+		 ),
+		 occ AS (
+		    SELECT clause, COUNT(DISTINCT clause_id) AS occurrence_count FROM base GROUP BY clause
+		 ),
+		 grouped AS (
+		    SELECT clause,
+		           CAST(to_json(list(keyword ORDER BY rk, keyword)) AS VARCHAR) AS keywords,
+		           COUNT(*) AS keyword_count
+		    FROM kw GROUP BY clause
+		 )
+		 SELECT g.clause, g.keywords, o.occurrence_count
+		 FROM grouped g JOIN occ o ON g.clause = o.clause
+		 ORDER BY g.keyword_count DESC, g.clause
+		 LIMIT %[3]d OFFSET %[4]d`,
+		source, clauseFilter, limit, offset,
+	)
+	rows, err := scanArtifactRows(db, itemQuery, []string{"clause", "keywords", "occurrence_count"})
+	if err != nil {
+		return 0, nil, err
+	}
+	items := make([]map[string]any, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, map[string]any{
+			"clause":           r["clause"],
+			"keywords":         decodeStringArray(r["keywords"]),
+			"occurrence_count": r["occurrence_count"],
+		})
+	}
+	return total, items, nil
+}
+
+// decodeStringArray — DuckDB to_json(list(...)) VARCHAR(JSON 배열 문자열)을 []string으로.
+// 파싱 실패/빈 값이면 빈 배열.
+func decodeStringArray(v any) []string {
+	s, ok := v.(string)
+	if !ok || strings.TrimSpace(s) == "" {
+		return []string{}
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return []string{}
+	}
+	return out
 }
 
 // whereGlue — 기존 WHERE 절에 추가 조건(keyword IS NOT NULL)을 잇는 연결어.
