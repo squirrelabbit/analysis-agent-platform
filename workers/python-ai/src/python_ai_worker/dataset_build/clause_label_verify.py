@@ -38,9 +38,11 @@ from .clause_label import (
     _DEFAULT_CONCURRENCY,
     _FALLBACK_ASPECT,
     _extract_subject_config,
+    _inject_primary_area,
     _inject_taxonomy,
     _load_genuineness_filter,
     _render_subject_prompt,
+    PRIMARY_AREA_KEYS,
     resolve_clause_label_taxonomy,
 )
 
@@ -50,19 +52,16 @@ _CLASSIFY_PROMPT_TASK = "clause_label"
 _JUDGE_PROMPT_TASK = "clause_label_verify_judge"
 
 # ADR-030 Phase 1 — primary_area "대상" 축 병렬 관측 필드. 각 모델이 aspects와 별도로
-# 문장의 *대상*을 9개 중 1개로 라벨. 최종 라벨로는 안 쓰고(reconcile 안 함) model A/B
+# 문장의 *대상*을 1개로 라벨. 최종 라벨로는 안 쓰고(reconcile 안 함) model A/B
 # 스냅샷 + summary 통계(일치율/혼동쌍/분포)로만 적재해 ADR-030을 데이터로 검증한다.
-_PRIMARY_AREAS = frozenset({
-    "food_beverage", "content_program", "hands_on_experience", "operation_admission",
-    "site_facility", "access_transport", "atmosphere", "overall", "etc",
-})
+# allowed key set은 config/primary_area(PRIMARY_AREA_KEYS)에서 — 프롬프트 inject와 동일 source.
 
 
 def _coerce_primary_area(v: Any) -> str | None:
     pa = str(v or "").strip()
     if not pa:
         return None
-    return pa if pa in _PRIMARY_AREAS else "etc"
+    return pa if pa in PRIMARY_AREA_KEYS else "etc"
 
 # judge batch 가드
 _MAX_DISPUTED_PER_JUDGE_CALL = 20
@@ -393,7 +392,9 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
     classify_body, classify_version = load_prompt_body(
         _CLASSIFY_PROMPT_TASK, str(payload.get("clause_label_prompt_version") or "").strip() or None
     )
-    classify_system_prompt = _render_subject_prompt(_inject_taxonomy(classify_body, taxonomy), subject_config)
+    classify_system_prompt = _render_subject_prompt(
+        _inject_primary_area(_inject_taxonomy(classify_body, taxonomy)), subject_config
+    )
     judge_body, judge_version = load_prompt_body(
         _JUDGE_PROMPT_TASK, str(payload.get("judge_prompt_version") or "").strip() or None
     )

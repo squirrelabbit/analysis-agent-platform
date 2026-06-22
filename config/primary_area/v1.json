@@ -1,0 +1,23 @@
+{
+  "version": "v1",
+  "axis": "primary_area",
+  "title": "primary_area — 대상 축 (2축 taxonomy, ADR-030)",
+  "note": "축제/행사 SNS 후기 family 공유 MECE. aspect taxonomy(config/taxonomies/*.json, per-dataset)와 달리 도메인 공유라 단일 파일. 프롬프트에 {{PRIMARY_AREA}}로 주입.",
+  "areas": [
+    {"key": "food_beverage", "desc": "먹고 마시는 것(음식·음료·맥주·안주·맛·메뉴). 가격은 제외."},
+    {"key": "content_program", "desc": "보고 듣는 프로그램(공연·음악·드론쇼·쇼·MC). 관람형."},
+    {"key": "hands_on_experience", "desc": "직접 하는 참여 활동(만들기·스탬프·포토·게임·시식부스·이벤트). 참여형."},
+    {"key": "operation_admission", "desc": "운영·입장·결제·안내·진행 방식 자체(입장권·결제·쿠폰·환급·증정 운영·안내·기획)."},
+    {"key": "site_facility", "desc": "행사장 물리 시설·공간(천막·자리·테이블·화장실·음향장비·무대구조)."},
+    {"key": "access_transport", "desc": "접근·주차·교통·위치."},
+    {"key": "atmosphere", "desc": "현장 분위기·경관·감각 인상(밤분위기·노을·야경·바람·무드)."},
+    {"key": "overall", "desc": "축제 전반 종합 평가·재방문·추천 (명시적 전체평일 때만 — 특정 대상 칭찬은 그 area로)."},
+    {"key": "etc", "desc": "위에 안 들어가는 잡음·메타·정말 애매."}
+  ],
+  "boundary_rules": [
+    "먹는것/맛=food_beverage, 만들기/체험=hands_on_experience (시음은 맛 평가면 food).",
+    "입장·결제·안내·진행=operation_admission, 천막·자리·화장실·음향=site_facility.",
+    "분위기 묘사=atmosphere, 재방문·추천·종합만족=overall.",
+    "관람=content_program, 참여=hands_on_experience."
+  ]
+}
