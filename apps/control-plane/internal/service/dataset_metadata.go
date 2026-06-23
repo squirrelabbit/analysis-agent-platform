@@ -252,6 +252,7 @@ func buildCleanSummary(metadata map[string]any) *domain.DatasetCleanSummary {
 		OutputRowCount:        intValueOrZero(raw["output_row_count"]),
 		KeptCount:             intValueOrZero(raw["kept_count"]),
 		DroppedCount:          intValueOrZero(raw["dropped_count"]),
+		DedupedCount:          intValueOrZero(raw["deduped_count"]),
 		SkippedRowCount:       intValueOrZero(raw["skipped_row_count"]),
 		TextColumn:            strings.TrimSpace(anyStringValue(raw["text_column"])),
 		TextColumns:           anyStringList(raw["text_columns"]),

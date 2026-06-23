@@ -38,9 +38,11 @@ from .clause_label import (
     _DEFAULT_CONCURRENCY,
     _FALLBACK_ASPECT,
     _extract_subject_config,
+    _inject_primary_area,
     _inject_taxonomy,
     _load_genuineness_filter,
     _render_subject_prompt,
+    PRIMARY_AREA_KEYS,
     resolve_clause_label_taxonomy,
 )
 
@@ -48,6 +50,18 @@ from .clause_label import (
 # clause_label(문장 형식 v3/v4)로 일원화. 옛 clause_label_verify 프롬프트는 제거.
 _CLASSIFY_PROMPT_TASK = "clause_label"
 _JUDGE_PROMPT_TASK = "clause_label_verify_judge"
+
+# ADR-030 Phase 1 — primary_area "대상" 축 병렬 관측 필드. 각 모델이 aspects와 별도로
+# 문장의 *대상*을 1개로 라벨. 최종 라벨로는 안 쓰고(reconcile 안 함) model A/B
+# 스냅샷 + summary 통계(일치율/혼동쌍/분포)로만 적재해 ADR-030을 데이터로 검증한다.
+# allowed key set은 config/primary_area(PRIMARY_AREA_KEYS)에서 — 프롬프트 inject와 동일 source.
+
+
+def _coerce_primary_area(v: Any) -> str | None:
+    pa = str(v or "").strip()
+    if not pa:
+        return None
+    return pa if pa in PRIMARY_AREA_KEYS else "etc"
 
 # judge batch 가드
 _MAX_DISPUTED_PER_JUDGE_CALL = 20
@@ -99,7 +113,13 @@ def _parse_label_item(
     sentiment = str(item.get("sentiment") or "neutral").strip()
     if sentiment not in _ALLOWED_SENTIMENT:
         sentiment = "neutral"
-    return idx, {"relevant": relevant, "sentiment": sentiment, "aspects": sorted(aspects)}
+    # ADR-030 Phase 1 — primary_area 병렬 관측(있으면). aspects/sentiment 판정엔 안 쓴다.
+    return idx, {
+        "relevant": relevant,
+        "sentiment": sentiment,
+        "aspects": sorted(aspects),
+        "primary_area": _coerce_primary_area(item.get("primary_area")),
+    }
 
 
 def _coerce_array(body: Any) -> list | None:
@@ -284,6 +304,8 @@ def _model_result_obj(label: dict[str, Any] | None) -> dict[str, Any] | None:
         "relevant": bool(label.get("relevant")),
         "sentiment": str(label.get("sentiment") or "neutral"),
         "aspects": [str(a) for a in (label.get("aspects") or [])],
+        # ADR-030 Phase 1 — 대상 축 병렬 관측(있으면). None이면 모델이 미산출.
+        "primary_area": label.get("primary_area"),
     }
 
 
@@ -370,7 +392,9 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
     classify_body, classify_version = load_prompt_body(
         _CLASSIFY_PROMPT_TASK, str(payload.get("clause_label_prompt_version") or "").strip() or None
     )
-    classify_system_prompt = _render_subject_prompt(_inject_taxonomy(classify_body, taxonomy), subject_config)
+    classify_system_prompt = _render_subject_prompt(
+        _inject_primary_area(_inject_taxonomy(classify_body, taxonomy)), subject_config
+    )
     judge_body, judge_version = load_prompt_body(
         _JUDGE_PROMPT_TASK, str(payload.get("judge_prompt_version") or "").strip() or None
     )
@@ -547,6 +571,11 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
     clause_count = 0
     sentiment_counts: dict[str, int] = {s: 0 for s in _ALLOWED_SENTIMENT}
     aspect_counts: dict[str, int] = {a: 0 for a in taxonomy.aspect_keys_set}
+    # ADR-030 Phase 1 — primary_area 병렬 관측 통계(문장 단위 dedup). aspects 판정과 독립.
+    pa_seen: set = set()
+    pa_both = pa_agree = pa_a_overall = 0
+    pa_conf: dict[str, int] = {}
+    pa_dist_a: dict[str, int] = {}
     with output_path.open("w", encoding="utf-8") as dst:
         for index, row in enumerate(rows):
             doc_id = str(row.get("row_id") or f"{dataset_version_id}:row:{index}")
@@ -557,6 +586,21 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
                 clause_count += 1
                 sentiment_counts[rec["sentiment"]] = sentiment_counts.get(rec["sentiment"], 0) + 1
                 aspect_counts[rec["aspect"]] = aspect_counts.get(rec["aspect"], 0) + 1
+                pk = (doc_id, rec.get("sentence_index"))
+                if pk not in pa_seen:
+                    pa_seen.add(pk)
+                    a_pa = (rec.get("model_a_result") or {}).get("primary_area")
+                    b_pa = (rec.get("model_b_result") or {}).get("primary_area")
+                    if a_pa and b_pa:
+                        pa_both += 1
+                        pa_dist_a[a_pa] = pa_dist_a.get(a_pa, 0) + 1
+                        if a_pa == "overall":
+                            pa_a_overall += 1
+                        if a_pa == b_pa:
+                            pa_agree += 1
+                        else:
+                            ck = "↔".join(sorted([a_pa, b_pa]))
+                            pa_conf[ck] = pa_conf.get(ck, 0) + 1
 
     if progress_path:
         write_progress(progress_path, processed_rows=target_count, total_rows=target_count, started_at=started_at, message="clause_label verify completed")
@@ -573,6 +617,16 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
         "dropped_irrelevant_count": agg["dropped"],
         "sentiment_counts": sentiment_counts,
         "aspect_counts": aspect_counts,
+        # ADR-030 Phase 1 — 대상 축 병렬 관측. 최종 라벨 아님(reconcile 안 함). 두 모델
+        # 일치율/혼동쌍/분포/overall비중으로 2축 구조를 데이터 검증.
+        "primary_area": {
+            "both_count": pa_both,
+            "agree_count": pa_agree,
+            "agreement_rate": round(pa_agree / pa_both, 4) if pa_both else None,
+            "overall_ratio_a": round(pa_a_overall / pa_both, 4) if pa_both else None,
+            "distribution_model_a": pa_dist_a,
+            "confusion_top": dict(sorted(pa_conf.items(), key=lambda kv: -kv[1])[:10]),
+        },
         "concurrency": concurrency,
         "chunking": {
             "enabled": True,

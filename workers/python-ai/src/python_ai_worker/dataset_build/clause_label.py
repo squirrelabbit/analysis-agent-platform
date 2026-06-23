@@ -105,6 +105,39 @@ def _inject_taxonomy(template: str, taxonomy: Taxonomy = _TAXONOMY) -> str:
     return template.replace(_ASPECT_TAXONOMY_PLACEHOLDER, rendered)
 
 
+# ADR-030 — primary_area "대상 축". aspect taxonomy처럼 config-driven으로 프롬프트에
+# {{PRIMARY_AREA}} 주입(하드코딩 금지). 도메인 공유라 config/primary_area/<ver>.json 단일 파일.
+_PRIMARY_AREA_PLACEHOLDER = "{{PRIMARY_AREA}}"
+
+
+def _load_primary_area(version: str = "v1") -> dict[str, Any]:
+    path = resolve_config_dir("PYTHON_AI_PRIMARY_AREA_DIR", __file__, "primary_area") / f"{version}.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+_PRIMARY_AREA = _load_primary_area()
+# allowed key set + 프롬프트 inject 목록을 한 source(config)에서 — 검증/프롬프트 불일치 방지.
+PRIMARY_AREA_KEYS = frozenset(a["key"] for a in _PRIMARY_AREA.get("areas", []))
+
+
+def render_primary_area_block(data: dict[str, Any] | None = None) -> str:
+    """config/primary_area를 프롬프트 inject용 목록 markdown으로 렌더. deterministic."""
+    data = data or _PRIMARY_AREA
+    lines = [f"- {a['key']}: {a['desc']}" for a in data.get("areas", [])]
+    rules = data.get("boundary_rules", [])
+    if rules:
+        lines.append("- 경계: " + " / ".join(rules))
+    return "\n".join(lines)
+
+
+def _inject_primary_area(template: str, data: dict[str, Any] | None = None) -> str:
+    """prompt의 ``{{PRIMARY_AREA}}``를 config/primary_area 목록으로 치환.
+    placeholder 없는 프롬프트(judge 등)는 그대로 통과."""
+    if _PRIMARY_AREA_PLACEHOLDER not in template:
+        return template
+    return template.replace(_PRIMARY_AREA_PLACEHOLDER, render_primary_area_block(data))
+
+
 # silverone 2026-05-28 — clause_label subject 변수화. doc_genuineness PR-α2
 # 패턴을 그대로 이식. 다만 doc_genuineness와 달리 subject metadata가 없으면
 # festival default로 fallback (옛 dataset 호환). recruitment_keywords는
@@ -180,14 +213,14 @@ def _load_prompt_template(payload: dict[str, Any], taxonomy: Taxonomy = _TAXONOM
     inline = payload.get("clause_label_prompt_content")
     if isinstance(inline, str) and inline.strip():
         version = str(payload.get("clause_label_prompt_version") or "request_inline").strip()
-        return _inject_taxonomy(inline, taxonomy), version
+        return _inject_primary_area(_inject_taxonomy(inline, taxonomy)), version
     # silverone 2026-06-02 — 카탈로그 빌드. /prompt_options에서 고른 version(stem)을
     # payload['clause_label_prompt_version']로 받아 그 version 파일을 로드. 미지정이면
     # index.yaml default. unknown version은 load_prompt_body가 400으로 reject.
     # artifact prompt_version은 resolve된 stem을 기록 (감사 가능).
     requested = str(payload.get("clause_label_prompt_version") or "").strip() or None
     body, stem = load_prompt_body(_PROMPT_TASK, requested)
-    return _inject_taxonomy(body, taxonomy), stem
+    return _inject_primary_area(_inject_taxonomy(body, taxonomy)), stem
 
 
 def _load_genuineness_filter(payload: dict[str, Any]) -> tuple[set[str] | None, dict[str, str], dict[str, list]]:
