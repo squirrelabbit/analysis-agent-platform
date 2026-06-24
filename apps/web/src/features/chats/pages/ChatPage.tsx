@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Send } from "lucide-react";
+import { FileText, Send } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,19 +10,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { createClientId } from "@/shared/utils/id";
 import { useDatasets } from "@/features/datasets/hooks/dataset.query";
-import {
-  useAnalysisChat,
-  useDeleteChatThread,
-  useSaveReportResult,
-} from "../hooks/chat.mutation";
-import { useChatThread, useChatThreads } from "../hooks/chat.query";
+import { useAnalysisChat } from "../hooks/chat.mutation";
+import { useChatThread } from "../hooks/chat.query";
+import { useReportPanel } from "../hooks/useReportPanel";
+import { useCreateReportFromPanel } from "../hooks/useCreateReportFromPanel";
+import { useChatNav } from "../context/ChatNavContext";
 import type { ChatMessage } from "../models";
 import MessageBubble from "../components/MessageBubble";
 import ChatToast from "../components/ChatToast";
-import ThreadList from "../components/ThreadList";
+import ReportPanel from "../components/ReportPanel";
 
 function extractErrorMessage(err: unknown): string {
   const detail = (
@@ -40,25 +40,20 @@ export function ChatPage() {
   const { projectId } = useProjectParams();
   const { data: datasets = [] } = useDatasets();
 
-  const [datasetId, setDatasetId] = useState<string>("");
-  const [threadId, setThreadId] = useState<string | null>(null);
+  // 데이터셋·스레드 선택과 대화 이력은 공용 사이드바와 공유하므로 ChatNavContext에서
+  // 가져온다. pendingTurn·입력·스크롤·보고서 패널은 이 화면 전용 상태로 남긴다.
+  const nav = useChatNav();
+  const activeDatasetId = nav.activeDatasetId;
+
   const [pendingTurn, setPendingTurn] = useState<PendingTurn | null>(null);
   const [input, setInput] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const activeDatasetId = datasetId || datasets[0]?.id || "";
-
-  const threadsQuery = useChatThreads(projectId, activeDatasetId);
-  const threadDetail = useChatThread(projectId, activeDatasetId, threadId);
+  const threadDetail = useChatThread(projectId, activeDatasetId, nav.threadId);
   const chat = useAnalysisChat(projectId, activeDatasetId);
-  const deleteThread = useDeleteChatThread(projectId, activeDatasetId);
-  const saveResult = useSaveReportResult(projectId);
-  // 보고서 보관함 저장 상태 — run_id 기준(스냅샷 단위). 저장 성공은 누적 보존,
-  // 진행 중은 단건만(연타 방지).
-  const [savedRunIds, setSavedRunIds] = useState<Set<string>>(
-    () => new Set<string>(),
-  );
-  const [savingRunId, setSavingRunId] = useState<string | null>(null);
+  // 보고서 패널 — 결과 카드를 모아 제목·메모·순서 편집 후 한 번에 보고서 문서 생성.
+  const panel = useReportPanel();
+  const createReport = useCreateReportFromPanel(projectId);
   // 결과 액션 토스트 — 1.6초 후 자동 숨김.
   const [toast, setToast] = useState<{ msg: string; visible: boolean }>({
     msg: "",
@@ -75,9 +70,6 @@ export function ChatPage() {
     );
   }
   const isLoading = chat.isPending;
-  const deletingThreadId = deleteThread.isPending
-    ? (deleteThread.variables ?? null)
-    : null;
 
   const serverMessages = useMemo(
     () => threadDetail.data?.messages ?? [],
@@ -121,6 +113,9 @@ export function ChatPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollPolicyRef = useRef<"force" | "auto">("force");
+  // handleSend가 새 서버 threadId로 승격할 때(null→id) threadId 변경 효과의 리셋이
+  // 방금 만든 pendingTurn을 지우지 않도록 한 번만 건너뛰게 하는 플래그.
+  const skipThreadResetRef = useRef(false);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -155,44 +150,36 @@ export function ChatPage() {
     };
   }, [messages, isLoading]);
 
-  function resetThreadState() {
-    setThreadId(null);
-    setPendingTurn(null);
-    setErrorMsg(null);
-    setInput("");
-    scrollPolicyRef.current = "force";
-  }
+  // 안정적인 컨텍스트/패널 콜백만 추려 effect 의존성으로 쓴다(panel/nav 객체 자체는
+  // 매 렌더 새로 만들어져 의존하면 effect가 매번 도므로).
+  const resetPanel = panel.reset;
+  const setComposing = nav.setComposing;
 
-  function handleDatasetChange(next: string) {
-    setDatasetId(next);
-    resetThreadState();
-  }
-
-  function handleSelectThread(next: string) {
-    if (next === threadId || isLoading) return;
-    setThreadId(next);
-    setPendingTurn(null);
-    setErrorMsg(null);
-    scrollPolicyRef.current = "force";
-  }
-
-  function handleNewThread() {
-    if (isLoading) return;
-    resetThreadState();
-  }
-
-  async function handleDeleteThread(id: string) {
-    if (isLoading || deleteThread.isPending) return;
-    setErrorMsg(null);
-    try {
-      await deleteThread.mutateAsync(id);
-      if (id === threadId) {
-        resetThreadState();
-      }
-    } catch (err) {
-      setErrorMsg(extractErrorMessage(err));
+  // 스레드 전환·새 대화·삭제(컨텍스트가 threadId를 바꿈)에 반응해 진행 중 턴·에러·
+  // 패널을 리셋하고 강제 하단 스크롤을 건다. 단 handleSend의 null→서버threadId 승격은
+  // pendingTurn 보존을 위해 한 번 건너뛴다.
+  useEffect(() => {
+    if (skipThreadResetRef.current) {
+      skipThreadResetRef.current = false;
+      return;
     }
-  }
+    setPendingTurn(null);
+    setErrorMsg(null);
+    resetPanel();
+    scrollPolicyRef.current = "force";
+  }, [nav.threadId, resetPanel]);
+
+  // 데이터셋을 바꾸면(setDatasetId가 threadId도 해제) 입력창까지 비운다.
+  useEffect(() => {
+    // 사이드바에서 바뀌는 데이터셋에 맞춰 로컬 입력을 비우는 동기화 — 의도된 setState.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setInput("");
+  }, [nav.datasetId]);
+
+  // 전송 중 상태를 사이드바(대화 이력 비활성화)와 공유.
+  useEffect(() => {
+    setComposing(chat.isPending);
+  }, [chat.isPending, setComposing]);
 
   async function handleSend() {
     const text = input.trim();
@@ -212,9 +199,13 @@ export function ChatPage() {
     try {
       const res = await chat.mutateAsync({
         content: text,
-        threadId: threadId ?? undefined,
+        threadId: nav.threadId ?? undefined,
       });
-      setThreadId(res.threadId);
+      // 새 대화면 서버 threadId로 승격(리셋 효과는 건너뛴다). 이어질문이면 변동 없음.
+      if (res.threadId !== nav.threadId) {
+        skipThreadResetRef.current = true;
+        nav.setThreadId(res.threadId);
+      }
       // server id로 교체 → 곧이어 들어올 detail refetch와 자연스럽게 dedupe.
       setPendingTurn({
         user: res.userMessage ?? localUser,
@@ -228,49 +219,38 @@ export function ChatPage() {
     }
   }
 
-  async function handleSaveToReport(msg: ChatMessage) {
-    const runId = msg.runId;
-    if (!runId || savingRunId || savedRunIds.has(runId)) return;
-    setErrorMsg(null);
-    setSavingRunId(runId);
-    try {
-      await saveResult.mutateAsync({
-        runId,
-        threadId: threadId ?? undefined,
-      });
-      setSavedRunIds((prev) => new Set(prev).add(runId));
-      showToast("보고서에 저장했습니다");
-    } catch (err) {
-      setErrorMsg(extractErrorMessage(err));
-    } finally {
-      setSavingRunId(null);
+  function handleAddToReport(msg: ChatMessage) {
+    if (!msg.runId) return;
+    const added = panel.add(msg);
+    if (added) {
+      showToast("보고서에 추가했습니다");
+    } else {
+      panel.openPanel();
+      showToast("이미 보고서에 추가된 결과입니다");
     }
   }
 
-  function reportSaveStateFor(msg: ChatMessage) {
-    if (!msg.runId) return "idle" as const;
-    if (savedRunIds.has(msg.runId)) return "saved" as const;
-    if (savingRunId === msg.runId) return "saving" as const;
-    return "idle" as const;
+  async function handleCreateReport() {
+    setErrorMsg(null);
+    try {
+      await createReport.create({
+        staged: panel.staged,
+        reportTitle: panel.reportTitle,
+        threadId: nav.threadId ?? undefined,
+        messageOf: panel.messageOf,
+        cardStateOf: panel.cardStateOf,
+      });
+      // 성공 시 에디터로 이동(navigate)되므로 별도 토스트 없음.
+    } catch (err) {
+      setErrorMsg(extractErrorMessage(err));
+    }
   }
 
-  const threads = threadsQuery.data ?? [];
-  const isDetailLoading = !!threadId && threadDetail.isLoading;
+  const isDetailLoading = !!nav.threadId && threadDetail.isLoading;
   const hasContent = messages.length > 0;
 
   return (
     <div className="flex h-full overflow-hidden bg-zinc-50">
-      <ThreadList
-        threads={threads}
-        activeThreadId={threadId}
-        isLoading={threadsQuery.isLoading}
-        isComposing={isLoading}
-        deletingThreadId={deletingThreadId}
-        onSelect={handleSelectThread}
-        onNewThread={handleNewThread}
-        onDelete={handleDeleteThread}
-      />
-
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         {/* 헤더 */}
         <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-zinc-100 shrink-0">
@@ -282,7 +262,10 @@ export function ChatPage() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-zinc-500">데이터셋</span>
-            <Select value={activeDatasetId} onValueChange={handleDatasetChange}>
+            <Select
+              value={nav.activeDatasetId}
+              onValueChange={nav.setDatasetId}
+            >
               <SelectTrigger className="w-48 h-7 text-[11px]">
                 <SelectValue placeholder="데이터셋 선택" />
               </SelectTrigger>
@@ -294,6 +277,33 @@ export function ChatPage() {
                 ))}
               </SelectContent>
             </Select>
+
+            {/* 보고서 토글 — 추가된 결과가 1개 이상일 때 노출(시안 .rtoggle) */}
+            {panel.count >= 1 && (
+              <button
+                type="button"
+                onClick={panel.togglePanel}
+                className={cn(
+                  "inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-bold transition",
+                  panel.panelOpen
+                    ? "border-zinc-900 bg-zinc-900 text-white"
+                    : "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100",
+                )}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                보고서
+                <span
+                  className={cn(
+                    "grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px] font-extrabold",
+                    panel.panelOpen
+                      ? "bg-white/25 text-white"
+                      : "bg-violet-600 text-white",
+                  )}
+                >
+                  {panel.count}
+                </span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -320,19 +330,24 @@ export function ChatPage() {
               </p>
             )}
 
-            {messages.map((msg) => (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                onSaveToReport={
-                  msg.role === "assistant" && msg.runId
-                    ? () => handleSaveToReport(msg)
-                    : undefined
-                }
-                saveState={reportSaveStateFor(msg)}
-                onToast={showToast}
-              />
-            ))}
+            {messages.map((msg) => {
+              const canReport = msg.role === "assistant" && !!msg.runId;
+              return (
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  onAddToReport={
+                    canReport ? () => handleAddToReport(msg) : undefined
+                  }
+                  isAdded={canReport ? panel.isAdded(msg.runId!) : false}
+                  title={canReport ? panel.titleFor(msg) : undefined}
+                  onTitleChange={
+                    canReport ? (v) => panel.setTitle(msg.runId!, v) : undefined
+                  }
+                  onToast={showToast}
+                />
+              );
+            })}
 
             {isLoading && (
               <div className="flex gap-2.5 items-start">
@@ -390,6 +405,12 @@ export function ChatPage() {
           </div>
         </div>
       </div>
+
+      <ReportPanel
+        panel={panel}
+        onCreate={handleCreateReport}
+        creating={createReport.isPending}
+      />
 
       <ChatToast message={toast.msg} visible={toast.visible} />
     </div>
