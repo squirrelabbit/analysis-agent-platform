@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import {
   FileText,
   Check,
+  ChevronRight,
   Loader2,
   Minus,
   Pencil,
@@ -22,7 +23,11 @@ import {
   SENTIMENT_BADGE,
   type Sentiment,
 } from "@/features/versions/constants/sentiment";
-import type { ClauseBuild, ClauseItem, ClauseModelResult } from "../../models/build";
+import type {
+  ClauseBuild,
+  ClauseItem,
+  ClauseModelResult,
+} from "../../models/build";
 import { Badge } from "@/components/ui/badge";
 import { useBuildVersion, useLloaModelOptions } from "../../hooks/build.query";
 import { useClauseLabelOverride } from "../../hooks/build.mutation";
@@ -286,8 +291,11 @@ export function ClauseTab() {
   const fmtModelResult = (r?: ClauseModelResult | null): string => {
     if (!r) return "—";
     if (r.relevant === false) return "무관";
-    const sent = SENTIMENT_LABELS[r.sentiment as Sentiment] ?? r.sentiment ?? "";
-    const asp = (r.aspects ?? []).map((a) => aspectLabelOf(taxonomy, a)).join("·");
+    const sent =
+      SENTIMENT_LABELS[r.sentiment as Sentiment] ?? r.sentiment ?? "";
+    const asp = (r.aspects ?? [])
+      .map((a) => aspectLabelOf(taxonomy, a))
+      .join("·");
     return [sent, asp].filter(Boolean).join(" / ") || "—";
   };
 
@@ -312,7 +320,11 @@ export function ClauseTab() {
     }
     setSavingClauseId(item.clauseId);
     try {
-      await override.set.mutateAsync({ clauseId: item.clauseId, aspect, sentiment });
+      await override.set.mutateAsync({
+        clauseId: item.clauseId,
+        aspect,
+        sentiment,
+      });
       setEditingClauseId(null);
     } finally {
       setSavingClauseId(null);
@@ -467,15 +479,17 @@ export function ClauseTab() {
                       (item.modelAResult || item.modelBResult) && (
                         <div className="rounded-md bg-zinc-50 px-2 py-1 text-zinc-600">
                           <span>
-                            모델 A: <b>{fmtModelResult(item.modelAResult)}</b> · 모델 B:{" "}
-                            <b>{fmtModelResult(item.modelBResult)}</b>
+                            모델 A: <b>{fmtModelResult(item.modelAResult)}</b> ·
+                            모델 B: <b>{fmtModelResult(item.modelBResult)}</b>
                           </span>
                           {item.judgeResult && (
                             <span>
-                              {" "}→ judge: <b>{fmtModelResult(item.judgeResult)}</b>
+                              {" "}
+                              → judge: <b>{fmtModelResult(item.judgeResult)}</b>
                               {item.judgeResult.reason && (
                                 <span className="text-zinc-400">
-                                  {" "}({item.judgeResult.reason})
+                                  {" "}
+                                  ({item.judgeResult.reason})
                                 </span>
                               )}
                             </span>
@@ -615,10 +629,37 @@ export function ClauseTab() {
             </p>
           )}
           <p className="mt-1 text-[11px] text-zinc-400">
-            두 모델이 같은 문장을 라벨링해 합의는 신뢰 신호, 갈린 절만 judge가 라벨
-            기준으로 재검토합니다. judge 미해소 절은 검토 필요로 격리됩니다.
+            두 모델이 같은 문장을 라벨링해 합의는 신뢰 신호, 갈린 절만 judge가
+            라벨 기준으로 재검토합니다. judge 미해소 절은 검토 필요로
+            격리됩니다.
           </p>
         </div>
+      )}
+
+      {/* 절 유형(Aspect) 안내 — 참고 정보라 기본 접힘, 펼치면 카드로 표시 */}
+      {taxonomy && taxonomy.aspects.length > 0 && (
+        <details className="group rounded-2xl border border-zinc-100 bg-white px-5 py-3.5 shadow-sm">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm font-bold text-zinc-900 marker:hidden">
+            <ChevronRight className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-90" />
+            절 유형(Aspect) 안내
+            <span className="font-medium text-zinc-400">
+              · {taxonomy.aspects.length}종
+            </span>
+          </summary>
+          <div className="mt-3.5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {taxonomy.aspects.map((a) => (
+              <div
+                key={a.key}
+                className="rounded-xl border border-zinc-100 bg-zinc-50/50 p-3"
+              >
+                <div className="text-sm font-bold text-zinc-800">{a.label}</div>
+                <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+                  {a.description || "설명이 제공되지 않았습니다."}
+                </p>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       {/* Aspect별 감성 분포 (전체 + aspect 드릴다운) */}

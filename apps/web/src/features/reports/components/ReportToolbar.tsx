@@ -40,10 +40,9 @@ const EXPORT_ITEMS: {
   {
     fmt: "pptx",
     title: "PPTX",
-    desc: "블록 1개 = 슬라이드 1장",
+    desc: "블록 1개 = 슬라이드 1장 · 편집 가능한 개체",
     icon: <Presentation className="h-4.25 w-4.25" />,
     iconClass: "bg-amber-50 text-amber-600",
-    soon: true,
   },
   {
     fmt: "hwp",
