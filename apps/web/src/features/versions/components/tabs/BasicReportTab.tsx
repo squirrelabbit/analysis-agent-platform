@@ -112,11 +112,11 @@ function BlockCard({ block }: { block: ReportBlock }) {
       </div>
       <div className="space-y-4">
         {block.layout.map((row, ri) => (
-          <div key={ri} className="flex flex-wrap gap-4">
+          <div key={ri} className="flex flex-wrap items-center gap-4">
             {row.panels.map((panel, pi) => (
               <div
                 key={pi}
-                className="min-w-[220px] flex-1"
+                className="flex min-w-[220px] flex-1 flex-col justify-center"
                 style={{ flexBasis: WIDTH_BASIS[panel.width] ?? "100%" }}
               >
                 <Panel panel={panel} />

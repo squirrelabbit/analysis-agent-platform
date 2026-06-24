@@ -1,6 +1,7 @@
 package service
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -179,11 +180,19 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		if ds, err := s.GetDataset(version.ProjectID, version.DatasetID); err == nil {
 			datasetName = ds.Name
 		}
+		period := metadataString(version.Metadata, "data_period", "")
+		if period == "" {
+			period = s.reportDataPeriod(version) // 원본 데이터의 게시일 범위
+		}
+		model := metadataString(version.Metadata, "clause_label_model", metadataString(version.Metadata, "doc_genuineness_model", ""))
+		if model == "" {
+			model = reportPreprocessModels(version.Metadata) // 전처리에 쓴 LLOA 모델
+		}
 		return reportBuildRoot{root: map[string]any{
 			"dataset_name":  datasetName,
 			"version_label": metadataString(version.Metadata, "version_label", ""),
-			"data_period":   metadataString(version.Metadata, "data_period", ""),
-			"lloa_model":    metadataString(version.Metadata, "clause_label_model", metadataString(version.Metadata, "doc_genuineness_model", "")),
+			"data_period":   period,
+			"lloa_model":    model,
 		}, ready: true}
 	case "clean":
 		if !reportCleanReady(version) {
@@ -344,6 +353,89 @@ func loadChannelGenuineBreakdown(cleanRef, genuinenessRef string, verifyMode boo
 		return nil, err
 	}
 	return map[string]any{"total": total, "channels": channels, "channel_field": chosen}, nil
+}
+
+// reportPreprocessModels — 분석 개요의 "분석 모델"용. 전처리(doc_genuineness/clause_label)
+// 빌드 당시 metadata에 snapshot된 LLOA 모델 id를 모아 고유 목록 문자열로. verify 모드는
+// applied.classify_models(2개), 단일 모드는 model 1개. "wisenut/" prefix는 떼서 보기 좋게.
+func reportPreprocessModels(metadata map[string]any) string {
+	seen := map[string]bool{}
+	order := make([]string, 0, 4)
+	add := func(m string) {
+		m = strings.TrimSpace(m)
+		if i := strings.LastIndex(m, "/"); i >= 0 {
+			m = m[i+1:]
+		}
+		if m == "" || seen[m] {
+			return
+		}
+		seen[m] = true
+		order = append(order, m)
+	}
+	for _, sk := range []string{"doc_genuineness_summary", "clause_label_summary"} {
+		if applied, ok := summaryMetadataMap(metadata, sk, "applied"); ok {
+			if cm, ok := asList(applied["classify_models"]); ok {
+				for _, v := range cm {
+					if s, ok := v.(string); ok {
+						add(s)
+					}
+				}
+			}
+		}
+		add(summaryMetadataString(metadata, sk, "model"))
+	}
+	return strings.Join(order, ", ")
+}
+
+// reportDataPeriod — 분석 개요의 "분석 기간"용. clean이 보존한 source_json의 원본 날짜
+// 컬럼(게시일/작성일/…) 범위를 min~max로. 날짜 컬럼명은 데이터셋마다 다르므로 후보 자동
+// 선택, "Invalid date--" 같은 더러운 값은 TRY_CAST로 거른다.
+func (s *DatasetService) reportDataPeriod(version domain.DatasetVersion) string {
+	if !reportCleanReady(version) {
+		return ""
+	}
+	cleanRef := reportArtifactRef(version.Metadata, "clean_uri", "cleaned_ref")
+	if cleanRef == "" && version.CleanURI != nil {
+		cleanRef = strings.TrimSpace(*version.CleanURI)
+	}
+	if cleanRef == "" {
+		return ""
+	}
+	lo, hi, err := loadDataPeriod(cleanRef)
+	if err != nil || lo == "" {
+		return ""
+	}
+	if hi == "" || hi == lo {
+		return lo
+	}
+	return lo + " ~ " + hi
+}
+
+func loadDataPeriod(cleanRef string) (string, string, error) {
+	db, cleanup, err := openTempDuckDB()
+	if err != nil {
+		return "", "", err
+	}
+	defer cleanup()
+
+	cleanSrc := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+	dateExpr := func(field string) string {
+		return fmt.Sprintf(`TRY_CAST(json_extract_string(source_json, '$."%s"') AS DATE)`, field)
+	}
+	candidates := []string{"게시일", "작성일", "작성시간", "등록일", "수집일", "date", "날짜", "created_at", "published_at"}
+	for _, f := range candidates {
+		expr := dateExpr(f)
+		q := fmt.Sprintf("SELECT CAST(MIN(%s) AS VARCHAR), CAST(MAX(%s) AS VARCHAR), COUNT(%s) FROM %s", expr, expr, expr, cleanSrc)
+		var lo, hi sql.NullString
+		var cnt int
+		if err := db.QueryRow(q).Scan(&lo, &hi, &cnt); err != nil {
+			continue // 컬럼/스키마 미스는 후보 skip
+		}
+		if cnt > 0 && lo.Valid {
+			return lo.String, hi.String, nil
+		}
+	}
+	return "", "", nil
 }
 
 // reportCleanReady — clean 단계 완료 판정. 빌드 잡 status는 "completed", artifact status는
