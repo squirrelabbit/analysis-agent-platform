@@ -157,8 +157,6 @@ export function ClauseTab() {
   };
   // isPlaceholderData: 페이지/필터 변경으로 새 데이터 도착 전(이전 데이터 표시 중) → 로딩.
   const tableLoading = isPlaceholderData;
-  // taxonomy 조회 실패해도 aspectLabelOf가 key로 fallback하므로 화면은 동작한다.
-  const { data: taxonomy } = useTaxonomy();
   const {
     summary,
     items,
@@ -168,6 +166,10 @@ export function ClauseTab() {
     durationSeconds,
     pagination,
   } = data || {};
+  // 이 빌드에 실제 사용된 taxonomy(applied.taxonomy_id)로 aspect 정의를 조회한다.
+  // taxonomy_id를 안 남긴 옛 artifact는 undefined → default taxonomy로 fallback.
+  // taxonomy 조회 실패해도 aspectLabelOf가 key로 fallback하므로 화면은 동작한다.
+  const { data: taxonomy } = useTaxonomy(applied?.taxonomy_id);
 
   if (isLoading) return <BuildTabLoading />;
   if (!summary) {
