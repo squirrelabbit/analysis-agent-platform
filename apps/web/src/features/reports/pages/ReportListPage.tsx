@@ -87,7 +87,10 @@ export default function ReportListPage() {
   const [toast, setToast] = useState<string | null>(null);
   const showToast = (msg: string) => {
     setToast(msg);
-    window.setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 1900);
+    window.setTimeout(
+      () => setToast((cur) => (cur === msg ? null : cur)),
+      1900,
+    );
   };
 
   const list = useMemo(() => {
@@ -311,17 +314,24 @@ function ReportCard({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
         <DropdownMenuItem onClick={onOpen}>
-          <SquarePen />편집 열기
+          <SquarePen />
+          편집 열기
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => setRenameOpen(true)}>
-          <Pencil />이름 변경
+          <Pencil />
+          이름 변경
         </DropdownMenuItem>
         <DropdownMenuItem onClick={onDuplicate}>
-          <Copy />복제
+          <Copy />
+          복제
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
-          <Trash2 />삭제
+        <DropdownMenuItem
+          variant="destructive"
+          onClick={() => setDeleteOpen(true)}
+        >
+          <Trash2 />
+          삭제
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -371,8 +381,9 @@ function ReportCard({
             </DialogHeader>
             <p className="text-sm text-zinc-600">
               <b className="font-semibold text-zinc-800">{report.title}</b>{" "}
-              보고서를 삭제할까요? 블록 {report.blockCount}개가 함께 사라집니다.
-              (보관함의 원본 분석 결과는 유지됩니다.)
+              보고서를 삭제할까요?
+              <br />
+              블록 {report.blockCount}개가 함께 사라집니다.
             </p>
             <DialogFooter className="flex gap-2">
               <DialogClose asChild>

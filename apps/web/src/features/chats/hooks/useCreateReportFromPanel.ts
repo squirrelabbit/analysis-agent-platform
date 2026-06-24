@@ -22,7 +22,8 @@ function hasDetail(msg: ChatMessage): boolean {
 export interface CreateReportParams {
   staged: string[];
   reportTitle: string;
-  threadId?: string;
+  /** runId별 출처 스레드 id(여러 스레드 결과 집계 시 카드마다 다를 수 있다). */
+  threadOf: (runId: string) => string | undefined;
   messageOf: (runId: string) => ChatMessage | undefined;
   cardStateOf: (runId: string) => PanelCardState;
 }
@@ -36,7 +37,7 @@ export function useCreateReportFromPanel(projectId: string) {
     async ({
       staged,
       reportTitle,
-      threadId,
+      threadOf,
       messageOf,
       cardStateOf,
     }: CreateReportParams) => {
@@ -50,7 +51,7 @@ export function useCreateReportFromPanel(projectId: string) {
             const card = cardStateOf(runId);
             const saved = await chatApi.saveResult(projectId, {
               run_id: runId,
-              thread_id: threadId,
+              thread_id: threadOf(runId),
               title: card.title.trim() || undefined,
             });
             return {
