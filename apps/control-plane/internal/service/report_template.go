@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -44,7 +45,7 @@ func (s *DatasetService) CreateReportFromTemplate(projectID string, req domain.R
 	if err != nil {
 		return domain.ReportFromTemplateResponse{}, err
 	}
-	if !strings.EqualFold(strings.TrimSpace(version.CleanStatus), "completed") {
+	if !reportCleanReady(version) {
 		return domain.ReportFromTemplateResponse{}, ErrInvalidArgument{Message: "clean_not_ready"}
 	}
 
@@ -131,7 +132,7 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 			"lloa_model":    metadataString(version.Metadata, "clause_label_model", metadataString(version.Metadata, "doc_genuineness_model", "")),
 		}, ready: true}
 	case "clean":
-		if !strings.EqualFold(strings.TrimSpace(version.CleanStatus), "completed") {
+		if !reportCleanReady(version) {
 			return reportBuildRoot{}
 		}
 		summary := map[string]any{}
@@ -146,7 +147,15 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		if ref == "" {
 			return reportBuildRoot{}
 		}
-		summary, _, _, _, err := loadClauseLabelArtifact(ref, 1, 0, "", "")
+		// ADR-028 verify 모드는 schema가 달라 전용 로더(final_label 기준 집계). view
+		// 핸들러(dataset_artifact_views.go)와 동일 분기.
+		var summary map[string]any
+		var err error
+		if metadataString(version.Metadata, "clause_label_mode", "") == "verify" {
+			summary, _, _, _, err = loadClauseLabelVerifyArtifact(ref, 1, 0, "", "", false, false)
+		} else {
+			summary, _, _, _, err = loadClauseLabelArtifact(ref, 1, 0, "", "")
+		}
 		if err != nil {
 			return reportBuildRoot{}
 		}
@@ -160,7 +169,15 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		if cleanRef == "" && version.CleanURI != nil {
 			cleanRef = strings.TrimSpace(*version.CleanURI)
 		}
-		summary, _, _, _, err := loadDocGenuinenessArtifact(ref, cleanRef, 1, 0, version.DatasetVersionID, "")
+		// ADR-026 verify 모드는 schema가 달라(final_label 등) 전용 로더를 쓴다.
+		// view 핸들러(dataset_artifact_views.go)와 동일 분기.
+		var summary map[string]any
+		var err error
+		if metadataString(version.Metadata, "doc_genuineness_mode", "") == "verify" {
+			summary, _, _, _, err = loadDocGenuinenessVerifyArtifact(ref, cleanRef, 1, 0, "", false, false)
+		} else {
+			summary, _, _, _, err = loadDocGenuinenessArtifact(ref, cleanRef, 1, 0, version.DatasetVersionID, "")
+		}
 		if err != nil {
 			return reportBuildRoot{}
 		}
@@ -179,6 +196,16 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		// channel_breakdown 등 아직 없는 build → not ready (missing_sections로)
 		return reportBuildRoot{}
 	}
+}
+
+// reportCleanReady — clean 단계 완료 판정. 빌드 잡 status는 "completed", artifact status는
+// "ready"로 나뉘므로 둘 다 허용. status가 비어도 summary가 있으면 ready로 본다.
+func reportCleanReady(version domain.DatasetVersion) bool {
+	status := strings.ToLower(strings.TrimSpace(version.CleanStatus))
+	if status == "ready" || status == "completed" {
+		return true
+	}
+	return version.CleanSummary != nil
 }
 
 func reportArtifactRef(meta map[string]any, keys ...string) string {
@@ -257,7 +284,7 @@ func (s *DatasetService) buildReportPanel(version domain.DatasetVersion, panel r
 // ── transformer: distribution (bar/doughnut/table) ────────────────────────
 
 func distributionData(node any, src *registry.ReportTemplateSource, labels reportLabels) map[string]any {
-	counts, _ := node.(map[string]any)
+	counts, _ := asMap(node)
 	type item struct {
 		key   string
 		count float64
@@ -314,7 +341,7 @@ func distributionData(node any, src *registry.ReportTemplateSource, labels repor
 // ── transformer: stacked_bar (aspect_sentiment) ───────────────────────────
 
 func stackedData(node any, labels reportLabels) map[string]any {
-	aspectMap, _ := node.(map[string]any)
+	aspectMap, _ := asMap(node)
 	type cat struct {
 		key   string
 		total float64
@@ -322,15 +349,15 @@ func stackedData(node any, labels reportLabels) map[string]any {
 	}
 	cats := make([]cat, 0, len(aspectMap))
 	for key, v := range aspectMap {
-		obj, ok := v.(map[string]any)
+		obj, ok := asMap(v)
 		if !ok {
 			continue
 		}
 		total, _ := toFloat(obj["total"])
 		sent := map[string]float64{}
-		if sm, ok := obj["sentiment"].(map[string]any); ok {
+		if sm, ok := asMap(obj["sentiment"]); ok {
 			for sk, sv := range sm {
-				if so, ok := sv.(map[string]any); ok {
+				if so, ok := asMap(sv); ok {
 					c, _ := toFloat(so["count"])
 					sent[sk] = c
 				}
@@ -370,14 +397,14 @@ func stackedData(node any, labels reportLabels) map[string]any {
 
 func rankData(node any, src *registry.ReportTemplateSource, labels reportLabels) map[string]any {
 	// case 1: 리스트(키워드 top) — [{keyword,count} | {label,value}]
-	if list, ok := node.([]any); ok {
+	if list, ok := asList(node); ok {
 		items := make([]any, 0, len(list))
 		n := len(list)
 		if src.Top > 0 && src.Top < n {
 			n = src.Top
 		}
 		for i := 0; i < n; i++ {
-			row, ok := list[i].(map[string]any)
+			row, ok := asMap(list[i])
 			if !ok {
 				continue
 			}
@@ -388,7 +415,7 @@ func rankData(node any, src *registry.ReportTemplateSource, labels reportLabels)
 		return map[string]any{"items": items}
 	}
 	// case 2: aspect_sentiment map + order_by(positive|negative) → 그 감성 count로 순위.
-	aspectMap, ok := node.(map[string]any)
+	aspectMap, ok := asMap(node)
 	if !ok {
 		return map[string]any{"items": []any{}}
 	}
@@ -402,13 +429,13 @@ func rankData(node any, src *registry.ReportTemplateSource, labels reportLabels)
 	}
 	rows := make([]row, 0, len(aspectMap))
 	for key, v := range aspectMap {
-		obj, ok := v.(map[string]any)
+		obj, ok := asMap(v)
 		if !ok {
 			continue
 		}
 		value := 0.0
-		if sm, ok := obj["sentiment"].(map[string]any); ok {
-			if so, ok := sm[orderBy].(map[string]any); ok {
+		if sm, ok := asMap(obj["sentiment"]); ok {
+			if so, ok := asMap(sm[orderBy]); ok {
 				value, _ = toFloat(so["count"])
 			}
 		}
@@ -548,7 +575,7 @@ func digPath(root map[string]any, path string) any {
 	parts := strings.Split(strings.TrimSpace(path), ".")
 	var cur any = root
 	for _, part := range parts {
-		m, ok := cur.(map[string]any)
+		m, ok := asMap(cur)
 		if !ok {
 			return nil
 		}
@@ -558,6 +585,46 @@ func digPath(root map[string]any, path string) any {
 		}
 	}
 	return cur
+}
+
+// asMap — map[string]any 외에 map[string]int / map[string]float64 등 임의의
+// string-keyed 맵을 map[string]any로 정규화. DuckDB 집계 로더(aggregateGroupedCounts
+// 등)가 map[string]int를 반환하므로 digPath·transformer가 그대로 못 읽는 문제 대응.
+func asMap(v any) (map[string]any, bool) {
+	if v == nil {
+		return nil, false
+	}
+	if m, ok := v.(map[string]any); ok {
+		return m, true
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Map || rv.Type().Key().Kind() != reflect.String {
+		return nil, false
+	}
+	out := make(map[string]any, rv.Len())
+	for _, k := range rv.MapKeys() {
+		out[k.String()] = rv.MapIndex(k).Interface()
+	}
+	return out, true
+}
+
+// asList — []any 외에 []map[string]any 등 임의 슬라이스를 []any로 정규화.
+func asList(v any) ([]any, bool) {
+	if v == nil {
+		return nil, false
+	}
+	if l, ok := v.([]any); ok {
+		return l, true
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+		return nil, false
+	}
+	out := make([]any, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		out[i] = rv.Index(i).Interface()
+	}
+	return out, true
 }
 
 func toFloat(v any) (float64, bool) {

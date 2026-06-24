@@ -133,6 +133,47 @@ func TestRankDataFromAspectSentimentOrderBy(t *testing.T) {
 	}
 }
 
+// DuckDB 집계 로더(aggregateGroupedCounts)는 map[string]int를, JSONL 키워드 리스트는
+// []map[string]any를 반환한다. transformer가 map[string]any/[]any만 단언하면 verify
+// build에서 분포가 통째로 빈값이 되던 회귀를 잠근다.
+func TestTransformersHandleConcreteGoTypes(t *testing.T) {
+	// map[string]int 분포 — digPath + distributionData 둘 다 통과해야 한다.
+	root := map[string]any{"summary": map[string]any{
+		"sentiment": map[string]int{"positive": 4206, "neutral": 3072, "negative": 446},
+	}}
+	node := digPath(root, "summary.sentiment")
+	if node == nil {
+		t.Fatalf("digPath가 map[string]int를 못 뚫음")
+	}
+	src := &registry.ReportTemplateSource{Path: "summary.sentiment", Order: []string{"positive", "neutral", "negative"}}
+	out := distributionData(node, src, testLabels())
+	if total, _ := toFloat(out["total"]); total != 7724 {
+		t.Errorf("total = %v, want 7724", out["total"])
+	}
+	items, _ := out["items"].([]any)
+	if len(items) != 3 || items[0].(map[string]any)["label"] != "긍정" {
+		t.Fatalf("map[string]int 분포 변환 실패: %v", items)
+	}
+
+	// []map[string]any 키워드 리스트 + 문자열 count — rankData 통과해야 한다.
+	kw := []map[string]any{
+		{"keyword": "드론", "count": "262"},
+		{"keyword": "체험", "count": "182"},
+	}
+	rout := rankData(kw, &registry.ReportTemplateSource{Top: 10}, testLabels())
+	ritems, _ := rout["items"].([]any)
+	if len(ritems) != 2 {
+		t.Fatalf("[]map[string]any rank 변환 실패: %v", ritems)
+	}
+	first := ritems[0].(map[string]any)
+	if first["label"] != "드론" {
+		t.Errorf("첫 키워드 label = %v, want 드론", first["label"])
+	}
+	if v, _ := toFloat(first["value"]); v != 262 {
+		t.Errorf("문자열 count 파싱 실패: value = %v, want 262", first["value"])
+	}
+}
+
 func TestDigPathAndToFloat(t *testing.T) {
 	root := map[string]any{"summary": map[string]any{"genuineness": map[string]any{"genuine_review": float64(1182)}}}
 	v := digPath(root, "summary.genuineness.genuine_review")
