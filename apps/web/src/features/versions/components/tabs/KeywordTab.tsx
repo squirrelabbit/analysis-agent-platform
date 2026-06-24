@@ -3,6 +3,7 @@ import { StatCard } from "@/components/common/cards/StatCard";
 import {
   BuildMetaBar,
   BuildRunningBanner,
+  BuildTabEmpty,
   BuildTabLoading,
   isBuildRunning,
 } from "../BuildStatusMeta";
@@ -29,6 +30,12 @@ export function KeywordTab() {
   } = data || {};
 
   if (isLoading) return <BuildTabLoading />;
+
+  // 빌드 전(summary 없음)·진행 중이 아니면 다른 탭과 동일한 empty state.
+  // (키워드 순위/절 표가 빌드 안 한 버전에서 빈 표로 노출되던 것 방지)
+  if (!summary && !isBuildRunning(status)) {
+    return <BuildTabEmpty type="clause_keywords" status={status ?? "not_requested"} />;
+  }
 
   // 최다 출현 키워드 — 전역 필드가 없어 현재 페이지 상위로 근사.
   const topTerms = items.slice(0, 2).map((it) => it.keyword);
