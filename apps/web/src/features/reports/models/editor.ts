@@ -90,6 +90,12 @@ export interface ReportState {
   blocks: ReportBlock[];
   /** 선택된 블록 uid */
   selected: string | null;
+  /**
+   * 현재 state가 어떤 보고서(reportId)로 hydrate됐는지. null이면 아직 미hydrate(DEFAULT).
+   * 자동저장 가드가 이 값으로 "현재 state가 이 보고서 것인지"를 state와 원자적으로 판단한다
+   * (ref로 판단하면 hydrate effect가 state보다 한 렌더 앞서 세팅돼 stale 빈 블록을 저장하는 race 발생).
+   */
+  hydratedId: string | null;
 }
 
 export const LIB_TYPE_LABEL: Record<LibType, string> = {
@@ -104,4 +110,5 @@ export const DEFAULT_STATE = (): ReportState => ({
   mode: "edit",
   selected: null,
   blocks: [],
+  hydratedId: null,
 });
