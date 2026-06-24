@@ -436,7 +436,13 @@ func loadDataPeriod(cleanRef string) (string, string, error) {
 	dateExpr := func(field string) string {
 		return fmt.Sprintf(`TRY_CAST(json_extract_string(source_json, '$."%s"') AS DATE)`, field)
 	}
-	candidates := []string{"게시일", "작성일", "작성시간", "등록일", "수집일", "date", "날짜", "created_at", "published_at"}
+	// 날짜 컬럼명 후보 — 한글(SNS 수집) + 영어(docDatetime 등 다른 수집 스키마) 모두.
+	// 완전한 날짜를 우선하도록 docDatetime 류를 앞쪽에 둔다.
+	candidates := []string{
+		"게시일", "작성일", "작성시간", "등록일", "수집일", "날짜",
+		"docDatetime", "doc_datetime", "pub_date", "reg_date", "post_date",
+		"write_date", "regdate", "datetime", "date", "created_at", "published_at",
+	}
 	for _, f := range candidates {
 		expr := dateExpr(f)
 		q := fmt.Sprintf("SELECT CAST(MIN(%s) AS VARCHAR), CAST(MAX(%s) AS VARCHAR), COUNT(%s) FROM %s", expr, expr, expr, cleanSrc)
