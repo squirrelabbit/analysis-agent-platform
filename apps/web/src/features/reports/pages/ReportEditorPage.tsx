@@ -1,7 +1,7 @@
 // 분석 보고서 에디터 페이지.
-// 좌: 저장된 결과 보관함(LIBRARY) / 우: 보고서 캔버스(블록 구성).
-// 채팅에서 저장된 차트·표·원문 결과를 골라 블록으로 추가하고, 드래그 정렬·너비 조절·
-// 해석 문구·표시 옵션을 편집한 뒤 PDF/HTML로 내보낸다.
+// 보고서는 채팅에서 생성된 블록 구성으로 들어온다. 이 화면에서는 새 결과/차트를
+// "추가"하지 않고, 기존 블록의 글(제목·해석 문구·표시 옵션)과 레이아웃 구조
+// (드래그 정렬·너비·높이·삭제)만 편집한 뒤 PDF/HTML/PPTX로 내보낸다.
 // 보고서 문서 API(GET 단건 → hydrate, 변경분 디바운스 PUT 자동저장)와 연동된다.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -12,12 +12,10 @@ import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { useProjectDetail } from "@/features/projects/hooks/project.query";
 import { savedResultToLibraryItem } from "../models/library";
 import { useSavedResults } from "../hooks/report.query";
-import { useDeleteSavedResult } from "../hooks/report.mutation";
 import { useReport } from "../hooks/reportDoc.query";
 import { useUpdateReport } from "../hooks/reportDoc.mutation";
 import { useReportEditor } from "../hooks/useReportEditor";
 import type { ReportBlock as ReportBlockModel } from "../models";
-import { ReportLibrary } from "../components/ReportLibrary";
 import { ReportBlock } from "../components/ReportBlock";
 import { BlockPopover } from "../components/BlockPopover";
 import {
@@ -46,7 +44,6 @@ export default function ReportEditorPage() {
   const { reportId } = useParams();
   const { data: project } = useProjectDetail(projectId);
   const { state, dispatch } = useReportEditor();
-  const deleteSaved = useDeleteSavedResult(projectId);
 
   // 보고서 문서 로드 → 에디터 hydrate.
   const {
@@ -72,7 +69,13 @@ export default function ReportEditorPage() {
     const blocks = (report.blocks as ReportBlockModel[]) ?? [];
     dispatch({
       type: "hydrate",
-      state: { title: report.title, mode: "edit", selected: null, blocks },
+      state: {
+        title: report.title,
+        mode: "edit",
+        selected: null,
+        blocks,
+        hydratedId: report.reportId,
+      },
     });
     lastSavedRef.current = JSON.stringify({ title: report.title, blocks });
     hydratedIdRef.current = report.reportId;
@@ -85,7 +88,10 @@ export default function ReportEditorPage() {
 
   // 변경분 디바운스 자동저장(PUT 전체 교체). hydrate 직후/무변경은 skip.
   useEffect(() => {
-    if (!reportId || hydratedIdRef.current !== reportId) return;
+    // state가 현재 reportId로 hydrate된 뒤에만 저장한다. hydratedIdRef(sibling effect에서
+    // 세팅)는 state보다 한 렌더 앞서므로, hydrate 직후 stale DEFAULT(빈 블록)를 저장하는
+    // race가 생긴다 → state와 원자적으로 갱신되는 state.hydratedId로 판단.
+    if (!reportId || state.hydratedId !== reportId) return;
     const snapshot = JSON.stringify({
       title: state.title,
       blocks: state.blocks,
@@ -118,7 +124,7 @@ export default function ReportEditorPage() {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.title, state.blocks, reportId]);
+  }, [state.title, state.blocks, state.hydratedId, reportId]);
 
   // 페이지 이탈/언마운트 시 디바운스 대기 중이던 변경분을 즉시 저장(마지막 변경 유실 방지).
   // flush에 필요한 최신 값은 커밋 후 effect에서 ref에 담아 둔다(렌더 중 ref 갱신 금지).
@@ -155,9 +161,7 @@ export default function ReportEditorPage() {
   const libById = (id: string) => libMap.get(id);
 
   const blocksRef = useRef<HTMLDivElement>(null);
-  const libDragId = useRef<string | null>(null);
   const gripDragUid = useRef<string | null>(null);
-  const [dropIdx, setDropIdx] = useState<number | null>(null);
   const [dropMarker, setDropMarker] = useState<DropMarker | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastT = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -166,10 +170,6 @@ export default function ReportEditorPage() {
   const autoScroll = useRef<{ vy: number; raf: number }>({ vy: 0, raf: 0 });
 
   const isEdit = state.mode === "edit";
-  const usedIds = useMemo(
-    () => new Set(state.blocks.map((b) => b.libId)),
-    [state.blocks],
-  );
   const selectedBlock = state.blocks.find((b) => b.uid === state.selected);
   const selectedLib = selectedBlock ? libById(selectedBlock.libId) : undefined;
 
@@ -177,30 +177,6 @@ export default function ReportEditorPage() {
     setToast(msg);
     if (toastT.current) clearTimeout(toastT.current);
     toastT.current = setTimeout(() => setToast(null), 1900);
-  };
-
-  const addBlock = (libId: string, atIdx?: number, sameRow = false) => {
-    // 메인이 표가 아니면(metric/evidence/chart) display를 상세 데이터 폴드로 보여줄 수 있다.
-    const r = libById(libId)?.result;
-    const hasDetail =
-      !!r && (!!r.metric || !!r.evidence || !!r.chart) && !!r.display;
-    dispatch({ type: "addBlock", libId, atIdx, newRow: !sameRow, hasDetail });
-    showToast(`"${libById(libId)?.title}" 추가됨`);
-  };
-
-  // 보관함에서 결과 삭제. 삭제 확인은 보관함 카드의 DeleteDialog가 담당.
-  // 성공 시 삭제된 결과를 참조하던 블록도 함께 정리한다.
-  const deleteLib = (libId: string) => {
-    const title = libById(libId)?.title ?? "결과";
-    deleteSaved.mutate(libId, {
-      onSuccess: () => {
-        state.blocks
-          .filter((b) => b.libId === libId)
-          .forEach((b) => dispatch({ type: "deleteBlock", uid: b.uid }));
-        showToast(`"${title}" 삭제됨`);
-      },
-      onError: () => showToast("삭제에 실패했어요"),
-    });
   };
 
   // 드롭 위치 계산 — 포인터에서 가장 가까운 카드 중심 기준 앞/뒤 삽입.
@@ -360,11 +336,11 @@ export default function ReportEditorPage() {
   useEffect(() => stopAutoScroll, []);
 
   const onCanvasDragOver = (e: React.DragEvent) => {
-    if (libDragId.current == null && gripDragUid.current == null) return;
+    // 블록 재정렬(grip 드래그)만 처리한다. 결과 추가는 지원하지 않는다.
+    if (gripDragUid.current == null) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = libDragId.current ? "copy" : "move";
-    const { idx, marker } = resolveDrop(e.clientX, e.clientY);
-    setDropIdx(idx);
+    e.dataTransfer.dropEffect = "move";
+    const { marker } = resolveDrop(e.clientX, e.clientY);
     setDropMarker(marker);
     updateAutoScroll(e.clientY);
   };
@@ -372,10 +348,7 @@ export default function ReportEditorPage() {
   const onCanvasDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const { idx, sameRow } = resolveDrop(e.clientX, e.clientY);
-    if (libDragId.current) {
-      addBlock(libDragId.current, idx, sameRow);
-      libDragId.current = null;
-    } else if (gripDragUid.current) {
+    if (gripDragUid.current) {
       const from = state.blocks.findIndex(
         (b) => b.uid === gripDragUid.current,
       );
@@ -383,7 +356,6 @@ export default function ReportEditorPage() {
         dispatch({ type: "moveBlock", from, to: idx, newRow: !sameRow });
       gripDragUid.current = null;
     }
-    setDropIdx(null);
     setDropMarker(null);
     stopAutoScroll();
   };
@@ -436,30 +408,12 @@ export default function ReportEditorPage() {
 
   return (
     <div className="flex h-full">
-      {isEdit && (
-        <ReportLibrary
-          items={library}
-          usedIds={usedIds}
-          onAdd={(libId) => addBlock(libId)}
-          onDelete={deleteLib}
-          onDragStart={(libId) => {
-            libDragId.current = libId;
-          }}
-          onDragEnd={() => {
-            libDragId.current = null;
-            setDropIdx(null);
-            setDropMarker(null);
-            stopAutoScroll();
-          }}
-        />
-      )}
-
       <div
         ref={scrollRef}
         className="min-w-0 flex-1 overflow-y-auto"
         onDragOver={(e) => {
-          // 컨테이너 가장자리(블록 바깥 여백 포함)에서도 자동 스크롤 동작하도록.
-          if (libDragId.current == null && gripDragUid.current == null) return;
+          // 블록 재정렬 드래그 중 컨테이너 가장자리에서도 자동 스크롤 동작하도록.
+          if (gripDragUid.current == null) return;
           updateAutoScroll(e.clientY);
         }}
       >
@@ -482,7 +436,7 @@ export default function ReportEditorPage() {
             분석 보고서
           </h1>
           <p className="mt-1.5 text-sm text-zinc-500">
-            분석 채팅에서 저장된 결과를 골라 보고서를 구성하고 내보냅니다.
+            채팅에서 만든 보고서의 글과 결과 카드 배치를 편집하고 내보냅니다.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -560,7 +514,6 @@ export default function ReportEditorPage() {
                         }}
                         onGripDragEnd={() => {
                           gripDragUid.current = null;
-                          setDropIdx(null);
                           setDropMarker(null);
                           stopAutoScroll();
                         }}
@@ -596,19 +549,6 @@ export default function ReportEditorPage() {
                       }}
                     />
                   ))}
-
-                {isEdit && (
-                  <div
-                    className={cn(
-                      "col-span-full rounded-2xl border-2 border-dashed px-6 py-7 text-center text-sm font-semibold transition-colors",
-                      dropIdx === state.blocks.length
-                        ? "border-violet-500 bg-violet-50 text-violet-700"
-                        : "border-zinc-300 text-zinc-400",
-                    )}
-                  >
-                    보관함에서 결과를 끌어다 놓거나 "추가"로 블록을 삽입하세요
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -693,10 +633,10 @@ function EmptyReport() {
         <FileText className="h-6.5 w-6.5 text-zinc-400" />
       </div>
       <b className="block text-base font-bold text-zinc-600">
-        아직 추가된 결과가 없어요
+        표시할 결과 블록이 없어요
       </b>
       <span className="text-[13.5px]">
-        왼쪽 보관함에서 결과를 추가하거나 끌어다 놓으세요
+        보고서 블록은 분석 채팅에서 결과를 저장할 때 추가됩니다
       </span>
     </div>
   );

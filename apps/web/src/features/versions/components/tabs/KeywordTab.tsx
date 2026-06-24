@@ -9,6 +9,7 @@ import {
 import type { KeywordBuild } from "../../models/build";
 import { useBuildVersion } from "../../hooks/build.query";
 import KeywordClauseTable from "../KeywordClauseTable";
+import KeywordSentimentRankTable from "../KeywordSentimentRankTable";
 
 export function KeywordTab() {
   // 요약 통계는 기존 clause_keywords 집계 API를 그대로 사용한다.
@@ -81,6 +82,9 @@ export function KeywordTab() {
           hasPrevious={false}
         />
       )}
+
+      {/* 키워드별 긍정/부정 전체 순위 (순위 API 준비 전 — mock 하드코딩) */}
+      <KeywordSentimentRankTable />
 
       {/* 절에서 추출된 키워드 (추출 API 준비 전 — 예시 하드코딩) */}
       <KeywordClauseTable />
