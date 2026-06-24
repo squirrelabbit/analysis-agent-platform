@@ -29,6 +29,7 @@ import {
   exportReportPDF,
   REPORT_EXPORT_ROOT_ID,
 } from "../utils/exportReport";
+import { exportReportPPTX } from "../utils/exportReportPptx";
 
 // 드롭 삽입 지점 표시 막대(컨테이너 기준 좌표). 같은 행 사이=세로(v), 행 경계=가로(h).
 type DropMarker =
@@ -389,7 +390,14 @@ export default function ReportEditorPage() {
 
   const handleExport = (fmt: ExportFormat) => {
     if (fmt === "pptx") {
-      showToast("PPTX는 블록=슬라이드로 매핑해 곧 지원돼요");
+      // 블록 1개 = 슬라이드 1장, 네이티브 PPT 개체(텍스트/표/차트)로 내보낸다.
+      exportReportPPTX(state.title, state.blocks, libById)
+        .then((ok) =>
+          showToast(
+            ok ? "PPTX 파일을 다운로드했어요" : "내보낼 내용이 없습니다",
+          ),
+        )
+        .catch(() => showToast("PPTX 내보내기에 실패했어요"));
       return;
     }
     if (fmt === "hwp") {
