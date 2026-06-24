@@ -433,15 +433,27 @@ func loadDataPeriod(cleanRef string) (string, string, error) {
 	defer cleanup()
 
 	cleanSrc := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+
+	// 1순위: clean이 운영자가 선택한 date_column을 created_at(ISO 8601)으로 정규화해
+	// 저장한 컬럼. 선택돼 있으면 컬럼명 추론 없이 그대로 쓴다(하드코딩 제거의 주 경로).
+	{
+		q := fmt.Sprintf("SELECT CAST(MIN(TRY_CAST(created_at AS DATE)) AS VARCHAR), CAST(MAX(TRY_CAST(created_at AS DATE)) AS VARCHAR), COUNT(TRY_CAST(created_at AS DATE)) FROM %s", cleanSrc)
+		var lo, hi sql.NullString
+		var cnt int
+		if err := db.QueryRow(q).Scan(&lo, &hi, &cnt); err == nil && cnt > 0 && lo.Valid {
+			return lo.String, hi.String, nil
+		}
+	}
+
+	// 2순위(fallback): date_column 미선택으로 clean된 기존 데이터 — source_json의 원본
+	// 날짜 컬럼을 후보로 추론. date_column 선택이 기본이 되면 이 경로는 점차 안 쓰인다.
 	dateExpr := func(field string) string {
 		return fmt.Sprintf(`TRY_CAST(json_extract_string(source_json, '$."%s"') AS DATE)`, field)
 	}
-	// 날짜 컬럼명 후보 — 한글(SNS 수집) + 영어(docDatetime 등 다른 수집 스키마) 모두.
-	// 완전한 날짜를 우선하도록 docDatetime 류를 앞쪽에 둔다.
 	candidates := []string{
 		"게시일", "작성일", "작성시간", "등록일", "수집일", "날짜",
 		"docDatetime", "doc_datetime", "pub_date", "reg_date", "post_date",
-		"write_date", "regdate", "datetime", "date", "created_at", "published_at",
+		"write_date", "regdate", "datetime", "date", "published_at",
 	}
 	for _, f := range candidates {
 		expr := dateExpr(f)
