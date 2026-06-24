@@ -7,10 +7,7 @@ import { Pagination } from "./Pagination";
 // 절(clause)마다 추출된 키워드를 배지로 보여준다. clause_keywords?group=clause API로
 // 절 중심 집계를 서버 검색(q)·페이징해 가져온다 (silverone 2026-06-19).
 
-// 한 페이지 표시 개수 — 사용자가 선택(서버 limit로 그대로 전달). 백엔드는
-// limit 1~1000을 지원하므로 추가 변경 없이 30/50/100까지 조회된다.
-const PAGE_SIZE_OPTIONS = [20, 30, 50, 100] as const;
-const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE = 20;
 
 // 절 텍스트에서 keyword 출현 위치를 <mark>로 감싼다(부분일치, 정규식 없이).
 function highlightClause(text: string, kw: string) {
@@ -39,7 +36,6 @@ function highlightClause(text: string, kw: string) {
 export default function KeywordClauseTable() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   // 클릭한 키워드 → 그 절에서 위치 하이라이트. {row index, keyword}.
   const [selected, setSelected] = useState<{ row: number; kw: string } | null>(
     null,
@@ -47,25 +43,25 @@ export default function KeywordClauseTable() {
 
   const { data, isLoading, isPlaceholderData } = useClauseKeywordClauses({
     q: search.trim() || undefined,
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
   });
 
   const rows = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(total / pageSize)),
-    [total, pageSize],
+    () => Math.max(1, Math.ceil(total / PAGE_SIZE)),
+    [total],
   );
 
-  // 검색어·표시 개수가 바뀌면 1페이지로.
+  // 검색어가 바뀌면 1페이지로.
   useEffect(() => {
     setPage(1);
-  }, [search, pageSize]);
-  // 페이지/검색/개수가 바뀌면 행이 달라지므로 선택 하이라이트 해제.
+  }, [search]);
+  // 페이지/검색이 바뀌면 행이 달라지므로 선택 하이라이트 해제.
   useEffect(() => {
     setSelected(null);
-  }, [page, search, pageSize]);
+  }, [page, search]);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-zinc-100 bg-white shadow-sm">
@@ -76,28 +72,14 @@ export default function KeywordClauseTable() {
           </div>
           <span className="text-xs text-zinc-400">{total.toLocaleString()}건</span>
         </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            title="한 페이지에 표시할 개수"
-            className="h-7 rounded-lg border border-zinc-200 px-2 text-xs text-zinc-600 outline-none focus:border-violet-400"
-          >
-            {PAGE_SIZE_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n}개씩
-              </option>
-            ))}
-          </select>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="절·키워드 검색…"
-              className="h-7 w-44 rounded-lg border border-zinc-200 pl-7 pr-2.5 text-xs outline-none focus:border-violet-400"
-            />
-          </div>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="절·키워드 검색…"
+            className="h-7 w-44 rounded-lg border border-zinc-200 pl-7 pr-2.5 text-xs outline-none focus:border-violet-400"
+          />
         </div>
       </div>
 
