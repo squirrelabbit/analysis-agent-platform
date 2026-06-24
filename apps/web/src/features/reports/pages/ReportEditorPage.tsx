@@ -72,7 +72,13 @@ export default function ReportEditorPage() {
     const blocks = (report.blocks as ReportBlockModel[]) ?? [];
     dispatch({
       type: "hydrate",
-      state: { title: report.title, mode: "edit", selected: null, blocks },
+      state: {
+        title: report.title,
+        mode: "edit",
+        selected: null,
+        blocks,
+        hydratedId: report.reportId,
+      },
     });
     lastSavedRef.current = JSON.stringify({ title: report.title, blocks });
     hydratedIdRef.current = report.reportId;
@@ -85,7 +91,10 @@ export default function ReportEditorPage() {
 
   // 변경분 디바운스 자동저장(PUT 전체 교체). hydrate 직후/무변경은 skip.
   useEffect(() => {
-    if (!reportId || hydratedIdRef.current !== reportId) return;
+    // state가 현재 reportId로 hydrate된 뒤에만 저장한다. hydratedIdRef(sibling effect에서
+    // 세팅)는 state보다 한 렌더 앞서므로, hydrate 직후 stale DEFAULT(빈 블록)를 저장하는
+    // race가 생긴다 → state와 원자적으로 갱신되는 state.hydratedId로 판단.
+    if (!reportId || state.hydratedId !== reportId) return;
     const snapshot = JSON.stringify({
       title: state.title,
       blocks: state.blocks,
@@ -118,7 +127,7 @@ export default function ReportEditorPage() {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.title, state.blocks, reportId]);
+  }, [state.title, state.blocks, state.hydratedId, reportId]);
 
   // 페이지 이탈/언마운트 시 디바운스 대기 중이던 변경분을 즉시 저장(마지막 변경 유실 방지).
   // flush에 필요한 최신 값은 커밋 후 effect에서 ref에 담아 둔다(렌더 중 ref 갱신 금지).
