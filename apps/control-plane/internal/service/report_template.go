@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -192,10 +193,104 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 			return reportBuildRoot{}
 		}
 		return reportBuildRoot{root: map[string]any{"summary": summary}, ready: true}
+	case "channel_breakdown":
+		// 별도 build 단계가 아니다. clean(source_json에 원본 채널 컬럼 보존)과
+		// doc_genuineness를 doc_id로 JOIN해 "채널별 진성 문서 수"를 즉석 집계한다.
+		// clean + doc_genuineness 둘 다 ready여야 한다.
+		cleanRef := reportArtifactRef(version.Metadata, "clean_uri", "cleaned_ref")
+		if cleanRef == "" && version.CleanURI != nil {
+			cleanRef = strings.TrimSpace(*version.CleanURI)
+		}
+		genRef := reportArtifactRef(version.Metadata, "doc_genuineness_ref", "doc_genuineness_uri")
+		if cleanRef == "" || genRef == "" {
+			return reportBuildRoot{}
+		}
+		verify := metadataString(version.Metadata, "doc_genuineness_mode", "") == "verify"
+		summary, err := loadChannelGenuineBreakdown(cleanRef, genRef, verify)
+		if err != nil || summary == nil {
+			return reportBuildRoot{}
+		}
+		return reportBuildRoot{root: map[string]any{"summary": summary}, ready: true}
 	default:
-		// channel_breakdown 등 아직 없는 build → not ready (missing_sections로)
 		return reportBuildRoot{}
 	}
+}
+
+// loadChannelGenuineBreakdown — cleaned.parquet(clean이 source_json에 원본 row 전체를
+// 보존)와 doc_genuineness artifact를 doc_id로 JOIN해 "채널별 진성(genuine_review) 문서
+// 수"를 즉석 집계한다. 별도 build 단계 없이 on-demand reshape(보고서 철학).
+//
+// 채널 컬럼명은 데이터셋마다 다르므로(수집채널/채널/channel/source/…) 후보 중 값이 가장
+// 많이 채워진 컬럼을 자동 선택한다. 채널 데이터가 전혀 없으면 nil을 반환해 섹션을
+// missing_sections로 떨어뜨린다. verify 모드는 진성 라벨 컬럼이 final_label, 단일 모드는
+// genuineness다(view 핸들러와 동일).
+func loadChannelGenuineBreakdown(cleanRef, genuinenessRef string, verifyMode bool) (map[string]any, error) {
+	if strings.TrimSpace(cleanRef) == "" || strings.TrimSpace(genuinenessRef) == "" {
+		return nil, nil
+	}
+	db, cleanup, err := openTempDuckDB()
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	cleanSrc := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+	genSrc := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(genuinenessRef))
+
+	// 원본 채널 컬럼 후보 (코드 상수 — SQL injection 위험 없음).
+	channelExpr := func(field string) string {
+		return fmt.Sprintf(`json_extract_string(source_json, '$."%s"')`, field)
+	}
+	candidates := []string{"수집채널", "채널", "channel", "source", "platform", "매체", "미디어"}
+	chosen := ""
+	best := -1
+	for _, f := range candidates {
+		expr := channelExpr(f)
+		q := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s IS NOT NULL AND %s <> ''", cleanSrc, expr, expr)
+		var cnt int
+		if err := db.QueryRow(q).Scan(&cnt); err != nil {
+			continue // 컬럼/스키마 미스는 후보 skip
+		}
+		if cnt > best {
+			best = cnt
+			chosen = f
+		}
+	}
+	if chosen == "" || best <= 0 {
+		return nil, nil // 채널 데이터 없음 → not ready
+	}
+
+	labelCol := "genuineness"
+	if verifyMode {
+		labelCol = "final_label"
+	}
+	q := fmt.Sprintf(`
+		SELECT c.channel, COUNT(*) AS cnt FROM
+			(SELECT doc_id, %s AS channel FROM %s) c
+			JOIN (SELECT doc_id FROM %s WHERE %s = 'genuine_review') g ON c.doc_id = g.doc_id
+		WHERE c.channel IS NOT NULL AND c.channel <> ''
+		GROUP BY c.channel`,
+		channelExpr(chosen), cleanSrc, genSrc, labelCol)
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	channels := map[string]int{}
+	total := 0
+	for rows.Next() {
+		var key string
+		var cnt int
+		if err := rows.Scan(&key, &cnt); err != nil {
+			return nil, err
+		}
+		channels[key] += cnt
+		total += cnt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return map[string]any{"total": total, "channels": channels, "channel_field": chosen}, nil
 }
 
 // reportCleanReady — clean 단계 완료 판정. 빌드 잡 status는 "completed", artifact status는

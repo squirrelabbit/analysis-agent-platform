@@ -45,7 +45,6 @@
       "id": "channel_distribution",
       "title": "채널별 진성 문서 분포",
       "required_build": "channel_breakdown",
-      "phase": "B",
       "unit_basis": "doc",
       "layout": [
         { "panels": [
