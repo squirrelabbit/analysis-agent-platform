@@ -74,8 +74,10 @@ def _iter_rows(dataset_name: str) -> list[dict[str, Any]]:
         rows = _read_parquet_rows(path)
     elif suffix == ".txt":
         rows = [{"text": line.strip()} for line in path.read_text(encoding="utf-8").splitlines()]
+    elif suffix in (".xlsx", ".xlsm"):
+        rows = _read_excel_rows(path)
     else:
-        raise ValueError("dataset_name must point to a .csv, .jsonl, .parquet, or .txt file")
+        raise ValueError("dataset_name must point to a .csv, .xlsx, .jsonl, .parquet, or .txt file")
 
     _ROW_CACHE[cache_key] = rows
     _ROW_CACHE.move_to_end(cache_key)
@@ -88,6 +90,43 @@ def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
     with path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         return [dict(row) for row in reader]
+
+
+def _read_excel_rows(path: Path) -> list[dict[str, Any]]:
+    """엑셀(.xlsx/.xlsm) 첫 시트를 CSV와 동일한 형태(헤더 dict, 값은 문자열)로 읽는다.
+
+    - 첫 행 = 헤더. 헤더가 빈 칸인 열은 무시.
+    - 셀 값은 CSV(DictReader)와 동일하게 문자열로 정규화(빈 셀/None → "")해
+      schema_inference·clean의 type 추론이 CSV와 같은 경로를 타게 한다.
+    - 완전히 빈 행은 건너뛴다. read_only로 큰 파일도 스트리밍 처리.
+    """
+    from openpyxl import load_workbook  # heavy optional dep — lazy import
+
+    workbook = load_workbook(filename=str(path), read_only=True, data_only=True)
+    try:
+        worksheet = workbook.active
+        if worksheet is None:
+            return []
+        row_iter = worksheet.iter_rows(values_only=True)
+        try:
+            header_cells = next(row_iter)
+        except StopIteration:
+            return []
+        headers = [str(h).strip() if h is not None else "" for h in header_cells]
+        rows: list[dict[str, Any]] = []
+        for cells in row_iter:
+            if all(c is None for c in cells):
+                continue
+            record: dict[str, Any] = {}
+            for index, name in enumerate(headers):
+                if not name:
+                    continue
+                value = cells[index] if index < len(cells) else None
+                record[name] = "" if value is None else str(value)
+            rows.append(record)
+        return rows
+    finally:
+        workbook.close()
 
 
 def _read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
@@ -920,6 +959,7 @@ __all__ = [
     "_rank_documents",
     "_strip_known_noise_phrases",
     "_read_csv_rows",
+    "_read_excel_rows",
     "_read_jsonl_rows",
     "_read_parquet_rows",
     "_require_pyarrow",

@@ -235,7 +235,8 @@ func inferDatasetArtifactFormat(uri, fallback string) string {
 	if extension == "" {
 		return strings.TrimSpace(fallback)
 	}
-	if extension == "jsonl" || extension == "json" || extension == "csv" || extension == "parquet" {
+	if extension == "jsonl" || extension == "json" || extension == "csv" || extension == "parquet" ||
+		extension == "xlsx" || extension == "xlsm" {
 		return extension
 	}
 	return strings.TrimSpace(fallback)

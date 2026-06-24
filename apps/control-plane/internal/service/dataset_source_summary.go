@@ -10,6 +10,7 @@ import (
 	"analysis-support-platform/control-plane/internal/domain"
 
 	_ "github.com/marcboeker/go-duckdb"
+	"github.com/xuri/excelize/v2"
 )
 
 func loadDatasetSourceSummary(storageURI string, sampleLimit int) *domain.DatasetSourceSummary {
@@ -47,6 +48,25 @@ func loadDatasetSourceSummary(storageURI string, sampleLimit int) *domain.Datase
 	if info.IsDir() {
 		summary.Status = "error"
 		summary.ErrorMessage = "source path must be a file"
+		return summary
+	}
+
+	// 엑셀(.xlsx/.xlsm)은 DuckDB로 못 읽으므로 excelize로 직접 읽어 컬럼/행수/샘플을 채운다.
+	// (clean 폼의 text_columns 선택이 source 컬럼 목록에 의존하므로 프리뷰가 필수.)
+	// Python worker(runtime.common._read_excel_rows)와 동일하게 첫 시트·헤더·빈행 skip·문자열 값.
+	if format == "xlsx" {
+		columns, rowCount, sampleRows, xerr := readXlsxSourceSummary(storageURI, sampleLimit)
+		if xerr != nil {
+			summary.Status = "error"
+			summary.ErrorMessage = xerr.Error()
+			return summary
+		}
+		summary.Available = true
+		summary.Status = "ready"
+		summary.RowCount = &rowCount
+		summary.ColumnCount = len(columns)
+		summary.Columns = columns
+		summary.SampleRows = sampleRows
 		return summary
 	}
 
@@ -93,6 +113,69 @@ func loadDatasetSourceSummary(storageURI string, sampleLimit int) *domain.Datase
 	return summary
 }
 
+// readXlsxSourceSummary는 .xlsx/.xlsm 첫 시트를 읽어 source 프리뷰(컬럼/행수/샘플)를 만든다.
+// Python worker(runtime.common._read_excel_rows)와 정합: 첫 행=헤더(빈 칸 무시), 완전히 빈 행 skip,
+// 값은 문자열. clean의 text_columns 선택이 이 컬럼 목록을 쓴다.
+func readXlsxSourceSummary(path string, sampleLimit int) ([]domain.DatasetSourceColumnSummary, int, []map[string]any, error) {
+	file, err := excelize.OpenFile(path)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	defer file.Close()
+
+	sheets := file.GetSheetList()
+	if len(sheets) == 0 {
+		return []domain.DatasetSourceColumnSummary{}, 0, []map[string]any{}, nil
+	}
+	rows, err := file.GetRows(sheets[0])
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	if len(rows) == 0 {
+		return []domain.DatasetSourceColumnSummary{}, 0, []map[string]any{}, nil
+	}
+
+	header := rows[0]
+	columnIndexes := make([]int, 0, len(header))
+	columns := make([]domain.DatasetSourceColumnSummary, 0, len(header))
+	for index, raw := range header {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		columnIndexes = append(columnIndexes, index)
+		columns = append(columns, domain.DatasetSourceColumnSummary{Name: name, Type: "VARCHAR"})
+	}
+
+	rowCount := 0
+	sampleRows := make([]map[string]any, 0)
+	for _, cells := range rows[1:] {
+		allEmpty := true
+		for _, cell := range cells {
+			if strings.TrimSpace(cell) != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			continue
+		}
+		rowCount++
+		if sampleLimit > 0 && len(sampleRows) < sampleLimit {
+			record := make(map[string]any, len(columns))
+			for position, index := range columnIndexes {
+				value := ""
+				if index < len(cells) {
+					value = cells[index]
+				}
+				record[columns[position].Name] = value
+			}
+			sampleRows = append(sampleRows, record)
+		}
+	}
+	return columns, rowCount, sampleRows, nil
+}
+
 func inferDatasetSourceFormat(path string) string {
 	normalized := strings.ToLower(strings.TrimSpace(path))
 	switch {
@@ -104,6 +187,8 @@ func inferDatasetSourceFormat(path string) string {
 		return "tsv"
 	case strings.HasSuffix(normalized, ".jsonl"), strings.HasSuffix(normalized, ".ndjson"):
 		return "jsonl"
+	case strings.HasSuffix(normalized, ".xlsx"), strings.HasSuffix(normalized, ".xlsm"):
+		return "xlsx"
 	default:
 		return ""
 	}
