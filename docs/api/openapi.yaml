@@ -1863,6 +1863,38 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/basic_analysis:
+    get:
+      tags: [Reports]
+      summary: 기초분석보고서 조회 (read-only, 데이터셋 버전 탭)
+      description: |
+        데이터셋 버전 "기초분석보고서" 탭용 read-only 조회. report를 저장하지 않고
+        템플릿 config(config/report_templates/*.json)에 따라 빌드 summary를 블록으로
+        reshape해서만 반환한다(POST /reports/from_template과 블록 생성 로직 공유).
+        required_build가 ready인 섹션만 채우고 나머지는 missing_sections로 반환.
+        블록 구조·값 표현·배치는 POST 저장 블록과 동일(계약: docs/api/report_basic_template.sample.md).
+      operationId: getBasicAnalysis
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/VersionId"
+        - name: template_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 사용할 템플릿 id. 미지정 시 기본 템플릿(unstructured_basic_v1).
+      responses:
+        "200":
+          description: 템플릿 블록 + 포함/제외 섹션 (저장 안 함)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportBasicAnalysisResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/reports:
     post:
       tags: [Reports]
@@ -3127,6 +3159,38 @@ components:
       properties:
         report:
           $ref: "#/components/schemas/Report"
+        included_sections:
+          type: array
+          items:
+            type: string
+        missing_sections:
+          type: array
+          items:
+            type: object
+            properties:
+              section_id:
+                type: string
+              reason:
+                type: string
+    ReportBasicAnalysisResponse:
+      type: object
+      description: |
+        기초분석보고서 탭 read-only 조회. report 저장 없이 템플릿 블록만 반환.
+        blocks 구조·값 표현·배치는 POST 저장 블록과 동일(프론트 렌더 계약은
+        docs/api/report_basic_template.sample.md).
+      properties:
+        template_id:
+          type: string
+        dataset_version_id:
+          type: string
+        title:
+          type: string
+        blocks:
+          type: array
+          description: 흰 카드(블록) 배열. 각 블록의 layout/panel contract는 sample.md 참조.
+          items:
+            type: object
+            additionalProperties: true
         included_sections:
           type: array
           items:

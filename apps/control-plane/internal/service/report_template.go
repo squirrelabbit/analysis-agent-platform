@@ -23,31 +23,102 @@ import (
 // (추가 집계 없음). 생성된 블록엔 데이터 스냅샷 + source binding을 함께 저장(나중에 "갱신" 용).
 // 계약: docs/api/report_basic_template.sample.md
 func (s *DatasetService) CreateReportFromTemplate(projectID string, req domain.ReportFromTemplateRequest) (domain.ReportFromTemplateResponse, error) {
-	if err := s.requireProject(projectID); err != nil {
+	built, err := s.buildReportTemplateBlocks(projectID, req.TemplateID, req.DatasetVersionID)
+	if err != nil {
 		return domain.ReportFromTemplateResponse{}, err
 	}
-	template, ok := registry.ReportTemplateByID(strings.TrimSpace(req.TemplateID))
-	if !ok {
-		return domain.ReportFromTemplateResponse{}, ErrInvalidArgument{Message: "unknown template_id"}
+
+	blocksJSON, err := json.Marshal(built.blocks)
+	if err != nil {
+		return domain.ReportFromTemplateResponse{}, err
 	}
-	versionID := strings.TrimSpace(req.DatasetVersionID)
+	now := time.Now().UTC()
+	report := domain.Report{
+		ReportID:         id.New(),
+		ProjectID:        projectID,
+		Title:            built.title,
+		DatasetVersionID: built.versionID,
+		Blocks:           blocksJSON,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := s.store.CreateReport(report); err != nil {
+		return domain.ReportFromTemplateResponse{}, err
+	}
+	saved, err := s.store.GetReport(projectID, report.ReportID)
+	if err != nil {
+		return domain.ReportFromTemplateResponse{}, err
+	}
+	return domain.ReportFromTemplateResponse{
+		Report:           saved,
+		IncludedSections: built.included,
+		MissingSections:  built.missing,
+	}, nil
+}
+
+// GetBasicAnalysis — 데이터셋 버전 "기초분석보고서" 탭용 read-only 조회. report를 저장하지
+// 않고 템플릿 블록만 즉석 reshape해서 반환한다(CreateReportFromTemplate과 블록 생성 로직 공유).
+// templateID가 비면 기본 템플릿(unstructured_basic_v1)을 쓴다.
+func (s *DatasetService) GetBasicAnalysis(projectID, versionID, templateID string) (domain.ReportBasicAnalysisResponse, error) {
+	if strings.TrimSpace(templateID) == "" {
+		templateID = defaultBasicReportTemplateID
+	}
+	built, err := s.buildReportTemplateBlocks(projectID, templateID, versionID)
+	if err != nil {
+		return domain.ReportBasicAnalysisResponse{}, err
+	}
+	return domain.ReportBasicAnalysisResponse{
+		TemplateID:       built.templateID,
+		DatasetVersionID: built.versionID,
+		Title:            built.title,
+		Blocks:           built.blocks,
+		IncludedSections: built.included,
+		MissingSections:  built.missing,
+	}, nil
+}
+
+// defaultBasicReportTemplateID — 기초분석보고서 탭이 template_id를 안 주면 쓰는 기본 템플릿.
+// (현재 비정형 SNS 후기 1종. data_type별 기본 선택은 후속.)
+const defaultBasicReportTemplateID = "unstructured_basic_v1"
+
+// reportTemplateBuild — 템플릿 블록 생성 결과(저장 전). GET 미리보기와 POST 저장이 공유.
+type reportTemplateBuild struct {
+	templateID string
+	versionID  string
+	title      string
+	blocks     []map[string]any
+	included   []string
+	missing    []domain.ReportMissingSection
+}
+
+// buildReportTemplateBlocks — 템플릿 섹션을 순회해 ready인 build만 블록으로 reshape한다.
+// 추가 집계 없이 빌드 때 계산된 summary를 재구성할 뿐. 저장하지 않는다.
+func (s *DatasetService) buildReportTemplateBlocks(projectID, templateID, versionID string) (reportTemplateBuild, error) {
+	if err := s.requireProject(projectID); err != nil {
+		return reportTemplateBuild{}, err
+	}
+	template, ok := registry.ReportTemplateByID(strings.TrimSpace(templateID))
+	if !ok {
+		return reportTemplateBuild{}, ErrInvalidArgument{Message: "unknown template_id"}
+	}
+	versionID = strings.TrimSpace(versionID)
 	if versionID == "" {
-		return domain.ReportFromTemplateResponse{}, ErrInvalidArgument{Message: "dataset_version_id is required"}
+		return reportTemplateBuild{}, ErrInvalidArgument{Message: "dataset_version_id is required"}
 	}
 
 	rawVersion, err := s.store.GetDatasetVersion(projectID, versionID)
 	if err != nil {
 		if err == store.ErrNotFound {
-			return domain.ReportFromTemplateResponse{}, ErrNotFound{Resource: "dataset version"}
+			return reportTemplateBuild{}, ErrNotFound{Resource: "dataset version"}
 		}
-		return domain.ReportFromTemplateResponse{}, err
+		return reportTemplateBuild{}, err
 	}
 	version, err := s.GetDatasetVersion(projectID, rawVersion.DatasetID, versionID)
 	if err != nil {
-		return domain.ReportFromTemplateResponse{}, err
+		return reportTemplateBuild{}, err
 	}
 	if !reportCleanReady(version) {
-		return domain.ReportFromTemplateResponse{}, ErrInvalidArgument{Message: "clean_not_ready"}
+		return reportTemplateBuild{}, ErrInvalidArgument{Message: "clean_not_ready"}
 	}
 
 	labels := s.newReportLabels(version)
@@ -70,35 +141,17 @@ func (s *DatasetService) CreateReportFromTemplate(projectID string, req domain.R
 		included = append(included, section.ID)
 	}
 
-	blocksJSON, err := json.Marshal(blocks)
-	if err != nil {
-		return domain.ReportFromTemplateResponse{}, err
-	}
-	now := time.Now().UTC()
 	title := strings.TrimSpace(template.ReportTitle)
 	if title == "" {
 		title = "데이터 기초 분석 보고서"
 	}
-	report := domain.Report{
-		ReportID:         id.New(),
-		ProjectID:        projectID,
-		Title:            title,
-		DatasetVersionID: versionID,
-		Blocks:           blocksJSON,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}
-	if err := s.store.CreateReport(report); err != nil {
-		return domain.ReportFromTemplateResponse{}, err
-	}
-	saved, err := s.store.GetReport(projectID, report.ReportID)
-	if err != nil {
-		return domain.ReportFromTemplateResponse{}, err
-	}
-	return domain.ReportFromTemplateResponse{
-		Report:           saved,
-		IncludedSections: included,
-		MissingSections:  missing,
+	return reportTemplateBuild{
+		templateID: template.TemplateID,
+		versionID:  versionID,
+		title:      title,
+		blocks:     blocks,
+		included:   included,
+		missing:    missing,
 	}, nil
 }
 

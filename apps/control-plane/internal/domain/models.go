@@ -352,6 +352,18 @@ type ReportMissingSection struct {
 	Reason    string `json:"reason"`
 }
 
+// ReportBasicAnalysisResponse — 데이터셋 버전 "기초분석보고서" 탭이 쓰는 read-only 조회.
+// report를 저장하지 않고 템플릿 블록을 즉석 reshape해서만 반환한다(POST from_template과
+// 블록 생성 로직 공유). 블록 구조는 POST 저장 블록과 동일하다.
+type ReportBasicAnalysisResponse struct {
+	TemplateID       string                 `json:"template_id"`
+	DatasetVersionID string                 `json:"dataset_version_id"`
+	Title            string                 `json:"title"`
+	Blocks           []map[string]any       `json:"blocks"`
+	IncludedSections []string               `json:"included_sections"`
+	MissingSections  []ReportMissingSection `json:"missing_sections"`
+}
+
 type ReportListResponse struct {
 	Items []ReportSummary `json:"items"`
 }
