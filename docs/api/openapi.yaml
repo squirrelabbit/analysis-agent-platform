@@ -4390,6 +4390,14 @@ components:
                     LLOA_MODEL_DISPLAY_NAME으로 입힌다(하드코딩 매핑 없음). artifact의
                     raw model이 현재 LLOA_MODEL과 일치할 때만 노출되며, 미설정/불일치
                     시 생략(화면은 model로 fallback).
+                taxonomy_id:
+                  type: string
+                  description: |
+                    이 clause_label 빌드에 실제 사용된 aspect/sentiment taxonomy id
+                    (build 당시 clause_label_summary snapshot, verify/single 공통).
+                    화면은 이 id로 GET /taxonomy를 조회해 default가 아닌 "사용된
+                    config"의 aspect 정의(description)를 표시한다. taxonomy_id를 안 남긴
+                    옛 artifact(Phase 3 이전)는 생략 → 화면이 default taxonomy로 fallback.
             summary:
               type: object
               properties:

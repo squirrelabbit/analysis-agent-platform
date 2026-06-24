@@ -161,6 +161,26 @@ func TestClauseLabelSummaryString_Model(t *testing.T) {
 	}
 }
 
+// silverone 2026-06-24 — applied.taxonomy_id 회수 잠금. clause_label 결과 화면이
+// "실제 빌드에 사용된 taxonomy" config의 aspect 정의(description)를 표시할 수 있게,
+// build 시 clause_label_summary snapshot에 기록된 taxonomy_id를 GET view가 applied로
+// 노출한다(verify/single 공통, summary top-level 값).
+func TestClauseLabelSummaryString_TaxonomyID(t *testing.T) {
+	metadata := map[string]any{
+		"clause_label_summary": map[string]any{
+			"taxonomy_id":   "festival-gunsan",
+			"taxonomy_hash": "abc123",
+		},
+	}
+	if got := summaryMetadataString(metadata, "clause_label_summary", "taxonomy_id"); got != "festival-gunsan" {
+		t.Fatalf("taxonomy_id = %q, want festival-gunsan", got)
+	}
+	// taxonomy_id를 안 남긴 옛 artifact(Phase 3 이전) → "" → 화면 default fallback.
+	if got := summaryMetadataString(map[string]any{"clause_label_summary": map[string]any{}}, "clause_label_summary", "taxonomy_id"); got != "" {
+		t.Fatalf("missing taxonomy_id → want empty, got %q", got)
+	}
+}
+
 func TestLoadClauseLabelArtifact_Pagination(t *testing.T) {
 	path := setupClauseLabelFixture(t)
 	_, _, total, items, err := loadClauseLabelArtifact(path, 1, 1, "", "")
