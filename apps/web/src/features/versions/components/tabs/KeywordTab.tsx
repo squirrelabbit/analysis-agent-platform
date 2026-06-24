@@ -83,7 +83,7 @@ export function KeywordTab() {
         />
       )}
 
-      {/* 키워드별 긍정/부정 전체 순위 (순위 API 준비 전 — mock 하드코딩) */}
+      {/* 키워드별 긍정/부정 순위 — clause_keywords API(sentiment 필터+limit)로 상위 N 조회 */}
       <KeywordSentimentRankTable />
 
       {/* 절에서 추출된 키워드 (추출 API 준비 전 — 예시 하드코딩) */}
