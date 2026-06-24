@@ -5,12 +5,12 @@
     {
       "key": "show_program",
       "label": "공연/프로그램",
-      "description": "공연, 퍼레이드, 드론쇼, 불꽃놀이, 버스킹 등 관람형 콘텐츠에 대한 평가"
+      "description": "공연, 퍼레이드, 불꽃놀이 등 관람형 콘텐츠에 대한 평가"
     },
     {
       "key": "experience_booth",
       "label": "체험/부스",
-      "description": "체험 부스, 만들기, 스탬프 투어 등 참여형 프로그램에 대한 평가"
+      "description": "체험, 이벤트 등 참여형 프로그램에 대한 평가"
     },
     {
       "key": "ambiance_scenery",
@@ -30,7 +30,7 @@
     {
       "key": "facility_crowd",
       "label": "편의시설/혼잡도",
-      "description": "화장실, 쉼터, 청결도, 인파, 혼잡도 등 편의시설 및 환경에 대한 평가"
+      "description": "화장실, 쉼터, 청결도, 인파, 혼잡도, 대기줄 등 편의시설 및 환경에 대한 평가"
     },
     {
       "key": "access_traffic",
