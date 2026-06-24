@@ -39,6 +39,18 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 
+  // accordion: 한 번에 하나만 펼친다. 카드를 새로 추가하면 기존 카드는 접히고
+  // 새로 들어온 카드만 펼쳐지도록 expandedId를 새 runId로 옮긴다.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const prevStaged = useRef<string[]>([]);
+  useEffect(() => {
+    const added = staged.find((id) => !prevStaged.current.includes(id));
+    if (added) setExpandedId(added);
+    prevStaged.current = staged;
+  }, [staged]);
+  const toggleExpand = (runId: string) =>
+    setExpandedId((cur) => (cur === runId ? null : runId));
+
   // 드래그로 카드 순서 변경 시, 리스트 위/아래 가장자리에서 자동 스크롤.
   // (HTML5 DnD는 컨테이너를 자동 스크롤해 주지 않아 화면 밖으로 못 옮기는 문제 해결.)
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -182,6 +194,8 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
                     onTitleChange={(v) => setTitle(runId, v)}
                     onNoteChange={(v) => setNote(runId, v)}
                     onRemove={() => remove(runId)}
+                    collapsed={expandedId !== runId}
+                    onToggle={() => toggleExpand(runId)}
                     isDragging={dragIndex === index}
                     dropHint={dropHintFor(index)}
                     onDragStartCard={() => setDragIndex(index)}
