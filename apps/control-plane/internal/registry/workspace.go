@@ -32,3 +32,9 @@ func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
 }
+
+// ConfigDir — workspace의 config 디렉토리 절대 경로. 다른 패키지가 config/*.json을
+// 직접 읽을 때 사용(예: report 엔진의 taxonomy aspect 라벨 조회).
+func ConfigDir() string {
+	return filepath.Join(detectWorkspaceRoot(), "config")
+}

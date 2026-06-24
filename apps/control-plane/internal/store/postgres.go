@@ -1629,12 +1629,13 @@ func (s *PostgresStore) CreateReport(report domain.Report) error {
 		updated = now
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO reports (report_id, project_id, title, blocks_json, created_at, updated_at)
-		 VALUES ($1, $2::uuid, $3, $4::jsonb, $5, $6)`,
+		`INSERT INTO reports (report_id, project_id, title, blocks_json, dataset_version_id, created_at, updated_at)
+		 VALUES ($1, $2::uuid, $3, $4::jsonb, $5, $6, $7)`,
 		report.ReportID,
 		report.ProjectID,
 		report.Title,
 		reportBlocksJSON(report.Blocks),
+		report.DatasetVersionID,
 		now,
 		updated,
 	)
@@ -1698,7 +1699,7 @@ func (s *PostgresStore) ListReports(projectID string) ([]domain.ReportSummary, e
 
 func (s *PostgresStore) GetReport(projectID, reportID string) (domain.Report, error) {
 	row := s.db.QueryRow(
-		`SELECT report_id, project_id::text, title, blocks_json, created_at, updated_at
+		`SELECT report_id, project_id::text, title, blocks_json, COALESCE(dataset_version_id, ''), created_at, updated_at
 		 FROM reports
 		 WHERE project_id = $1::uuid AND report_id = $2`,
 		projectID,
@@ -1707,7 +1708,7 @@ func (s *PostgresStore) GetReport(projectID, reportID string) (domain.Report, er
 	var r domain.Report
 	var blocksRaw []byte
 	if err := row.Scan(
-		&r.ReportID, &r.ProjectID, &r.Title, &blocksRaw, &r.CreatedAt, &r.UpdatedAt,
+		&r.ReportID, &r.ProjectID, &r.Title, &blocksRaw, &r.DatasetVersionID, &r.CreatedAt, &r.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Report{}, ErrNotFound
@@ -2602,9 +2603,12 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			project_id UUID NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
 			title TEXT NOT NULL,
 			blocks_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+			dataset_version_id TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+		// 기존 DB 호환 — 기본 템플릿 보고서의 version 바인딩 컬럼(2026-06-24).
+		`ALTER TABLE reports ADD COLUMN IF NOT EXISTS dataset_version_id TEXT NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS reports_project_idx
 		  ON reports(project_id, updated_at DESC)`,
 		// silverone 2026-06-11 — 진성 라벨 수동 보정 overlay. artifact JSONL은

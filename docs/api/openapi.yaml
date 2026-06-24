@@ -1833,6 +1833,36 @@ paths:
           description: 삭제 완료
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/reports/from_template:
+    post:
+      tags: [Reports]
+      summary: 기본 템플릿으로 보고서 생성 (데이터 기초 분석)
+      description: |
+        clean ready인 dataset_version을 대상으로 템플릿 config(config/report_templates/*.json)에
+        따라 빌드 summary를 블록으로 채운 보고서를 생성한다. required_build가 ready인 섹션만
+        만들고 나머지는 missing_sections로 반환. 블록 data·source는 생성 시점 snapshot.
+        값 표현(count/percent)·배치(layout/view/width)는 템플릿이 결정해 응답에 실린다
+        (계약: docs/api/report_basic_template.sample.md).
+      operationId: createReportFromTemplate
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportFromTemplateRequest"
+      responses:
+        "201":
+          description: 생성된 보고서 + 포함/제외 섹션
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportFromTemplateResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/reports:
     post:
       tags: [Reports]
@@ -3024,6 +3054,9 @@ components:
           type: string
         title:
           type: string
+        dataset_version_id:
+          type: string
+          description: 기본 템플릿으로 생성한 보고서가 묶인 dataset_version. 일반 보고서면 빈 문자열/생략.
         blocks:
           type: array
           items:
@@ -3078,6 +3111,35 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReportSummary"
+    ReportFromTemplateRequest:
+      type: object
+      description: 기본 템플릿 생성 요청. dataset_version_id는 clean ready여야 한다.
+      properties:
+        template_id:
+          type: string
+          example: unstructured_basic_v1
+        dataset_version_id:
+          type: string
+      required: [template_id, dataset_version_id]
+    ReportFromTemplateResponse:
+      type: object
+      description: 생성된 보고서 + 어떤 섹션이 들어갔고(included) build 미완으로 빠졌는지(missing).
+      properties:
+        report:
+          $ref: "#/components/schemas/Report"
+        included_sections:
+          type: array
+          items:
+            type: string
+        missing_sections:
+          type: array
+          items:
+            type: object
+            properties:
+              section_id:
+                type: string
+              reason:
+                type: string
     User:
       type: object
       description: Google OIDC로 인증된 사용자 (ADR-025). external_id = Google sub.

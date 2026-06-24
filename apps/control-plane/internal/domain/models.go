@@ -303,9 +303,12 @@ type Report struct {
 	ReportID  string          `json:"report_id"`
 	ProjectID string          `json:"project_id"`
 	Title     string          `json:"title"`
-	Blocks    json.RawMessage `json:"blocks"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	// DatasetVersionID — 기본 템플릿으로 생성한 보고서가 묶인 dataset_version. 빈 문자열이면
+	// 일반 보고서(보관함 조립). (보고서 블록 출처 추적의 기준.)
+	DatasetVersionID string          `json:"dataset_version_id,omitempty"`
+	Blocks           json.RawMessage `json:"blocks"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
 // ReportSummary — 목록용 경량 projection. blocks 본문 대신 개수만(목록이
@@ -328,6 +331,25 @@ type ReportCreateRequest struct {
 type ReportUpdateRequest struct {
 	Title  string          `json:"title"`
 	Blocks json.RawMessage `json:"blocks,omitempty"`
+}
+
+// ReportFromTemplateRequest — 기본 템플릿 생성 요청. clean ready인 dataset_version만 대상.
+type ReportFromTemplateRequest struct {
+	TemplateID       string `json:"template_id"`
+	DatasetVersionID string `json:"dataset_version_id"`
+}
+
+// ReportFromTemplateResponse — 생성된 보고서 + 어떤 섹션이 들어갔고(included) 어떤 섹션이
+// 빌드 미완으로 빠졌는지(missing).
+type ReportFromTemplateResponse struct {
+	Report           Report                  `json:"report"`
+	IncludedSections []string                `json:"included_sections"`
+	MissingSections  []ReportMissingSection  `json:"missing_sections"`
+}
+
+type ReportMissingSection struct {
+	SectionID string `json:"section_id"`
+	Reason    string `json:"reason"`
 }
 
 type ReportListResponse struct {
