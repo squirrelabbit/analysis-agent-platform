@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tzdata \
-    && python -m pip install --no-cache-dir "fastembed>=0.8,<0.9" "pydantic>=2.8,<3.0" "pyarrow>=21,<22" "duckdb>=1.1,<2.0" "psycopg[binary]>=3.2,<3.3" "structlog>=24,<26" "kiwipiepy>=0.23,<0.24" \
+    && python -m pip install --no-cache-dir "fastembed>=0.8,<0.9" "pydantic>=2.8,<3.0" "pyarrow>=21,<22" "duckdb>=1.1,<2.0" "psycopg[binary]>=3.2,<3.3" "structlog>=24,<26" "kiwipiepy>=0.23,<0.24" "openpyxl>=3.1,<3.2" \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -2879,6 +2879,7 @@ components:
         file:
           type: string
           format: binary
+          description: "원본 파일. 지원 형식: .csv / .xlsx(.xlsm) / .jsonl / .parquet / .txt. 엑셀은 첫 시트를 헤더+행으로 읽는다(업로드 직후 source 프리뷰는 미제공이며 행/열 수는 clean 빌드 후 채워짐)."
         data_type:
           type: string
         activate_on_create:
