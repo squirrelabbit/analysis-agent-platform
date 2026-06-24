@@ -186,7 +186,7 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		}
 		model := metadataString(version.Metadata, "clause_label_model", metadataString(version.Metadata, "doc_genuineness_model", ""))
 		if model == "" {
-			model = reportPreprocessModels(version.Metadata) // 전처리에 쓴 LLOA 모델
+			model = s.reportPreprocessModels(version.Metadata) // 전처리에 쓴 LLOA 모델(config label)
 		}
 		return reportBuildRoot{root: map[string]any{
 			"dataset_name":  datasetName,
@@ -357,27 +357,41 @@ func loadChannelGenuineBreakdown(cleanRef, genuinenessRef string, verifyMode boo
 
 // reportPreprocessModels — 분석 개요의 "분석 모델"용. 전처리(doc_genuineness/clause_label)
 // 빌드 당시 metadata에 snapshot된 LLOA 모델 id를 모아 고유 목록 문자열로. verify 모드는
-// applied.classify_models(2개), 단일 모드는 model 1개. "wisenut/" prefix는 떼서 보기 좋게.
-func reportPreprocessModels(metadata map[string]any) string {
+// applied.classify_models(2개), 단일 모드는 model 1개. 표시는 raw id가 아니라 모델 config
+// (config/lloa_models.json)의 label로 변환한다(예: wisenut/wise-lloa-max-v1.2.1 → LLOA Max
+// 1.2.1). config에 없는 모델은 "wisenut/" prefix만 떼서 fallback.
+func (s *DatasetService) reportPreprocessModels(metadata map[string]any) string {
+	labelByID := map[string]string{}
+	for _, opt := range s.LLOAModelOptions() {
+		labelByID[opt.ModelID] = opt.Label
+	}
+
 	seen := map[string]bool{}
 	order := make([]string, 0, 4)
-	add := func(m string) {
-		m = strings.TrimSpace(m)
-		if i := strings.LastIndex(m, "/"); i >= 0 {
-			m = m[i+1:]
-		}
-		if m == "" || seen[m] {
+	add := func(rawID string) {
+		rawID = strings.TrimSpace(rawID)
+		if rawID == "" {
 			return
 		}
-		seen[m] = true
-		order = append(order, m)
+		display := labelByID[rawID]
+		if display == "" {
+			display = rawID
+			if i := strings.LastIndex(display, "/"); i >= 0 {
+				display = display[i+1:]
+			}
+		}
+		if seen[display] {
+			return
+		}
+		seen[display] = true
+		order = append(order, display)
 	}
 	for _, sk := range []string{"doc_genuineness_summary", "clause_label_summary"} {
 		if applied, ok := summaryMetadataMap(metadata, sk, "applied"); ok {
 			if cm, ok := asList(applied["classify_models"]); ok {
 				for _, v := range cm {
-					if s, ok := v.(string); ok {
-						add(s)
+					if str, ok := v.(string); ok {
+						add(str)
 					}
 				}
 			}
