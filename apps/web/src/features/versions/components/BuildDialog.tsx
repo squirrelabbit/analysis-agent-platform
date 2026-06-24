@@ -92,6 +92,9 @@ export default function BuildDialog({
                   req: {
                     text_columns:
                       data.textColumns?.map((item) => item.value) ?? [],
+                    date_column: data.dateColumn?.trim()
+                      ? data.dateColumn.trim()
+                      : null,
                   },
                 });
               }}

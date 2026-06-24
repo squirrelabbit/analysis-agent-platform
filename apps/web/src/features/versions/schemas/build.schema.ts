@@ -31,6 +31,8 @@ export type ClauseFormValues = z.infer<typeof ClauseSchema>;
 
 export const BuildCleanSchema = z.object({
   textColumns: z.array(textColumnSchema).optional(),
+  // 분석 기간 산출용 날짜 컬럼(선택). clean이 created_at(ISO 8601)으로 정규화.
+  dateColumn: z.string().optional(),
   // outputPath: z.string().optional(),
   // cleanOptions: z.object({
   //   removeEnglish: z.boolean(),

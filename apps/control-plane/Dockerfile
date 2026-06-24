@@ -27,6 +27,10 @@ COPY docs/api/openapi.yaml /app/docs/api/openapi.yaml
 COPY config/task_registry.json /app/config/task_registry.json
 # silverone 2026-06-12 — 전처리 빌드 모델 선택 allowlist (config/*.json 패턴).
 COPY config/lloa_models.json /app/config/lloa_models.json
+# 보고서 기본 템플릿 정의(2026-06-24). report 엔진이 로드 — 누락 시 unknown template_id.
+COPY config/report_templates /app/config/report_templates
+# report 엔진의 aspect key→한글 라벨 조회용(없으면 key로 fallback).
+COPY config/taxonomies /app/config/taxonomies
 
 EXPOSE 8080
 

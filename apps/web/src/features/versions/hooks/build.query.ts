@@ -76,6 +76,16 @@ export const useBuildVersion = (
   });
 };
 
+// 기초분석보고서 탭 — read-only 조회(report 저장 안 함). build job이 아니라 폴링 없음.
+export const useBasicAnalysis = (templateId?: string) => {
+  const { projectId, datasetId, versionId } = useVersionParams();
+  return useQuery({
+    queryKey: [...buildKeys.all, "basic_analysis", versionId, templateId ?? ""],
+    queryFn: () => buildApi.getBasicAnalysis(projectId, datasetId, versionId, templateId),
+    enabled: !!projectId && !!datasetId && !!versionId,
+  });
+};
+
 // "절에서 추출된 키워드" 표 전용 — clause_keywords를 group=clause로 조회.
 // mapBuild(키워드 중심)와 item shape이 달라 별도 hook + 매퍼를 쓴다. 서버 q 검색 +
 // limit/offset 페이징.

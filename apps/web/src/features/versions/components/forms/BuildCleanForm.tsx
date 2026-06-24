@@ -31,7 +31,7 @@ export default function BuildCleanForm({
     formState: { errors },
   } = useForm<BuildCleanFormValues>({
     resolver: zodResolver(BuildCleanSchema),
-    defaultValues: { textColumns: [{ value: "" }] },
+    defaultValues: { textColumns: [{ value: "" }], dateColumn: "" },
   });
 
   const { fields, append, remove } = useFieldArray({
@@ -40,6 +40,9 @@ export default function BuildCleanForm({
   });
 
   const selected = useWatch({ control, name: "textColumns" }) ?? [];
+  const dateColumn = useWatch({ control, name: "dateColumn" }) ?? "";
+  // Radix Select는 빈 문자열 value를 못 쓰므로 "선택 안 함"을 sentinel로 표현.
+  const DATE_NONE = "__none__";
 
   async function handleFormSubmit(data: BuildCleanFormValues) {
     await onSubmit(data);
@@ -139,6 +142,37 @@ export default function BuildCleanForm({
               컬럼 추가
             </Button>
           </div>
+        </Field>
+
+        <Field>
+          <FieldLabel className="text-xs mb-1">
+            날짜 컬럼 <span className="text-zinc-400">(선택)</span>
+          </FieldLabel>
+          <Select
+            value={dateColumn || DATE_NONE}
+            onValueChange={(v) =>
+              setValue("dateColumn", v === DATE_NONE ? "" : v, {
+                shouldDirty: true,
+              })
+            }
+          >
+            <SelectTrigger className="h-9 text-xs">
+              <SelectValue placeholder="게시일 등 날짜 컬럼" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={DATE_NONE} className="text-xs">
+                선택 안 함
+              </SelectItem>
+              {availableColumns.map((col) => (
+                <SelectItem key={col} value={col} className="text-xs">
+                  {col}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-xs text-zinc-400">
+            선택하면 기초분석보고서의 “분석 기간”이 이 컬럼 기준으로 계산됩니다.
+          </p>
         </Field>
       </FieldGroup>
     </form>
