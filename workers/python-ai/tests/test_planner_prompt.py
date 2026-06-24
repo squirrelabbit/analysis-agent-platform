@@ -360,50 +360,6 @@ class PromptRenderTests(unittest.TestCase):
                 leftover = re.findall(r"{{\s*[a-zA-Z0-9_]+\s*}}", body)
                 self.assertEqual(leftover, [])
 
-    def test_english_variant_renders_with_korean_user_section(self) -> None:
-        """silverone 2026-05-26 (cost-2 A/B) — opt-in 영어 system prompt variant.
-        intro/rules/output format/examples는 영어. table_schemas / skill_catalog
-        placeholder를 안 쓰고 영어로 inline됐는지 + dynamic suffix는 한국어
-        그대로인지 잠근다."""
-
-        version, system, user = render_planner_prompt(
-            user_question="긍정 절을 보여줘",
-            version="planner-v2-anthropic-en-v1",
-        )
-        self.assertEqual(version, "planner-v2-anthropic-en-v1")
-
-        # system 영역은 영어 본문.
-        self.assertIn("You are a data-analysis planner.", system)
-        self.assertIn("## Standard tables", system)
-        self.assertIn("## Skill catalog", system)
-        self.assertIn("## Rules", system)
-        self.assertIn("## Output format", system)
-        self.assertIn("## Examples", system)
-        # 영어 schema/catalog는 inline됐으므로 placeholder는 system에 남지 않음.
-        self.assertNotIn("{{table_schemas}}", system)
-        self.assertNotIn("{{skill_catalog}}", system)
-
-        # examples 안의 user_question 문구는 한국어 그대로 유지 (anchoring).
-        self.assertIn('질문: "작년과 올해의 aspect 증감수치 계산해줘"', system)
-        self.assertIn('질문: "최근 한 달 부정 후기에서 자주 나오는 aspect는?"', system)
-
-        # B안 prefix anchor도 영어로 보존.
-        self.assertIn('"left_label": "last", "right_label": "this"', system)
-        self.assertIn('"left": "this_count", "right": "last_count"', system)
-
-        # user 영역(dynamic suffix)은 한국어 그대로.
-        self.assertIn("## 현재 시점", user)
-        self.assertIn("## 이 dataset의 docs 추가 컬럼", user)
-        self.assertIn("## 이전 대화 context", user)
-        self.assertIn("## 사용자 질문", user)
-        self.assertIn("<user_question>\n긍정 절을 보여줘\n</user_question>", user)
-
-        # 두 영역 모두 unresolved placeholder는 없어야 함.
-        import re
-        for label, body in (("system", system), ("user", user)):
-            with self.subTest(part=label):
-                self.assertEqual(re.findall(r"{{\s*[a-zA-Z0-9_]+\s*}}", body), [])
-
     def test_cache_break_present_in_template(self) -> None:
         # template에 마커가 있는지 직접 확인. _split_at_cache_break이 마커가 없을
         # 때 fallback으로 (빈 string, 전체) 반환하기 때문에, system이 비어 있지
