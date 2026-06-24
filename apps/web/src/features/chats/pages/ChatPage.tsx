@@ -23,6 +23,7 @@ import type { ChatMessage } from "../models";
 import MessageBubble from "../components/MessageBubble";
 import ChatToast from "../components/ChatToast";
 import ReportPanel from "../components/ReportPanel";
+import UnsavedReportGuard from "../components/UnsavedReportGuard";
 
 function extractErrorMessage(err: unknown): string {
   const detail = (
@@ -150,14 +151,15 @@ export function ChatPage() {
     };
   }, [messages, isLoading]);
 
-  // 안정적인 컨텍스트/패널 콜백만 추려 effect 의존성으로 쓴다(panel/nav 객체 자체는
-  // 매 렌더 새로 만들어져 의존하면 effect가 매번 도므로).
-  const resetPanel = panel.reset;
+  // 안정적인 컨텍스트 콜백만 추려 effect 의존성으로 쓴다(nav 객체 자체는 매 렌더
+  // 새로 만들어져 의존하면 effect가 매번 도므로).
   const setComposing = nav.setComposing;
 
-  // 스레드 전환·새 대화·삭제(컨텍스트가 threadId를 바꿈)에 반응해 진행 중 턴·에러·
-  // 패널을 리셋하고 강제 하단 스크롤을 건다. 단 handleSend의 null→서버threadId 승격은
+  // 스레드 전환·새 대화·삭제(컨텍스트가 threadId를 바꿈)에 반응해 진행 중 턴·에러를
+  // 리셋하고 강제 하단 스크롤을 건다. 단 handleSend의 null→서버threadId 승격은
   // pendingTurn 보존을 위해 한 번 건너뛴다.
+  // 보고서 패널은 일부러 리셋하지 않는다 — 여러 스레드의 결과를 한 보고서에 모을 수
+  // 있도록 스레드 전환과 무관하게 유지한다(보고서 생성/전체 비우기/채팅 이탈 시 정리).
   useEffect(() => {
     if (skipThreadResetRef.current) {
       skipThreadResetRef.current = false;
@@ -165,9 +167,8 @@ export function ChatPage() {
     }
     setPendingTurn(null);
     setErrorMsg(null);
-    resetPanel();
     scrollPolicyRef.current = "force";
-  }, [nav.threadId, resetPanel]);
+  }, [nav.threadId]);
 
   // 데이터셋을 바꾸면(setDatasetId가 threadId도 해제) 입력창까지 비운다.
   useEffect(() => {
@@ -221,7 +222,8 @@ export function ChatPage() {
 
   function handleAddToReport(msg: ChatMessage) {
     if (!msg.runId) return;
-    const added = panel.add(msg);
+    // 추가 시점의 스레드를 출처로 보관 — 다른 스레드 결과도 한 보고서에 모을 수 있다.
+    const added = panel.add(msg, nav.threadId ?? undefined);
     if (added) {
       showToast("보고서에 추가했습니다");
     } else {
@@ -236,7 +238,7 @@ export function ChatPage() {
       await createReport.create({
         staged: panel.staged,
         reportTitle: panel.reportTitle,
-        threadId: nav.threadId ?? undefined,
+        threadOf: panel.threadOf,
         messageOf: panel.messageOf,
         cardStateOf: panel.cardStateOf,
       });
@@ -410,6 +412,12 @@ export function ChatPage() {
         panel={panel}
         onCreate={handleCreateReport}
         creating={createReport.isPending}
+      />
+
+      {/* 미저장 보고서 편집 경고 — 패널에 담긴 결과가 있고, 보고서 생성으로 인한
+          의도된 이동이 아닐 때만 활성화한다. */}
+      <UnsavedReportGuard
+        active={panel.count > 0 && !createReport.isPending}
       />
 
       <ChatToast message={toast.msg} visible={toast.visible} />
