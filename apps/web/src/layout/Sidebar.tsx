@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { Database, FileText, MessageCircle, PanelLeft } from "lucide-react";
+import { ChartColumn, Database, FileText, MessageCircle, PanelLeft } from "lucide-react";
 import type { Project } from "@/features/projects/models/model";
 import { useReports } from "@/features/reports/hooks/reportDoc.query";
 import { cn } from "@/lib/utils";
@@ -65,6 +65,11 @@ export default function Sidebar({ project }: { project: Project }) {
     //   icon: FileText,
     //   badge: project.scenarioCount,
     // },
+    {
+      name: "데이터 기초 분석",
+      path: `${basePath}/analytics`,
+      icon: ChartColumn,
+    },
     {
       name: "채팅",
       path: `${basePath}/chats`,
@@ -144,7 +149,7 @@ export default function Sidebar({ project }: { project: Project }) {
                   <Icon className="h-4 w-4 shrink-0" />
                   {!isCollapsed && menu.name}
                 </div>
-                {!isCollapsed && (
+                {!isCollapsed && menu.badge && (
                   <Badge
                     className={cn(
                       active

@@ -14,6 +14,7 @@ import DocGenuinenessComparePage from "./features/versions/pages/DocGenuinenessC
 import LoginPage from "./features/auth/pages/LoginPage";
 import ReportListPage from "./features/reports/pages/ReportListPage";
 import ReportEditorPage from "./features/reports/pages/ReportEditorPage";
+import { AnalyticsPage } from "./features/analytics/pages/AnalyticsPage";
 
 const queryClient = new QueryClient();
 
@@ -41,6 +42,7 @@ function App() {
                 {/* <Route path="prompts" element={<PromptPage />} /> */}
               </Route>
               {/* <Route path="scenarios" element={<ScenarioPage />} /> */}
+              <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="chats" element={<ChatPage />} />
               <Route path="reports" element={<ReportListPage />} />
               {/* 에디터: reportId 라우팅 추가. 본문 로드/저장 API 연동은 후속(현재 localStorage). */}
