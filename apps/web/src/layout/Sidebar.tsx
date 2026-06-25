@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { ChartColumn, Database, FileText, MessageCircle, PanelLeft } from "lucide-react";
+import { Database, FileText, MessageCircle, PanelLeft } from "lucide-react";
 import type { Project } from "@/features/projects/models/model";
 import { useReports } from "@/features/reports/hooks/reportDoc.query";
 import { useChatNav } from "@/features/chats/context/ChatNavContext";
@@ -68,11 +68,6 @@ export default function Sidebar({ project }: { project: Project }) {
     //   icon: FileText,
     //   badge: project.scenarioCount,
     // },
-    {
-      name: "데이터 기초 분석",
-      path: `${basePath}/analytics`,
-      icon: ChartColumn,
-    },
     {
       name: "채팅",
       path: `${basePath}/chats`,

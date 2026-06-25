@@ -20,7 +20,6 @@ import DocGenuinenessComparePage from "./features/versions/pages/DocGenuinenessC
 import LoginPage from "./features/auth/pages/LoginPage";
 import ReportListPage from "./features/reports/pages/ReportListPage";
 import ReportEditorPage from "./features/reports/pages/ReportEditorPage";
-import { AnalyticsPage } from "./features/analytics/pages/AnalyticsPage";
 
 const queryClient = new QueryClient();
 
@@ -53,8 +52,6 @@ const router = createBrowserRouter(
         {/* <Route path="scenarios" element={<ScenarioPage />} /> */}
         <Route path="chats" element={<ChatPage />} />
         <Route path="reports" element={<ReportListPage />} />
-        
-        <Route path="analytics" element={<AnalyticsPage />} />
         {/* 에디터: reportId 라우팅 추가. */}
         <Route path="reports/:reportId" element={<ReportEditorPage />} />
       </Route>
