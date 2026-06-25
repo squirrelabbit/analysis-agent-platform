@@ -140,7 +140,9 @@ class RealConfigTaskFoldersTests(unittest.TestCase):
     """실제 config/prompts task-folder가 resolve되는지 (env override 없이)."""
 
     def test_doc_genuineness_and_clause_label_real_folders(self) -> None:
-        for task, default in (("doc_genuineness", "v1"), ("clause_label", "v3")):
+        # 2026-06-25 — doc_genuineness default가 festival 통합 base v3로 전환됨.
+        # clause_label default는 v3 유지(v5 전환은 behavioral parity 후 PR2-B 후속).
+        for task, default in (("doc_genuineness", "v3"), ("clause_label", "v3")):
             with self.subTest(task=task):
                 result = list_prompt_options(task)
                 self.assertEqual(result["task"], task)
