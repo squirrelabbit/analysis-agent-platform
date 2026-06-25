@@ -275,6 +275,24 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 			return reportBuildRoot{}
 		}
 		return reportBuildRoot{root: map[string]any{"summary": summary}, ready: true}
+	case "recent_year_stats":
+		// 문서 개요 "최근 연도 기준" item용. clean 날짜의 max 연도로 진성수/절수를
+		// 즉석 집계. clean + doc_genuineness + clause_label 셋 다 + 날짜 필요.
+		cleanRef := reportArtifactRef(version.Metadata, "clean_uri", "cleaned_ref")
+		if cleanRef == "" && version.CleanURI != nil {
+			cleanRef = strings.TrimSpace(*version.CleanURI)
+		}
+		genRef := reportArtifactRef(version.Metadata, "doc_genuineness_ref", "doc_genuineness_uri")
+		clauseRef := reportArtifactRef(version.Metadata, "clause_label_ref", "clause_label_uri")
+		if cleanRef == "" || genRef == "" || clauseRef == "" {
+			return reportBuildRoot{}
+		}
+		genVerify := metadataString(version.Metadata, "doc_genuineness_mode", "") == "verify"
+		summary, err := loadRecentYearStats(cleanRef, genRef, clauseRef, genVerify)
+		if err != nil || summary == nil {
+			return reportBuildRoot{}
+		}
+		return reportBuildRoot{root: summary, ready: true}
 	default:
 		return reportBuildRoot{}
 	}
@@ -427,6 +445,31 @@ func (s *DatasetService) reportDataPeriod(version domain.DatasetVersion) string 
 	return lo + " ~ " + hi
 }
 
+// reportDateColumnCandidates — clean source_json에서 날짜로 쓸 원본 컬럼 후보(한/영).
+// created_at(date_column 정규화) 미선택 데이터의 fallback 추론용.
+var reportDateColumnCandidates = []string{
+	"게시일", "작성일", "작성시간", "등록일", "수집일", "날짜",
+	"docDatetime", "doc_datetime", "pub_date", "reg_date", "post_date",
+	"write_date", "regdate", "datetime", "date", "published_at",
+}
+
+// reportCleanDateExpr — cleaned.parquet에서 날짜로 쓸 SQL DATE 표현식을 고른다.
+// created_at(date_column 정규화) 우선, 없으면 source_json 원본 날짜 컬럼 후보 중 값이
+// 채워진 첫 컬럼. 유효한 게 없으면 "". 분석기간/최근연도 집계가 공유한다.
+func reportCleanDateExpr(db *sql.DB, cleanSrc string) string {
+	var cnt int
+	if err := db.QueryRow(fmt.Sprintf("SELECT COUNT(TRY_CAST(created_at AS DATE)) FROM %s", cleanSrc)).Scan(&cnt); err == nil && cnt > 0 {
+		return "TRY_CAST(created_at AS DATE)"
+	}
+	for _, f := range reportDateColumnCandidates {
+		expr := fmt.Sprintf(`TRY_CAST(json_extract_string(source_json, '$."%s"') AS DATE)`, f)
+		if err := db.QueryRow(fmt.Sprintf("SELECT COUNT(%s) FROM %s", expr, cleanSrc)).Scan(&cnt); err == nil && cnt > 0 {
+			return expr
+		}
+	}
+	return ""
+}
+
 func loadDataPeriod(cleanRef string) (string, string, error) {
 	db, cleanup, err := openTempDuckDB()
 	if err != nil {
@@ -435,41 +478,80 @@ func loadDataPeriod(cleanRef string) (string, string, error) {
 	defer cleanup()
 
 	cleanSrc := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+	dateExpr := reportCleanDateExpr(db, cleanSrc)
+	if dateExpr == "" {
+		return "", "", nil
+	}
+	q := fmt.Sprintf("SELECT CAST(MIN(%s) AS VARCHAR), CAST(MAX(%s) AS VARCHAR) FROM %s", dateExpr, dateExpr, cleanSrc)
+	var lo, hi sql.NullString
+	if err := db.QueryRow(q).Scan(&lo, &hi); err != nil {
+		return "", "", err
+	}
+	if !lo.Valid {
+		return "", "", nil
+	}
+	return lo.String, hi.String, nil
+}
 
-	// 1순위: clean이 운영자가 선택한 date_column을 created_at(ISO 8601)으로 정규화해
-	// 저장한 컬럼. 선택돼 있으면 컬럼명 추론 없이 그대로 쓴다(하드코딩 제거의 주 경로).
-	{
-		q := fmt.Sprintf("SELECT CAST(MIN(TRY_CAST(created_at AS DATE)) AS VARCHAR), CAST(MAX(TRY_CAST(created_at AS DATE)) AS VARCHAR), COUNT(TRY_CAST(created_at AS DATE)) FROM %s", cleanSrc)
-		var lo, hi sql.NullString
-		var cnt int
-		if err := db.QueryRow(q).Scan(&lo, &hi, &cnt); err == nil && cnt > 0 && lo.Valid {
-			return lo.String, hi.String, nil
-		}
+// loadRecentYearStats — 문서 개요의 "최근 연도 기준" 집계. clean 날짜에서 가장 최근
+// 연도를 구해, 그 연도 문서의 진성(genuine_review) 문서수와 절 수를 doc_id JOIN으로 센다.
+// clean/doc_genuineness/clause_label 셋 다 ready여야 하고, 날짜가 없으면 nil.
+func loadRecentYearStats(cleanRef, genRef, clauseRef string, genVerify bool) (map[string]any, error) {
+	if strings.TrimSpace(cleanRef) == "" || strings.TrimSpace(genRef) == "" || strings.TrimSpace(clauseRef) == "" {
+		return nil, nil
+	}
+	db, cleanup, err := openTempDuckDB()
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	cleanSrc := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+	dateExpr := reportCleanDateExpr(db, cleanSrc)
+	if dateExpr == "" {
+		return nil, nil // 날짜 없으면 최근 연도 집계 불가
 	}
 
-	// 2순위(fallback): date_column 미선택으로 clean된 기존 데이터 — source_json의 원본
-	// 날짜 컬럼을 후보로 추론. date_column 선택이 기본이 되면 이 경로는 점차 안 쓰인다.
-	dateExpr := func(field string) string {
-		return fmt.Sprintf(`TRY_CAST(json_extract_string(source_json, '$."%s"') AS DATE)`, field)
+	var maxYear sql.NullInt64
+	if err := db.QueryRow(fmt.Sprintf("SELECT MAX(EXTRACT(year FROM %s)) FROM %s", dateExpr, cleanSrc)).Scan(&maxYear); err != nil {
+		return nil, err
 	}
-	candidates := []string{
-		"게시일", "작성일", "작성시간", "등록일", "수집일", "날짜",
-		"docDatetime", "doc_datetime", "pub_date", "reg_date", "post_date",
-		"write_date", "regdate", "datetime", "date", "published_at",
+	if !maxYear.Valid {
+		return nil, nil
 	}
-	for _, f := range candidates {
-		expr := dateExpr(f)
-		q := fmt.Sprintf("SELECT CAST(MIN(%s) AS VARCHAR), CAST(MAX(%s) AS VARCHAR), COUNT(%s) FROM %s", expr, expr, expr, cleanSrc)
-		var lo, hi sql.NullString
-		var cnt int
-		if err := db.QueryRow(q).Scan(&lo, &hi, &cnt); err != nil {
-			continue // 컬럼/스키마 미스는 후보 skip
-		}
-		if cnt > 0 && lo.Valid {
-			return lo.String, hi.String, nil
-		}
+	year := int(maxYear.Int64)
+
+	// 최근 연도 문서(row_id). doc_genuineness/clause_label의 doc_id와 매핑된다.
+	recentDocs := fmt.Sprintf("(SELECT row_id FROM %s WHERE EXTRACT(year FROM %s) = %d)", cleanSrc, dateExpr, year)
+
+	genSrc := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(genRef))
+	genLabelCol := "genuineness"
+	if genVerify {
+		genLabelCol = "final_label"
 	}
-	return "", "", nil
+	var genuineDocs int
+	if err := db.QueryRow(fmt.Sprintf(
+		"SELECT COUNT(*) FROM %s AS g JOIN %s AS r ON g.doc_id = r.row_id WHERE g.%s = 'genuine_review'",
+		genSrc, recentDocs, genLabelCol,
+	)).Scan(&genuineDocs); err != nil {
+		return nil, err
+	}
+
+	clauseSrc := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(clauseRef))
+	var clauseCount int
+	if err := db.QueryRow(fmt.Sprintf(
+		"SELECT COUNT(*) FROM %s AS c JOIN %s AS r ON c.doc_id = r.row_id",
+		clauseSrc, recentDocs,
+	)).Scan(&clauseCount); err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"recent_year":  year,
+		"year_label":   fmt.Sprintf("%d년", year),
+		"genuine_docs": genuineDocs,
+		"clause_count": clauseCount,
+	}, nil
 }
 
 // reportCleanReady — clean 단계 완료 판정. 빌드 잡 status는 "completed", artifact status는

@@ -33,8 +33,10 @@
         { "panels": [
           { "view": "stat_grid", "width": "full",
             "items": [
-              { "key": "genuine_docs", "label": "진성 문서수", "format": "count", "unit": "건", "source": { "build": "doc_genuineness", "path": "summary.genuineness.genuine_review" } },
-              { "key": "clauses",      "label": "절(clause) 수", "format": "count", "unit": "개", "source": { "build": "clause_label", "path": "summary.total" } }
+              { "key": "genuine_docs",        "label": "진성 문서수 (전체)",      "format": "count", "unit": "건", "source": { "build": "doc_genuineness", "path": "summary.genuineness.genuine_review" } },
+              { "key": "genuine_docs_recent", "label": "진성 문서수 (최근연도)",   "format": "count", "unit": "건", "source": { "build": "recent_year_stats", "path": "genuine_docs" }, "sub_source": { "build": "recent_year_stats", "path": "year_label" } },
+              { "key": "clauses",             "label": "절(clause) 수 (전체)",    "format": "count", "unit": "개", "source": { "build": "clause_label", "path": "summary.total" } },
+              { "key": "clauses_recent",      "label": "절(clause) 수 (최근연도)", "format": "count", "unit": "개", "source": { "build": "recent_year_stats", "path": "clause_count" }, "sub_source": { "build": "recent_year_stats", "path": "year_label" } }
             ]
           }
         ] }
