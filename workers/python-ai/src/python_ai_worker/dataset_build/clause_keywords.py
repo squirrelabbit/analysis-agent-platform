@@ -22,7 +22,7 @@ from typing import Any
 
 from .. import runtime as rt
 from ._common import write_progress
-from .keyword_extractor import KiwiKeywordExtractor
+from .keyword_extractor import DEFAULT_KEYWORD_STOPWORDS_RULE, KiwiKeywordExtractor
 
 
 def _read_clause_records(path: Path) -> list[dict[str, Any]]:
@@ -79,6 +79,29 @@ def run_dataset_clause_keywords(payload: dict[str, Any]) -> dict[str, Any]:
     min_len = max(1, int(payload.get("keyword_min_len") or 2))
     progress_path = str(payload.get("progress_path") or "").strip()
 
+    # 키워드 정제 사전 baked-in (silverone 2026-06-25, Phase 2). control-plane이
+    # 활성 규칙(block/synonym)을 payload로 넘긴다. 재빌드 시 처음부터 제외/병합돼
+    # artifact 자체가 정제본 → 보고서/analyze에도 그대로 흘러간다(overlay 불필요).
+    block_terms: set[str] = set()
+    synonym_map: dict[str, str] = {}
+    for rule in payload.get("keyword_dictionary_rules") or []:
+        if not isinstance(rule, dict):
+            continue
+        source_term = str(rule.get("source_term") or "").strip()
+        if not source_term:
+            continue
+        rule_type = str(rule.get("rule_type") or "").strip()
+        if rule_type == "block":
+            block_terms.add(source_term)
+        elif rule_type == "synonym":
+            target_term = str(rule.get("target_term") or "").strip()
+            if target_term:
+                synonym_map[source_term] = target_term
+    stopwords_rule = (
+        str(payload.get("keyword_stopwords_rule_name") or "").strip()
+        or DEFAULT_KEYWORD_STOPWORDS_RULE
+    )
+
     input_path = Path(input_ref)
     if not input_path.exists():
         raise ValueError(f"dataset_clause_keywords input missing: {input_path}")
@@ -87,7 +110,12 @@ def run_dataset_clause_keywords(payload: dict[str, Any]) -> dict[str, Any]:
 
     started_at = time.monotonic()
     records = _assign_clause_ids(_read_clause_records(input_path))
-    extractor = KiwiKeywordExtractor(min_len=min_len)
+    extractor = KiwiKeywordExtractor(
+        min_len=min_len,
+        stopwords_rule_name=stopwords_rule,
+        block_terms=block_terms,
+        synonym_map=synonym_map,
+    )
 
     # 진행률은 status=running 동안만 화면에 표시되므로(BuildRunningBanner) 초기 0% +
     # 루프 중 주기적 갱신을 남겨야 빌드 진행 중에 진행률 바가 채워진다. 최종 100%는
@@ -159,6 +187,9 @@ def run_dataset_clause_keywords(payload: dict[str, Any]) -> dict[str, Any]:
         "unique_keyword_count": len(keyword_counts),
         "extractor_version": extractor.version,
         "keyword_min_len": min_len,
+        "keyword_stopwords_rule": stopwords_rule,
+        "dictionary_block_count": len(block_terms),
+        "dictionary_synonym_count": len(synonym_map),
         "top_keywords": [{"keyword": k, "count": c} for k, c in top_keywords],
     }
     return {

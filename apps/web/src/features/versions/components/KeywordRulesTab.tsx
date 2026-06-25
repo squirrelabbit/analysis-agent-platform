@@ -105,6 +105,12 @@ export default function KeywordRulesTab() {
 
   return (
     <>
+      {/* Phase 2 안내 (silverone 2026-06-25) — 키워드 뷰는 overlay로 즉시 반영되지만,
+          보고서·analyze는 baked-in 재빌드 후 반영된다. */}
+      <p className="mb-2 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">
+        규칙은 키워드 결과에 즉시 반영됩니다. 보고서·analyze에도 반영하려면 키워드를 다시
+        빌드하세요(재빌드 시 규칙이 추출 결과에 적용됩니다).
+      </p>
       <DataTable
         columns={columns}
         items={rules}

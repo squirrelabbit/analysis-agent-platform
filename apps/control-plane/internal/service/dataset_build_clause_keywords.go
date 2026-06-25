@@ -60,6 +60,20 @@ func (s *DatasetService) BuildClauseKeywords(projectID, datasetID, datasetVersio
 		payload["keyword_min_len"] = *input.KeywordMinLen
 	}
 
+	// 키워드 정제 사전 baked-in (silverone 2026-06-25, Phase 2). 활성 block/synonym
+	// 규칙을 payload로 넘겨 extractor가 추출 시점에 제외/병합하게 한다 — 재빌드하면
+	// artifact 자체가 정제본이라 보고서/analyze에도 반영된다(키워드 뷰만 overlay하던
+	// Phase 1과 달리). clause_label의 taxonomy_id/doc_genuineness inject 패턴과 동일.
+	if rules, err := s.store.ListKeywordDictionaryRules(projectID, datasetID, true); err == nil && len(rules) > 0 {
+		payload["keyword_dictionary_rules"] = rules
+	}
+	// 도메인 불용어 룰 — dataset.metadata override가 있으면 사용(없으면 worker 기본 festival-v1).
+	if dataset, err := s.GetDataset(projectID, datasetID); err == nil {
+		if name := strings.TrimSpace(metadataString(dataset.Metadata, "keyword_stopwords_rule_name", "")); name != "" {
+			payload["keyword_stopwords_rule_name"] = name
+		}
+	}
+
 	response, err := s.runWorkerTask(context.Background(), registry.TaskPathFor("dataset_clause_keywords"), payload)
 	if err != nil {
 		version.Metadata["clause_keywords_status"] = "failed"

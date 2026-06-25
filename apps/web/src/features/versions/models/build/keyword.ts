@@ -24,6 +24,8 @@ export interface KeywordItemDto {
   dominant_sentiment_ratio: number;
   top_aspect: string;
   representative_clause: string;
+  // 검색어/대상명에서 유래한 키워드 (추천 제외어). 자동 제외 아님 — 운영자가 [제외]로 승인.
+  suggested_exclude?: boolean;
 }
 
 export interface KeywordSummaryDto {
@@ -74,6 +76,8 @@ export interface KeywordItem {
   dominantSentimentRatio: number;
   topAspect: string;
   representativeClause: string;
+  // 검색어/대상명 유래 추천 제외어 (자동 제외 아님).
+  suggestedExclude: boolean;
 }
 
 // 선택 aspect의 긍/부정 키워드 묶음.
@@ -122,6 +126,7 @@ const mapKeywordItem = (dto: KeywordItemDto): KeywordItem => ({
   dominantSentimentRatio: Number(dto.dominant_sentiment_ratio ?? 0),
   topAspect: dto.top_aspect,
   representativeClause: dto.representative_clause,
+  suggestedExclude: Boolean(dto.suggested_exclude),
 });
 
 export const mapKeywordSummary = (dto: KeywordSummaryDto): KeywordSummary => ({
