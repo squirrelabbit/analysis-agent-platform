@@ -333,10 +333,11 @@ type ReportUpdateRequest struct {
 	Blocks json.RawMessage `json:"blocks,omitempty"`
 }
 
-// ReportFromTemplateRequest — 기본 템플릿 생성 요청. clean ready인 dataset_version만 대상.
+// ReportFromTemplateRequest — 기본 템플릿 생성 요청. dataset_id를 받아 그 dataset의
+// active version으로 보고서를 만든다(clean ready인 active version 대상).
 type ReportFromTemplateRequest struct {
-	TemplateID       string `json:"template_id"`
-	DatasetVersionID string `json:"dataset_version_id"`
+	TemplateID string `json:"template_id"`
+	DatasetID  string `json:"dataset_id"`
 }
 
 // ReportFromTemplateResponse — 생성된 보고서 + 어떤 섹션이 들어갔고(included) 어떤 섹션이
@@ -362,6 +363,25 @@ type ReportBasicAnalysisResponse struct {
 	Blocks           []map[string]any       `json:"blocks"`
 	IncludedSections []string               `json:"included_sections"`
 	MissingSections  []ReportMissingSection `json:"missing_sections"`
+}
+
+// ReportItemAppendRequest — 기존 보고서에 item(블록)을 1개 추가한다. 새 보고서를
+// 만들지 않고 report_id의 blocks 뒤에 append + updated_at만 갱신. type=analysis_result는
+// run_id가 가리키는 완료된 분석 결과를 스냅샷한다(향후 text 등 다른 type 확장).
+type ReportItemAppendRequest struct {
+	Type     string         `json:"type"`
+	RunID    string         `json:"run_id,omitempty"`
+	ThreadID string         `json:"thread_id,omitempty"`
+	Title    string         `json:"title,omitempty"`
+	Interp   string         `json:"interp,omitempty"`
+	Options  map[string]any `json:"options,omitempty"`
+	Layout   map[string]any `json:"layout,omitempty"`
+}
+
+// ReportItemAppendResponse — 갱신된 보고서 + 추가된 item(프론트가 즉시 에디터에 반영).
+type ReportItemAppendResponse struct {
+	Report Report         `json:"report"`
+	Item   map[string]any `json:"item"`
 }
 
 type ReportListResponse struct {

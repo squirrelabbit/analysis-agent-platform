@@ -232,6 +232,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /projects/{project_id}/reports/{report_id}", s.handleGetReport)
 	s.mux.HandleFunc("PUT /projects/{project_id}/reports/{report_id}", s.handleUpdateReport)
 	s.mux.HandleFunc("DELETE /projects/{project_id}/reports/{report_id}", s.handleDeleteReport)
+	// 기존 보고서에 item(블록) 추가 — 새 보고서 만들지 않고 blocks 뒤에 append.
+	s.mux.HandleFunc("POST /projects/{project_id}/reports/{report_id}/item", s.handleAppendReportItem)
 }
 
 func (s *Server) withCORS(next stdhttp.Handler) stdhttp.Handler {
@@ -1106,6 +1108,25 @@ func (s *Server) handleCreateReportFromTemplate(w stdhttp.ResponseWriter, r *std
 		return
 	}
 	response, err := s.datasetService.CreateReportFromTemplate(r.PathValue("project_id"), payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+// handleAppendReportItem — 기존 보고서에 item(블록) 1개 추가. blocks 뒤에 append + updated_at.
+func (s *Server) handleAppendReportItem(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ReportItemAppendRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.AppendReportItem(
+		r.PathValue("project_id"),
+		r.PathValue("report_id"),
+		payload,
+	)
 	if err != nil {
 		s.writeServiceError(w, err)
 		return

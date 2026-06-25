@@ -1838,8 +1838,9 @@ paths:
       tags: [Reports]
       summary: 기본 템플릿으로 보고서 생성 (데이터 기초 분석)
       description: |
-        clean ready인 dataset_version을 대상으로 템플릿 config(config/report_templates/*.json)에
-        따라 빌드 summary를 블록으로 채운 보고서를 생성한다. required_build가 ready인 섹션만
+        dataset_id를 받아 그 dataset의 active version(clean ready)을 대상으로 템플릿
+        config(config/report_templates/*.json)에 따라 빌드 summary를 블록으로 채운 보고서를
+        생성한다. active version이 없으면 400. required_build가 ready인 섹션만
         만들고 나머지는 missing_sections로 반환. 블록 data·source는 생성 시점 snapshot.
         값 표현(count/percent)·배치(layout/view/width)는 템플릿이 결정해 응답에 실린다
         (계약: docs/api/report_basic_template.sample.md).
@@ -1992,6 +1993,37 @@ paths:
       responses:
         "204":
           description: 삭제 완료
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/reports/{report_id}/item:
+    post:
+      tags: [Reports]
+      summary: 보고서에 item(블록) 추가
+      description: |
+        기존 보고서의 blocks 뒤에 item 1개를 append한다(새 보고서를 만들지 않음).
+        report_id는 유지되고 updated_at만 갱신. type=analysis_result는 run_id가
+        가리키는 완료된 분석 결과에서 question/assistant_content/display/plan을
+        그 시점 스냅샷으로 박제한다(재실행·재빌드와 무관하게 근거 보존). 응답으로
+        갱신된 보고서 + 추가된 item을 반환해 프론트가 즉시 에디터에 반영한다.
+      operationId: appendReportItem
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReportId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportItemAppendRequest"
+      responses:
+        "201":
+          description: 갱신된 보고서 + 추가된 item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportItemAppendResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
 components:
@@ -3136,6 +3168,46 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReportBlock"
+    ReportItemAppendRequest:
+      type: object
+      description: "보통 run_id만 보내면 된다(type 생략 시 analysis_result). 나머지는 모두 선택."
+      properties:
+        run_id:
+          type: string
+          description: "추가할 분석 실행 id. type=analysis_result(기본)일 때 필수."
+        type:
+          type: string
+          description: "analysis_result(기본) | (향후 text 등). 보통 생략."
+          example: analysis_result
+        thread_id:
+          type: string
+          description: "지정 시 run의 thread와 일치해야 함(잘못된 thread 추가 방지)."
+        title:
+          type: string
+          description: "미지정 시 display.title → question → assistant_content 순으로 유도."
+        interp:
+          type: string
+          description: "운영자 해석/코멘트(선택)."
+        options:
+          type: object
+          additionalProperties: true
+          description: "표시 옵션(show_question/show_detail/show_plan 등) — 프론트 렌더용, 그대로 저장."
+        layout:
+          type: object
+          additionalProperties: true
+          description: "배치(span/height/new_row 등) — 프론트 렌더용, 그대로 저장."
+    ReportItemAppendResponse:
+      type: object
+      properties:
+        report:
+          $ref: "#/components/schemas/Report"
+        item:
+          type: object
+          additionalProperties: true
+          description: >
+            추가된 item. type=analysis_result는 uid/type/run_id/thread_id/title/
+            question/assistant_content/display/plan + interp/options/layout. 블록
+            렌더 계약은 프론트(보고서 에디터)가 소유.
     ReportListResponse:
       type: object
       properties:
@@ -3145,14 +3217,17 @@ components:
             $ref: "#/components/schemas/ReportSummary"
     ReportFromTemplateRequest:
       type: object
-      description: 기본 템플릿 생성 요청. dataset_version_id는 clean ready여야 한다.
+      description: |
+        기본 템플릿 생성 요청. dataset_id를 받아 그 dataset의 active version으로 보고서를
+        만든다(active version이 clean ready여야 한다). active version이 없으면 400.
       properties:
         template_id:
           type: string
           example: unstructured_basic_v1
-        dataset_version_id:
+        dataset_id:
           type: string
-      required: [template_id, dataset_version_id]
+          description: 보고서를 만들 dataset. 이 dataset의 active version이 대상이 된다.
+      required: [template_id, dataset_id]
     ReportFromTemplateResponse:
       type: object
       description: 생성된 보고서 + 어떤 섹션이 들어갔고(included) build 미완으로 빠졌는지(missing).
