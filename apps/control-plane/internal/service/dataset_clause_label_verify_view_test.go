@@ -27,7 +27,7 @@ func setupClauseLabelVerifyFixture(t *testing.T) string {
 
 func TestLoadClauseLabelVerifyArtifact_NoFilter(t *testing.T) {
 	path := setupClauseLabelVerifyFixture(t)
-	summary, _, total, items, err := loadClauseLabelVerifyArtifact(path, 10, 0, "", "", false, false)
+	summary, _, total, items, err := loadClauseLabelVerifyArtifact(path, "", 10, 0, "", "", false, false)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestLoadClauseLabelVerifyArtifact_NoFilter(t *testing.T) {
 
 func TestLoadClauseLabelVerifyArtifact_DisagreementFilter(t *testing.T) {
 	path := setupClauseLabelVerifyFixture(t)
-	summary, _, total, items, err := loadClauseLabelVerifyArtifact(path, 10, 0, "", "", true, false)
+	summary, _, total, items, err := loadClauseLabelVerifyArtifact(path, "", 10, 0, "", "", true, false)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestLoadClauseLabelVerifyArtifact_DisagreementFilter(t *testing.T) {
 
 func TestLoadClauseLabelVerifyArtifact_NeedsReviewFilter(t *testing.T) {
 	path := setupClauseLabelVerifyFixture(t)
-	_, _, total, items, err := loadClauseLabelVerifyArtifact(path, 10, 0, "", "", false, true)
+	_, _, total, items, err := loadClauseLabelVerifyArtifact(path, "", 10, 0, "", "", false, true)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

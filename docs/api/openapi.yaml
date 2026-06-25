@@ -4598,6 +4598,14 @@ components:
                     type: string
                   clause:
                     type: string
+                  cleaned_text:
+                    type:
+                      - string
+                      - "null"
+                    description: >
+                      절이 속한 원본 문서의 정제 본문. cleaned.parquet을 doc_id=row_id로
+                      LEFT JOIN해 절마다 채운다(같은 doc 절들은 동일 값). clean artifact가
+                      없거나 join miss면 null.
                   sentiment:
                     type:
                       - string

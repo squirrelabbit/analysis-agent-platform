@@ -215,9 +215,9 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		var summary map[string]any
 		var err error
 		if metadataString(version.Metadata, "clause_label_mode", "") == "verify" {
-			summary, _, _, _, err = loadClauseLabelVerifyArtifact(ref, 1, 0, "", "", false, false)
+			summary, _, _, _, err = loadClauseLabelVerifyArtifact(ref, "", 1, 0, "", "", false, false)
 		} else {
-			summary, _, _, _, err = loadClauseLabelArtifact(ref, 1, 0, "", "")
+			summary, _, _, _, err = loadClauseLabelArtifact(ref, "", 1, 0, "", "")
 		}
 		if err != nil {
 			return reportBuildRoot{}
