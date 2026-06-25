@@ -255,40 +255,9 @@ type PlannerRejectionEvent struct {
 	CreatedAt     time.Time      `json:"created_at"`
 }
 
-// ReportSavedResult — 채팅 분석 결과를 보고서 보관함에 저장한 스냅샷
-// (silverone 2026-06-10). 보고서 탭이 이 보관함에서 결과를 골라 블록으로 구성한다.
-// run.result_json의 composer.display / plan / assistant_content를 저장 시점에
-// 그대로 얼려서(snapshot) 보존한다 — 이후 같은 질문을 재실행하거나 thread를
-// 지워도 보고서에 박제된 결과가 변하지 않게 하기 위함. Display / Plan은
-// composer.display / plan과 동일 shape (frontend-safe keep-set projection).
-type ReportSavedResult struct {
-	ResultID         string         `json:"result_id"`
-	ProjectID        string         `json:"project_id"`
-	DatasetID        string         `json:"dataset_id"`
-	DatasetVersionID string         `json:"dataset_version_id"`
-	ThreadID         string         `json:"thread_id,omitempty"`
-	RunID            string         `json:"run_id,omitempty"`
-	SourceMessageID  string         `json:"source_message_id,omitempty"`
-	Title            string         `json:"title"`
-	Question         string         `json:"question,omitempty"`
-	AssistantContent string         `json:"assistant_content,omitempty"`
-	Display          map[string]any `json:"display,omitempty"`
-	Plan             map[string]any `json:"plan,omitempty"`
-	CreatedAt        time.Time      `json:"created_at"`
-}
-
-// ReportSavedResultCreateRequest — 보관함 저장 요청. run_id로 어떤 분석 결과를
-// 스냅샷할지 지정한다. thread_id는 scope·검증용. title은 미지정 시 서버가
-// display.title 또는 question에서 유도한다.
-type ReportSavedResultCreateRequest struct {
-	ThreadID string `json:"thread_id"`
-	RunID    string `json:"run_id"`
-	Title    string `json:"title,omitempty"`
-}
-
-type ReportSavedResultListResponse struct {
-	Items []ReportSavedResult `json:"items"`
-}
+// silverone 2026-06-25 — 보고서 보관함(ReportSavedResult / *CreateRequest /
+// *ListResponse) 폐기. 채팅 분석 결과는 POST /reports/{id}/item로 보고서 blocks에
+// 직접 스냅샷한다(ReportItemAppendRequest).
 
 // Report — 보고서 문서 (silverone 2026-06-11). saved_results(분석 결과 보관함)를
 // 조합해 만든 별도 문서. blocks는 작성 당시 상태로 고정하기 위해 각 블록 안에
@@ -333,10 +302,11 @@ type ReportUpdateRequest struct {
 	Blocks json.RawMessage `json:"blocks,omitempty"`
 }
 
-// ReportFromTemplateRequest — 기본 템플릿 생성 요청. clean ready인 dataset_version만 대상.
+// ReportFromTemplateRequest — 기본 템플릿 생성 요청. dataset_id를 받아 그 dataset의
+// active version으로 보고서를 만든다(clean ready인 active version 대상).
 type ReportFromTemplateRequest struct {
-	TemplateID       string `json:"template_id"`
-	DatasetVersionID string `json:"dataset_version_id"`
+	TemplateID string `json:"template_id"`
+	DatasetID  string `json:"dataset_id"`
 }
 
 // ReportFromTemplateResponse — 생성된 보고서 + 어떤 섹션이 들어갔고(included) 어떤 섹션이
@@ -362,6 +332,25 @@ type ReportBasicAnalysisResponse struct {
 	Blocks           []map[string]any       `json:"blocks"`
 	IncludedSections []string               `json:"included_sections"`
 	MissingSections  []ReportMissingSection `json:"missing_sections"`
+}
+
+// ReportItemAppendRequest — 기존 보고서에 item(블록)을 1개 추가한다. 새 보고서를
+// 만들지 않고 report_id의 blocks 뒤에 append + updated_at만 갱신. type=analysis_result는
+// run_id가 가리키는 완료된 분석 결과를 스냅샷한다(향후 text 등 다른 type 확장).
+type ReportItemAppendRequest struct {
+	Type     string         `json:"type"`
+	RunID    string         `json:"run_id,omitempty"`
+	ThreadID string         `json:"thread_id,omitempty"`
+	Title    string         `json:"title,omitempty"`
+	Interp   string         `json:"interp,omitempty"`
+	Options  map[string]any `json:"options,omitempty"`
+	Layout   map[string]any `json:"layout,omitempty"`
+}
+
+// ReportItemAppendResponse — 갱신된 보고서 + 추가된 item(프론트가 즉시 에디터에 반영).
+type ReportItemAppendResponse struct {
+	Report Report         `json:"report"`
+	Item   map[string]any `json:"item"`
 }
 
 type ReportListResponse struct {
