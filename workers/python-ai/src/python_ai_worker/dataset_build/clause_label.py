@@ -30,6 +30,7 @@ from ..obs import get, skill_handler
 from ..taxonomies import DEFAULT_TAXONOMY_ID, Taxonomy, load_taxonomy, render_aspect_taxonomy_block
 from ._chunking import build_sentence_chunks, split_anchor_sentences
 from ._common import write_progress
+from ._prompt_slots import extract_extra_slot
 
 LOGGER = get(__name__)
 
@@ -146,29 +147,36 @@ _DEFAULT_SUBJECT_CONFIG: dict[str, Any] = {
     "subject_name": "축제",
     "subject_aliases": [],
     "subject_type": "festival",
+    "extra_instructions": "",
+    "extra_examples": "",
 }
 
 
 def _extract_subject_config(payload: dict[str, Any]) -> dict[str, Any]:
-    """payload['doc_genuineness']에서 subject 변수를 추출한다.
+    """subject 변수 + 행사별 추가 슬롯을 추출한다.
 
-    공유 정책 (2026-05-28): dataset.metadata.doc_genuineness 키를 doc_genuineness
-    skill과 그대로 공유한다. control plane이 payload['doc_genuineness']로 inject
-    하면 여기서 정규화한다. metadata가 없거나 subject_name이 비면 festival
-    default로 fallback — clause_label은 옛 dataset도 처리해야 한다 (5/28 결정).
+    - subject_name/aliases/type: payload['doc_genuineness']에서. doc_genuineness
+      skill과 공유 (2026-05-28). 없거나 subject_name이 비면 festival default로
+      fallback — clause_label은 옛 dataset도 처리해야 한다 (5/28 결정).
+    - extra_instructions/extra_examples: payload['clause_label']에서 (task별 분리,
+      2026-06-25). doc_genuineness 예시와 출력 스키마가 달라 공용 금지. subject가
+      default여도 extra는 독립으로 읽는다. verify 경로도 이 함수를 재사용하므로
+      자동 반영된다.
     """
+    extra = extract_extra_slot(payload.get("clause_label"))
     raw = payload.get("doc_genuineness")
     if not isinstance(raw, dict):
-        return dict(_DEFAULT_SUBJECT_CONFIG)
+        return {**_DEFAULT_SUBJECT_CONFIG, **extra}
     subject_name = str(raw.get("subject_name") or "").strip()
     if not subject_name:
-        return dict(_DEFAULT_SUBJECT_CONFIG)
+        return {**_DEFAULT_SUBJECT_CONFIG, **extra}
     aliases = [str(item).strip() for item in raw.get("subject_aliases") or [] if str(item).strip()]
     subject_type = str(raw.get("subject_type") or "generic").strip() or "generic"
     return {
         "subject_name": subject_name,
         "subject_aliases": aliases,
         "subject_type": subject_type,
+        **extra,
     }
 
 
@@ -192,6 +200,8 @@ def _render_subject_prompt(template: str, config: dict[str, Any]) -> str:
     truthy = {
         "subject_name": bool(config.get("subject_name")),
         "subject_aliases": bool(config.get("subject_aliases")),
+        "extra_instructions": bool(config.get("extra_instructions")),
+        "extra_examples": bool(config.get("extra_examples")),
     }
 
     def repl_block(match: re.Match) -> str:
@@ -203,6 +213,8 @@ def _render_subject_prompt(template: str, config: dict[str, Any]) -> str:
     substitutions = {
         "subject_name": str(config.get("subject_name") or ""),
         "subject_aliases": _render_quoted_list(list(config.get("subject_aliases") or [])),
+        "extra_instructions": str(config.get("extra_instructions") or ""),
+        "extra_examples": str(config.get("extra_examples") or ""),
     }
     for key, value in substitutions.items():
         rendered = rendered.replace("{{" + key + "}}", value)
@@ -529,6 +541,10 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
             "subject_name": subject_config["subject_name"],
             "subject_aliases": list(subject_config["subject_aliases"]),
             "subject_type": subject_config["subject_type"],
+            # 행사별 추가 슬롯 적용 내용 snapshot (감사 — extra_instructions는
+            # 사실상 프롬프트 코드라 무엇이 적용됐는지 보존한다).
+            "extra_instructions": subject_config.get("extra_instructions", ""),
+            "extra_examples": subject_config.get("extra_examples", ""),
         },
     }
     return {
