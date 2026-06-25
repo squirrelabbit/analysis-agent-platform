@@ -658,6 +658,14 @@ paths:
                   recruitment_keywords:
                     - 서포터즈
                     - 푸드트럭
+                  # 행사별 추가 슬롯(doc_genuineness 전용, festival 통합 base).
+                  # 비우면 base 프롬프트만 사용. 채우면 base 끝에 append된다.
+                  extra_instructions: 입장료·특정 지명 언급은 현장 관찰 근거로 본다
+                  extra_examples: ""
+                # 절 라벨링 전용 추가 슬롯. doc_genuineness.extra_*와 분리(출력 스키마가 다름).
+                clause_label:
+                  extra_instructions: 특정 프로그램명/장소명은 콘텐츠·대상으로 해석한다
+                  extra_examples: ""
       responses:
         "201":
           description: dataset 생성 완료
@@ -2564,9 +2572,17 @@ components:
             dataset-level 설정 jsonb. silverone 2026-05-22 (옵션 α1).
             현재 정의된 keypath:
               - `metadata.doc_genuineness` — {subject_type, subject_name,
-                subject_aliases[], recruitment_keywords[]} (값 채워지면
-                doc_genuineness build 시 prompt placeholder로 inject 예정).
-            그 외 key는 forward-compat용으로 그대로 보존된다.
+                subject_aliases[], recruitment_keywords[], extra_instructions,
+                extra_examples}. subject는 prompt placeholder로 inject되고,
+                extra_instructions/extra_examples는 festival 통합 base 프롬프트 끝의
+                행사별 슬롯에 append된다(doc_genuineness 전용).
+              - `metadata.clause_label` — {extra_instructions, extra_examples}.
+                절 라벨링 base 프롬프트 슬롯 전용. doc_genuineness.extra_*와 분리한다
+                (출력 스키마가 달라 공용 금지). 비우면 슬롯 섹션 생략.
+              - `metadata.taxonomy_id` — per-dataset aspect taxonomy id (미설정 시
+                worker default).
+            extra_examples는 문자열 또는 배열 모두 허용한다. 그 외 key는
+            forward-compat용으로 그대로 보존된다.
         created_at:
           type: string
           format: date-time
@@ -2603,6 +2619,11 @@ components:
               recruitment_keywords:
                 - 서포터즈
                 - 푸드트럭
+              extra_instructions: 입장료·특정 지명 언급은 현장 관찰 근거로 본다
+              extra_examples: ""
+            clause_label:
+              extra_instructions: 특정 프로그램명/장소명은 콘텐츠·대상으로 해석한다
+              extra_examples: ""
       required: [name]
     DatasetMetadataPatchRequest:
       type: object

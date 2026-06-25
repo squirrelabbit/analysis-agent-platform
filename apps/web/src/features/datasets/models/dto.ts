@@ -5,6 +5,15 @@ export interface DocGenuinenessMeta {
   subject_name?: string;
   subject_aliases?: string[];
   recruitment_keywords?: string[];
+  // 행사별 추가 슬롯 (doc_genuineness 전용).
+  extra_instructions?: string;
+  extra_examples?: string;
+}
+
+// 행사별 추가 슬롯 (clause_label 전용). doc_genuineness.extra_*와 분리.
+export interface ClauseLabelMeta {
+  extra_instructions?: string;
+  extra_examples?: string;
 }
 
 export interface DatasetResponse {
@@ -18,6 +27,7 @@ export interface DatasetResponse {
   created_at: string;
   metadata?: {
     doc_genuineness?: DocGenuinenessMeta;
+    clause_label?: ClauseLabelMeta;
     taxonomy_id?: string;
   };
 }
@@ -33,7 +43,10 @@ export interface MetadataRequest {
       subject_name: string;
       subject_aliases: string[];
       recruitment_keywords: string[];
+      extra_instructions?: string;
+      extra_examples?: string;
     };
+    clause_label?: ClauseLabelMeta;
     taxonomy_id?: string;
   };
 }
