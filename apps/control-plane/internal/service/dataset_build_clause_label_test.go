@@ -80,9 +80,53 @@ func TestBuildClauseLabelInjectsSubjectFromDatasetMetadata(t *testing.T) {
 	}
 }
 
+// TestBuildClauseLabelPassesClauseExtraSlot — silverone 2026-06-25. 행사별 추가
+// 슬롯(festival 통합 base). dataset.metadata.clause_label(clause_label 전용
+// extra_instructions/extra_examples)을 payload['clause_label']로 그대로
+// pass-through하는지 잠금. doc_genuineness.extra_*와 분리(출력 스키마가 달라
+// 공용 금지). Python `_extract_subject_config`가 payload['clause_label']에서 읽는다.
+func TestBuildClauseLabelPassesClauseExtraSlot(t *testing.T) {
+	service, project, dataset, version := setupClauseLabelHarness(t, map[string]any{
+		"doc_genuineness": map[string]any{"subject_name": "군산 맥주축제"},
+		"clause_label": map[string]any{
+			"extra_instructions": "백년광장은 장소명으로 본다.",
+			"extra_examples":     []any{"문장A → neutral"},
+		},
+	})
+
+	var requestedClause map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		requestedClause, _ = payload["clause_label"].(map[string]any)
+		_ = json.NewEncoder(w).Encode(clauseLabelSuccessResponse(nil))
+	}))
+	defer server.Close()
+	service.pythonAIWorkerURL = server.URL
+
+	emptyTiers := []string{}
+	if _, err := service.BuildClauseLabel(
+		project.ProjectID, dataset.DatasetID, version.DatasetVersionID,
+		domain.DatasetClauseLabelBuildRequest{IncludeGenuineness: emptyTiers},
+	); err != nil {
+		t.Fatalf("BuildClauseLabel: %v", err)
+	}
+
+	if requestedClause == nil {
+		t.Fatalf("payload['clause_label'] missing — expected pass-through from dataset metadata")
+	}
+	if requestedClause["extra_instructions"] != "백년광장은 장소명으로 본다." {
+		t.Fatalf("extra_instructions not passed: %+v", requestedClause)
+	}
+	if _, ok := requestedClause["extra_examples"].([]any); !ok {
+		t.Fatalf("extra_examples not passed through as list: %+v", requestedClause["extra_examples"])
+	}
+}
+
 // TestBuildClauseLabelOmitsDocGenuinenessWhenMetadataAbsent — silverone
 // 2026-05-28. 옛 dataset(metadata.doc_genuineness 없음) 호환 경로. Go는 키를
 // payload에 inject하지 않고, Python이 festival default로 fallback한다.
+// 2026-06-25 — clause_label 슬롯 키도 metadata 미설정 시 omit됨을 함께 확인.
 func TestBuildClauseLabelOmitsDocGenuinenessWhenMetadataAbsent(t *testing.T) {
 	service, project, dataset, version := setupClauseLabelHarness(t, map[string]any{})
 
@@ -112,6 +156,9 @@ func TestBuildClauseLabelOmitsDocGenuinenessWhenMetadataAbsent(t *testing.T) {
 
 	if payloadKeys["doc_genuineness"] {
 		t.Fatalf("payload should omit doc_genuineness when dataset metadata absent — Python fallback path")
+	}
+	if payloadKeys["clause_label"] {
+		t.Fatalf("payload should omit clause_label when dataset metadata absent — Python 빈값 슬롯 생략 경로")
 	}
 }
 
