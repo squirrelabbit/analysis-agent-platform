@@ -48,6 +48,7 @@
       "title": "채널별 진성 문서 분포",
       "required_build": "channel_breakdown",
       "unit_basis": "doc",
+      "date_filter": "recent_year",
       "layout": [
         { "panels": [
           { "view": "bar",   "width": "2/3", "metric": "channel_genuine_distribution", "top": 8 },
@@ -61,6 +62,7 @@
       "title": "절 단위 감성 분포",
       "required_build": "clause_label",
       "unit_basis": "clause",
+      "date_filter": "recent_year",
       "layout": [
         { "panels": [
           { "view": "doughnut", "width": "2/3", "metric": "sentiment_distribution", "order": ["positive", "neutral", "negative"] },
@@ -74,6 +76,7 @@
       "title": "유형별 절 분포",
       "required_build": "clause_label",
       "unit_basis": "clause",
+      "date_filter": "recent_year",
       "layout": [
         { "panels": [
           { "view": "bar",   "width": "2/3", "metric": "aspect_distribution", "order_by": "count" },
@@ -87,6 +90,7 @@
       "title": "유형별 감성 구성·대비",
       "required_build": "clause_label",
       "unit_basis": "clause",
+      "date_filter": "recent_year",
       "layout": [
         { "panels": [
           { "view": "stacked_bar", "width": "full", "metric": "aspect_sentiment", "title": "긍정·부정 구성비 (100%)" }
@@ -103,6 +107,7 @@
       "title": "감성별 상위 키워드",
       "required_build": "clause_keywords",
       "unit_basis": "clause",
+      "date_filter": "recent_year",
       "layout": [
         { "panels": [
           { "view": "rank", "width": "1/2", "metric": "keywords_positive", "top": 10, "title": "긍정 키워드" },

@@ -102,7 +102,7 @@ func (s *DatasetService) GetClauseKeywordsView(
 
 // loadClauseKeywordsArtifact — clause_keywords long-format jsonl을 DuckDB로 집계.
 // 반환: dashboard summary / 필터 적용 total(페이징용) / 페이징된 item rows.
-func loadClauseKeywordsArtifact(ref string, limit, offset int, aspect, sentiment, q, group string, rules []domain.KeywordDictionaryRule) (map[string]any, int, []map[string]any, error) {
+func loadClauseKeywordsArtifact(ref string, limit, offset int, aspect, sentiment, q, group string, rules []domain.KeywordDictionaryRule, filters ...artifactRecentYearFilter) (map[string]any, int, []map[string]any, error) {
 	db, cleanup, err := openTempDuckDB()
 	if err != nil {
 		return nil, 0, nil, err
@@ -112,6 +112,8 @@ func loadClauseKeywordsArtifact(ref string, limit, offset int, aspect, sentiment
 	// 사전 적용 source — 활성 규칙이 없으면 평범한 read_json. 모든 하위 집계가
 	// 이 source 위에서 돌아 block 제외/synonym 병합이 재집계까지 자동 반영된다.
 	source := buildKeywordDictionarySource(ref, rules)
+	// 최신년도 섹션 필터(silverone 2026-06-25) — source를 최신년도 doc로 좁힌다(없으면 no-op).
+	source, _ = wrapSourceRecentYear(db, source, filters)
 
 	// ── dashboard summary (필터 미적용 전체) ──────────────────────────────
 	total, byAspect, err := aggregateGroupedCounts(db, source, "aspect")

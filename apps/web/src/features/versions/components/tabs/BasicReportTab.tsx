@@ -109,6 +109,12 @@ function BlockCard({ block }: { block: ReportBlock }) {
             {block.unit_basis === "clause" ? "절 단위" : block.unit_basis === "doc" ? "문서 단위" : block.unit_basis}
           </span>
         )}
+        {/* 최신년도만 집계된 섹션(개요 제외) 표시 — silverone 2026-06-25 */}
+        {block.scope_label && (
+          <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+            {block.scope_label}
+          </span>
+        )}
       </div>
       <div className="space-y-4">
         {block.layout.map((row, ri) => (

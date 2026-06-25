@@ -123,14 +123,18 @@ func (s *DatasetService) buildReportTemplateBlocks(projectID, templateID, versio
 	}
 
 	labels := s.newReportLabels(version)
-	roots := map[string]reportBuildRoot{} // build → (root, ready) 캐시
+	roots := map[string]reportBuildRoot{} // (build|dateFilter) → (root, ready) 캐시
+
+	// 최신년도 라벨용(silverone 2026-06-25) — date_filter 섹션에 "YYYY년 기준" 배지.
+	// 날짜 없으면 필터 미적용이라 라벨도 안 단다. 보고서당 1회 계산.
+	recentYear, recentYearOK := s.reportRecentYear(version)
 
 	blocks := make([]map[string]any, 0, len(template.Sections))
 	included := make([]string, 0, len(template.Sections))
 	missing := make([]domain.ReportMissingSection, 0)
 
 	for _, section := range template.Sections {
-		root := s.reportBuildRoot(version, section.RequiredBuild, roots)
+		root := s.reportBuildRoot(version, section.RequiredBuild, section.DateFilter, roots)
 		if !root.ready {
 			missing = append(missing, domain.ReportMissingSection{
 				SectionID: section.ID,
@@ -138,7 +142,12 @@ func (s *DatasetService) buildReportTemplateBlocks(projectID, templateID, versio
 			})
 			continue
 		}
-		blocks = append(blocks, s.buildReportBlock(version, section, roots, labels))
+		block := s.buildReportBlock(version, section, roots, labels)
+		// 개요 외 섹션(date_filter=recent_year)은 최신년도 데이터만 집계됨을 명시.
+		if section.DateFilter == "recent_year" && recentYearOK {
+			block["scope_label"] = fmt.Sprintf("%d년 기준", recentYear)
+		}
+		blocks = append(blocks, block)
 		included = append(included, section.ID)
 	}
 
@@ -163,17 +172,23 @@ type reportBuildRoot struct {
 	ready bool
 }
 
-func (s *DatasetService) reportBuildRoot(version domain.DatasetVersion, build string, cache map[string]reportBuildRoot) reportBuildRoot {
+func (s *DatasetService) reportBuildRoot(version domain.DatasetVersion, build, dateFilter string, cache map[string]reportBuildRoot) reportBuildRoot {
 	build = strings.TrimSpace(build)
-	if cached, ok := cache[build]; ok {
+	dateFilter = strings.TrimSpace(dateFilter)
+	// 같은 build을 전체/최신년도 두 스코프로 안전하게 공존시키기 위해 캐시 키에 필터 포함.
+	key := build + "|" + dateFilter
+	if cached, ok := cache[key]; ok {
 		return cached
 	}
-	result := s.loadReportBuildRoot(version, build)
-	cache[build] = result
+	result := s.loadReportBuildRoot(version, build, dateFilter)
+	cache[key] = result
 	return result
 }
 
-func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, build string) reportBuildRoot {
+func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, build, dateFilter string) reportBuildRoot {
+	// date_filter="recent_year" 섹션은 개요 외 분포를 최신년도 doc로 좁힌다(clause_label/
+	// clause_keywords/channel_breakdown만 대상. version/clean/doc_genuineness는 항상 전체).
+	recentYear := dateFilter == "recent_year"
 	switch build {
 	case "version":
 		datasetName := ""
@@ -210,14 +225,16 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		if ref == "" {
 			return reportBuildRoot{}
 		}
+		// 최신년도 필터(recentYear) — clean에 doc_id JOIN해 최신년도 절만 집계. 날짜 없으면 no-op.
+		filters := recentYearFilters(version, recentYear)
 		// ADR-028 verify 모드는 schema가 달라 전용 로더(final_label 기준 집계). view
 		// 핸들러(dataset_artifact_views.go)와 동일 분기.
 		var summary map[string]any
 		var err error
 		if metadataString(version.Metadata, "clause_label_mode", "") == "verify" {
-			summary, _, _, _, err = loadClauseLabelVerifyArtifact(ref, "", 1, 0, "", "", false, false)
+			summary, _, _, _, err = loadClauseLabelVerifyArtifact(ref, "", 1, 0, "", "", false, false, filters...)
 		} else {
-			summary, _, _, _, err = loadClauseLabelArtifact(ref, "", 1, 0, "", "")
+			summary, _, _, _, err = loadClauseLabelArtifact(ref, "", 1, 0, "", "", filters...)
 		}
 		if err != nil {
 			return reportBuildRoot{}
@@ -252,7 +269,8 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		}
 		// 키워드 정제 사전(silverone 2026-06-25)은 Phase 1에서 키워드 뷰에만 적용한다.
 		// 보고서는 사전 미적용(nil) — 정제 반영이 필요하면 clause_keywords 재빌드(Phase 2).
-		summary, _, _, err := loadClauseKeywordsArtifact(ref, 1, 0, "", "", "", "", nil)
+		// 최신년도 필터(recentYear) — clean에 doc_id JOIN해 최신년도 키워드만 집계.
+		summary, _, _, err := loadClauseKeywordsArtifact(ref, 1, 0, "", "", "", "", nil, recentYearFilters(version, recentYear)...)
 		if err != nil {
 			return reportBuildRoot{}
 		}
@@ -270,7 +288,7 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 			return reportBuildRoot{}
 		}
 		verify := metadataString(version.Metadata, "doc_genuineness_mode", "") == "verify"
-		summary, err := loadChannelGenuineBreakdown(cleanRef, genRef, verify)
+		summary, err := loadChannelGenuineBreakdown(cleanRef, genRef, verify, recentYear)
 		if err != nil || summary == nil {
 			return reportBuildRoot{}
 		}
@@ -307,7 +325,7 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 // 많이 채워진 컬럼을 자동 선택한다. 채널 데이터가 전혀 없으면 nil을 반환해 섹션을
 // missing_sections로 떨어뜨린다. verify 모드는 진성 라벨 컬럼이 final_label, 단일 모드는
 // genuineness다(view 핸들러와 동일).
-func loadChannelGenuineBreakdown(cleanRef, genuinenessRef string, verifyMode bool) (map[string]any, error) {
+func loadChannelGenuineBreakdown(cleanRef, genuinenessRef string, verifyMode bool, recentYear bool) (map[string]any, error) {
 	if strings.TrimSpace(cleanRef) == "" || strings.TrimSpace(genuinenessRef) == "" {
 		return nil, nil
 	}
@@ -319,6 +337,15 @@ func loadChannelGenuineBreakdown(cleanRef, genuinenessRef string, verifyMode boo
 
 	cleanSrc := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
 	genSrc := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(genuinenessRef))
+
+	// 최신년도 섹션 필터(silverone 2026-06-25) — 채널 doc 집합을 최신년도로 제한.
+	// 채널 subselect가 clean에서 직접 읽으므로 연도 술어를 인라인으로 건다. 날짜 없으면 no-op.
+	docFilter := ""
+	if recentYear {
+		if pred, _, ok := recentYearPredicate(db, cleanSrc); ok {
+			docFilter = " AND " + pred
+		}
+	}
 
 	// 원본 채널 컬럼 후보 (코드 상수 — SQL injection 위험 없음).
 	channelExpr := func(field string) string {
@@ -349,11 +376,11 @@ func loadChannelGenuineBreakdown(cleanRef, genuinenessRef string, verifyMode boo
 	}
 	q := fmt.Sprintf(`
 		SELECT c.channel, COUNT(*) AS cnt FROM
-			(SELECT doc_id, %s AS channel FROM %s) c
+			(SELECT doc_id, %s AS channel FROM %s WHERE TRUE%s) c
 			JOIN (SELECT doc_id FROM %s WHERE %s = 'genuine_review') g ON c.doc_id = g.doc_id
 		WHERE c.channel IS NOT NULL AND c.channel <> ''
 		GROUP BY c.channel`,
-		channelExpr(chosen), cleanSrc, genSrc, labelCol)
+		channelExpr(chosen), cleanSrc, docFilter, genSrc, labelCol)
 	rows, err := db.Query(q)
 	if err != nil {
 		return nil, err
@@ -561,6 +588,101 @@ func loadRecentYearStats(cleanRef, genRef, clauseRef string, genVerify bool) (ma
 	return result, nil
 }
 
+// ── 최신년도 섹션 필터 (silverone 2026-06-25) ──────────────────────────────
+// 기초보고서의 개요 2섹션(분석/문서)을 뺀 나머지 섹션은 "최신년도 데이터로만" 집계한다.
+// clause_label/clause_keywords artifact엔 날짜가 없어 clean(created_at/원본 날짜)에 doc_id
+// (=row_id) JOIN으로 최신년도(MAX year)를 거른다. loadRecentYearStats와 동일 패턴.
+
+// artifactRecentYearFilter — 공유 집계 로더에 trailing 가변인자로 넘기는 최신년도 필터.
+// cleanRef가 있고 clean 날짜가 유효하면 로더가 source를 최신년도 doc로 좁힌다(없으면 no-op).
+type artifactRecentYearFilter struct {
+	cleanRef string
+}
+
+// firstRecentYearFilter — variadic 중 유효한(cleanRef 있는) 첫 필터를 돌려준다.
+func firstRecentYearFilter(filters []artifactRecentYearFilter) (artifactRecentYearFilter, bool) {
+	if len(filters) > 0 && strings.TrimSpace(filters[0].cleanRef) != "" {
+		return filters[0], true
+	}
+	return artifactRecentYearFilter{}, false
+}
+
+// recentYearPredicate — clean source의 "최신연도(MAX year)" SQL 술어(EXTRACT(year …)=max)와
+// 연도를 돌려준다. 날짜 컬럼이 없거나 연도를 못 구하면 ("", 0, false) → 호출부는 전체 fallback.
+func recentYearPredicate(db *sql.DB, cleanSrc string) (string, int, bool) {
+	dateExpr := reportCleanDateExpr(db, cleanSrc)
+	if dateExpr == "" {
+		return "", 0, false
+	}
+	var maxYear sql.NullInt64
+	if err := db.QueryRow(fmt.Sprintf("SELECT MAX(EXTRACT(year FROM %s)) FROM %s", dateExpr, cleanSrc)).Scan(&maxYear); err != nil || !maxYear.Valid {
+		return "", 0, false
+	}
+	year := int(maxYear.Int64)
+	return fmt.Sprintf("EXTRACT(year FROM %s) = %d", dateExpr, year), year, true
+}
+
+// recentYearDocSubquery — clean source에서 최신연도 row_id 서브쿼리. clause_label/clause_keywords
+// artifact의 doc_id(=clean row_id)를 좁히는 데 쓴다. 날짜 없으면 ("", 0, false).
+func recentYearDocSubquery(db *sql.DB, cleanSrc string) (string, int, bool) {
+	pred, year, ok := recentYearPredicate(db, cleanSrc)
+	if !ok {
+		return "", 0, false
+	}
+	return fmt.Sprintf("(SELECT row_id FROM %s WHERE %s)", cleanSrc, pred), year, true
+}
+
+// wrapSourceRecentYear — source(읽기 식)를 최신년도 doc로 좁힌다. filter 미적용/날짜 없으면
+// 원본 source 그대로 반환(두 번째 반환값 false). 모든 하위 집계가 이 source 위에서 돌아간다.
+func wrapSourceRecentYear(db *sql.DB, source string, filters []artifactRecentYearFilter) (string, bool) {
+	filter, ok := firstRecentYearFilter(filters)
+	if !ok {
+		return source, false
+	}
+	cleanSrc := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(filter.cleanRef))
+	sub, _, valid := recentYearDocSubquery(db, cleanSrc)
+	if !valid {
+		return source, false
+	}
+	return fmt.Sprintf("(SELECT * FROM %s WHERE doc_id IN %s)", source, sub), true
+}
+
+// recentYearFilters — recentYear일 때 clean ref를 담은 로더 필터를 만든다(아니면 nil).
+// clean ref가 없으면 nil(전체). loadClauseLabelArtifact/loadClauseKeywordsArtifact의 trailing
+// 가변인자로 전달한다.
+func recentYearFilters(version domain.DatasetVersion, recentYear bool) []artifactRecentYearFilter {
+	if !recentYear {
+		return nil
+	}
+	cleanRef := reportArtifactRef(version.Metadata, "clean_uri", "cleaned_ref")
+	if cleanRef == "" && version.CleanURI != nil {
+		cleanRef = strings.TrimSpace(*version.CleanURI)
+	}
+	if cleanRef == "" {
+		return nil
+	}
+	return []artifactRecentYearFilter{{cleanRef: cleanRef}}
+}
+
+// reportRecentYear — 보고서 섹션 라벨("2025년 기준")용. clean 날짜의 MAX 연도. 날짜 없으면 false.
+func (s *DatasetService) reportRecentYear(version domain.DatasetVersion) (int, bool) {
+	cleanRef := reportArtifactRef(version.Metadata, "clean_uri", "cleaned_ref")
+	if cleanRef == "" && version.CleanURI != nil {
+		cleanRef = strings.TrimSpace(*version.CleanURI)
+	}
+	if cleanRef == "" {
+		return 0, false
+	}
+	db, cleanup, err := openTempDuckDB()
+	if err != nil {
+		return 0, false
+	}
+	defer cleanup()
+	cleanSrc := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+	_, year, ok := recentYearDocSubquery(db, cleanSrc)
+	return year, ok
+}
+
 // reportCleanReady — clean 단계 완료 판정. 빌드 잡 status는 "completed", artifact status는
 // "ready"로 나뉘므로 둘 다 허용. status가 비어도 summary가 있으면 ready로 본다.
 func reportCleanReady(version domain.DatasetVersion) bool {
@@ -587,7 +709,7 @@ func (s *DatasetService) buildReportBlock(version domain.DatasetVersion, section
 	for _, row := range section.Layout {
 		panels := make([]any, 0, len(row.Panels))
 		for _, panel := range row.Panels {
-			panels = append(panels, s.buildReportPanel(version, panel, cache, labels))
+			panels = append(panels, s.buildReportPanel(version, panel, cache, labels, section.DateFilter))
 		}
 		layout = append(layout, map[string]any{"panels": panels})
 	}
@@ -603,14 +725,14 @@ func (s *DatasetService) buildReportBlock(version domain.DatasetVersion, section
 	return block
 }
 
-func (s *DatasetService) buildReportPanel(version domain.DatasetVersion, panel registry.ReportTemplatePanel, cache map[string]reportBuildRoot, labels reportLabels) map[string]any {
+func (s *DatasetService) buildReportPanel(version domain.DatasetVersion, panel registry.ReportTemplatePanel, cache map[string]reportBuildRoot, labels reportLabels, dateFilter string) map[string]any {
 	out := map[string]any{"view": panel.View, "width": panel.Width}
 	if strings.TrimSpace(panel.Title) != "" {
 		out["title"] = panel.Title
 	}
 
 	if panel.View == "stat_grid" {
-		out["data"] = s.statGridData(version, panel, cache, labels)
+		out["data"] = s.statGridData(version, panel, cache, labels, dateFilter)
 		return out
 	}
 
@@ -624,7 +746,7 @@ func (s *DatasetService) buildReportPanel(version domain.DatasetVersion, panel r
 		out["data"] = map[string]any{}
 		return out
 	}
-	root := s.reportBuildRoot(version, src.Build, cache)
+	root := s.reportBuildRoot(version, src.Build, dateFilter, cache)
 	node := digPath(root.root, src.Path)
 	switch panel.View {
 	case "bar", "doughnut", "table":
@@ -819,7 +941,7 @@ func rankData(node any, src *registry.ReportTemplateSource, labels reportLabels)
 
 // ── transformer: stat_grid ────────────────────────────────────────────────
 
-func (s *DatasetService) statGridData(version domain.DatasetVersion, panel registry.ReportTemplatePanel, cache map[string]reportBuildRoot, labels reportLabels) map[string]any {
+func (s *DatasetService) statGridData(version domain.DatasetVersion, panel registry.ReportTemplatePanel, cache map[string]reportBuildRoot, labels reportLabels, dateFilter string) map[string]any {
 	items := make([]any, 0, len(panel.Items))
 	for _, cfg := range panel.Items {
 		// metric 별칭이면 catalog에서 source/format/unit/sub/label을 채우고, item에 명시된
@@ -832,14 +954,14 @@ func (s *DatasetService) statGridData(version domain.DatasetVersion, panel regis
 		}
 		var value any = cfg.Value
 		if source != nil {
-			root := s.reportBuildRoot(version, source.Build, cache)
+			root := s.reportBuildRoot(version, source.Build, dateFilter, cache)
 			if resolved := digPath(root.root, source.Path); resolved != nil {
 				value = normalizeStatValue(resolved)
 			}
 		}
 		out["value"] = value
 		if subSource != nil {
-			root := s.reportBuildRoot(version, subSource.Build, cache)
+			root := s.reportBuildRoot(version, subSource.Build, dateFilter, cache)
 			if resolved := digPath(root.root, subSource.Path); resolved != nil {
 				out["sub"] = normalizeStatValue(resolved)
 			}
