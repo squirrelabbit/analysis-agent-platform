@@ -317,14 +317,25 @@ func (s *DatasetService) GetClauseLabelView(
 	// verify 모드(ADR-028)는 schema가 달라(검토 큐 필드 + model A/B/judge) 전용
 	// 로더로 읽고, 단일 모델 artifact는 기존 로더를 유지한다.
 	verifyMode := metadataString(version.Metadata, "clause_label_mode", "") == "verify"
+	// cleaned.parquet의 cleaned_text를 doc_id 기준 LEFT JOIN해 절마다 원본 본문을
+	// 응답에 포함(doc_genuineness 옵션 A와 동일). clean artifact 없으면 본문 없이 degrade.
+	cleanRef := strings.TrimSpace(metadataString(version.Metadata, "clean_uri", ""))
+	if cleanRef == "" {
+		cleanRef = strings.TrimSpace(metadataString(version.Metadata, "cleaned_ref", ""))
+	}
+	if cleanRef != "" {
+		if _, statErr := os.Stat(cleanRef); statErr != nil {
+			cleanRef = "" // file 없으면 join 생략
+		}
+	}
 	var summary map[string]any
 	var fallbackPrompt string
 	var total int
 	var items []map[string]any
 	if verifyMode {
-		summary, fallbackPrompt, total, items, err = loadClauseLabelVerifyArtifact(ref, limit, offset, aspect, sentiment, disagreementOnly, needsReviewOnly)
+		summary, fallbackPrompt, total, items, err = loadClauseLabelVerifyArtifact(ref, cleanRef, limit, offset, aspect, sentiment, disagreementOnly, needsReviewOnly)
 	} else {
-		summary, fallbackPrompt, total, items, err = loadClauseLabelArtifact(ref, limit, offset, aspect, sentiment)
+		summary, fallbackPrompt, total, items, err = loadClauseLabelArtifact(ref, cleanRef, limit, offset, aspect, sentiment)
 	}
 	if err != nil {
 		return domain.DatasetArtifactView{}, err
@@ -797,7 +808,7 @@ func docVerifyObject(v any) map[string]any {
 // prompt_version 회수. clause_id는 `{doc_id}-{partition_row_index}`로 즉시 생성.
 // summary(차트용)는 항상 전체 분포(필터 무관)이고, items + 반환 total은 aspect/
 // sentiment 필터가 적용된 결과(서버 페이징 대상)다. 필터가 비면 전체.
-func loadClauseLabelArtifact(ref string, limit, offset int, aspect, sentiment string) (map[string]any, string, int, []map[string]any, error) {
+func loadClauseLabelArtifact(ref, cleanRef string, limit, offset int, aspect, sentiment string, filters ...artifactRecentYearFilter) (map[string]any, string, int, []map[string]any, error) {
 	db, cleanup, err := openTempDuckDB()
 	if err != nil {
 		return nil, "", 0, nil, err
@@ -805,6 +816,8 @@ func loadClauseLabelArtifact(ref string, limit, offset int, aspect, sentiment st
 	defer cleanup()
 
 	source := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(ref))
+	// 최신년도 섹션 필터(silverone 2026-06-25) — source를 최신년도 doc로 좁힌다(없으면 no-op).
+	source, _ = wrapSourceRecentYear(db, source, filters)
 
 	// summary: 전체(필터 미적용) 분포. total + 2 grouping (sentiment, aspect).
 	total, bySentiment, err := aggregateGroupedCounts(db, source, "sentiment")
@@ -847,6 +860,18 @@ func loadClauseLabelArtifact(ref string, limit, offset int, aspect, sentiment st
 	// clause_id는 doc_id 내 ROW_NUMBER에서 1을 빼 0-base index로 만든다.
 	// ROW_NUMBER는 *전체* scan 순서 기준으로 먼저 매겨 필터와 무관하게 안정적이게
 	// 하고, 그 뒤에 필터/페이징을 적용한다.
+	// cleanRef(옵션)가 있으면 cleaned.parquet을 doc_id=row_id로 LEFT JOIN해 절마다
+	// 원본 본문(cleaned_text)을 붙인다(doc_genuineness 옵션 A와 동일 패턴).
+	selectClause := "SELECT doc_id, clause_id, clause, sentiment, aspect, source\n\t\t FROM numbered"
+	columns := []string{"doc_id", "clause_id", "clause", "sentiment", "aspect", "source"}
+	if strings.TrimSpace(cleanRef) != "" {
+		cleanSrc := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+		selectClause = fmt.Sprintf(
+			"SELECT n.doc_id AS doc_id, n.clause_id, n.clause, n.sentiment, n.aspect, n.source, c.cleaned_text\n\t\t FROM numbered AS n\n\t\t LEFT JOIN %s AS c ON n.doc_id = c.row_id",
+			cleanSrc,
+		)
+		columns = append(columns, "cleaned_text")
+	}
 	itemQuery := fmt.Sprintf(
 		`WITH ordered AS (
 		    SELECT *, ROW_NUMBER() OVER () AS _rn
@@ -859,14 +884,13 @@ func loadClauseLabelArtifact(ref string, limit, offset int, aspect, sentiment st
 		       clause, sentiment, aspect, source, _rn
 		    FROM ordered
 		 )
-		 SELECT doc_id, clause_id, clause, sentiment, aspect, source
-		 FROM numbered
+		 %s
 		 %s
 		 ORDER BY _rn
 		 LIMIT %d OFFSET %d`,
-		source, where, limit, offset,
+		source, selectClause, where, limit, offset,
 	)
-	items, err := scanArtifactRows(db, itemQuery, []string{"doc_id", "clause_id", "clause", "sentiment", "aspect", "source"})
+	items, err := scanArtifactRows(db, itemQuery, columns)
 	if err != nil {
 		return nil, "", 0, nil, err
 	}
@@ -894,7 +918,7 @@ func buildClauseFilter(aspect, sentiment string) string {
 // resolution 분포와 행별 resolution/needs_review/sentence_index/chunk_index +
 // model A/B/judge snapshot을 노출한다. 필터: aspect/sentiment + 불일치(resolution
 // != 'agree')만 + 검토 필요(needs_review)만. AND 결합.
-func loadClauseLabelVerifyArtifact(ref string, limit, offset int, aspect, sentiment string, disagreementOnly, needsReviewOnly bool) (map[string]any, string, int, []map[string]any, error) {
+func loadClauseLabelVerifyArtifact(ref, cleanRef string, limit, offset int, aspect, sentiment string, disagreementOnly, needsReviewOnly bool, filters ...artifactRecentYearFilter) (map[string]any, string, int, []map[string]any, error) {
 	db, cleanup, err := openTempDuckDB()
 	if err != nil {
 		return nil, "", 0, nil, err
@@ -902,6 +926,8 @@ func loadClauseLabelVerifyArtifact(ref string, limit, offset int, aspect, sentim
 	defer cleanup()
 
 	source := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(ref))
+	// 최신년도 섹션 필터(silverone 2026-06-25) — source를 최신년도 doc로 좁힌다(없으면 no-op).
+	source, _ = wrapSourceRecentYear(db, source, filters)
 
 	// summary 분포(필터 미적용) — 단일 모드와 동일 + resolution 분포 추가.
 	total, bySentiment, err := aggregateGroupedCounts(db, source, "sentiment")
@@ -966,6 +992,22 @@ func loadClauseLabelVerifyArtifact(ref string, limit, offset int, aspect, sentim
 
 	// clause_id는 단일 모드와 동일(doc_id 내 0-base index). model A/B/judge는
 	// to_json으로 직렬화해 Go에서 객체로 복원(genuineness verify와 동일 패턴).
+	// cleanRef(옵션)가 있으면 cleaned.parquet을 doc_id=row_id로 LEFT JOIN해 절마다
+	// 원본 본문(cleaned_text)을 붙인다(단일 모드/doc_genuineness와 동일 패턴).
+	selectClause := "SELECT doc_id, clause_id, clause, sentiment, aspect, source, resolution,\n\t\t        needs_review, sentence_index, chunk_index,\n\t\t        model_a_result, model_b_result, judge_result\n\t\t FROM numbered"
+	cols := []string{
+		"doc_id", "clause_id", "clause", "sentiment", "aspect", "source", "resolution",
+		"needs_review", "sentence_index", "chunk_index",
+		"model_a_result", "model_b_result", "judge_result",
+	}
+	if strings.TrimSpace(cleanRef) != "" {
+		cleanSrc := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+		selectClause = fmt.Sprintf(
+			"SELECT n.doc_id AS doc_id, n.clause_id, n.clause, n.sentiment, n.aspect, n.source, n.resolution,\n\t\t        n.needs_review, n.sentence_index, n.chunk_index,\n\t\t        n.model_a_result, n.model_b_result, n.judge_result, c.cleaned_text\n\t\t FROM numbered AS n\n\t\t LEFT JOIN %s AS c ON n.doc_id = c.row_id",
+			cleanSrc,
+		)
+		cols = append(cols, "cleaned_text")
+	}
 	itemQuery := fmt.Sprintf(
 		`WITH ordered AS (
 		    SELECT *, ROW_NUMBER() OVER () AS _rn
@@ -985,20 +1027,12 @@ func loadClauseLabelVerifyArtifact(ref string, limit, offset int, aspect, sentim
 		       _rn
 		    FROM ordered
 		 )
-		 SELECT doc_id, clause_id, clause, sentiment, aspect, source, resolution,
-		        needs_review, sentence_index, chunk_index,
-		        model_a_result, model_b_result, judge_result
-		 FROM numbered
+		 %s
 		 %s
 		 ORDER BY _rn
 		 LIMIT %d OFFSET %d`,
-		source, where, limit, offset,
+		source, selectClause, where, limit, offset,
 	)
-	cols := []string{
-		"doc_id", "clause_id", "clause", "sentiment", "aspect", "source", "resolution",
-		"needs_review", "sentence_index", "chunk_index",
-		"model_a_result", "model_b_result", "judge_result",
-	}
 	rawItems, err := scanArtifactRows(db, itemQuery, cols)
 	if err != nil {
 		return nil, "", 0, nil, err
@@ -1021,6 +1055,9 @@ func loadClauseLabelVerifyArtifact(ref string, limit, offset int, aspect, sentim
 		item["model_a_result"] = objOrNil(docVerifyObject(raw["model_a_result"]))
 		item["model_b_result"] = objOrNil(docVerifyObject(raw["model_b_result"]))
 		item["judge_result"] = objOrNil(docVerifyObject(raw["judge_result"]))
+		if v, ok := raw["cleaned_text"]; ok {
+			item["cleaned_text"] = v
+		}
 		items = append(items, item)
 	}
 	return summary, "", filteredTotal, items, nil

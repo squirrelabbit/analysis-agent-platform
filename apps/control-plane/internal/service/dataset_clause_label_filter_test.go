@@ -35,7 +35,7 @@ func joinLines(lines []string) string {
 
 func TestLoadClauseLabelArtifact_NoFilter(t *testing.T) {
 	path := setupClauseLabelFixture(t)
-	summary, prompt, total, items, err := loadClauseLabelArtifact(path, 10, 0, "", "")
+	summary, prompt, total, items, err := loadClauseLabelArtifact(path, "", 10, 0, "", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestLoadClauseLabelArtifact_NoFilter(t *testing.T) {
 
 func TestLoadClauseLabelArtifact_SentimentFilter(t *testing.T) {
 	path := setupClauseLabelFixture(t)
-	summary, _, total, items, err := loadClauseLabelArtifact(path, 10, 0, "", "positive")
+	summary, _, total, items, err := loadClauseLabelArtifact(path, "", 10, 0, "", "positive")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestLoadClauseLabelArtifact_SentimentFilter(t *testing.T) {
 
 func TestLoadClauseLabelArtifact_AspectAndSentimentFilter(t *testing.T) {
 	path := setupClauseLabelFixture(t)
-	_, _, total, items, err := loadClauseLabelArtifact(path, 10, 0, "price", "positive")
+	_, _, total, items, err := loadClauseLabelArtifact(path, "", 10, 0, "price", "positive")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestLoadClauseLabelArtifact_AspectAndSentimentFilter(t *testing.T) {
 func TestLoadClauseLabelArtifact_AspectSentimentSummary(t *testing.T) {
 	path := setupClauseLabelFixture(t)
 	// 필터를 걸어도 summary.aspect_sentiment는 전체 분포여야 한다.
-	summary, _, _, _, err := loadClauseLabelArtifact(path, 10, 0, "price", "positive")
+	summary, _, _, _, err := loadClauseLabelArtifact(path, "", 10, 0, "price", "positive")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestClauseLabelSummaryString_TaxonomyID(t *testing.T) {
 
 func TestLoadClauseLabelArtifact_Pagination(t *testing.T) {
 	path := setupClauseLabelFixture(t)
-	_, _, total, items, err := loadClauseLabelArtifact(path, 1, 1, "", "")
+	_, _, total, items, err := loadClauseLabelArtifact(path, "", 1, 1, "", "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

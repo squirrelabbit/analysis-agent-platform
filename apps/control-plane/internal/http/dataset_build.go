@@ -280,6 +280,97 @@ func (s *Server) handleGetClauseKeywordsView(w stdhttp.ResponseWriter, r *stdhtt
 	writeJSON(w, stdhttp.StatusOK, view)
 }
 
+// ── 키워드 정제 사전 (silverone 2026-06-25) ────────────────────────────────
+// dataset 단위 block(제외)/synonym(병합) 규칙 + append-only 이력. 키워드 뷰가
+// 조회 시 overlay로 적용한다(원본 artifact 불변).
+
+func keywordDictActor(r *stdhttp.Request) string {
+	if u, ok := userFromContext(r.Context()); ok {
+		return u.UserID
+	}
+	return ""
+}
+
+func (s *Server) handleListKeywordDictionary(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	// ?include_inactive=1 이면 비활성 규칙도 포함(이력 화면용). 기본은 활성만.
+	activeOnly := strings.TrimSpace(r.URL.Query().Get("include_inactive")) == ""
+	rules, err := s.datasetService.ListKeywordDictionaryRules(
+		r.PathValue("project_id"), r.PathValue("dataset_id"), activeOnly)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, domain.KeywordDictionaryRuleListResponse{Items: rules})
+}
+
+func (s *Server) handleSetKeywordDictionaryRule(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.KeywordDictionaryRuleRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	rule, err := s.datasetService.SetKeywordDictionaryRule(
+		r.PathValue("project_id"), r.PathValue("dataset_id"), payload, keywordDictActor(r))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, rule)
+}
+
+type keywordRuleActiveRequest struct {
+	Reason string `json:"reason"`
+}
+
+func (s *Server) setKeywordRuleActive(w stdhttp.ResponseWriter, r *stdhttp.Request, active bool) {
+	var payload keywordRuleActiveRequest
+	_ = decodeJSONAllowEmpty(r, &payload)
+	rule, err := s.datasetService.SetKeywordDictionaryRuleActive(
+		r.PathValue("project_id"), r.PathValue("dataset_id"), r.PathValue("rule_id"),
+		active, payload.Reason, keywordDictActor(r))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, rule)
+}
+
+func (s *Server) handleDeactivateKeywordDictionaryRule(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	s.setKeywordRuleActive(w, r, false)
+}
+
+func (s *Server) handleReactivateKeywordDictionaryRule(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	s.setKeywordRuleActive(w, r, true)
+}
+
+func (s *Server) handleDeleteKeywordDictionaryRule(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	// 사유는 query(?reason=) 또는 body {reason} 둘 다 허용.
+	reason := strings.TrimSpace(r.URL.Query().Get("reason"))
+	if reason == "" {
+		var payload keywordRuleActiveRequest
+		_ = decodeJSONAllowEmpty(r, &payload)
+		reason = payload.Reason
+	}
+	if err := s.datasetService.DeleteKeywordDictionaryRule(
+		r.PathValue("project_id"), r.PathValue("dataset_id"), r.PathValue("rule_id"),
+		reason, keywordDictActor(r),
+	); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
+func (s *Server) handleListKeywordDictionaryHistory(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	events, err := s.datasetService.ListKeywordDictionaryEvents(
+		r.PathValue("project_id"), r.PathValue("dataset_id"))
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, domain.KeywordDictionaryEventListResponse{Items: events})
+}
+
 // silverone 2026-06-10 — 수동 keyword build. precondition clause_label ready.
 func (s *Server) handleCreateClauseKeywordsJob(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	var payload domain.DatasetClauseKeywordsBuildRequest

@@ -83,6 +83,8 @@ export interface ReportBlock {
   section_id: string;
   title?: string;
   unit_basis?: string;
+  // 최신년도만 집계된 섹션 표시(예: "2025년 기준"). 개요 섹션·날짜 없는 경우엔 없음.
+  scope_label?: string;
   layout: ReportRow[];
 }
 

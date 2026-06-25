@@ -24,6 +24,7 @@ from ..obs import get, skill_handler
 from ..prompt_options import load_prompt_body
 from ._chunking import build_sentence_chunks, split_anchor_sentences
 from ._common import write_progress
+from ._prompt_slots import extract_extra_slot
 
 LOGGER = get(__name__)
 
@@ -207,6 +208,8 @@ def _extract_doc_genuineness_config(payload: dict[str, Any]) -> dict[str, Any]:
       - ``subject_aliases``: [] (list[str])
       - ``recruitment_keywords``: [] (list[str])
       - ``subject_type``: "generic" (str, prompt에는 노출 안 됨, snapshot용)
+      - ``extra_instructions`` / ``extra_examples``: "" (행사별 추가 슬롯, 2026-06-25).
+        doc_genuineness 전용 — clause_label.extra_*와 분리(출력 스키마가 다름).
     """
     raw = payload.get("doc_genuineness")
     if not isinstance(raw, dict):
@@ -226,6 +229,7 @@ def _extract_doc_genuineness_config(payload: dict[str, Any]) -> dict[str, Any]:
         "subject_aliases": aliases,
         "recruitment_keywords": keywords,
         "subject_type": subject_type,
+        **extract_extra_slot(raw),
     }
 
 
@@ -256,6 +260,8 @@ def _render_prompt(template: str, config: dict[str, Any]) -> str:
         "subject_name": bool(config["subject_name"]),
         "subject_aliases": bool(config["subject_aliases"]),
         "recruitment_keywords": bool(config["recruitment_keywords"]),
+        "extra_instructions": bool(config.get("extra_instructions")),
+        "extra_examples": bool(config.get("extra_examples")),
     }
 
     def repl_block(match: re.Match) -> str:
@@ -268,6 +274,8 @@ def _render_prompt(template: str, config: dict[str, Any]) -> str:
         "subject_name": config["subject_name"],
         "subject_aliases": _render_quoted_list(config["subject_aliases"]),
         "recruitment_keywords": _render_quoted_list(config["recruitment_keywords"]),
+        "extra_instructions": str(config.get("extra_instructions") or ""),
+        "extra_examples": str(config.get("extra_examples") or ""),
     }
     for key, value in substitutions.items():
         rendered = rendered.replace("{{" + key + "}}", value)
@@ -744,6 +752,9 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
             "subject_aliases": list(doc_genuineness_config["subject_aliases"]),
             "recruitment_keywords": list(doc_genuineness_config["recruitment_keywords"]),
             "subject_type": doc_genuineness_config["subject_type"],
+            # 행사별 추가 슬롯 적용 내용 snapshot (감사).
+            "extra_instructions": doc_genuineness_config.get("extra_instructions", ""),
+            "extra_examples": doc_genuineness_config.get("extra_examples", ""),
         },
     }
     return {

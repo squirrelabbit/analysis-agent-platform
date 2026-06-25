@@ -27,7 +27,7 @@ import { useTaxonomies } from "@/features/taxonomy/hooks/taxonomy.query";
 // Radix Select은 빈 문자열 value를 허용하지 않아 "기본값" 항목용 sentinel을 둔다.
 const TAXONOMY_DEFAULT = "__default__";
 
-// 통합 수정 폼: 이름/설명 + aspect taxonomy + 진정 분석 설정(metadata). 이름만 필수, 나머지는 선택.
+// 통합 수정 폼: 이름/설명 + aspect taxonomy + 진성 분석 설정(metadata). 이름만 필수, 나머지는 선택.
 const editSchema = z.object({
   name: z.string().trim().min(1, "이름은 필수입니다"),
   description: z.string(),
@@ -40,7 +40,7 @@ const editSchema = z.object({
 type EditValues = z.infer<typeof editSchema>;
 
 /*
- * 데이터셋 수정 (이름/설명 + 진정 분석 설정). silverone 2026-06-05.
+ * 데이터셋 수정 (이름/설명 + 진성 분석 설정). silverone 2026-06-05.
  * 저장 시 PATCH /datasets/{id}(이름/설명) + PATCH /datasets/{id}/metadata(doc_genuineness)
  * 두 호출. Radix Dialog는 닫히면 unmount → 열 때마다 현재값으로 prefill(effect 불필요).
  */
@@ -163,10 +163,10 @@ export default function EditInfoDialogControlled({
               )}
             />
 
-            {/* 진정 분석 설정 */}
+            {/* 진성 분석 설정 */}
             <div className="mt-1 rounded-lg border border-slate-200 bg-slate-50 p-4 flex flex-col gap-4">
               <p className="text-xs font-medium text-slate-600">
-                진정 분석 설정 (문서 진성 분석 실행 시 Prompt 변수로 활용)
+                진성 분석 설정 (문서 진성 분석 실행 시 Prompt 변수로 활용)
               </p>
               <div className="grid grid-cols-2 gap-3">
                 <Field>

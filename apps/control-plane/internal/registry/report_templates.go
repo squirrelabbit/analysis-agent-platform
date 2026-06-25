@@ -28,7 +28,10 @@ type ReportTemplateSection struct {
 	RequiredBuild string              `json:"required_build"`
 	UnitBasis     string              `json:"unit_basis,omitempty"`
 	Phase         string              `json:"phase,omitempty"`
-	Layout        []ReportTemplateRow `json:"layout"`
+	// DateFilter — "recent_year"면 이 섹션 분포를 최신년도 데이터로만 집계한다(개요 섹션은
+	// 미설정=전체). silverone 2026-06-25. clause_label/clause_keywords/channel_breakdown에만 적용.
+	DateFilter string              `json:"date_filter,omitempty"`
+	Layout     []ReportTemplateRow `json:"layout"`
 }
 
 type ReportTemplateRow struct {
@@ -38,10 +41,15 @@ type ReportTemplateRow struct {
 type ReportTemplatePanel struct {
 	View        string                   `json:"view"`
 	Width       string                   `json:"width"`
+	Metric      string                   `json:"metric,omitempty"` // metric catalog 별칭(source 대신)
 	ValueFormat string                   `json:"value_format,omitempty"`
 	Title       string                   `json:"title,omitempty"`
-	Items       []ReportTemplateStatItem `json:"items,omitempty"` // stat_grid 전용
-	Source      *ReportTemplateSource    `json:"source,omitempty"`
+	// metric을 쓸 때 정렬·상위 N을 panel에서 덮어쓴다(metric의 source 위에 적용).
+	OrderBy string   `json:"order_by,omitempty"`
+	Order   []string `json:"order,omitempty"`
+	Top     int      `json:"top,omitempty"`
+	Items   []ReportTemplateStatItem `json:"items,omitempty"` // stat_grid 전용
+	Source  *ReportTemplateSource    `json:"source,omitempty"`
 }
 
 // ReportTemplateSource — 패널 데이터를 어느 build summary의 어느 path에서, 어떻게 잘라올지.
@@ -53,15 +61,28 @@ type ReportTemplateSource struct {
 	Top     int      `json:"top,omitempty"`
 }
 
-// ReportTemplateStatItem — stat_grid 항목. value(정적) 또는 source(build summary에서).
+// ReportTemplateStatItem — stat_grid 항목. metric(별칭) / value(정적) / source(직접) 중 하나.
 type ReportTemplateStatItem struct {
-	Key       string                `json:"key"`
+	Key       string                `json:"key,omitempty"`
 	Label     string                `json:"label"`
-	Format    string                `json:"format"`
+	Metric    string                `json:"metric,omitempty"` // metric catalog 별칭(source/format/unit 자동)
+	Format    string                `json:"format,omitempty"`
 	Unit      string                `json:"unit,omitempty"`
 	Value     any                   `json:"value,omitempty"`
 	Source    *ReportTemplateSource `json:"source,omitempty"`
 	SubSource *ReportTemplateSource `json:"sub_source,omitempty"`
+}
+
+// ReportMetric — metric catalog 항목(config/report_metrics.json). 운영자가 내부
+// build/path를 몰라도 metric 이름만으로 stat/차트를 구성하게 한다.
+type ReportMetric struct {
+	Kind        string                `json:"kind"` // stat | distribution | stacked | rank
+	Source      *ReportTemplateSource `json:"source"`
+	SubSource   *ReportTemplateSource `json:"sub_source,omitempty"`
+	Format      string                `json:"format,omitempty"`       // stat용 값 포맷
+	Unit        string                `json:"unit,omitempty"`         // stat용 단위
+	ValueFormat string                `json:"value_format,omitempty"` // 차트용 값 포맷
+	Label       string                `json:"label,omitempty"`        // 기본 라벨(item이 안 주면)
 }
 
 var (

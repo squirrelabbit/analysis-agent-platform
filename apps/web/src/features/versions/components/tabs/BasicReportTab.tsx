@@ -137,6 +137,12 @@ function BlockCard({ block }: { block: ReportBlock }) {
     <div className="rounded-2xl border border-zinc-100 bg-white p-5.5 shadow-sm">
       <div className="mb-4 flex items-start gap-3">
         <div className="text-[15px] font-bold text-zinc-900">{block.title}</div>
+        {/* 최신년도만 집계된 섹션(개요 제외) 표시 — silverone 2026-06-25 */}
+        {block.scope_label && (
+          <span className="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+            {block.scope_label}
+          </span>
+        )}
         {unit && <UnitBadge unit={unit} />}
       </div>
       <div className="flex flex-col gap-5">

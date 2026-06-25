@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Loader2, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useBuildVersion } from "../hooks/build.query";
 import type { KeywordBuild } from "../models/build";
+import type { RefineMode } from "./KeywordRefineDialog";
 
 // 키워드 분석 탭의 "키워드 추출 결과" 카드 위에 놓는 긍/부정 키워드 순위 표.
 // 왼쪽=긍정, 오른쪽=부정. 컬럼: 순위 / 키워드 / 빈도. 빈도 내림차순 상위 N을 보여주되
@@ -25,11 +26,13 @@ function RankTable({
   sentiment,
   tone,
   icon: Icon,
+  onRefine,
 }: {
   title: string;
   sentiment: "positive" | "negative";
   tone: "positive" | "negative";
   icon: typeof ThumbsUp;
+  onRefine?: (keyword: string, mode: RefineMode) => void;
 }) {
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
 
@@ -43,6 +46,8 @@ function RankTable({
   const rows = (data?.items ?? []).map((it) => ({
     keyword: it.keyword,
     count: it.count,
+    // 검색어/대상명 유래 추천 제외어 — 배지로 표시(자동 제외 아님).
+    suggestedExclude: it.suggestedExclude,
   }));
 
   const accent =
@@ -89,22 +94,23 @@ function RankTable({
         <table className="w-full table-fixed text-sm">
           <thead className="sticky top-0 z-10">
             <tr className="border-b border-zinc-100 bg-zinc-50/95 text-left text-xs font-semibold text-zinc-500 backdrop-blur">
-              <th className="w-14 px-4 py-2.5">순위</th>
+              <th className="w-12 px-4 py-2.5">순위</th>
               <th className="px-4 py-2.5">키워드</th>
-              <th className="w-20 px-4 py-2.5 text-right">빈도</th>
+              <th className="w-16 px-4 py-2.5 text-right">빈도</th>
+              {onRefine && <th className="w-28 px-2 py-2.5 text-right">정제</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-50">
             {isLoading ? (
               <tr>
-                <td colSpan={3} className="py-10 text-center">
+                <td colSpan={onRefine ? 4 : 3} className="py-10 text-center">
                   <Loader2 className="mx-auto h-5 w-5 animate-spin text-violet-400" />
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={3}
+                  colSpan={onRefine ? 4 : 3}
                   className="py-8 text-center text-sm text-zinc-400"
                 >
                   키워드가 없습니다
@@ -114,17 +120,45 @@ function RankTable({
               rows.map((r, i) => (
                 <tr
                   key={`${r.keyword}-${i}`}
-                  className="transition-colors hover:bg-zinc-50/60"
+                  className="group transition-colors hover:bg-zinc-50/60"
                 >
                   <td className="px-4 py-2 text-xs font-semibold text-zinc-400">
                     {i + 1}
                   </td>
                   <td className="px-4 py-2 font-medium text-zinc-800">
                     {r.keyword}
+                    {r.suggestedExclude && (
+                      <span
+                        className="ml-1.5 inline-block rounded bg-amber-50 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-amber-700"
+                        title="검색어·대상명에서 유래한 키워드입니다. 노이즈면 [제외]하세요(자동 제외 아님)."
+                      >
+                        검색어 유래
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2 text-right tabular-nums text-zinc-600">
                     {r.count.toLocaleString()}
                   </td>
+                  {onRefine && (
+                    <td className="px-2 py-2 text-right whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => onRefine(r.keyword, "synonym")}
+                        className="rounded-md px-1.5 py-0.5 text-xs font-medium text-violet-600 opacity-0 transition-opacity hover:bg-violet-50 group-hover:opacity-100"
+                        title="대표어 지정(병합)"
+                      >
+                        병합
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRefine(r.keyword, "exclude")}
+                        className="rounded-md px-1.5 py-0.5 text-xs font-medium text-rose-600 opacity-0 transition-opacity hover:bg-rose-50 group-hover:opacity-100"
+                        title="키워드 제외"
+                      >
+                        제외
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))
             )}
@@ -135,7 +169,11 @@ function RankTable({
   );
 }
 
-export default function KeywordSentimentRankTable() {
+export default function KeywordSentimentRankTable({
+  onRefine,
+}: {
+  onRefine?: (keyword: string, mode: RefineMode) => void;
+}) {
   return (
     <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
       <RankTable
@@ -143,12 +181,14 @@ export default function KeywordSentimentRankTable() {
         sentiment="positive"
         tone="positive"
         icon={ThumbsUp}
+        onRefine={onRefine}
       />
       <RankTable
         title="부정 키워드"
         sentiment="negative"
         tone="negative"
         icon={ThumbsDown}
+        onRefine={onRefine}
       />
     </div>
   );

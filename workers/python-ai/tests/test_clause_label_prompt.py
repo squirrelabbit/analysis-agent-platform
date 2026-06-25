@@ -115,5 +115,95 @@ class ClauseLabelSubjectRenderTests(unittest.TestCase):
         self.assertEqual(config["subject_aliases"], [])
 
 
+# silverone 2026-06-25 — 행사별 추가 슬롯(extra_instructions/extra_examples).
+# clause_label은 payload['clause_label']에서만 읽는다(doc_genuineness.extra_*와 분리 —
+# 출력 스키마가 달라 공용 금지). base 프롬프트 마커는 PR2에서 들어오므로 렌더러
+# 동작은 인라인 템플릿으로 검증한다.
+_EXTRA_SLOT_TEMPLATE = (
+    "You are an analyst for '{{subject_name}}'.\n"
+    "{{#if extra_instructions}}\n## 행사별 추가 지침\n{{extra_instructions}}\n{{/if}}\n"
+    "{{#if extra_examples}}\n## 행사별 추가 예시\n{{extra_examples}}\n{{/if}}\n"
+)
+
+
+class ClauseLabelExtraSlotTests(unittest.TestCase):
+    def test_extra_read_from_clause_label_key(self) -> None:
+        from python_ai_worker.dataset_build.clause_label import (
+            _extract_subject_config,
+            _render_subject_prompt,
+        )
+
+        config = _extract_subject_config({
+            "doc_genuineness": {"subject_name": "군산 맥주축제"},
+            "clause_label": {
+                "extra_instructions": "백년광장은 장소명으로 본다.",
+                "extra_examples": ["문장A → neutral", "문장B → positive / food"],
+            },
+        })
+        self.assertEqual(config["extra_instructions"], "백년광장은 장소명으로 본다.")
+        self.assertIn("문장A", config["extra_examples"])
+        self.assertIn("문장B", config["extra_examples"])
+
+        rendered = _render_subject_prompt(_EXTRA_SLOT_TEMPLATE, config)
+        self.assertIn("## 행사별 추가 지침", rendered)
+        self.assertIn("백년광장은 장소명으로 본다.", rendered)
+        self.assertIn("## 행사별 추가 예시", rendered)
+        self.assertIn("문장A", rendered)
+        self.assertNotIn("{{#if", rendered)
+        self.assertNotIn("{{/if}}", rendered)
+        self.assertNotIn("{{extra_instructions}}", rendered)
+
+    def test_empty_extra_omits_sections(self) -> None:
+        from python_ai_worker.dataset_build.clause_label import (
+            _extract_subject_config,
+            _render_subject_prompt,
+        )
+
+        config = _extract_subject_config({})  # clause_label 키 없음
+        self.assertEqual(config["extra_instructions"], "")
+        self.assertEqual(config["extra_examples"], "")
+
+        rendered = _render_subject_prompt(_EXTRA_SLOT_TEMPLATE, config)
+        self.assertNotIn("행사별 추가 지침", rendered)
+        self.assertNotIn("행사별 추가 예시", rendered)
+        self.assertNotIn("{{", rendered)
+
+    def test_task_isolation_doc_genuineness_extra_not_read(self) -> None:
+        """doc_genuineness.extra_*는 clause_label로 새면 안 된다(스키마 오염 방지)."""
+        from python_ai_worker.dataset_build.clause_label import _extract_subject_config
+
+        config = _extract_subject_config({
+            "doc_genuineness": {
+                "subject_name": "군산 맥주축제",
+                "extra_instructions": "문서 진성 판정용 지침",
+                "extra_examples": "문서 예시",
+            },
+            # clause_label 키 자체 없음 → clause_label extra는 빈값이어야 함
+        })
+        self.assertEqual(config["extra_instructions"], "")
+        self.assertEqual(config["extra_examples"], "")
+
+
+class PromptSlotHelperTests(unittest.TestCase):
+    def test_extract_extra_slot_variants(self) -> None:
+        from python_ai_worker.dataset_build._prompt_slots import extract_extra_slot
+
+        # 문자열
+        self.assertEqual(
+            extract_extra_slot({"extra_instructions": " 규칙 ", "extra_examples": " 예시 "}),
+            {"extra_instructions": "규칙", "extra_examples": "예시"},
+        )
+        # 리스트 → 번호 블록
+        out = extract_extra_slot({"extra_examples": ["가", "", "나"]})
+        self.assertIn("예시 1:\n가", out["extra_examples"])
+        self.assertIn("예시 2:\n나", out["extra_examples"])
+        self.assertEqual(out["extra_instructions"], "")
+        # dict 아님/누락 → 빈값
+        self.assertEqual(
+            extract_extra_slot(None),
+            {"extra_instructions": "", "extra_examples": ""},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

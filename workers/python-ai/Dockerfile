@@ -20,6 +20,9 @@ COPY config/prompts /app/config/prompts
 # 5/11: clean 단계 inline noise scrub 패턴 — `_load_noise_patterns`가 tier 4
 # config fallback으로 직접 read.
 COPY config/noise_patterns /app/config/noise_patterns
+# 6/25: clause_keywords 도메인 불용어 — `load_keyword_stopwords`가 직접 read.
+# 누락 시 빈 집합 fallback(warning)이라 crash는 안 하지만 불용어가 비므로 반드시 동봉.
+COPY config/keyword_stopwords /app/config/keyword_stopwords
 # taxonomy-driven config Phase 1 (2026-05-27) — aspect/sentiment taxonomy
 # single source. clause_label / planner schema가 점진적으로 여기서 derive.
 COPY config/taxonomies /app/config/taxonomies

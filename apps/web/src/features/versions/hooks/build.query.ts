@@ -1,8 +1,21 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { buildKeys } from "../api/version.key";
 import { useVersionParams } from "@/shared/hooks/useRouteParams";
 import { buildApi, type BuildViewParams } from "../api/build.api";
-import { mapBuild, mapKeywordClauseView } from "../models/build";
+import {
+  mapBuild,
+  mapKeywordClauseView,
+  mapKeywordDictionaryRule,
+  mapKeywordDictionaryEvent,
+  type KeywordDictionaryRuleDto,
+  type KeywordDictionaryEventDto,
+  type KeywordDictionaryRuleRequest,
+} from "../models/build";
 import type { BuildJobType } from "@/shared/types/common";
 
 // 전처리 모델 선택지 — env allowlist라 거의 변하지 않으므로 stale을 길게.
@@ -104,5 +117,103 @@ export const useClauseKeywordClauses = (params?: BuildViewParams) => {
       }),
     select: mapKeywordClauseView,
     placeholderData: keepPreviousData,
+  });
+};
+
+// ── 키워드 정제 사전 (silverone 2026-06-25) ────────────────────────────────
+// 규칙은 dataset 단위. 변경 시 키워드 결과(clause_keywords) 쿼리 + 규칙/이력
+// 쿼리를 invalidate해 즉시 갱신한다. 키워드 뷰 query key는
+// [...buildKeys.all, versionId, "clause_keywords", ...] prefix.
+
+export const useKeywordDictionaryRules = (includeInactive = false) => {
+  const { projectId, datasetId } = useVersionParams();
+  return useQuery({
+    queryKey: [
+      ...buildKeys.keywordDictionary(projectId, datasetId),
+      includeInactive ? "all" : "active",
+    ],
+    queryFn: () =>
+      buildApi
+        .listKeywordDictionary(projectId, datasetId, includeInactive)
+        .then((d: { items?: KeywordDictionaryRuleDto[] }) =>
+          (d.items ?? []).map(mapKeywordDictionaryRule),
+        ),
+    enabled: !!projectId && !!datasetId,
+  });
+};
+
+export const useKeywordDictionaryEvents = () => {
+  const { projectId, datasetId } = useVersionParams();
+  return useQuery({
+    queryKey: buildKeys.keywordDictionaryHistory(projectId, datasetId),
+    queryFn: () =>
+      buildApi
+        .listKeywordDictionaryHistory(projectId, datasetId)
+        .then((d: { items?: KeywordDictionaryEventDto[] }) =>
+          (d.items ?? []).map(mapKeywordDictionaryEvent),
+        ),
+    enabled: !!projectId && !!datasetId,
+  });
+};
+
+// 규칙 변경 후 invalidate 대상 — 키워드 결과(버전 전체 clause_keywords) + 규칙 + 이력.
+const useInvalidateKeywordDictionary = () => {
+  const { projectId, datasetId, versionId } = useVersionParams();
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({
+      queryKey: [...buildKeys.all, versionId, "clause_keywords" as BuildJobType],
+    });
+    qc.invalidateQueries({
+      queryKey: buildKeys.keywordDictionary(projectId, datasetId),
+    });
+    qc.invalidateQueries({
+      queryKey: buildKeys.keywordDictionaryHistory(projectId, datasetId),
+    });
+  };
+};
+
+export const useSetKeywordDictionaryRule = () => {
+  const { projectId, datasetId } = useVersionParams();
+  const invalidate = useInvalidateKeywordDictionary();
+  return useMutation({
+    mutationFn: (req: KeywordDictionaryRuleRequest) =>
+      buildApi.setKeywordDictionaryRule(projectId, datasetId, req),
+    onSuccess: invalidate,
+  });
+};
+
+export const useToggleKeywordDictionaryRule = () => {
+  const { projectId, datasetId } = useVersionParams();
+  const invalidate = useInvalidateKeywordDictionary();
+  return useMutation({
+    mutationFn: ({
+      ruleId,
+      active,
+      reason,
+    }: {
+      ruleId: string;
+      active: boolean;
+      reason?: string;
+    }) =>
+      buildApi.setKeywordDictionaryRuleActive(
+        projectId,
+        datasetId,
+        ruleId,
+        active,
+        reason,
+      ),
+    onSuccess: invalidate,
+  });
+};
+
+// 규칙 완전 삭제(목록에서 제거). 이력은 남는다.
+export const useDeleteKeywordDictionaryRule = () => {
+  const { projectId, datasetId } = useVersionParams();
+  const invalidate = useInvalidateKeywordDictionary();
+  return useMutation({
+    mutationFn: ({ ruleId, reason }: { ruleId: string; reason?: string }) =>
+      buildApi.deleteKeywordDictionaryRule(projectId, datasetId, ruleId, reason),
+    onSuccess: invalidate,
   });
 };

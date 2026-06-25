@@ -26,4 +26,10 @@ export const buildKeys = {
 
   // 전처리 모델 선택지 (전역 — 버전과 무관).
   lloaModelOptions: () => [...buildKeys.all, "lloa_model_options"] as const,
+
+  // 키워드 정제 사전 (silverone 2026-06-25) — dataset 단위(버전 무관).
+  keywordDictionary: (projectId: string, datasetId: string) =>
+    [...buildKeys.all, "keyword_dictionary", projectId, datasetId] as const,
+  keywordDictionaryHistory: (projectId: string, datasetId: string) =>
+    [...buildKeys.all, "keyword_dictionary_history", projectId, datasetId] as const,
 };
