@@ -144,17 +144,22 @@ export default function ClauseDocDialog({
       sentiment: toSentiment(i.sentiment),
     }));
 
-    // 원본 텍스트: 절의 source(원문 문장) 우선. source가 절을 포함하지 않으면
-    // (식별자 등) 절 텍스트를 이어 붙여 복원한다.
+    // 원본 텍스트: 백엔드가 cleaned.parquet에서 LEFT JOIN한 cleaned_text(원본 문서
+    // 정제 본문)를 우선 사용한다. 같은 docId 절은 동일 값이므로 첫 번째 비어있지 않은 값.
+    // cleaned_text가 없으면(clean artifact 없음) 기존 fallback: source(원문) → 절 짜깁기.
+    const cleanedText =
+      docItems.map((i) => i.cleanedText).find((t) => !!t) ?? "";
     const sources = Array.from(
       new Set(docItems.map((i) => i.source).filter(Boolean)),
     );
     const sourcesText = sources.join(" ");
     const sourcesUsable =
       sources.length > 0 && cls.some((c) => sourcesText.includes(c.clause));
-    const text = sourcesUsable
-      ? sourcesText
-      : cls.map((c) => c.clause).join(" ");
+    const text = cleanedText
+      ? cleanedText
+      : sourcesUsable
+        ? sourcesText
+        : cls.map((c) => c.clause).join(" ");
 
     return { src: text, clauses: cls, isFallback: false };
   }, [docId, items, taxonomy]);

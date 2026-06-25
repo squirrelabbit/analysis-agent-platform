@@ -27,6 +27,8 @@ export interface ClauseItemDto {
   doc_id: string;
   sentiment: string;
   source: string;
+  // 절이 속한 원본 문서의 정제 본문(cleaned.parquet LEFT JOIN). 같은 doc 절은 동일 값.
+  cleaned_text?: string | null;
   // silverone 2026-06-11 — 수동 보정 overlay. aspect/sentiment는 effective 값,
   // 아래는 원본/보정 구분용(보정된 행에만).
   original_aspect?: string;
@@ -78,6 +80,8 @@ export interface ClauseItem {
   docId: string;
   sentiment: string;
   source: string;
+  // 절이 속한 원본 문서의 정제 본문. 같은 docId 절은 동일 값.
+  cleanedText?: string | null;
   // silverone 2026-06-11 — 수동 보정 overlay (보정된 행에만).
   originalAspect?: string;
   originalSentiment?: string;
@@ -141,6 +145,7 @@ const mapClauseItem = (dto: ClauseItemDto): ClauseItem => ({
   docId: dto.doc_id,
   sentiment: dto.sentiment,
   source: dto.source,
+  cleanedText: dto.cleaned_text,
   originalAspect: dto.original_aspect,
   originalSentiment: dto.original_sentiment,
   overrideAspect: dto.override_aspect,
