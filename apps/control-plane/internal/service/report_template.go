@@ -250,7 +250,9 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		if ref == "" {
 			return reportBuildRoot{}
 		}
-		summary, _, _, err := loadClauseKeywordsArtifact(ref, 1, 0, "", "", "", "")
+		// 키워드 정제 사전(silverone 2026-06-25)은 Phase 1에서 키워드 뷰에만 적용한다.
+		// 보고서는 사전 미적용(nil) — 정제 반영이 필요하면 clause_keywords 재빌드(Phase 2).
+		summary, _, _, err := loadClauseKeywordsArtifact(ref, 1, 0, "", "", "", "", nil)
 		if err != nil {
 			return reportBuildRoot{}
 		}

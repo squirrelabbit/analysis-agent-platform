@@ -62,11 +62,21 @@ func (s *DatasetService) GetClauseKeywordsView(
 		return domain.DatasetArtifactView{}, err
 	}
 
-	summary, total, items, err := loadClauseKeywordsArtifact(ref, limit, offset, aspect, sentiment, q, group)
+	// 키워드 정제 사전(silverone 2026-06-25) — dataset 단위 활성 규칙을 조회 overlay로
+	// 적용(block 제외 / synonym 병합). 원본 artifact 불변. 규칙 없으면 no-op.
+	rules, err := s.store.ListKeywordDictionaryRules(projectID, datasetID, true)
+	if err != nil {
+		return domain.DatasetArtifactView{}, err
+	}
+
+	summary, total, items, err := loadClauseKeywordsArtifact(ref, limit, offset, aspect, sentiment, q, group, rules)
 	if err != nil {
 		return domain.DatasetArtifactView{}, err
 	}
 	view.Summary = summary
+	if n := countActiveKeywordRules(rules); n > 0 {
+		view.Summary["dictionary_rule_count"] = n
+	}
 	// applied: 빌드 당시 extractor_version (per-row에도 있지만 summary metadata에서 회수).
 	if ev := summaryMetadataString(version.Metadata, "clause_keywords_summary", "extractor_version"); ev != "" {
 		view.Applied = map[string]any{"extractor_version": ev}
@@ -78,14 +88,16 @@ func (s *DatasetService) GetClauseKeywordsView(
 
 // loadClauseKeywordsArtifact — clause_keywords long-format jsonl을 DuckDB로 집계.
 // 반환: dashboard summary / 필터 적용 total(페이징용) / 페이징된 item rows.
-func loadClauseKeywordsArtifact(ref string, limit, offset int, aspect, sentiment, q, group string) (map[string]any, int, []map[string]any, error) {
+func loadClauseKeywordsArtifact(ref string, limit, offset int, aspect, sentiment, q, group string, rules []domain.KeywordDictionaryRule) (map[string]any, int, []map[string]any, error) {
 	db, cleanup, err := openTempDuckDB()
 	if err != nil {
 		return nil, 0, nil, err
 	}
 	defer cleanup()
 
-	source := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(ref))
+	// 사전 적용 source — 활성 규칙이 없으면 평범한 read_json. 모든 하위 집계가
+	// 이 source 위에서 돌아 block 제외/synonym 병합이 재집계까지 자동 반영된다.
+	source := buildKeywordDictionarySource(ref, rules)
 
 	// ── dashboard summary (필터 미적용 전체) ──────────────────────────────
 	total, byAspect, err := aggregateGroupedCounts(db, source, "aspect")

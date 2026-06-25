@@ -91,6 +91,16 @@ type Repository interface {
 	DeleteClauseLabelOverride(projectID, datasetVersionID, clauseID string) error
 	ListClauseLabelOverrides(projectID, datasetVersionID string) ([]domain.ClauseLabelOverride, error)
 
+	// 키워드 정제 사전 (silverone 2026-06-25). dataset 단위 rule(현재 상태, soft
+	// delete=active) + append-only event(감사). 키워드 뷰 overlay에서 ListRules로
+	// 활성 규칙을 읽어 block 제외/synonym 병합을 적용한다.
+	UpsertKeywordDictionaryRule(rule domain.KeywordDictionaryRule) error
+	SetKeywordDictionaryRuleActive(projectID, datasetID, ruleID string, active bool, updatedAt time.Time) error
+	GetKeywordDictionaryRule(projectID, datasetID, ruleID string) (domain.KeywordDictionaryRule, error)
+	ListKeywordDictionaryRules(projectID, datasetID string, activeOnly bool) ([]domain.KeywordDictionaryRule, error)
+	AppendKeywordDictionaryEvent(event domain.KeywordDictionaryEvent) error
+	ListKeywordDictionaryEvents(projectID, datasetID string) ([]domain.KeywordDictionaryEvent, error)
+
 	// 인증/RBAC (ADR-025, silverone 2026-06-12). Google OIDC = 인증,
 	// project_members = 권한. UpsertUserByExternal는 (auth_provider, external_id)
 	// 기준 upsert(첫 로그인 가입 + 재로그인 갱신).

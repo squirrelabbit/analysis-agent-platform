@@ -420,6 +420,57 @@ type ClauseLabelOverrideRequest struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+// KeywordDictionaryRule — 데이터셋 단위 키워드 정제 규칙 (silverone 2026-06-25).
+// rule_type: "block"(제외) | "synonym"(대표어 병합). block은 source_term을 키워드
+// 결과에서 제외하고, synonym은 source_term을 target_term(대표어)로 병합한다. 원본
+// artifact는 불변이고 조회 overlay로 적용된다(Phase 1). active=false는 soft delete
+// (복구·감사용). 스코프는 dataset (같은 데이터셋 모든 버전에 적용 — 도메인 어휘).
+type KeywordDictionaryRule struct {
+	ID         string    `json:"id"`
+	ProjectID  string    `json:"project_id"`
+	DatasetID  string    `json:"dataset_id"`
+	RuleType   string    `json:"rule_type"`
+	SourceTerm string    `json:"source_term"`
+	TargetTerm string    `json:"target_term,omitempty"`
+	Active     bool      `json:"active"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// KeywordDictionaryEvent — append-only 변경 이력. 규칙 add/update/deactivate/
+// reactivate 마다 1행. before/after_payload는 규칙 snapshot(JSON). actor_id는
+// ADR-025 세션에서 채운다. 현재 상태(rule)와 분리해 "왜 사라졌나/합쳐졌나" 감사.
+type KeywordDictionaryEvent struct {
+	ID            string    `json:"id"`
+	ProjectID     string    `json:"project_id"`
+	DatasetID     string    `json:"dataset_id"`
+	RuleID        string    `json:"rule_id"`
+	EventType     string    `json:"event_type"`
+	BeforePayload string    `json:"before_payload,omitempty"`
+	AfterPayload  string    `json:"after_payload,omitempty"`
+	Reason        string    `json:"reason,omitempty"`
+	ActorID       string    `json:"actor_id,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// KeywordDictionaryRuleRequest — 규칙 생성/수정 요청. rule_type="block"이면
+// target_term 무시. reason은 감사 로그용(비면 기본값).
+type KeywordDictionaryRuleRequest struct {
+	RuleType   string `json:"rule_type"`
+	SourceTerm string `json:"source_term"`
+	TargetTerm string `json:"target_term,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// KeywordDictionaryRuleListResponse / EventListResponse — GET 응답 래퍼.
+type KeywordDictionaryRuleListResponse struct {
+	Items []KeywordDictionaryRule `json:"items"`
+}
+
+type KeywordDictionaryEventListResponse struct {
+	Items []KeywordDictionaryEvent `json:"items"`
+}
+
 type AnalysisThreadCreateRequest struct {
 	Title string `json:"title,omitempty"`
 }

@@ -1908,6 +1908,143 @@ func (s *PostgresStore) ListClauseLabelOverrides(projectID, datasetVersionID str
 	return items, rows.Err()
 }
 
+// ── 키워드 정제 사전 (silverone 2026-06-25) ────────────────────────────────
+
+func (s *PostgresStore) UpsertKeywordDictionaryRule(r domain.KeywordDictionaryRule) error {
+	now := r.UpdatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	created := r.CreatedAt
+	if created.IsZero() {
+		created = now
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO keyword_dictionary_rules (
+			id, project_id, dataset_id, rule_type, source_term, target_term, active, created_at, updated_at
+		) VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (id) DO UPDATE
+		SET rule_type = EXCLUDED.rule_type,
+		    source_term = EXCLUDED.source_term,
+		    target_term = EXCLUDED.target_term,
+		    active = EXCLUDED.active,
+		    updated_at = EXCLUDED.updated_at`,
+		r.ID, r.ProjectID, r.DatasetID, r.RuleType, r.SourceTerm,
+		nullableEmptyString(r.TargetTerm), r.Active, created, now,
+	)
+	return err
+}
+
+func (s *PostgresStore) SetKeywordDictionaryRuleActive(projectID, datasetID, ruleID string, active bool, updatedAt time.Time) error {
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	res, err := s.db.Exec(
+		`UPDATE keyword_dictionary_rules SET active = $4, updated_at = $5
+		 WHERE project_id = $1::uuid AND dataset_id = $2::uuid AND id = $3`,
+		projectID, datasetID, ruleID, active, updatedAt,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *PostgresStore) GetKeywordDictionaryRule(projectID, datasetID, ruleID string) (domain.KeywordDictionaryRule, error) {
+	var r domain.KeywordDictionaryRule
+	err := s.db.QueryRow(
+		`SELECT id, project_id::text, dataset_id::text, rule_type, source_term,
+		        COALESCE(target_term, ''), active, created_at, updated_at
+		 FROM keyword_dictionary_rules
+		 WHERE project_id = $1::uuid AND dataset_id = $2::uuid AND id = $3`,
+		projectID, datasetID, ruleID,
+	).Scan(&r.ID, &r.ProjectID, &r.DatasetID, &r.RuleType, &r.SourceTerm,
+		&r.TargetTerm, &r.Active, &r.CreatedAt, &r.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return domain.KeywordDictionaryRule{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.KeywordDictionaryRule{}, err
+	}
+	return r, nil
+}
+
+func (s *PostgresStore) ListKeywordDictionaryRules(projectID, datasetID string, activeOnly bool) ([]domain.KeywordDictionaryRule, error) {
+	query := `SELECT id, project_id::text, dataset_id::text, rule_type, source_term,
+	                 COALESCE(target_term, ''), active, created_at, updated_at
+	          FROM keyword_dictionary_rules
+	          WHERE project_id = $1::uuid AND dataset_id = $2::uuid`
+	if activeOnly {
+		query += ` AND active`
+	}
+	query += ` ORDER BY rule_type, source_term`
+	rows, err := s.db.Query(query, projectID, datasetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.KeywordDictionaryRule, 0)
+	for rows.Next() {
+		var r domain.KeywordDictionaryRule
+		if err := rows.Scan(&r.ID, &r.ProjectID, &r.DatasetID, &r.RuleType, &r.SourceTerm,
+			&r.TargetTerm, &r.Active, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+func (s *PostgresStore) AppendKeywordDictionaryEvent(e domain.KeywordDictionaryEvent) error {
+	created := e.CreatedAt
+	if created.IsZero() {
+		created = time.Now().UTC()
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO keyword_dictionary_events (
+			id, project_id, dataset_id, rule_id, event_type,
+			before_payload, after_payload, reason, actor_id, created_at
+		) VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10)`,
+		e.ID, e.ProjectID, e.DatasetID, e.RuleID, e.EventType,
+		nullableEmptyString(e.BeforePayload), nullableEmptyString(e.AfterPayload),
+		nullableEmptyString(e.Reason), nullableEmptyString(e.ActorID), created,
+	)
+	return err
+}
+
+func (s *PostgresStore) ListKeywordDictionaryEvents(projectID, datasetID string) ([]domain.KeywordDictionaryEvent, error) {
+	rows, err := s.db.Query(
+		`SELECT id, project_id::text, dataset_id::text, rule_id, event_type,
+		        COALESCE(before_payload, ''), COALESCE(after_payload, ''),
+		        COALESCE(reason, ''), COALESCE(actor_id, ''), created_at
+		 FROM keyword_dictionary_events
+		 WHERE project_id = $1::uuid AND dataset_id = $2::uuid
+		 ORDER BY created_at DESC, id`,
+		projectID, datasetID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.KeywordDictionaryEvent, 0)
+	for rows.Next() {
+		var e domain.KeywordDictionaryEvent
+		if err := rows.Scan(&e.ID, &e.ProjectID, &e.DatasetID, &e.RuleID, &e.EventType,
+			&e.BeforePayload, &e.AfterPayload, &e.Reason, &e.ActorID, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, e)
+	}
+	return items, rows.Err()
+}
+
 // silverone 2026-06-01 — project 사이드바 채팅 count. dataset 단위 합산이
 // 아닌 단일 COUNT 쿼리(analysis_threads.project_id 인덱스 활용)로 처리.
 // project가 없거나 thread 0건이면 0 반환 (ErrNotFound 아님).
@@ -2650,6 +2787,39 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS clause_label_overrides_scope_idx
 		  ON clause_label_overrides(project_id, dataset_version_id)`,
+		// 키워드 정제 사전 (silverone 2026-06-25). dataset 단위 — clause_label_overrides가
+		// version 단위인 것과 달리 사전은 도메인 어휘라 dataset에 건다. rule=현재 상태
+		// (active=false soft delete), event=append-only 감사.
+		`CREATE TABLE IF NOT EXISTS keyword_dictionary_rules (
+			id TEXT PRIMARY KEY,
+			project_id UUID NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+			dataset_id UUID NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+			rule_type TEXT NOT NULL,
+			source_term TEXT NOT NULL,
+			target_term TEXT,
+			active BOOLEAN NOT NULL DEFAULT TRUE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		// 활성 규칙은 dataset 내 source_term 유일(중복 규칙 방지). 비활성은 제외.
+		`CREATE UNIQUE INDEX IF NOT EXISTS keyword_dictionary_rules_active_source_idx
+		  ON keyword_dictionary_rules(dataset_id, source_term) WHERE active`,
+		`CREATE INDEX IF NOT EXISTS keyword_dictionary_rules_scope_idx
+		  ON keyword_dictionary_rules(project_id, dataset_id)`,
+		`CREATE TABLE IF NOT EXISTS keyword_dictionary_events (
+			id TEXT PRIMARY KEY,
+			project_id UUID NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+			dataset_id UUID NOT NULL REFERENCES datasets(dataset_id) ON DELETE CASCADE,
+			rule_id TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			before_payload TEXT,
+			after_payload TEXT,
+			reason TEXT,
+			actor_id TEXT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS keyword_dictionary_events_scope_idx
+		  ON keyword_dictionary_events(project_id, dataset_id, created_at DESC)`,
 		// 인증/RBAC (ADR-025, silverone 2026-06-12). Google OIDC = 인증,
 		// project_members = 권한. password_hash는 local login 대비 자리만(1차 미사용).
 		`CREATE TABLE IF NOT EXISTS users (
