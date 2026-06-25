@@ -12,11 +12,12 @@ from __future__ import annotations
 import unittest
 
 from python_ai_worker.dataset_build.keyword_extractor import (
-    FESTIVAL_STOPWORDS,
+    DEFAULT_KEYWORD_STOPWORDS_RULE,
     KIWI_EXTRACTOR_VERSION,
     KeywordExtractor,
     KiwiKeywordExtractor,
     default_keyword_extractor,
+    load_keyword_stopwords,
 )
 
 
@@ -73,10 +74,32 @@ class KiwiKeywordExtractorTests(unittest.TestCase):
         self.assertIsInstance(self.ex, KeywordExtractor)
         self.assertIsInstance(default_keyword_extractor(), KeywordExtractor)
 
-    def test_festival_stopwords_nonempty(self) -> None:
-        # Downloads 파일 흡수 확인 — 도메인 단어가 실제로 들어 있어야 한다.
-        for w in ("축제", "강릉", "야행", "후기"):
-            self.assertIn(w, FESTIVAL_STOPWORDS)
+    def test_keyword_stopwords_config_loaded(self) -> None:
+        # config asset 외부화(silverone 2026-06-25) — 도메인 단어가 실제로 들어 있어야 한다.
+        words = load_keyword_stopwords(DEFAULT_KEYWORD_STOPWORDS_RULE)
+        for w in ("축제", "후기", "방문", "다양"):
+            self.assertIn(w, words)
+        # 데이터셋 특정 지명은 config에서 제거됨 — block 규칙/추천 제외어로 처리.
+        self.assertNotIn("강릉", words)
+        self.assertNotIn("야행", words)
+
+    def test_keyword_stopwords_unknown_rule_empty(self) -> None:
+        # 없는 룰이면 빈 집합(graceful) — extractor가 crash하지 않는다.
+        self.assertEqual(load_keyword_stopwords("does-not-exist"), frozenset())
+
+    def test_block_terms_added_to_stopwords(self) -> None:
+        # 운영자 사전 block 규칙은 도메인 불용어에 가산돼 결과에서 빠진다.
+        ex = KiwiKeywordExtractor(block_terms={"가격"})
+        out = ex.extract("가격 푸드트럭")
+        self.assertNotIn("가격", out)
+        self.assertIn("푸드트럭", out)
+
+    def test_synonym_map_merges_and_dedups(self) -> None:
+        # 대표어 병합 — 수제맥주→맥주. 같은 절에 맥주가 또 있으면 1건으로 dedup.
+        ex = KiwiKeywordExtractor(synonym_map={"수제맥주": "맥주"})
+        out = ex.extract("수제맥주 맥주 음식")
+        self.assertEqual(out, ["맥주", "음식"])
+        self.assertNotIn("수제맥주", out)
 
     def test_compound_rejoin_keeps_compounds_splits_on_space(self) -> None:
         # silverone 2026-06-16 — 복합명사 재결합. kiwipiepy가 푸드트럭→푸드+트럭,

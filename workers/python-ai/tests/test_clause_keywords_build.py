@@ -115,6 +115,44 @@ class RunClauseKeywordsTests(unittest.TestCase):
             self.assertEqual(data["total_rows"], 2)
             self.assertEqual(data["message"], "clause_keywords completed")
 
+    def test_keyword_dictionary_baked_in(self) -> None:
+        # Phase 2 (silverone 2026-06-25) — payload의 사전 규칙이 추출 시점에
+        # block(제외)/synonym(병합)으로 적용돼 artifact 자체가 정제본이 된다.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            inp = tmp_path / "clause_label.jsonl"
+            out = tmp_path / "clause_keywords.jsonl"
+            _write_jsonl(
+                inp,
+                [
+                    {"doc_id": "d1", "clause": "수제맥주 가격이 비쌌어요", "sentiment": "negative", "aspect": "food", "source": "lloa", "prompt_version": "v3"},
+                    {"doc_id": "d2", "clause": "맥주 종류가 다양했어요", "sentiment": "positive", "aspect": "food", "source": "lloa", "prompt_version": "v3"},
+                ],
+            )
+            result = run_dataset_clause_keywords(
+                {
+                    "dataset_version_id": "ver1",
+                    "clause_label_ref": str(inp),
+                    "output_path": str(out),
+                    "keyword_dictionary_rules": [
+                        {"rule_type": "block", "source_term": "가격"},
+                        {"rule_type": "synonym", "source_term": "수제맥주", "target_term": "맥주"},
+                    ],
+                }
+            )
+            rows = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines() if line.strip()]
+            keywords = {r["keyword"] for r in rows}
+            # block — "가격"이 빠진다.
+            self.assertNotIn("가격", keywords)
+            # synonym — "수제맥주"가 "맥주"로 병합돼 surface 형태로 남지 않는다.
+            self.assertNotIn("수제맥주", keywords)
+            self.assertIn("맥주", keywords)
+            # summary audit
+            summary = result["artifact"]["summary"]
+            self.assertEqual(summary["dictionary_block_count"], 1)
+            self.assertEqual(summary["dictionary_synonym_count"], 1)
+            self.assertEqual(summary["keyword_stopwords_rule"], "festival-v1")
+
     def test_missing_required_payload_raises(self) -> None:
         with self.assertRaises(ValueError):
             run_dataset_clause_keywords({"dataset_version_id": "v"})

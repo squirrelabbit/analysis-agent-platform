@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
+	"unicode"
 
 	"analysis-support-platform/control-plane/internal/domain"
 )
@@ -76,6 +78,18 @@ func (s *DatasetService) GetClauseKeywordsView(
 	view.Summary = summary
 	if n := countActiveKeywordRules(rules); n > 0 {
 		view.Summary["dictionary_rule_count"] = n
+	}
+	// 추천 제외어 (silverone 2026-06-25) — 검색어/대상명(metadata.doc_genuineness)에서
+	// 유래한 키워드를 결과 행에 표시한다. 자동 제외가 아니라 운영자가 [제외]로 승인하면
+	// block 규칙이 된다(맥주/블루스처럼 핵심어일 수 있어 자동 block 금지). 키워드 집계
+	// 행(group != clause)에만 단다.
+	if dataset, derr := s.GetDataset(projectID, datasetID); derr == nil {
+		if terms := subjectDerivedTerms(dataset); len(terms) > 0 {
+			if n := annotateSuggestedExclude(items, terms); n > 0 {
+				view.Summary["suggested_exclude_page_count"] = n
+			}
+			view.Summary["suggested_exclude_terms"] = sortedTermList(terms)
+		}
 	}
 	// applied: 빌드 당시 extractor_version (per-row에도 있지만 summary metadata에서 회수).
 	if ev := summaryMetadataString(version.Metadata, "clause_keywords_summary", "extractor_version"); ev != "" {
@@ -424,4 +438,69 @@ func scalarCount(db *sql.DB, query string) (int, error) {
 		return 0, err
 	}
 	return n, nil
+}
+
+// subjectDerivedTerms — dataset.metadata.doc_genuineness의 subject_name +
+// subject_aliases + recruitment_keywords를 구분자(공백/&/·/구두점)로 쪼갠 토큰 집합.
+// "추천 제외어" 매칭용 — 키워드가 검색어/대상명에서 유래했는지 판별한다. 2글자 미만
+// 토큰은 노이즈 매칭 방지로 버린다(extractor min_len=2와 정합). 매칭은 소문자 정규화.
+func subjectDerivedTerms(dataset domain.Dataset) map[string]bool {
+	raw, _ := dataset.Metadata["doc_genuineness"].(map[string]any)
+	if raw == nil {
+		return nil
+	}
+	parts := []string{anyStringValue(raw["subject_name"])}
+	parts = append(parts, anyStringList(raw["subject_aliases"])...)
+	parts = append(parts, anyStringList(raw["recruitment_keywords"])...)
+	isSep := func(r rune) bool {
+		switch r {
+		case '&', '/', ',', '·', '・', '|', '+', '(', ')', '[', ']', '-', '_', '~':
+			return true
+		}
+		return unicode.IsSpace(r)
+	}
+	terms := map[string]bool{}
+	for _, p := range parts {
+		for _, tok := range strings.FieldsFunc(p, isSep) {
+			t := strings.ToLower(strings.TrimSpace(tok))
+			if len([]rune(t)) >= 2 {
+				terms[t] = true
+			}
+		}
+	}
+	if len(terms) == 0 {
+		return nil
+	}
+	return terms
+}
+
+// annotateSuggestedExclude — 키워드 집계 item("keyword" 보유)에 검색어 유래 플래그를
+// 단다. 현재 페이지 행만 대상(페이징 무관 전체는 summary의 suggested_exclude_terms 참고).
+// 반환: 이 페이지에서 플래그된 행 수.
+func annotateSuggestedExclude(items []map[string]any, terms map[string]bool) int {
+	if len(terms) == 0 {
+		return 0
+	}
+	count := 0
+	for _, item := range items {
+		kw, ok := item["keyword"].(string)
+		if !ok {
+			continue
+		}
+		if terms[strings.ToLower(strings.TrimSpace(kw))] {
+			item["suggested_exclude"] = true
+			count++
+		}
+	}
+	return count
+}
+
+// sortedTermList — term set을 정렬된 슬라이스로(프론트 "검색어 유래 후보" 칩 표시용).
+func sortedTermList(terms map[string]bool) []string {
+	out := make([]string, 0, len(terms))
+	for t := range terms {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
 }

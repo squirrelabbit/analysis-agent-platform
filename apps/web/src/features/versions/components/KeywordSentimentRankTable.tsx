@@ -46,6 +46,8 @@ function RankTable({
   const rows = (data?.items ?? []).map((it) => ({
     keyword: it.keyword,
     count: it.count,
+    // 검색어/대상명 유래 추천 제외어 — 배지로 표시(자동 제외 아님).
+    suggestedExclude: it.suggestedExclude,
   }));
 
   const accent =
@@ -125,6 +127,14 @@ function RankTable({
                   </td>
                   <td className="px-4 py-2 font-medium text-zinc-800">
                     {r.keyword}
+                    {r.suggestedExclude && (
+                      <span
+                        className="ml-1.5 inline-block rounded bg-amber-50 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-amber-700"
+                        title="검색어·대상명에서 유래한 키워드입니다. 노이즈면 [제외]하세요(자동 제외 아님)."
+                      >
+                        검색어 유래
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2 text-right tabular-nums text-zinc-600">
                     {r.count.toLocaleString()}

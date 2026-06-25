@@ -4367,6 +4367,16 @@ components:
                   type: object
                   additionalProperties: { type: integer }
                   description: "선택 aspect 안의 sentiment별 언급 수 (aspect 필터 시)"
+                dictionary_rule_count:
+                  type: integer
+                  description: "적용 중인 키워드 정제 사전 활성 규칙 수(block+synonym). 0이면 생략."
+                suggested_exclude_terms:
+                  type: array
+                  items: { type: string }
+                  description: "검색어/대상명에서 유래한 추천 제외어 후보(소문자 정규화, 페이징 무관). doc_genuineness 메타 없으면 생략."
+                suggested_exclude_page_count:
+                  type: integer
+                  description: "현재 페이지 item 중 suggested_exclude로 플래그된 행 수. 0이면 생략."
             items:
               type: array
               description: |
@@ -4382,6 +4392,9 @@ components:
                   dominant_sentiment_ratio: { type: number, description: "우세 감성 비율(0~1)" }
                   top_aspect: { type: string, description: "이 키워드의 대표 aspect(최빈)" }
                   representative_clause: { type: string, description: "대표 절(키워드 포함 절 중 최장)" }
+                  suggested_exclude:
+                    type: boolean
+                    description: "검색어/대상명(metadata.doc_genuineness)에서 유래한 키워드. 추천 제외어(자동 제외 아님 — 운영자가 사전 block으로 승인). 유래 키워드 행에만 포함."
     ClauseLabelOverrideRequest:
       type: object
       description: aspect/sentiment 중 보낸 것만 effective로 바뀌고 나머지는 원본 유지(둘 다 비면 400).

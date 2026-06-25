@@ -489,3 +489,48 @@ func TestValidateKeywordRuleAgainst(t *testing.T) {
 		}
 	}
 }
+
+// 추천 제외어 (silverone 2026-06-25) — 검색어/대상명에서 유래한 키워드만 플래그.
+func TestSubjectDerivedTermsAndAnnotate(t *testing.T) {
+	dataset := domain.Dataset{Metadata: map[string]any{
+		"doc_genuineness": map[string]any{
+			"subject_name":         "군산 수제맥주&블루스 페스티벌",
+			"subject_aliases":      []any{"군산축제"},
+			"recruitment_keywords": []any{"블루스"},
+		},
+	}}
+	terms := subjectDerivedTerms(dataset)
+	// subject_name 분해 토큰 + alias + keyword가 들어가야 한다.
+	for _, w := range []string{"군산", "수제맥주", "블루스", "페스티벌", "군산축제"} {
+		if !terms[w] {
+			t.Errorf("expected term %q in subject-derived set, got %v", w, terms)
+		}
+	}
+
+	items := []map[string]any{
+		{"keyword": "군산", "count": int64(10)},   // 검색어 유래 → 플래그
+		{"keyword": "맥주", "count": int64(40)},   // 검색어 토큰 아님(수제맥주의 부분어) → 플래그 X
+		{"keyword": "공연", "count": int64(20)},   // 무관 → 플래그 X
+		{"clause": "맥주가 맛있다"},                  // group=clause 행(keyword 없음) → 무시
+	}
+	n := annotateSuggestedExclude(items, terms)
+	if n != 1 {
+		t.Fatalf("expected 1 flagged item, got %d", n)
+	}
+	if items[0]["suggested_exclude"] != true {
+		t.Errorf("expected 군산 flagged, got %v", items[0])
+	}
+	if _, ok := items[1]["suggested_exclude"]; ok {
+		t.Errorf("맥주 should not be flagged (sub-word, core term), got %v", items[1])
+	}
+	if _, ok := items[2]["suggested_exclude"]; ok {
+		t.Errorf("공연 should not be flagged, got %v", items[2])
+	}
+}
+
+// metadata에 doc_genuineness가 없으면 nil(플래그 비활성).
+func TestSubjectDerivedTermsEmptyWhenNoMetadata(t *testing.T) {
+	if terms := subjectDerivedTerms(domain.Dataset{}); terms != nil {
+		t.Errorf("expected nil for empty metadata, got %v", terms)
+	}
+}
