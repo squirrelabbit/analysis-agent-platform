@@ -343,6 +343,24 @@ func (s *Server) handleReactivateKeywordDictionaryRule(w stdhttp.ResponseWriter,
 	s.setKeywordRuleActive(w, r, true)
 }
 
+func (s *Server) handleDeleteKeywordDictionaryRule(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	// 사유는 query(?reason=) 또는 body {reason} 둘 다 허용.
+	reason := strings.TrimSpace(r.URL.Query().Get("reason"))
+	if reason == "" {
+		var payload keywordRuleActiveRequest
+		_ = decodeJSONAllowEmpty(r, &payload)
+		reason = payload.Reason
+	}
+	if err := s.datasetService.DeleteKeywordDictionaryRule(
+		r.PathValue("project_id"), r.PathValue("dataset_id"), r.PathValue("rule_id"),
+		reason, keywordDictActor(r),
+	); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
 func (s *Server) handleListKeywordDictionaryHistory(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	events, err := s.datasetService.ListKeywordDictionaryEvents(
 		r.PathValue("project_id"), r.PathValue("dataset_id"))

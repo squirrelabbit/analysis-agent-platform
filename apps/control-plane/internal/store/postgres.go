@@ -1957,6 +1957,25 @@ func (s *PostgresStore) SetKeywordDictionaryRuleActive(projectID, datasetID, rul
 	return nil
 }
 
+func (s *PostgresStore) DeleteKeywordDictionaryRule(projectID, datasetID, ruleID string) error {
+	res, err := s.db.Exec(
+		`DELETE FROM keyword_dictionary_rules
+		 WHERE project_id = $1::uuid AND dataset_id = $2::uuid AND id = $3`,
+		projectID, datasetID, ruleID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *PostgresStore) GetKeywordDictionaryRule(projectID, datasetID, ruleID string) (domain.KeywordDictionaryRule, error) {
 	var r domain.KeywordDictionaryRule
 	err := s.db.QueryRow(

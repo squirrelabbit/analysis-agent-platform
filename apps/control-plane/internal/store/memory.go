@@ -1034,6 +1034,17 @@ func (s *MemoryStore) SetKeywordDictionaryRuleActive(projectID, datasetID, ruleI
 	return nil
 }
 
+func (s *MemoryStore) DeleteKeywordDictionaryRule(projectID, datasetID, ruleID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.keywordDictRules[ruleID]
+	if !ok || r.ProjectID != projectID || r.DatasetID != datasetID {
+		return ErrNotFound
+	}
+	delete(s.keywordDictRules, ruleID)
+	return nil
+}
+
 func (s *MemoryStore) GetKeywordDictionaryRule(projectID, datasetID, ruleID string) (domain.KeywordDictionaryRule, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

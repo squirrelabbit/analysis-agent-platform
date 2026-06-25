@@ -96,6 +96,7 @@ type Repository interface {
 	// 활성 규칙을 읽어 block 제외/synonym 병합을 적용한다.
 	UpsertKeywordDictionaryRule(rule domain.KeywordDictionaryRule) error
 	SetKeywordDictionaryRuleActive(projectID, datasetID, ruleID string, active bool, updatedAt time.Time) error
+	DeleteKeywordDictionaryRule(projectID, datasetID, ruleID string) error
 	GetKeywordDictionaryRule(projectID, datasetID, ruleID string) (domain.KeywordDictionaryRule, error)
 	ListKeywordDictionaryRules(projectID, datasetID string, activeOnly bool) ([]domain.KeywordDictionaryRule, error)
 	AppendKeywordDictionaryEvent(event domain.KeywordDictionaryEvent) error

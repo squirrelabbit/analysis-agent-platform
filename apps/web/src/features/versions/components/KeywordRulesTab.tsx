@@ -2,10 +2,12 @@ import { useState } from "react";
 import { DataTable, type Column } from "./DataTable";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import DeleteDialog from "@/components/common/dialogs/DeleteDialog";
 import ChatToast from "@/features/chats/components/ChatToast";
 import {
   useKeywordDictionaryRules,
   useToggleKeywordDictionaryRule,
+  useDeleteKeywordDictionaryRule,
 } from "../hooks/build.query";
 import type { KeywordDictionaryRule } from "../models/build";
 
@@ -16,16 +18,25 @@ const fmtDate = (iso: string) => (iso ? iso.slice(0, 10) : "-");
 export default function KeywordRulesTab() {
   const { data: rules = [], isLoading } = useKeywordDictionaryRules(true);
   const { mutateAsync, isPending } = useToggleKeywordDictionaryRule();
+  const { mutateAsync: removeRule } = useDeleteKeywordDictionaryRule();
   const [toast, setToast] = useState("");
+  const flash = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(""), 2000);
+  };
 
   const toggle = async (r: KeywordDictionaryRule) => {
     await mutateAsync({ ruleId: r.id, active: !r.active });
-    setToast(
+    flash(
       r.active
         ? `"${r.sourceTerm}" 규칙을 해제했습니다.`
         : `"${r.sourceTerm}" 규칙을 재활성했습니다.`,
     );
-    setTimeout(() => setToast(""), 2000);
+  };
+
+  const remove = async (r: KeywordDictionaryRule) => {
+    await removeRule({ ruleId: r.id });
+    flash(`"${r.sourceTerm}" 규칙을 삭제했습니다.`);
   };
 
   const columns: Column<KeywordDictionaryRule>[] = [
@@ -68,7 +79,7 @@ export default function KeywordRulesTab() {
     {
       header: "액션",
       cell: (r) => (
-        <td className="px-3 py-2">
+        <td className="px-3 py-2 whitespace-nowrap">
           <Button
             size="xs"
             variant="ghost"
@@ -77,6 +88,16 @@ export default function KeywordRulesTab() {
           >
             {r.active ? "해제" : "재활성"}
           </Button>
+          <DeleteDialog
+            title="규칙 삭제"
+            description={`"${r.sourceTerm}" 규칙을 목록에서 완전히 삭제합니다. (변경 이력은 남습니다) 다시 적용하려면 규칙을 새로 추가해야 합니다.`}
+            onDelete={() => remove(r)}
+            trigger={
+              <Button size="xs" variant="ghost" className="text-red-600 hover:bg-red-50">
+                삭제
+              </Button>
+            }
+          />
         </td>
       ),
     },

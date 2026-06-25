@@ -186,6 +186,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/keyword_dictionary/history", s.handleListKeywordDictionaryHistory)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/keyword_dictionary/{rule_id}/deactivate", s.handleDeactivateKeywordDictionaryRule)
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/keyword_dictionary/{rule_id}/reactivate", s.handleReactivateKeywordDictionaryRule)
+	s.mux.HandleFunc("DELETE /projects/{project_id}/datasets/{dataset_id}/keyword_dictionary/{rule_id}", s.handleDeleteKeywordDictionaryRule)
 	// ADR-017 / 5/19 결정 — clean 직후 doc-level 3-tier 진성 분류 endpoint.
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness", s.handleCreateDocGenuinenessJob)
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness", s.handleGetDocGenuinenessView)

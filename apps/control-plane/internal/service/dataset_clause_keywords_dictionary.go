@@ -30,6 +30,7 @@ const (
 	keywordEventUpdate     = "update"
 	keywordEventDeactivate = "deactivate"
 	keywordEventReactivate = "reactivate"
+	keywordEventDelete     = "delete"
 
 	keywordDefaultReason = "운영자 키워드 정제"
 )
@@ -184,6 +185,37 @@ func (s *DatasetService) SetKeywordDictionaryRuleActive(
 	}
 	s.appendKeywordEvent(projectID, datasetID, ruleID, eventType, keywordRulePayload(current), keywordRulePayload(updated), r, actorID, now)
 	return updated, nil
+}
+
+// DeleteKeywordDictionaryRule — 규칙을 목록에서 완전 제거(hard delete). 해제
+// (active=false)와 달리 행을 지운다. 변경 이력 event는 append-only로 남아(rule_id
+// 참조만, FK 아님) "삭제됨"이 감사에 보존된다. 되돌리려면 다시 규칙을 추가.
+func (s *DatasetService) DeleteKeywordDictionaryRule(
+	projectID, datasetID, ruleID string,
+	reason, actorID string,
+) error {
+	if _, err := s.GetDataset(projectID, datasetID); err != nil {
+		return err
+	}
+	current, err := s.store.GetKeywordDictionaryRule(projectID, datasetID, ruleID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return ErrNotFound{Resource: "keyword dictionary rule"}
+		}
+		return err
+	}
+	if err := s.store.DeleteKeywordDictionaryRule(projectID, datasetID, ruleID); err != nil {
+		if err == store.ErrNotFound {
+			return ErrNotFound{Resource: "keyword dictionary rule"}
+		}
+		return err
+	}
+	r := strings.TrimSpace(reason)
+	if r == "" {
+		r = keywordDefaultReason
+	}
+	s.appendKeywordEvent(projectID, datasetID, ruleID, keywordEventDelete, keywordRulePayload(current), "", r, actorID, time.Now().UTC())
+	return nil
 }
 
 func (s *DatasetService) appendKeywordEvent(projectID, datasetID, ruleID, eventType, before, after, reason, actorID string, at time.Time) {

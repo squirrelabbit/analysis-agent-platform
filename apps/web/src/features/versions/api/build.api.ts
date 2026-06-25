@@ -251,6 +251,21 @@ export const buildApi = {
       )
       .then(({ data }) => data),
 
+  // 규칙 완전 삭제(hard delete) — 해제(active=false)와 달리 목록에서 제거.
+  // 변경 이력은 append-only로 남는다.
+  deleteKeywordDictionaryRule: (
+    projectId: string,
+    datasetId: string,
+    ruleId: string,
+    reason?: string,
+  ) =>
+    apiClient
+      .delete(
+        `/projects/${projectId}/datasets/${datasetId}/keyword_dictionary/${encodeURIComponent(ruleId)}`,
+        { params: reason ? { reason } : undefined },
+      )
+      .then(() => undefined),
+
   listKeywordDictionaryHistory: (projectId: string, datasetId: string) =>
     apiClient
       .get(`/projects/${projectId}/datasets/${datasetId}/keyword_dictionary/history`)

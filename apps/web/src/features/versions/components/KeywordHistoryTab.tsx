@@ -12,6 +12,7 @@ const EVENT_LABEL: Record<string, string> = {
   update: "수정",
   deactivate: "해제",
   reactivate: "재활성",
+  delete: "삭제",
 };
 
 const fmtDateTime = (iso: string) =>

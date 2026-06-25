@@ -206,3 +206,14 @@ export const useToggleKeywordDictionaryRule = () => {
     onSuccess: invalidate,
   });
 };
+
+// 규칙 완전 삭제(목록에서 제거). 이력은 남는다.
+export const useDeleteKeywordDictionaryRule = () => {
+  const { projectId, datasetId } = useVersionParams();
+  const invalidate = useInvalidateKeywordDictionary();
+  return useMutation({
+    mutationFn: ({ ruleId, reason }: { ruleId: string; reason?: string }) =>
+      buildApi.deleteKeywordDictionaryRule(projectId, datasetId, ruleId, reason),
+    onSuccess: invalidate,
+  });
+};
