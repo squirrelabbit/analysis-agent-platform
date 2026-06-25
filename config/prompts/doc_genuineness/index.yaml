@@ -1,3 +1,6 @@
 # doc_genuineness prompt task — version 목록은 이 폴더의 *.md (stem = version).
 # default는 prompt_options resolver / dataset_build가 읽는 기본 version.
-default: v1
+# 2026-06-25 — festival 통합 base v3로 전환. v3는 v1 본문 그대로 + 행사별 추가 슬롯
+# (빈값이면 v1과 byte-동일, parity 잠금 테스트로 확인). 군산 예시는 metadata
+# extra_examples로 이동. v1/v2는 과거 artifact 재현용으로 보존(삭제 안 함).
+default: v3

@@ -32,8 +32,13 @@
   행사별 슬롯으로 대체된다. 과거 artifact 재현(prompt_version 문자열로만 기록되어
   파일이 없으면 재빌드 불가)을 위해 **파일은 보존**한다. 신규 빌드에는 쓰지 않는다.
 
-### default 전환은 PR2-B에서 (parity 게이트)
+### default 전환 (parity 게이트)
 
-이 변경(PR2-A)은 v5/v3 파일만 추가하고 `index.yaml` default는 그대로 둔다
-(`clause_label: v3`, `doc_genuineness: v1`). 군산/강릉 샘플로 v3→v5, v1→v3 결과
-parity를 확인한 뒤 별도 PR(PR2-B)에서 default를 v5/v3로 전환한다.
+- **PR2-A** — v5/v3 파일만 추가, default 유지.
+- **PR2-B (2026-06-25)** — `doc_genuineness` default를 `v1 → v3`로 전환. v3는 v1
+  본문 그대로 + 빈 슬롯이라 **렌더 결과가 v1과 byte-동일**(parity 잠금 테스트
+  `test_v3_base_byte_identical_to_v1_when_slot_empty`로 확인) → 기존 dataset
+  동작 불변. 슬롯 마커 whitespace도 빈값 시 잔여 줄이 없도록 정리.
+- **clause_label default는 v3 유지(보류)** — v5는 v3 대비 흡수 규칙 3줄(결제·대기줄
+  →operation, 과거회상→neutral, 푸드트럭→food)이 추가돼 **동작이 바뀔 수 있으므로**,
+  강릉/군산 샘플 behavioral parity 측정 후 별도로 전환한다.

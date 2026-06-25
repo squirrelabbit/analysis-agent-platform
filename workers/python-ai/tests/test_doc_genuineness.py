@@ -222,7 +222,8 @@ class DocGenuinenessTests(unittest.TestCase):
         self.assertEqual(applied["subject_aliases"], ["문화유산야행", "문화재야행", "강릉야행"])
         self.assertEqual(applied["recruitment_keywords"], ["서포터즈", "푸드트럭"])
         self.assertEqual(applied["subject_type"], "festival")
-        self.assertEqual(applied["prompt_version"], "v1")
+        # 2026-06-25 — default가 festival 통합 base v3로 전환됨(v3=v1 본문+빈 슬롯).
+        self.assertEqual(applied["prompt_version"], "v3")
 
 
 def _fake_urlopen_with_failures(responses_by_doc: dict[str, dict], fail_doc_ids: set[str]):
@@ -533,6 +534,27 @@ class DocGenuinenessRenderTests(unittest.TestCase):
         self.assertNotIn("행사별 추가 지침", rendered_empty)
         self.assertNotIn("행사별 추가 예시", rendered_empty)
         self.assertNotIn("{{", rendered_empty)
+
+    # silverone 2026-06-25 — PR2-B default 전환 parity 잠금. v3 base는 v1 본문
+    # 그대로 + 행사별 슬롯이므로, 슬롯이 비면 v1과 **byte-동일**하게 렌더돼야
+    # default를 v1→v3로 바꿔도 기존 dataset(슬롯 미설정) 동작이 변하지 않는다.
+    def test_v3_base_byte_identical_to_v1_when_slot_empty(self) -> None:
+        from python_ai_worker.dataset_build.doc_genuineness import (
+            _extract_doc_genuineness_config,
+            _render_prompt,
+        )
+        from python_ai_worker.prompt_options import load_prompt_body
+
+        cfg = _extract_doc_genuineness_config({
+            "doc_genuineness": {"subject_name": "강릉 국가유산야행", "subject_aliases": ["강릉야행"]}
+        })
+        v1_body, _ = load_prompt_body("doc_genuineness", "v1")
+        v3_body, _ = load_prompt_body("doc_genuineness", "v3")
+        self.assertEqual(
+            _render_prompt(v1_body, cfg),
+            _render_prompt(v3_body, cfg),
+            "v3 base는 행사별 슬롯이 비면 v1과 byte-동일해야 default 전환이 안전하다",
+        )
 
 
 
