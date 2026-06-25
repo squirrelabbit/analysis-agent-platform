@@ -19,6 +19,29 @@ def _completion(content: str) -> dict:
     }
 
 
+# silverone 2026-06-25 — 행사별 추가 슬롯의 verify 경로 동작 잠금.
+# classify(clause_label)에는 슬롯 마커가 있어 반영되고, judge에는 마커가 없어
+# 미반영이다(분쟁 재판정에 행사 고유 예시는 불필요). verify는 _extract_subject_config
+# 를 재사용하므로 payload['clause_label']의 extra_*가 classify에 자동 반영된다.
+class ClauseLabelVerifyExtraSlotTests(unittest.TestCase):
+    def test_judge_prompt_has_no_extra_markers(self) -> None:
+        from python_ai_worker.prompt_options import resolve_prompt_path
+
+        judge_path = resolve_prompt_path("clause_label_verify_judge")
+        self.assertIsNotNone(judge_path)
+        judge_body = judge_path.read_text(encoding="utf-8")
+        self.assertNotIn("extra_instructions", judge_body)
+        self.assertNotIn("extra_examples", judge_body)
+
+    def test_verify_reuses_clause_label_extra(self) -> None:
+        from python_ai_worker.dataset_build.clause_label import _extract_subject_config
+
+        config = _extract_subject_config({
+            "clause_label": {"extra_instructions": "행사 고유 규칙"},
+        })
+        self.assertEqual(config["extra_instructions"], "행사 고유 규칙")
+
+
 class _Resp:
     def __init__(self, payload: dict) -> None:
         self._payload = payload

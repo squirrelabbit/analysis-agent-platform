@@ -492,6 +492,47 @@ class DocGenuinenessRenderTests(unittest.TestCase):
         self.assertEqual(config["subject_type"], "generic")
         self.assertEqual(config["subject_aliases"], [])
         self.assertEqual(config["recruitment_keywords"], [])
+        # 행사별 추가 슬롯 미지정 → 빈값 (2026-06-25).
+        self.assertEqual(config["extra_instructions"], "")
+        self.assertEqual(config["extra_examples"], "")
+
+    # silverone 2026-06-25 — 행사별 추가 슬롯. doc_genuineness는 자기 task
+    # 서브객체(payload['doc_genuineness'])에서 extra_*를 읽는다. base 프롬프트
+    # 마커는 PR2에서 들어오므로 렌더러 동작은 인라인 템플릿으로 검증한다.
+    _EXTRA_TEMPLATE = (
+        "Classify '{{subject_name}}'.\n"
+        "{{#if extra_instructions}}\n## 행사별 추가 지침\n{{extra_instructions}}\n{{/if}}\n"
+        "{{#if extra_examples}}\n## 행사별 추가 예시\n{{extra_examples}}\n{{/if}}\n"
+    )
+
+    def test_extra_slot_injected_and_omitted(self) -> None:
+        from python_ai_worker.dataset_build.doc_genuineness import (
+            _extract_doc_genuineness_config,
+            _render_prompt,
+        )
+
+        config = _extract_doc_genuineness_config({
+            "doc_genuineness": {
+                "subject_name": "군산 맥주축제",
+                "extra_instructions": "입장료 6천원은 현장 관찰로 본다.",
+                "extra_examples": ["문서A → genuine_review"],
+            }
+        })
+        self.assertEqual(config["extra_instructions"], "입장료 6천원은 현장 관찰로 본다.")
+        self.assertIn("문서A", config["extra_examples"])
+
+        rendered = _render_prompt(self._EXTRA_TEMPLATE, config)
+        self.assertIn("## 행사별 추가 지침", rendered)
+        self.assertIn("입장료 6천원", rendered)
+        self.assertIn("문서A", rendered)
+        self.assertNotIn("{{", rendered)
+
+        # 빈값이면 섹션 통째 생략.
+        empty = _extract_doc_genuineness_config({"doc_genuineness": {"subject_name": "x"}})
+        rendered_empty = _render_prompt(self._EXTRA_TEMPLATE, empty)
+        self.assertNotIn("행사별 추가 지침", rendered_empty)
+        self.assertNotIn("행사별 추가 예시", rendered_empty)
+        self.assertNotIn("{{", rendered_empty)
 
 
 
