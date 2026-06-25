@@ -27,6 +27,8 @@ type MemoryStore struct {
 	reports              map[string]domain.Report                // key: report_id (보고서 문서)
 	genuinenessOverrides map[string]domain.DocGenuinenessOverride // key: versionID\x00docID
 	clauseOverrides      map[string]domain.ClauseLabelOverride    // key: versionID\x00clauseID
+	keywordDictRules     map[string]domain.KeywordDictionaryRule  // key: ruleID (silverone 2026-06-25)
+	keywordDictEvents    []domain.KeywordDictionaryEvent          // append-only
 	// 인증/RBAC (ADR-025). lazy-init (memory_auth.go ensureAuthMaps).
 	users          map[string]domain.User          // key: user_id
 	sessions       map[string]domain.Session       // key: session_id
@@ -53,6 +55,7 @@ func NewMemoryStore() *MemoryStore {
 		reports:              make(map[string]domain.Report),
 		genuinenessOverrides: make(map[string]domain.DocGenuinenessOverride),
 		clauseOverrides:      make(map[string]domain.ClauseLabelOverride),
+		keywordDictRules:     make(map[string]domain.KeywordDictionaryRule),
 	}
 }
 
@@ -993,6 +996,107 @@ func (s *MemoryStore) ListClauseLabelOverrides(projectID, datasetVersionID strin
 		}
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].ClauseID < items[j].ClauseID })
+	return items, nil
+}
+
+// ── 키워드 정제 사전 (silverone 2026-06-25) ────────────────────────────────
+
+func (s *MemoryStore) UpsertKeywordDictionaryRule(r domain.KeywordDictionaryRule) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := r.UpdatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if existing, ok := s.keywordDictRules[r.ID]; ok {
+		r.CreatedAt = existing.CreatedAt
+	} else if r.CreatedAt.IsZero() {
+		r.CreatedAt = now
+	}
+	r.UpdatedAt = now
+	s.keywordDictRules[r.ID] = r
+	return nil
+}
+
+func (s *MemoryStore) SetKeywordDictionaryRuleActive(projectID, datasetID, ruleID string, active bool, updatedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.keywordDictRules[ruleID]
+	if !ok || r.ProjectID != projectID || r.DatasetID != datasetID {
+		return ErrNotFound
+	}
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	r.Active = active
+	r.UpdatedAt = updatedAt
+	s.keywordDictRules[ruleID] = r
+	return nil
+}
+
+func (s *MemoryStore) DeleteKeywordDictionaryRule(projectID, datasetID, ruleID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.keywordDictRules[ruleID]
+	if !ok || r.ProjectID != projectID || r.DatasetID != datasetID {
+		return ErrNotFound
+	}
+	delete(s.keywordDictRules, ruleID)
+	return nil
+}
+
+func (s *MemoryStore) GetKeywordDictionaryRule(projectID, datasetID, ruleID string) (domain.KeywordDictionaryRule, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r, ok := s.keywordDictRules[ruleID]
+	if !ok || r.ProjectID != projectID || r.DatasetID != datasetID {
+		return domain.KeywordDictionaryRule{}, ErrNotFound
+	}
+	return r, nil
+}
+
+func (s *MemoryStore) ListKeywordDictionaryRules(projectID, datasetID string, activeOnly bool) ([]domain.KeywordDictionaryRule, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.KeywordDictionaryRule, 0)
+	for _, r := range s.keywordDictRules {
+		if r.ProjectID != projectID || r.DatasetID != datasetID {
+			continue
+		}
+		if activeOnly && !r.Active {
+			continue
+		}
+		items = append(items, r)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].RuleType != items[j].RuleType {
+			return items[i].RuleType < items[j].RuleType
+		}
+		return items[i].SourceTerm < items[j].SourceTerm
+	})
+	return items, nil
+}
+
+func (s *MemoryStore) AppendKeywordDictionaryEvent(e domain.KeywordDictionaryEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e.CreatedAt.IsZero() {
+		e.CreatedAt = time.Now().UTC()
+	}
+	s.keywordDictEvents = append(s.keywordDictEvents, e)
+	return nil
+}
+
+func (s *MemoryStore) ListKeywordDictionaryEvents(projectID, datasetID string) ([]domain.KeywordDictionaryEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.KeywordDictionaryEvent, 0)
+	for _, e := range s.keywordDictEvents {
+		if e.ProjectID == projectID && e.DatasetID == datasetID {
+			items = append(items, e)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
 	return items, nil
 }
 

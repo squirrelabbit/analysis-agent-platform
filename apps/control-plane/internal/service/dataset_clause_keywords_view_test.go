@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"analysis-support-platform/control-plane/internal/domain"
 )
 
 func asFloat(v any) float64 {
@@ -48,7 +50,7 @@ func setupClauseKeywordsFixture(t *testing.T) string {
 
 func TestLoadClauseKeywords_SummaryKPI(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	summary, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
+	summary, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -69,7 +71,7 @@ func TestLoadClauseKeywords_SummaryKPI(t *testing.T) {
 
 func TestLoadClauseKeywords_ItemColumns(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	_, _, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
+	_, _, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -105,7 +107,7 @@ func TestLoadClauseKeywords_ItemColumns(t *testing.T) {
 
 func TestLoadClauseKeywords_AspectSummary(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
+	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -121,7 +123,7 @@ func TestLoadClauseKeywords_AspectSummary(t *testing.T) {
 func TestLoadClauseKeywords_SelectedAspectSentiment(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
 	// aspect=food 선택 → 그 aspect 안의 sentiment 분포.
-	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "food", "", "", "")
+	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "food", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -142,7 +144,7 @@ func TestLoadClauseKeywords_SelectedAspectSentiment(t *testing.T) {
 
 func TestLoadClauseKeywords_TopKeywords(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
+	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -163,7 +165,7 @@ func TestLoadClauseKeywords_TopKeywords(t *testing.T) {
 func TestLoadClauseKeywords_Filters(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
 	// aspect=food + sentiment=negative → 행 가격,푸드트럭,가격 → distinct keyword 2(가격,푸드트럭).
-	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "food", "negative", "", "")
+	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "food", "negative", "", "", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -179,7 +181,7 @@ func TestLoadClauseKeywords_Filters(t *testing.T) {
 func TestLoadClauseKeywords_QFilter(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
 	// q=맛 → keyword '맛' 또는 clause '맛 좋음' 부분일치 → keyword 맛 1종.
-	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "맛", "")
+	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "맛", "", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -193,7 +195,7 @@ func TestLoadClauseKeywords_QFilter(t *testing.T) {
 
 func TestLoadClauseKeywords_Pagination(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	_, total, items, err := loadClauseKeywordsArtifact(path, 2, 0, "", "", "", "")
+	_, total, items, err := loadClauseKeywordsArtifact(path, 2, 0, "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -207,7 +209,7 @@ func TestLoadClauseKeywords_Pagination(t *testing.T) {
 
 func TestLoadClauseKeywords_AspectSentimentKeywords(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
+	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -268,7 +270,7 @@ func TestLoadClauseKeywords_WordCloudCap30(t *testing.T) {
 	if err := os.WriteFile(path, []byte(joinLines(lines)), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
+	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -290,7 +292,7 @@ func TestLoadClauseKeywords_TopCardCappedAt5(t *testing.T) {
 	if err := os.WriteFile(path, []byte(joinLines(lines)), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "")
+	summary, _, _, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -304,7 +306,7 @@ func TestLoadClauseKeywords_TopCardCappedAt5(t *testing.T) {
 // 절(clause_id)마다 {clause, keywords[]}. 키워드 많은 절 우선.
 func TestLoadClauseKeywords_ClauseGroup(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
-	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "clause")
+	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "clause", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -333,7 +335,7 @@ func TestLoadClauseKeywords_ClauseGroup(t *testing.T) {
 func TestLoadClauseKeywords_ClauseGroupSearch(t *testing.T) {
 	path := setupClauseKeywordsFixture(t)
 	// q=친절 → clause '직원 친절' 또는 keyword '친절' 매칭 → 절 1개.
-	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "친절", "clause")
+	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "친절", "clause", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -359,7 +361,7 @@ func TestLoadClauseKeywords_ClauseGroupDedup(t *testing.T) {
 	if err := os.WriteFile(path, []byte(joinLines(lines)), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "clause")
+	_, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "clause", nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -393,6 +395,97 @@ func TestBuildKeywordFilter(t *testing.T) {
 	for _, want := range []string{"aspect = 'food'", "sentiment = 'negative'", "ILIKE"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("filter %q missing %q", got, want)
+		}
+	}
+}
+
+// silverone 2026-06-25 — 키워드 정제 사전 overlay 잠금. 사전을 source 서브쿼리로
+// 감싸 block 제외/synonym 병합이 재집계까지 자동 반영되는지 검증.
+func keywordItem(items []map[string]any, kw string) map[string]any {
+	for _, it := range items {
+		if fmt.Sprint(it["keyword"]) == kw {
+			return it
+		}
+	}
+	return nil
+}
+
+func TestLoadClauseKeywords_DictionaryBlock(t *testing.T) {
+	path := setupClauseKeywordsFixture(t)
+	rules := []domain.KeywordDictionaryRule{
+		{RuleType: "block", SourceTerm: "가격", Active: true},
+	}
+	summary, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "", rules)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// 가격(2행) 제외 → total_keyword_count 6→4, distinct 5→4.
+	if summary["total_keyword_count"] != 4 {
+		t.Errorf("total_keyword_count=%v, want 4", summary["total_keyword_count"])
+	}
+	if summary["unique_keyword_count"] != 4 {
+		t.Errorf("unique_keyword_count=%v, want 4", summary["unique_keyword_count"])
+	}
+	if total != 4 {
+		t.Errorf("distinct keyword total=%d, want 4", total)
+	}
+	if keywordItem(items, "가격") != nil {
+		t.Errorf("blocked keyword '가격' still present in items")
+	}
+}
+
+func TestLoadClauseKeywords_DictionarySynonymMerge(t *testing.T) {
+	path := setupClauseKeywordsFixture(t)
+	// 푸드트럭 → 맛 병합. 맛(1) + 푸드트럭(1) = 2.
+	rules := []domain.KeywordDictionaryRule{
+		{RuleType: "synonym", SourceTerm: "푸드트럭", TargetTerm: "맛", Active: true},
+	}
+	summary, total, items, err := loadClauseKeywordsArtifact(path, 100, 0, "", "", "", "", rules)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// 병합이라 총 언급(행) 수는 6 유지, distinct는 5→4.
+	if summary["total_keyword_count"] != 6 {
+		t.Errorf("total_keyword_count=%v, want 6 (merge keeps rows)", summary["total_keyword_count"])
+	}
+	if summary["unique_keyword_count"] != 4 {
+		t.Errorf("unique_keyword_count=%v, want 4 after merge", summary["unique_keyword_count"])
+	}
+	if total != 4 {
+		t.Errorf("distinct keyword total=%d, want 4", total)
+	}
+	if keywordItem(items, "푸드트럭") != nil {
+		t.Errorf("merged source '푸드트럭' should not appear as its own keyword")
+	}
+	merged := keywordItem(items, "맛")
+	if merged == nil {
+		t.Fatalf("merged target '맛' missing")
+	}
+	if got := fmt.Sprint(merged["count"]); got != "2" {
+		t.Errorf("merged '맛' count=%s, want 2 (맛+푸드트럭)", got)
+	}
+}
+
+func TestValidateKeywordRuleAgainst(t *testing.T) {
+	active := []domain.KeywordDictionaryRule{
+		{RuleType: "block", SourceTerm: "광고", Active: true},
+		{RuleType: "synonym", SourceTerm: "수제맥주", TargetTerm: "맥주", Active: true},
+	}
+	cases := []struct {
+		name    string
+		rt, src, tgt string
+		wantErr bool
+	}{
+		{"synonym target in blocklist", "synonym", "비어", "광고", true},
+		{"synonym target is another source (chain)", "synonym", "크래프트", "수제맥주", true},
+		{"synonym source is a canonical target (re-merge)", "synonym", "맥주", "음료", true},
+		{"valid new synonym", "synonym", "크래프트맥주", "맥주", false},
+		{"valid new block", "block", "쓰레기", "", false},
+	}
+	for _, c := range cases {
+		err := validateKeywordRuleAgainst(c.rt, c.src, c.tgt, active)
+		if (err != nil) != c.wantErr {
+			t.Errorf("%s: err=%v wantErr=%v", c.name, err, c.wantErr)
 		}
 	}
 }
