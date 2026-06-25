@@ -28,7 +28,10 @@ type ReportTemplateSection struct {
 	RequiredBuild string              `json:"required_build"`
 	UnitBasis     string              `json:"unit_basis,omitempty"`
 	Phase         string              `json:"phase,omitempty"`
-	Layout        []ReportTemplateRow `json:"layout"`
+	// DateFilter — "recent_year"면 이 섹션 분포를 최신년도 데이터로만 집계한다(개요 섹션은
+	// 미설정=전체). silverone 2026-06-25. clause_label/clause_keywords/channel_breakdown에만 적용.
+	DateFilter string              `json:"date_filter,omitempty"`
+	Layout     []ReportTemplateRow `json:"layout"`
 }
 
 type ReportTemplateRow struct {

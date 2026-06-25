@@ -808,7 +808,7 @@ func docVerifyObject(v any) map[string]any {
 // prompt_version 회수. clause_id는 `{doc_id}-{partition_row_index}`로 즉시 생성.
 // summary(차트용)는 항상 전체 분포(필터 무관)이고, items + 반환 total은 aspect/
 // sentiment 필터가 적용된 결과(서버 페이징 대상)다. 필터가 비면 전체.
-func loadClauseLabelArtifact(ref, cleanRef string, limit, offset int, aspect, sentiment string) (map[string]any, string, int, []map[string]any, error) {
+func loadClauseLabelArtifact(ref, cleanRef string, limit, offset int, aspect, sentiment string, filters ...artifactRecentYearFilter) (map[string]any, string, int, []map[string]any, error) {
 	db, cleanup, err := openTempDuckDB()
 	if err != nil {
 		return nil, "", 0, nil, err
@@ -816,6 +816,8 @@ func loadClauseLabelArtifact(ref, cleanRef string, limit, offset int, aspect, se
 	defer cleanup()
 
 	source := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(ref))
+	// 최신년도 섹션 필터(silverone 2026-06-25) — source를 최신년도 doc로 좁힌다(없으면 no-op).
+	source, _ = wrapSourceRecentYear(db, source, filters)
 
 	// summary: 전체(필터 미적용) 분포. total + 2 grouping (sentiment, aspect).
 	total, bySentiment, err := aggregateGroupedCounts(db, source, "sentiment")
@@ -916,7 +918,7 @@ func buildClauseFilter(aspect, sentiment string) string {
 // resolution 분포와 행별 resolution/needs_review/sentence_index/chunk_index +
 // model A/B/judge snapshot을 노출한다. 필터: aspect/sentiment + 불일치(resolution
 // != 'agree')만 + 검토 필요(needs_review)만. AND 결합.
-func loadClauseLabelVerifyArtifact(ref, cleanRef string, limit, offset int, aspect, sentiment string, disagreementOnly, needsReviewOnly bool) (map[string]any, string, int, []map[string]any, error) {
+func loadClauseLabelVerifyArtifact(ref, cleanRef string, limit, offset int, aspect, sentiment string, disagreementOnly, needsReviewOnly bool, filters ...artifactRecentYearFilter) (map[string]any, string, int, []map[string]any, error) {
 	db, cleanup, err := openTempDuckDB()
 	if err != nil {
 		return nil, "", 0, nil, err
@@ -924,6 +926,8 @@ func loadClauseLabelVerifyArtifact(ref, cleanRef string, limit, offset int, aspe
 	defer cleanup()
 
 	source := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(ref))
+	// 최신년도 섹션 필터(silverone 2026-06-25) — source를 최신년도 doc로 좁힌다(없으면 no-op).
+	source, _ = wrapSourceRecentYear(db, source, filters)
 
 	// summary 분포(필터 미적용) — 단일 모드와 동일 + resolution 분포 추가.
 	total, bySentiment, err := aggregateGroupedCounts(db, source, "sentiment")
