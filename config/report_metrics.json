@@ -1,0 +1,69 @@
+{
+  "note": "보고서 템플릿용 metric 별칭 사전. 운영자는 템플릿에서 내부 build/path 대신 metric 이름만 쓰면 된다 (예: {\"label\":\"진성 문서수\",\"metric\":\"genuine_docs_total\"}). 차트 metric은 panel의 view/order/top/order_by와 함께 쓴다. kind: stat(단일 값) | distribution(bar/doughnut/table) | stacked(stacked_bar) | rank.",
+
+  "metrics": {
+    "genuine_docs_total": {
+      "kind": "stat",
+      "label": "진성 문서수",
+      "source": { "build": "doc_genuineness", "path": "summary.genuineness.genuine_review" },
+      "format": "count", "unit": "건"
+    },
+    "genuine_docs_recent_year": {
+      "kind": "stat",
+      "label": "진성 문서수 (최근연도)",
+      "source": { "build": "recent_year_stats", "path": "genuine_docs" },
+      "sub_source": { "build": "recent_year_stats", "path": "year_label" },
+      "format": "count", "unit": "건"
+    },
+    "clauses_total": {
+      "kind": "stat",
+      "label": "절(clause) 수",
+      "source": { "build": "clause_label", "path": "summary.total" },
+      "format": "count", "unit": "개"
+    },
+    "clauses_recent_year": {
+      "kind": "stat",
+      "label": "절(clause) 수 (최근연도)",
+      "source": { "build": "recent_year_stats", "path": "clause_count" },
+      "sub_source": { "build": "recent_year_stats", "path": "year_label" },
+      "format": "count", "unit": "개"
+    },
+
+    "sentiment_distribution": {
+      "kind": "distribution",
+      "label": "절 단위 감성 분포",
+      "source": { "build": "clause_label", "path": "summary.sentiment" },
+      "value_format": "percent"
+    },
+    "aspect_distribution": {
+      "kind": "distribution",
+      "label": "유형별 절 분포",
+      "source": { "build": "clause_label", "path": "summary.aspect" },
+      "value_format": "count"
+    },
+    "aspect_sentiment": {
+      "kind": "stacked",
+      "label": "유형별 감성 구성",
+      "source": { "build": "clause_label", "path": "summary.aspect_sentiment" },
+      "value_format": "percent"
+    },
+    "channel_genuine_distribution": {
+      "kind": "distribution",
+      "label": "채널별 진성 문서 분포",
+      "source": { "build": "channel_breakdown", "path": "summary.channels" },
+      "value_format": "count"
+    },
+    "keywords_positive": {
+      "kind": "rank",
+      "label": "긍정 키워드",
+      "source": { "build": "clause_keywords", "path": "summary.top_keywords_positive" },
+      "value_format": "count"
+    },
+    "keywords_negative": {
+      "kind": "rank",
+      "label": "부정 키워드",
+      "source": { "build": "clause_keywords", "path": "summary.top_keywords_negative" },
+      "value_format": "count"
+    }
+  }
+}

@@ -283,8 +283,9 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 			cleanRef = strings.TrimSpace(*version.CleanURI)
 		}
 		genRef := reportArtifactRef(version.Metadata, "doc_genuineness_ref", "doc_genuineness_uri")
+		// clause_label은 optional(절 수만 거기 의존). clean + doc_genuineness만 필수.
 		clauseRef := reportArtifactRef(version.Metadata, "clause_label_ref", "clause_label_uri")
-		if cleanRef == "" || genRef == "" || clauseRef == "" {
+		if cleanRef == "" || genRef == "" {
 			return reportBuildRoot{}
 		}
 		genVerify := metadataString(version.Metadata, "doc_genuineness_mode", "") == "verify"
@@ -495,9 +496,10 @@ func loadDataPeriod(cleanRef string) (string, string, error) {
 
 // loadRecentYearStats — 문서 개요의 "최근 연도 기준" 집계. clean 날짜에서 가장 최근
 // 연도를 구해, 그 연도 문서의 진성(genuine_review) 문서수와 절 수를 doc_id JOIN으로 센다.
-// clean/doc_genuineness/clause_label 셋 다 ready여야 하고, 날짜가 없으면 nil.
+// clean + doc_genuineness + 날짜가 필수(진성 문서수 최근연도). clause_label은 optional —
+// 있으면 절 수(최근연도)도 채우고, 없으면 진성 문서수만 반환한다.
 func loadRecentYearStats(cleanRef, genRef, clauseRef string, genVerify bool) (map[string]any, error) {
-	if strings.TrimSpace(cleanRef) == "" || strings.TrimSpace(genRef) == "" || strings.TrimSpace(clauseRef) == "" {
+	if strings.TrimSpace(cleanRef) == "" || strings.TrimSpace(genRef) == "" {
 		return nil, nil
 	}
 	db, cleanup, err := openTempDuckDB()
@@ -537,21 +539,26 @@ func loadRecentYearStats(cleanRef, genRef, clauseRef string, genVerify bool) (ma
 		return nil, err
 	}
 
-	clauseSrc := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(clauseRef))
-	var clauseCount int
-	if err := db.QueryRow(fmt.Sprintf(
-		"SELECT COUNT(*) FROM %s AS c JOIN %s AS r ON c.doc_id = r.row_id",
-		clauseSrc, recentDocs,
-	)).Scan(&clauseCount); err != nil {
-		return nil, err
-	}
-
-	return map[string]any{
+	result := map[string]any{
 		"recent_year":  year,
 		"year_label":   fmt.Sprintf("%d년", year),
 		"genuine_docs": genuineDocs,
-		"clause_count": clauseCount,
-	}, nil
+	}
+
+	// clause_label은 optional — 빌드돼 있으면 절 수(최근연도)도 채운다.
+	if strings.TrimSpace(clauseRef) != "" {
+		clauseSrc := fmt.Sprintf("read_json('%s', format='newline_delimited')", escapeDuckDBLiteral(clauseRef))
+		var clauseCount int
+		if err := db.QueryRow(fmt.Sprintf(
+			"SELECT COUNT(*) FROM %s AS c JOIN %s AS r ON c.doc_id = r.row_id",
+			clauseSrc, recentDocs,
+		)).Scan(&clauseCount); err != nil {
+			return nil, err
+		}
+		result["clause_count"] = clauseCount
+	}
+
+	return result, nil
 }
 
 // reportCleanReady — clean 단계 완료 판정. 빌드 잡 status는 "completed", artifact status는
@@ -598,9 +605,6 @@ func (s *DatasetService) buildReportBlock(version domain.DatasetVersion, section
 
 func (s *DatasetService) buildReportPanel(version domain.DatasetVersion, panel registry.ReportTemplatePanel, cache map[string]reportBuildRoot, labels reportLabels) map[string]any {
 	out := map[string]any{"view": panel.View, "width": panel.Width}
-	if strings.TrimSpace(panel.ValueFormat) != "" {
-		out["value_format"] = panel.ValueFormat
-	}
 	if strings.TrimSpace(panel.Title) != "" {
 		out["title"] = panel.Title
 	}
@@ -610,7 +614,12 @@ func (s *DatasetService) buildReportPanel(version domain.DatasetVersion, panel r
 		return out
 	}
 
-	src := panel.Source
+	// source: metric 별칭(catalog) 우선, 없으면 직접 source. value_format도 함께 resolve.
+	valueFormat := strings.TrimSpace(panel.ValueFormat)
+	src := resolvePanelSource(panel, &valueFormat)
+	if valueFormat != "" {
+		out["value_format"] = valueFormat
+	}
 	if src == nil {
 		out["data"] = map[string]any{}
 		return out
@@ -813,27 +822,83 @@ func rankData(node any, src *registry.ReportTemplateSource, labels reportLabels)
 func (s *DatasetService) statGridData(version domain.DatasetVersion, panel registry.ReportTemplatePanel, cache map[string]reportBuildRoot, labels reportLabels) map[string]any {
 	items := make([]any, 0, len(panel.Items))
 	for _, cfg := range panel.Items {
-		out := map[string]any{"key": cfg.Key, "label": cfg.Label, "format": cfg.Format}
-		if strings.TrimSpace(cfg.Unit) != "" {
-			out["unit"] = cfg.Unit
+		// metric 별칭이면 catalog에서 source/format/unit/sub/label을 채우고, item에 명시된
+		// 값이 있으면 그게 우선(override). metric 없이 source 직접 방식도 그대로 동작.
+		source, subSource, format, unit, label, key := resolveStatItem(cfg)
+
+		out := map[string]any{"key": key, "label": label, "format": format}
+		if strings.TrimSpace(unit) != "" {
+			out["unit"] = unit
 		}
 		var value any = cfg.Value
-		if cfg.Source != nil {
-			root := s.reportBuildRoot(version, cfg.Source.Build, cache)
-			if resolved := digPath(root.root, cfg.Source.Path); resolved != nil {
+		if source != nil {
+			root := s.reportBuildRoot(version, source.Build, cache)
+			if resolved := digPath(root.root, source.Path); resolved != nil {
 				value = normalizeStatValue(resolved)
 			}
 		}
 		out["value"] = value
-		if cfg.SubSource != nil {
-			root := s.reportBuildRoot(version, cfg.SubSource.Build, cache)
-			if resolved := digPath(root.root, cfg.SubSource.Path); resolved != nil {
+		if subSource != nil {
+			root := s.reportBuildRoot(version, subSource.Build, cache)
+			if resolved := digPath(root.root, subSource.Path); resolved != nil {
 				out["sub"] = normalizeStatValue(resolved)
 			}
 		}
 		items = append(items, out)
 	}
 	return map[string]any{"items": items}
+}
+
+// resolveStatItem — stat item의 metric 별칭을 catalog로 풀어 (source, subSource, format,
+// unit, label, key)를 정한다. item에 명시된 값이 metric 기본값보다 우선.
+func resolveStatItem(cfg registry.ReportTemplateStatItem) (source, subSource *registry.ReportTemplateSource, format, unit, label, key string) {
+	source, subSource = cfg.Source, cfg.SubSource
+	format, unit, label, key = cfg.Format, cfg.Unit, cfg.Label, cfg.Key
+	if m, ok := registry.ReportMetricByID(cfg.Metric); ok {
+		if source == nil {
+			source = m.Source
+		}
+		if subSource == nil {
+			subSource = m.SubSource
+		}
+		if format == "" {
+			format = m.Format
+		}
+		if unit == "" {
+			unit = m.Unit
+		}
+		if label == "" {
+			label = m.Label
+		}
+		if key == "" {
+			key = strings.TrimSpace(cfg.Metric)
+		}
+	}
+	return source, subSource, format, unit, label, key
+}
+
+// resolvePanelSource — 차트 panel의 metric 별칭을 catalog source로 풀고, panel의
+// order/order_by/top을 그 위에 덮어쓴다. value_format도 (panel 명시 없으면) metric 기본.
+func resolvePanelSource(panel registry.ReportTemplatePanel, valueFormat *string) *registry.ReportTemplateSource {
+	if strings.TrimSpace(panel.Metric) != "" {
+		if m, ok := registry.ReportMetricByID(panel.Metric); ok && m.Source != nil {
+			merged := *m.Source // copy
+			if len(panel.Order) > 0 {
+				merged.Order = panel.Order
+			}
+			if strings.TrimSpace(panel.OrderBy) != "" {
+				merged.OrderBy = panel.OrderBy
+			}
+			if panel.Top > 0 {
+				merged.Top = panel.Top
+			}
+			if *valueFormat == "" {
+				*valueFormat = m.ValueFormat
+			}
+			return &merged
+		}
+	}
+	return panel.Source
 }
 
 func normalizeStatValue(v any) any {
