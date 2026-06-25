@@ -24,7 +24,25 @@ import (
 // (추가 집계 없음). 생성된 블록엔 데이터 스냅샷 + source binding을 함께 저장(나중에 "갱신" 용).
 // 계약: docs/api/report_basic_template.sample.md
 func (s *DatasetService) CreateReportFromTemplate(projectID string, req domain.ReportFromTemplateRequest) (domain.ReportFromTemplateResponse, error) {
-	built, err := s.buildReportTemplateBlocks(projectID, req.TemplateID, req.DatasetVersionID)
+	// dataset_id → 그 dataset의 active version으로 해석(analyze 흐름과 동일 패턴).
+	datasetID := strings.TrimSpace(req.DatasetID)
+	if datasetID == "" {
+		return domain.ReportFromTemplateResponse{}, ErrInvalidArgument{Message: "dataset_id is required"}
+	}
+	dataset, err := s.GetDataset(projectID, datasetID)
+	if err != nil {
+		return domain.ReportFromTemplateResponse{}, err
+	}
+	versionID := ""
+	if dataset.ActiveDatasetVersionID != nil {
+		versionID = strings.TrimSpace(*dataset.ActiveDatasetVersionID)
+	}
+	if versionID == "" {
+		return domain.ReportFromTemplateResponse{}, ErrInvalidArgument{
+			Message: "dataset has no active version — set an active version first",
+		}
+	}
+	built, err := s.buildReportTemplateBlocks(projectID, req.TemplateID, versionID)
 	if err != nil {
 		return domain.ReportFromTemplateResponse{}, err
 	}
