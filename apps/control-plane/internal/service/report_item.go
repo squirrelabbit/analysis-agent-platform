@@ -13,9 +13,9 @@ import (
 // AppendReportItem — 기존 보고서에 item(블록) 1개를 추가한다. 새 보고서를 만들지 않고
 // report_id의 blocks 뒤에 append + updated_at만 갱신한다(채팅 결과 → 보고서 추가 flow).
 //
-// type=analysis_result는 run_id가 가리키는 완료된 분석 결과를 그 시점 스냅샷으로 박제한다
-// (보관함 CreateSavedResult와 동일한 추출). 스냅샷 이유: 재실행/재빌드로 결과가 달라지거나
-// thread를 지워도 보고서 근거는 저장 당시 그대로 남아야 감사·재현이 된다.
+// type=analysis_result는 run_id가 가리키는 완료된 분석 결과를 그 시점 스냅샷으로 박제한다.
+// 스냅샷 이유: 재실행/재빌드로 결과가 달라지거나 thread를 지워도 보고서 근거는 저장 당시
+// 그대로 남아야 감사·재현이 된다.
 func (s *DatasetService) AppendReportItem(projectID, reportID string, req domain.ReportItemAppendRequest) (domain.ReportItemAppendResponse, error) {
 	report, err := s.store.GetReport(projectID, strings.TrimSpace(reportID))
 	if err != nil {
@@ -84,7 +84,7 @@ func (s *DatasetService) AppendReportItem(projectID, reportID string, req domain
 }
 
 // buildAnalysisResultItem — run_id의 완료 분석 결과에서 question/assistant_content/
-// display/plan을 추출해 item 필드로 만든다(보관함 추출 로직 재사용).
+// display/plan을 추출해 item 필드로 만든다.
 func (s *DatasetService) buildAnalysisResultItem(projectID string, req domain.ReportItemAppendRequest) (map[string]any, error) {
 	runID := strings.TrimSpace(req.RunID)
 	if runID == "" {
@@ -112,9 +112,9 @@ func (s *DatasetService) buildAnalysisResultItem(projectID string, req domain.Re
 
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
-		title = deriveSavedResultTitle(display, question, assistantContent)
+		title = deriveReportItemTitle(display, question, assistantContent)
 	}
-	title = truncateRunes(title, savedResultTitleMaxLen)
+	title = truncateRunes(title, reportItemTitleMaxLen)
 
 	return map[string]any{
 		"run_id":            run.RunID,
@@ -125,4 +125,55 @@ func (s *DatasetService) buildAnalysisResultItem(projectID string, req domain.Re
 		"display":           display,
 		"plan":              plan,
 	}, nil
+}
+
+// ── run result_json 추출 helper (구 보관함 report_saved_results.go에서 이동) ──
+
+const reportItemTitleMaxLen = 120
+
+// extractAssistantContentFromResultJSON — run.result_json의 composer.assistant_content.
+func extractAssistantContentFromResultJSON(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return ""
+	}
+	composer, ok := root["composer"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	content, _ := composer["assistant_content"].(string)
+	return strings.TrimSpace(content)
+}
+
+// analysisRunUserQuestion — run.request_json의 user_question.
+func analysisRunUserQuestion(run domain.AnalysisRun) string {
+	if run.RequestJSON == nil {
+		return ""
+	}
+	if q, ok := run.RequestJSON["user_question"].(string); ok {
+		return strings.TrimSpace(q)
+	}
+	return ""
+}
+
+// deriveReportItemTitle — 제목 미지정 시 display.title → question → assistant_content
+// 순으로 유도. 모두 비면 기본값.
+func deriveReportItemTitle(display map[string]any, question, assistantContent string) string {
+	if display != nil {
+		if t, ok := display["title"].(string); ok {
+			if t = strings.TrimSpace(t); t != "" {
+				return t
+			}
+		}
+	}
+	if q := strings.TrimSpace(question); q != "" {
+		return q
+	}
+	if c := strings.TrimSpace(assistantContent); c != "" {
+		return c
+	}
+	return "분석 결과"
 }
