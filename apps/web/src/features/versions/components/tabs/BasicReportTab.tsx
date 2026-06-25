@@ -190,9 +190,9 @@ function PanelView({ panel }: { panel: ReportPanel }) {
 
 // ── view별 패널 ───────────────────────────────────────────────
 
-// 분석 개요·문서 개요(stat_grid) — 분리된 강조 카드 그리드.
-// format에 따라 톤을 자동 분기: count/number는 큰 숫자 + 보라 강조바(문서 개요),
-// text/code는 중간 크기 + 회색 바(분석 개요).
+// 분석 개요·문서 개요(stat_grid) — 부모 흰 카드에 종속되는 회색 톤 셀 그리드.
+// 값 크기는 format으로 분기: count/number(문서 개요)는 큰 숫자, 그 외 텍스트(분석
+// 개요)는 작게 — 긴 텍스트가 큰 글씨로 깨지지 않게.
 function StatGridPanel({ data }: { data: StatGridData }) {
   return (
     <div
@@ -206,24 +206,18 @@ function StatGridPanel({ data }: { data: StatGridData }) {
         return (
           <div
             key={`${it.key}-${i}`}
-            className="overflow-hidden rounded-xl border border-zinc-100 bg-white p-4.5 shadow-sm"
+            className="rounded-xl border border-zinc-100 bg-zinc-50/60 px-4 py-3.5"
           >
-            <div className="text-[12.5px] font-semibold text-zinc-500">
+            <div className="text-[12px] font-semibold text-zinc-400">
               {it.label}
             </div>
             <div
               className={cn(
                 "mt-2 tracking-tight tabular-nums text-zinc-900",
-                big ? "text-3xl font-extrabold leading-none" : "text-[17px] font-bold",
+                big ? "text-3xl font-extrabold leading-none" : "text-sm font-bold",
               )}
             >
-              {it.format === "code" ? (
-                <code className="font-mono text-[15px] text-violet-600">
-                  {main}
-                </code>
-              ) : (
-                main
-              )}
+              {main}
               {big && it.unit && (
                 <span className="ml-1 text-base font-bold text-zinc-400">
                   {it.unit}
@@ -254,7 +248,7 @@ function BarPanel({ data }: { data: DistributionData }) {
             {it.label}
           </span>
           <BarTrack
-            className="h-5 !rounded-md"
+            className="h-5 rounded-md!"
             percent={it.percent}
             fillClassName="!rounded-md bg-linear-to-r from-violet-500 to-violet-600 transition-all duration-500"
           />
@@ -353,7 +347,7 @@ function TablePanel({ data }: { data: DistributionData }) {
 }
 
 // 긍정·부정 구성비 — 중립(neutral) 제외 후 남은 series를 counts 기준 100%로 재정규화.
-const NEUTRAL_KEYS = new Set(["neutral", "neu", "중립"]);
+const NEUTRAL_KEYS = new Set(["neutral", "중립"]);
 
 function StackedBarPanel({ data }: { data: StackedData }) {
   const { categories } = data;
@@ -399,7 +393,7 @@ function StackedBarPanel({ data }: { data: StackedData }) {
           </div>
         ))}
       </div>
-      <div className="mt-3.5 flex flex-wrap gap-4.5 border-t border-zinc-100 pt-3.5 text-[12.5px] font-semibold text-zinc-500">
+      <div className="mt-3.5 flex flex-wrap gap-4.5 border-b border-zinc-100 py-3.5 text-[12.5px] font-semibold text-zinc-500">
         {series.map((s, si) => (
           <span key={s.key} className="inline-flex items-center gap-1.75">
             <i
@@ -414,49 +408,34 @@ function StackedBarPanel({ data }: { data: StackedData }) {
   );
 }
 
+// 순위 리스트 — 계약이 주는 값(rank, label, value)만 표시. percent/총합/막대 스케일
+// 같은 파생 계산은 하지 않는다(분모가 표시 항목 합뿐이라 오해 소지).
 function RankPanel({ data, title }: { data: RankData; title?: string }) {
   const items = [...data.items].sort((a, b) => a.rank - b.rank);
-  const max = Math.max(...items.map((i) => i.value), 1);
-  const total = items.reduce((a, i) => a + i.value, 0);
   return (
     <div className="rounded-xl border border-zinc-100 bg-zinc-50/50 p-4">
       {title && (
-        <div className="mb-3.5 flex items-center gap-2 text-[13px] font-bold text-zinc-700">
-          {title}
-          <span className="ml-auto text-[11.5px] font-semibold text-zinc-400">
-            총 {numFmt(total)}
-          </span>
-        </div>
+        <div className="mb-3.5 text-[13px] font-bold text-zinc-700">{title}</div>
       )}
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
         {items.map((it) => (
-          <div key={`${it.rank}-${it.label}`} className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "grid h-4.5 w-4.5 shrink-0 place-items-center rounded-md text-[11px] font-extrabold",
-                  it.rank === 1
-                    ? "bg-violet-500 text-white"
-                    : "border border-zinc-200 bg-white text-zinc-500",
-                )}
-              >
-                {it.rank}
-              </span>
-              <span className="truncate text-[13px] font-semibold text-zinc-800">
-                {it.label}
-              </span>
-              <span className="ml-auto shrink-0 text-[13.5px] font-extrabold tabular-nums text-zinc-900">
-                {numFmt(it.value)}
-                <span className="ml-1 text-[11px] font-bold text-zinc-400">
-                  {total > 0 ? Math.round((it.value / total) * 1000) / 10 : 0}%
-                </span>
-              </span>
-            </div>
-            <BarTrack
-              className="h-3"
-              percent={(it.value / max) * 100}
-              fillClassName="bg-violet-500 transition-all duration-500"
-            />
+          <div key={`${it.rank}-${it.label}`} className="flex items-center gap-2">
+            <span
+              className={cn(
+                "grid h-4.5 w-4.5 shrink-0 place-items-center rounded-md text-[11px] font-extrabold",
+                it.rank === 1
+                  ? "bg-violet-500 text-white"
+                  : "border border-zinc-200 bg-white text-zinc-500",
+              )}
+            >
+              {it.rank}
+            </span>
+            <span className="truncate text-[13px] font-semibold text-zinc-800">
+              {it.label}
+            </span>
+            <span className="ml-auto shrink-0 text-[13.5px] font-extrabold tabular-nums text-zinc-900">
+              {numFmt(it.value)}
+            </span>
           </div>
         ))}
       </div>
