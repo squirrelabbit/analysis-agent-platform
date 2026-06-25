@@ -209,4 +209,50 @@ export const buildApi = {
         `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/clause_label/${encodeURIComponent(clauseId)}/override`,
       )
       .then(() => undefined),
+
+  // 키워드 정제 사전 (silverone 2026-06-25) — dataset 단위. 제외=block, 대표어
+  // 지정=synonym. 저장은 키워드 결과 overlay에 즉시 반영(원본 artifact 불변).
+  listKeywordDictionary: (
+    projectId: string,
+    datasetId: string,
+    includeInactive?: boolean,
+  ) =>
+    apiClient
+      .get(`/projects/${projectId}/datasets/${datasetId}/keyword_dictionary`, {
+        params: includeInactive ? { include_inactive: 1 } : undefined,
+      })
+      .then(({ data }) => data),
+
+  setKeywordDictionaryRule: (
+    projectId: string,
+    datasetId: string,
+    req: {
+      rule_type: "block" | "synonym";
+      source_term: string;
+      target_term?: string;
+      reason?: string;
+    },
+  ) =>
+    apiClient
+      .post(`/projects/${projectId}/datasets/${datasetId}/keyword_dictionary`, req)
+      .then(({ data }) => data),
+
+  setKeywordDictionaryRuleActive: (
+    projectId: string,
+    datasetId: string,
+    ruleId: string,
+    active: boolean,
+    reason?: string,
+  ) =>
+    apiClient
+      .post(
+        `/projects/${projectId}/datasets/${datasetId}/keyword_dictionary/${encodeURIComponent(ruleId)}/${active ? "reactivate" : "deactivate"}`,
+        { reason },
+      )
+      .then(({ data }) => data),
+
+  listKeywordDictionaryHistory: (projectId: string, datasetId: string) =>
+    apiClient
+      .get(`/projects/${projectId}/datasets/${datasetId}/keyword_dictionary/history`)
+      .then(({ data }) => data),
 };

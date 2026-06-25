@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Hash, Layers, Percent, Star } from "lucide-react";
 import { StatCard } from "@/components/common/cards/StatCard";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   BuildMetaBar,
   BuildRunningBanner,
@@ -11,11 +13,12 @@ import type { KeywordBuild } from "../../models/build";
 import { useBuildVersion } from "../../hooks/build.query";
 import KeywordClauseTable from "../KeywordClauseTable";
 import KeywordSentimentRankTable from "../KeywordSentimentRankTable";
+import KeywordRefineDialog, { type RefineMode } from "../KeywordRefineDialog";
+import KeywordRulesTab from "../KeywordRulesTab";
+import KeywordHistoryTab from "../KeywordHistoryTab";
+import ChatToast from "@/features/chats/components/ChatToast";
 
 export function KeywordTab() {
-  // 요약 통계는 기존 clause_keywords 집계 API를 그대로 사용한다.
-  // "절에서 추출된 키워드" 표는 추출 API가 아직 없어 KeywordClauseTable에서 하드코딩.
-  // (Aspect별 키워드 워드클라우드·긍부정 Top·키워드 상세 표는 제거됨.)
   const { data, isLoading } = useBuildVersion("clause_keywords") as {
     data: KeywordBuild | undefined;
     isLoading: boolean;
@@ -29,72 +32,107 @@ export function KeywordTab() {
     durationSeconds,
   } = data || {};
 
+  // 키워드 정제 모달 상태 + 저장 피드백 토스트.
+  const [refine, setRefine] = useState<{
+    open: boolean;
+    mode: RefineMode;
+    keyword: string;
+  }>({ open: false, mode: "exclude", keyword: "" });
+  const [toast, setToast] = useState("");
+  const openRefine = (keyword: string, mode: RefineMode) =>
+    setRefine({ open: true, mode, keyword });
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(""), 2200);
+  };
+
   if (isLoading) return <BuildTabLoading />;
 
-  // 빌드 전(summary 없음)·진행 중이 아니면 다른 탭과 동일한 empty state.
-  // (키워드 순위/절 표가 빌드 안 한 버전에서 빈 표로 노출되던 것 방지)
   if (!summary && !isBuildRunning(status)) {
-    return <BuildTabEmpty type="clause_keywords" status={status ?? "not_requested"} />;
+    return (
+      <BuildTabEmpty type="clause_keywords" status={status ?? "not_requested"} />
+    );
   }
 
-  // 최다 출현 키워드 — 전역 필드가 없어 현재 페이지 상위로 근사.
   const topTerms = items.slice(0, 2).map((it) => it.keyword);
 
   return (
-    <div className="space-y-5">
-      {summary && (
-        <>
-          {/* 메타 */}
-          <BuildMetaBar
+    <Tabs defaultValue="result" className="space-y-4">
+      <TabsList variant="line">
+        <TabsTrigger value="result">키워드 결과</TabsTrigger>
+        <TabsTrigger value="rules">정제 규칙</TabsTrigger>
+        <TabsTrigger value="history">변경 이력</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="result" className="space-y-5">
+        {summary && (
+          <>
+            <BuildMetaBar
+              status={status}
+              durationSeconds={durationSeconds}
+              applied={applied}
+            />
+            <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
+              <StatCard
+                value={summary.totalKeywordCount.toLocaleString()}
+                label="총 키워드 추출"
+                icon={Hash}
+                tone="neutral"
+              />
+              <StatCard
+                value={summary.uniqueKeywordCount.toLocaleString()}
+                label="고유 키워드 수"
+                icon={Layers}
+                tone="blue"
+              />
+              <StatCard
+                value={topTerms.join(" · ") || "-"}
+                label="최다 출현 키워드"
+                icon={Star}
+                tone="muted"
+              />
+              <StatCard
+                value={summary.clauseCount.toLocaleString()}
+                label="분석 절 수"
+                icon={Percent}
+                tone="ok"
+                valueColor="text-emerald-600"
+              />
+            </div>
+          </>
+        )}
+
+        {!summary && isBuildRunning(status) && (
+          <BuildRunningBanner
             status={status}
-            durationSeconds={durationSeconds}
-            applied={applied}
+            progress={progress}
+            hasPrevious={false}
           />
-          {/* 요약 통계 */}
-          <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-4">
-            <StatCard
-              value={summary.totalKeywordCount.toLocaleString()}
-              label="총 키워드 추출"
-              icon={Hash}
-              tone="neutral"
-            />
-            <StatCard
-              value={summary.uniqueKeywordCount.toLocaleString()}
-              label="고유 키워드 수"
-              icon={Layers}
-              tone="blue"
-            />
-            <StatCard
-              value={topTerms.join(" · ") || "-"}
-              label="최다 출현 키워드"
-              icon={Star}
-              tone="muted"
-            />
-            <StatCard
-              value={summary.clauseCount.toLocaleString()}
-              label="분석 절 수"
-              icon={Percent}
-              tone="ok"
-              valueColor="text-emerald-600"
-            />
-          </div>
-        </>
-      )}
+        )}
 
-      {/* 빌드 진행 중이고 이전 결과(summary)가 아직 없을 때 */}
-      {!summary && isBuildRunning(status) && (
-        <BuildRunningBanner
-          status={status}
-          progress={progress}
-          hasPrevious={false}
-        />
-      )}
+        {/* 키워드별 긍정/부정 순위 — 각 행에서 바로 [병합]/[제외] 정제 */}
+        <KeywordSentimentRankTable onRefine={openRefine} />
 
-      {/* 키워드별 긍정/부정 순위 — clause_keywords API(sentiment 필터+limit)로 상위 N 조회 */}
-      <KeywordSentimentRankTable />
+        {/* 절에서 추출된 키워드 */}
+        <KeywordClauseTable />
+      </TabsContent>
 
-      {/* 절에서 추출된 키워드 (추출 API 준비 전 — 예시 하드코딩) */}
-      <KeywordClauseTable />
-    </div>
+      <TabsContent value="rules">
+        <KeywordRulesTab />
+      </TabsContent>
+
+      <TabsContent value="history">
+        <KeywordHistoryTab />
+      </TabsContent>
+
+      <KeywordRefineDialog
+        open={refine.open}
+        onOpenChange={(open) => setRefine((s) => ({ ...s, open }))}
+        mode={refine.mode}
+        sourceTerm={refine.keyword}
+        onSaved={showToast}
+      />
+      <ChatToast message={toast} visible={!!toast} />
+    </Tabs>
   );
 }

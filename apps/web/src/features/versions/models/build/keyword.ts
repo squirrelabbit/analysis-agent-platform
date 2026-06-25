@@ -210,3 +210,103 @@ export const mapKeywordVersionBuild = (
   completedAt: dto.completed_at ?? "",
   summary: dto.summary ? mapKeywordSummary(dto.summary) : undefined,
 });
+
+// ── 키워드 정제 사전 (silverone 2026-06-25) ────────────────────────────────
+// dataset 단위 정제 규칙(제외=block, 대표어 지정=synonym) + append-only 이력.
+export interface KeywordDictionaryRuleDto {
+  id: string;
+  rule_type: "block" | "synonym";
+  source_term: string;
+  target_term?: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KeywordDictionaryRule {
+  id: string;
+  ruleType: "block" | "synonym";
+  sourceTerm: string;
+  targetTerm: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const mapKeywordDictionaryRule = (
+  dto: KeywordDictionaryRuleDto,
+): KeywordDictionaryRule => ({
+  id: dto.id,
+  ruleType: dto.rule_type,
+  sourceTerm: dto.source_term,
+  targetTerm: dto.target_term ?? "",
+  active: dto.active,
+  createdAt: dto.created_at,
+  updatedAt: dto.updated_at,
+});
+
+export interface KeywordDictionaryEventDto {
+  id: string;
+  rule_id: string;
+  event_type: string;
+  before_payload?: string;
+  after_payload?: string;
+  reason?: string;
+  actor_id?: string;
+  created_at: string;
+}
+
+// payload(JSON 문자열)에서 표시용으로 뽑은 규칙 요약.
+export interface KeywordRulePayload {
+  ruleType?: string;
+  sourceTerm?: string;
+  targetTerm?: string;
+  active?: boolean;
+}
+
+export interface KeywordDictionaryEvent {
+  id: string;
+  ruleId: string;
+  eventType: string;
+  before?: KeywordRulePayload;
+  after?: KeywordRulePayload;
+  reason: string;
+  actorId: string;
+  createdAt: string;
+}
+
+const parseRulePayload = (raw?: string): KeywordRulePayload | undefined => {
+  if (!raw) return undefined;
+  try {
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      ruleType: o.rule_type as string | undefined,
+      sourceTerm: o.source_term as string | undefined,
+      targetTerm: o.target_term as string | undefined,
+      active: o.active as boolean | undefined,
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+export const mapKeywordDictionaryEvent = (
+  dto: KeywordDictionaryEventDto,
+): KeywordDictionaryEvent => ({
+  id: dto.id,
+  ruleId: dto.rule_id,
+  eventType: dto.event_type,
+  before: parseRulePayload(dto.before_payload),
+  after: parseRulePayload(dto.after_payload),
+  reason: dto.reason ?? "",
+  actorId: dto.actor_id ?? "",
+  createdAt: dto.created_at,
+});
+
+// 규칙 생성/수정 요청 body.
+export interface KeywordDictionaryRuleRequest {
+  rule_type: "block" | "synonym";
+  source_term: string;
+  target_term?: string;
+  reason?: string;
+}
