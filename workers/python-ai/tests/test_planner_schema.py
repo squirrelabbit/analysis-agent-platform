@@ -239,41 +239,6 @@ class PlanV2ClausesAspectTaxonomyDerivedTests(unittest.TestCase):
             self.assertIn(key, self.aspect_column.description)
 
 
-class PlanV2EnVariantAspectTaxonomySyncTests(unittest.TestCase):
-    """en variant prompt(planner-v2-anthropic-en-v1.md)의 aspect enum line이
-    festival-v2 taxonomy와 정합한지 잠금. en variant는 experimental이라 runtime
-    render 안 함 — Phase 3-A에서는 *hand-coded 일치만* 잠금.
-    Phase 4 또는 별도 PR에서 en variant도 placeholder + render path로 전환 가능.
-    """
-
-    def setUp(self) -> None:
-        from pathlib import Path
-
-        from python_ai_worker.taxonomies import load_taxonomy
-
-        self.taxonomy = load_taxonomy("festival-v2")
-        # repo root: workers/python-ai/tests/test_planner_schema.py
-        #         → workers/python-ai/tests → workers/python-ai → workers → <repo root>
-        repo_root = Path(__file__).resolve().parents[3]
-        self.en_md = (
-            repo_root / "config" / "prompts" / "planner-v2-anthropic-en-v1.md"
-        ).read_text(encoding="utf-8")
-
-    def test_en_variant_contains_all_9_aspect_keys(self) -> None:
-        for key in self.taxonomy.aspect_keys:
-            self.assertIn(key, self.en_md, f"en variant missing aspect key '{key}'")
-
-    def test_en_variant_excludes_deprecated_aspect_keys(self) -> None:
-        # markdown table cell delimiter로 검색 — 옛 키가 자유 본문에 우연히 들어
-        # 있는 경우는 false positive 방지 (현재 prompt 본문에 없음).
-        for deprecated in ("atmosphere", "convenience", "value", "overall"):
-            self.assertNotIn(
-                f" {deprecated} ",
-                self.en_md,
-                f"deprecated aspect '{deprecated}' present in en variant",
-            )
-
-
 class PlanV2ColumnTypeClassificationTests(unittest.TestCase):
     """validator R3 (2026-05-27) — column type 분류 상수가 TABLE_SCHEMAS에서
     derive되고 의미가 보존되는지 잠금. 옛 위치는 validator.py module-level

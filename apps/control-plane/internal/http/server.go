@@ -217,6 +217,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /projects/{project_id}/saved_results/{result_id}", s.handleDeleteSavedResult)
 	// 보고서 문서 CRUD (silverone 2026-06-11) — project 스코프.
 	s.mux.HandleFunc("POST /projects/{project_id}/reports", s.handleCreateReport)
+	// 기본 템플릿으로 보고서 생성(데이터 기초 분석). clean ready version 대상.
+	s.mux.HandleFunc("POST /projects/{project_id}/reports/from_template", s.handleCreateReportFromTemplate)
+	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/basic_analysis", s.handleGetBasicAnalysis)
 	s.mux.HandleFunc("GET /projects/{project_id}/reports", s.handleListReports)
 	s.mux.HandleFunc("GET /projects/{project_id}/reports/{report_id}", s.handleGetReport)
 	s.mux.HandleFunc("PUT /projects/{project_id}/reports/{report_id}", s.handleUpdateReport)
@@ -1086,6 +1089,35 @@ func (s *Server) handleCreateReport(w stdhttp.ResponseWriter, r *stdhttp.Request
 		return
 	}
 	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+func (s *Server) handleCreateReportFromTemplate(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ReportFromTemplateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.datasetService.CreateReportFromTemplate(r.PathValue("project_id"), payload)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusCreated, response)
+}
+
+// handleGetBasicAnalysis — 데이터셋 버전 "기초분석보고서" 탭용 read-only 조회.
+// report를 저장하지 않고 템플릿 블록만 반환. template_id 쿼리로 템플릿 선택(기본값 있음).
+func (s *Server) handleGetBasicAnalysis(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	response, err := s.datasetService.GetBasicAnalysis(
+		r.PathValue("project_id"),
+		r.PathValue("version_id"),
+		r.URL.Query().Get("template_id"),
+	)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, response)
 }
 
 func (s *Server) handleListReports(w stdhttp.ResponseWriter, r *stdhttp.Request) {

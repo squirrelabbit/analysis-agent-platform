@@ -367,6 +367,15 @@ func (s *DatasetService) GetClauseLabelView(
 	if prompt != "" {
 		applied["prompt_version"] = prompt
 	}
+	// silverone 2026-06-24 — 절 라벨링 결과 화면이 "실제 빌드에 사용된 taxonomy"의
+	// aspect 정의(description)를 보여줄 수 있게, build summary snapshot에 기록된
+	// taxonomy_id를 applied로 노출한다(verify/single 공통, summary top-level 값).
+	// 프론트는 이 id로 GET /taxonomy를 조회해 default가 아닌 사용된 config의
+	// description을 렌더한다. taxonomy_id를 안 남긴 옛 artifact(Phase 3 이전)는 빈
+	// 값이면 omit → 프론트가 default taxonomy로 fallback한다.
+	if tid := summaryMetadataString(version.Metadata, "clause_label_summary", "taxonomy_id"); tid != "" {
+		applied["taxonomy_id"] = tid
+	}
 	// 진행 중이면 직전 summary 값 위에 in-flight 요청값(prompt_version/model)을 덮어
 	// 화면이 "이번 실행"을 가리키게 한다(재실행 시 버전 불일치 방지).
 	for k, v := range runningApplied {

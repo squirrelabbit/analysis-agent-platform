@@ -16,6 +16,11 @@ import CleanTab from "../components/tabs/CleanTab";
 import GenuinenessTab from "../components/tabs/GenuinenessTab";
 import { ClauseTab } from "../components/tabs/ClauseTab";
 import { KeywordTab } from "../components/tabs/KeywordTab";
+import { BasicReportTab } from "../components/tabs/BasicReportTab";
+
+// 기초분석보고서 탭 — build job이 아니라 read-only 조회라 builds 배열과 별도로 둔다.
+const BASIC_REPORT_TAB = "basic_analysis";
+type VersionTab = BuildJobType | typeof BASIC_REPORT_TAB;
 
 export default function VersionDetailPage() {
   const navigate = useNavigate();
@@ -24,7 +29,7 @@ export default function VersionDetailPage() {
   const { data: dataset } = useDataset();
   const { data: version } = useVersion();
   const { data: versions = [] } = useVersionsWithNumber();
-  const [tab, setTab] = useState<BuildJobType>("clean");
+  const [tab, setTab] = useState<VersionTab>("clean");
 
   if (!version) return null;
 
@@ -89,7 +94,7 @@ export default function VersionDetailPage() {
           <PipelineCard key={build} versionId={version.id} type={build} />
         ))}
       </div>
-      <Tabs value={tab} onValueChange={(v) => setTab(v as BuildJobType)}>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as VersionTab)}>
         <TabsList variant="line" className="mt-6 mb-3">
           {builds.map((build) => (
             <TabsTrigger
@@ -100,6 +105,12 @@ export default function VersionDetailPage() {
               {buildLabel(build)}
             </TabsTrigger>
           ))}
+          <TabsTrigger
+            value={BASIC_REPORT_TAB}
+            className="h-auto flex-none gap-2 rounded-none border-0 bg-transparent px-4 pb-3 pt-2.5 text-[14.5px] font-semibold text-zinc-400 transition-colors after:bg-violet-600 hover:text-zinc-600 data-[state=active]:bg-transparent data-[state=active]:text-violet-700 data-[state=active]:shadow-none"
+          >
+            기초분석보고서
+          </TabsTrigger>
         </TabsList>
 
         {/* 각 탭이 로딩/미실행/진행중/결과 상태를 자체 처리하므로 항상 렌더 */}
@@ -123,6 +134,12 @@ export default function VersionDetailPage() {
           className="animate-in fade-in duration-300"
         >
           <KeywordTab />
+        </TabsContent>
+        <TabsContent
+          value={BASIC_REPORT_TAB}
+          className="animate-in fade-in duration-300"
+        >
+          <BasicReportTab />
         </TabsContent>
       </Tabs>
     </div>

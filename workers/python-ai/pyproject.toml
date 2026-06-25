@@ -13,6 +13,8 @@ dependencies = [
   # 한국어 명사 추출 (Kiwi, JVM 불필요). runtime.common._extract_noun_tokens 및
   # clause_keywords build가 사용. 미설치 시 regex_fallback(josa 포함 저품질)로 떨어짐.
   "kiwipiepy>=0.23,<0.24",
+  # 엑셀(.xlsx/.xlsm) 업로드 파싱. runtime.common._read_excel_rows가 사용 (lazy import).
+  "openpyxl>=3.1,<3.2",
 ]
 
 [build-system]

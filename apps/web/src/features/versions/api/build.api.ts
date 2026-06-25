@@ -1,5 +1,6 @@
 import { apiClient } from "@/api/client";
 import type { BuildJobType } from "@/shared/types/common";
+import type { BasicAnalysisResponse } from "../models/basicReport";
 
 export interface BuildViewParams {
   limit?: number;
@@ -122,6 +123,21 @@ export const buildApi = {
       .get(
         `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/${type}`,
         { params },
+      )
+      .then(({ data }) => data),
+
+  // 기초분석보고서 탭 — read-only 조회(report 저장 안 함). 템플릿 블록만 반환.
+  // template_id 미지정 시 서버 기본 템플릿(unstructured_basic_v1).
+  getBasicAnalysis: (
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+    templateId?: string,
+  ) =>
+    apiClient
+      .get<BasicAnalysisResponse>(
+        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/basic_analysis`,
+        { params: templateId ? { template_id: templateId } : undefined },
       )
       .then(({ data }) => data),
 
