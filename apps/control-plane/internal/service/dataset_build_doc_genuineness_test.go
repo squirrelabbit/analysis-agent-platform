@@ -310,35 +310,6 @@ func TestExtractDocGenuinenessConfigDefaultsForOptionalFields(t *testing.T) {
 	if keywords == nil || len(keywords) != 0 {
 		t.Fatalf("recruitment_keywords default should be empty slice, got %#v", config["recruitment_keywords"])
 	}
-	// 행사별 추가 슬롯 미설정 → 빈값 (Python에서 슬롯 섹션 생략).
-	if config["extra_instructions"] != "" {
-		t.Fatalf("extra_instructions default should be empty, got %#v", config["extra_instructions"])
-	}
-	if config["extra_examples"] != nil {
-		t.Fatalf("extra_examples default should be nil, got %#v", config["extra_examples"])
-	}
-}
-
-// TestExtractDocGenuinenessConfigExtraSlot — silverone 2026-06-25. 행사별 추가
-// 슬롯(doc_genuineness 전용)을 whitelist map에 담아 worker로 넘기는지 잠금.
-// extra_instructions는 trim, extra_examples는 문자열/배열 raw 통과.
-func TestExtractDocGenuinenessConfigExtraSlot(t *testing.T) {
-	config, err := extractDocGenuinenessConfig(map[string]any{
-		"doc_genuineness": map[string]any{
-			"subject_name":       "군산 맥주축제",
-			"extra_instructions": "  입장료 6천원은 현장 관찰  ",
-			"extra_examples":     []any{"문서A → genuine_review"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if config["extra_instructions"] != "입장료 6천원은 현장 관찰" {
-		t.Fatalf("extra_instructions should be trimmed, got %#v", config["extra_instructions"])
-	}
-	if _, ok := config["extra_examples"].([]any); !ok {
-		t.Fatalf("extra_examples should pass through as list, got %#v", config["extra_examples"])
-	}
 }
 
 // TestBuildDocGenuinenessRequiresCleanReady — clean이 ready 상태가 아니면

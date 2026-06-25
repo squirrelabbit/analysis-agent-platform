@@ -41,17 +41,11 @@ func extractDocGenuinenessConfig(metadata map[string]any) (map[string]any, error
 	if keywords == nil {
 		keywords = []string{}
 	}
-	// silverone 2026-06-25 — 행사별 추가 슬롯(festival 통합 base). doc_genuineness
-	// 전용 — clause_label.extra_*와 분리(출력 스키마가 달라 공용 금지). extra_examples는
-	// 문자열 또는 배열 둘 다 허용하므로 raw 그대로 통과(Python _prompt_slots가 직렬화).
-	// 미설정이면 ""/nil — Python에서 빈값 → 프롬프트 슬롯 섹션 통째 생략.
 	return map[string]any{
 		"subject_name":         subjectName,
 		"subject_type":         subjectType,
 		"subject_aliases":      aliases,
 		"recruitment_keywords": keywords,
-		"extra_instructions":   strings.TrimSpace(anyStringValue(raw["extra_instructions"])),
-		"extra_examples":       raw["extra_examples"],
 	}, nil
 }
 

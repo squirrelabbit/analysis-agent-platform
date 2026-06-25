@@ -97,14 +97,6 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 	if rawDocGen, ok := dataset.Metadata["doc_genuineness"].(map[string]any); ok && len(rawDocGen) > 0 {
 		payload["doc_genuineness"] = rawDocGen
 	}
-	// silverone 2026-06-25 — 행사별 추가 슬롯(festival 통합 base). clause_label
-	// 전용 extra_instructions/extra_examples는 dataset.metadata.clause_label에 둔다
-	// (doc_genuineness.extra_*와 분리 — 출력 스키마가 달라 공용 금지). raw map을 그대로
-	// pass-through하고 Python `_extract_subject_config`가 payload['clause_label']에서
-	// 정규화한다. 미설정이면 키 omit → Python에서 빈값 → 슬롯 섹션 생략.
-	if rawClause, ok := dataset.Metadata["clause_label"].(map[string]any); ok && len(rawClause) > 0 {
-		payload["clause_label"] = rawClause
-	}
 	// silverone 2026-06-17 (Phase 3) — taxonomy_id per-dataset. dataset.metadata.taxonomy_id
 	// 를 payload로 넘겨 worker가 그 taxonomy로 aspect 라벨링/검증/주입한다(subject_name과
 	// 동일 레일). 미설정이면 worker DEFAULT(taxonomies.DEFAULT_TAXONOMY_ID)로 fallback.
