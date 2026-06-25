@@ -32,11 +32,11 @@ export function DistributionLegend({
               style={{ background: d.color }}
             />
             <span className="font-semibold text-zinc-600">{d.label}</span>
-            <span className="ml-auto font-semibold tabular-nums text-zinc-400">
+            <span className="ml-auto font-extrabold tabular-nums text-zinc-800">
               {d.value.toLocaleString()}
               {valueSuffix}
             </span>
-            <span className="min-w-12 text-right font-extrabold tabular-nums text-zinc-800">
+            <span className="min-w-12 text-right font-semibold tabular-nums text-zinc-400">
               {d.percent}%
             </span>
           </div>
