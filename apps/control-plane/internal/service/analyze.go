@@ -182,6 +182,30 @@ func (a *AnalyzeService) resolveAnalyzeArtifactPaths(version domain.DatasetVersi
 		clauseKeywords = strings.TrimSpace(metadataString(version.Metadata, "clause_keywords_uri", ""))
 	}
 
+	// silverone 2026-06-26 — 빌드 readiness 가드. ref(경로)는 빌드 "running" 시점에
+	// metadata에 미리 써지므로(파일은 아직 없음), 아래 파일 존재 검증만으로는 "전처리
+	// 진행 중"과 "ready인데 파일 손실"을 구분하지 못해 사용자에게 'missing on disk' 같은
+	// 기술 메시지가 나간다. 파일 검증 전에 build status를 먼저 보고, 진행 중/실패면 상태를
+	// 알려준다(전처리 미완 상태에서 채팅을 친 경우). 빈 status(레거시 버전)는 통과시켜
+	// 기존 동작을 보존하고, "ready인데 파일 없음"만 아래 validateArtifactReadable이 잡는다.
+	for _, st := range []struct {
+		label     string
+		statusKey string
+	}{
+		{"문서 정제(clean)", "clean_status"},
+		{"진성 분류(doc_genuineness)", "doc_genuineness_status"},
+		{"절 라벨링(clause_label)", "clause_label_status"},
+	} {
+		switch metadataString(version.Metadata, st.statusKey, "") {
+		case "queued", "running":
+			return analyzeArtifactPaths{}, ErrInvalidArgument{Message: fmt.Sprintf(
+				"%s 전처리가 아직 진행 중입니다. 빌드가 완료된 뒤 다시 분석해 주세요.", st.label)}
+		case "failed":
+			return analyzeArtifactPaths{}, ErrInvalidArgument{Message: fmt.Sprintf(
+				"%s 전처리 빌드가 실패했습니다. 빌드를 다시 실행한 뒤 분석해 주세요.", st.label)}
+		}
+	}
+
 	missing := make([]string, 0, 3)
 	if docs == "" {
 		missing = append(missing, "docs (cleaned.parquet)")
