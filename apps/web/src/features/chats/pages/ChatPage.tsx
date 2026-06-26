@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { FileText, Plus, Send } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -22,6 +22,9 @@ import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { createClientId } from "@/shared/utils/id";
 import { useDatasets } from "@/features/datasets/hooks/dataset.query";
 import { buildApi } from "@/features/versions/api/build.api";
+import { versionApi } from "@/features/versions/api/version.api";
+import { versionKeys } from "@/features/versions/api/version.key";
+import { mapVersionDetail } from "@/features/versions/models/version";
 import { reportDocApi } from "@/features/reports/api/reportDoc.api";
 import { useReports } from "@/features/reports/hooks/reportDoc.query";
 import { normalizeBlocks } from "@/features/reports/models/block";
@@ -76,6 +79,28 @@ export function ChatPage() {
       "",
     [datasets, activeDatasetId],
   );
+  // 전처리 빌드 readiness — active version의 정제/진성/절라벨링이 모두 ready여야 분석 가능.
+  // 진행 중에 채팅을 치면 백엔드가 'missing on disk'(ref만 있고 산출물 파일은 아직 없음)로
+  // 막으므로, 프론트에서 입력 자체를 비활성화하고 어떤 단계가 진행 중인지 안내한다.
+  const activeVersion = useQuery({
+    queryKey: versionKeys.detail(projectId, activeDatasetId, activeVersionId),
+    queryFn: () =>
+      versionApi.getVersion(projectId, activeDatasetId, activeVersionId),
+    enabled: !!activeDatasetId && !!activeVersionId,
+    select: mapVersionDetail,
+  });
+  const pendingBuild = useMemo(() => {
+    const v = activeVersion.data;
+    if (!v) return null;
+    // 첫 ready가 아닌 단계를 찾는다(정제 → 진성 → 절라벨링 순).
+    const stages = [
+      { label: "문서 정제", status: v.clean.status },
+      { label: "진성 분류", status: v.docGenuineness.status },
+      { label: "절 라벨링", status: v.clauseLabel.status },
+    ];
+    return stages.find((s) => s.status !== "ready") ?? null;
+  }, [activeVersion.data]);
+  const buildNotReady = !!activeVersionId && pendingBuild !== null;
   const loadTemplate = useMutation({
     mutationFn: () =>
       buildApi.getBasicAnalysis(projectId, activeDatasetId, activeVersionId),
@@ -499,18 +524,22 @@ export function ChatPage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
               placeholder={
-                activeDatasetId
-                  ? "분석 질문을 입력하세요..."
-                  : "데이터셋을 선택하세요"
+                !activeDatasetId
+                  ? "데이터셋을 선택하세요"
+                  : buildNotReady
+                    ? pendingBuild?.status === "failed"
+                      ? `${pendingBuild.label} 전처리가 실패했습니다. 다시 빌드해 주세요`
+                      : `${pendingBuild?.label} 전처리가 준비 중입니다. 완료 후 분석할 수 있어요`
+                    : "분석 질문을 입력하세요..."
               }
               className="flex-1 h-9 text-sm"
-              disabled={isLoading || !activeDatasetId}
+              disabled={isLoading || !activeDatasetId || buildNotReady}
             />
             <Button
               variant="secondary"
               size="sm"
               onClick={handleSend}
-              disabled={!input.trim() || isLoading || !activeDatasetId}
+              disabled={!input.trim() || isLoading || !activeDatasetId || buildNotReady}
               className="px-4 h-9"
             >
               <Send className="w-3.5 h-3.5" />

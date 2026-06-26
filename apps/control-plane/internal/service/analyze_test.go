@@ -266,6 +266,43 @@ func TestExecuteAnalyze_ArtifactOnDiskMissing(t *testing.T) {
 	}
 }
 
+// 5a. 전처리 빌드가 진행 중(status=running)이면 'missing on disk' 대신 상태 안내로 차단.
+// silverone 2026-06-26 — ref(경로)는 빌드 running 시점에 미리 써지므로, 파일이 아직 없어도
+// status를 먼저 보고 "전처리 진행 중"을 알려준다(전처리 미완에 채팅친 케이스).
+func TestExecuteAnalyze_BuildRunningGuard(t *testing.T) {
+	fx := newAnalyzeFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("worker should not be called while preprocessing is running")
+	}))
+	defer fx.close()
+	// artifact 파일은 존재하지만 clause_label 빌드가 진행 중인 상태로 갱신.
+	v, err := fx.service.store.GetDatasetVersion(fx.projectID, fx.versionID)
+	if err != nil {
+		t.Fatalf("get version: %v", err)
+	}
+	v.Metadata["clause_label_status"] = "running"
+	if err := fx.service.store.SaveDatasetVersion(v); err != nil {
+		t.Fatalf("save version: %v", err)
+	}
+
+	_, err = fx.service.ExecuteAnalyze(
+		context.Background(),
+		fx.projectID, fx.datasetID, fx.versionID,
+		AnalyzeRequest{UserQuestion: "x"},
+	)
+	if err == nil {
+		t.Fatal("expected build-running guard error")
+	}
+	if _, ok := err.(ErrInvalidArgument); !ok {
+		t.Fatalf("expected ErrInvalidArgument, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "진행 중") {
+		t.Fatalf("error should mention '진행 중': %v", err)
+	}
+	if strings.Contains(err.Error(), "missing on disk") {
+		t.Fatalf("running 상태에선 기술 메시지(missing on disk)가 아니라 상태 안내여야 함: %v", err)
+	}
+}
+
 // 5b. artifact가 disk에 있지만 손상(corrupt parquet)이면 worker 호출 전에 fail.
 // silverone 2026-06-04 — artifact 검증 도입.
 func TestExecuteAnalyze_CorruptParquetArtifact(t *testing.T) {
