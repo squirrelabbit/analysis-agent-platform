@@ -1,15 +1,21 @@
-import { Check } from "lucide-react";
+import { AlertTriangle, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// 디자인 「결과 카드 액션 아이콘」 토스트 — 하단 중앙 다크 칩 + 그린 체크.
-// 결과 액션(복사/다운로드/저장) 피드백용. (silverone 2026-06-11)
+// 토스트 톤 — success(그린 체크, 결과 액션 피드백) / warn(앰버 경고, 안내·실패).
+export type ToastTone = "success" | "warn";
+
+// 디자인 「결과 카드 액션 아이콘」 토스트 — 하단 중앙 다크 칩.
+// 결과 액션(복사/다운로드/저장) 피드백 + 안내/실패 경고용. (silverone 2026-06-11)
 export default function ChatToast({
   message,
   visible,
+  tone = "success",
 }: {
   message: string;
   visible: boolean;
+  tone?: ToastTone;
 }) {
+  const Icon = tone === "warn" ? AlertTriangle : Check;
   return (
     <div
       className={cn(
@@ -23,7 +29,13 @@ export default function ChatToast({
       role="status"
       aria-live="polite"
     >
-      <Check className="h-4 w-4 text-emerald-400" strokeWidth={2.4} />
+      <Icon
+        className={cn(
+          "h-4 w-4",
+          tone === "warn" ? "text-amber-400" : "text-emerald-400",
+        )}
+        strokeWidth={2.4}
+      />
       <span>{message}</span>
     </div>
   );
