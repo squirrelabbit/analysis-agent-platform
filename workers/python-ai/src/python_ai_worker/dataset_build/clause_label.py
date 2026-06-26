@@ -377,15 +377,7 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
     include_tiers, tier_by_doc, _genuine_spans = _load_genuineness_filter(payload)
 
     rows = rt._iter_rows(clean_artifact_ref)
-    total_rows = len(rows)
-    if progress_path:
-        write_progress(
-            progress_path,
-            processed_rows=0,
-            total_rows=total_rows,
-            started_at=started_at,
-            message="clause_label queued",
-        )
+    total_rows = len(rows)  # 전체 입력 수(summary input_row_count 용)
 
     # 1) 처리 대상 doc 사전 분류 (filter / empty 처리)
     target_docs: list[tuple[int, str, str, str]] = []  # (index, doc_id, doc_title, doc_text)
@@ -404,6 +396,18 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
                 continue
         doc_title = str(row.get("doc_title") or "").strip()
         target_docs.append((index, doc_id, doc_title, cleaned_text))
+
+    # 진행률 분모 = 실제 LLM 처리 대상(진성 필터/빈 텍스트 제외) 수. 전체 모수가 아니라
+    # 진성 데이터 기준으로 보여야 한다(verify 모드와 동일). (silverone 2026-06-26)
+    target_count = len(target_docs)
+    if progress_path:
+        write_progress(
+            progress_path,
+            processed_rows=0,
+            total_rows=target_count,
+            started_at=started_at,
+            message="clause_label queued",
+        )
 
     # 2) 병렬 LLOA 호출 — ThreadPoolExecutor
     parse_failures = 0
@@ -466,11 +470,11 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
                     clauses = []
                 clauses_by_doc[doc_id] = clauses
                 completed_docs += 1
-                if progress_path and (completed_docs % 5 == 0 or completed_docs == len(target_docs)):
+                if progress_path and (completed_docs % 5 == 0 or completed_docs == target_count):
                     write_progress(
                         progress_path,
-                        processed_rows=completed_docs + skipped_by_filter + skipped_empty,
-                        total_rows=total_rows,
+                        processed_rows=completed_docs,
+                        total_rows=target_count,
                         started_at=started_at,
                         message="clause_label processing",
                     )
@@ -507,8 +511,8 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
     if progress_path:
         write_progress(
             progress_path,
-            processed_rows=processed_docs,
-            total_rows=processed_docs,
+            processed_rows=target_count,
+            total_rows=target_count,
             started_at=started_at,
             message="clause_label completed",
         )

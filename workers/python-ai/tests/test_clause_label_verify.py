@@ -631,3 +631,62 @@ class ClauseLabelVerifyPrimaryAreaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# 단일 모드(비-verify) clause_label 진행률 분모도 진성 대상 수여야 한다(silverone 2026-06-26).
+# 버그: total_rows를 진성 필터 전 전체 입력 수로 써서 화면 모수가 전체로 부풀려졌음.
+class ClauseLabelSingleProgressTests(unittest.TestCase):
+    SENTENCES = [f"s{i}" for i in range(1, 7)]
+
+    def test_progress_denominator_is_target_count(self) -> None:
+        from python_ai_worker.dataset_build import clause_label as cl
+        from python_ai_worker.dataset_build import clause_label_verify as v
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        base = Path(tmp.name)
+        clean = base / "clean.jsonl"
+        gen = base / "gen.jsonl"
+        out = base / "out.jsonl"
+        prog = base / "prog.json"
+        # d1 genuine(처리), d2 non_review(skip), d3 genuine이지만 본문 빈값(skip) → 대상 1건.
+        with clean.open("w", encoding="utf-8") as f:
+            f.write(json.dumps({"row_id": "d1", "cleaned_text": "x" * 50}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"row_id": "d2", "cleaned_text": "y" * 50}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"row_id": "d3", "cleaned_text": ""}, ensure_ascii=False) + "\n")
+        with gen.open("w", encoding="utf-8") as f:
+            f.write(json.dumps({"doc_id": "d1", "genuineness": "genuine_review"}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"doc_id": "d2", "genuineness": "non_review"}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"doc_id": "d3", "genuineness": "genuine_review"}, ensure_ascii=False) + "\n")
+
+        calls: list[dict] = []
+
+        def _spy(path, *, processed_rows, total_rows, started_at, message, **kw):
+            calls.append({"p": processed_rows, "t": total_rows, "m": message})
+
+        def _fake_labels(client, system_prompt, sub, max_tokens, allowed, fallback):
+            return {i: {"relevant": True, "sentiment": "positive", "aspects": ["food"]} for i in range(1, len(sub) + 1)}
+
+        payload = {
+            "dataset_version_id": "ver1", "clean_artifact_ref": str(clean),
+            "output_path": str(out), "progress_path": str(prog),
+            "doc_genuineness": {"subject_type": "festival", "subject_name": "강릉 국가유산야행"},
+            "concurrency": 1, "include_genuineness": ["genuine_review", "uncertain"],
+            "doc_genuineness_ref": str(gen),
+        }
+        with patch.object(cl, "write_progress", _spy), \
+             patch.object(cl, "load_config", return_value=_fake_config()), \
+             patch.object(cl.LloaClient, "__init__", lambda self, config, **kw: None), \
+             patch.object(cl, "split_anchor_sentences", return_value=self.SENTENCES), \
+             patch.object(v, "_label_sentences", _fake_labels):
+            cl.run_dataset_clause_label(payload)
+
+        processing = [c for c in calls if "processing" in c["m"]]
+        self.assertTrue(processing, "processing progress write 없음")
+        # 분모=대상 1건(genuine·non-empty), 전체 입력 3건이 아니라. processed도 1.
+        self.assertEqual(processing[-1]["t"], 1)
+        self.assertEqual(processing[-1]["p"], 1)
+        completed = [c for c in calls if "completed" in c["m"]]
+        self.assertTrue(completed)
+        self.assertEqual(completed[-1]["t"], 1)
+        self.assertEqual(completed[-1]["p"], 1)
