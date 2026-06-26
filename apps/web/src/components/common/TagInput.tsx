@@ -43,6 +43,8 @@ export function TagInput({
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    // 한글 등 IME 조합 중 Enter/쉼표는 무시 — 마지막 음절 중복 태그 방지.
+    if (e.nativeEvent.isComposing) return;
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
       addTag(inputVal);
