@@ -440,7 +440,7 @@ function CreateDialog({
           className="w-full rounded-xl border border-zinc-200 px-3 py-2.5 text-sm text-zinc-800 outline-none transition focus:border-violet-500 focus:ring-3 focus:ring-violet-100"
         />
         <p className="text-xs text-zinc-400">
-          빈 보고서로 시작합니다. 보관함에서 결과를 추가해 구성하세요.
+          빈 보고서로 시작합니다. 분석 채팅에서 결과를 추가해 구성하세요.
         </p>
         <DialogFooter className="flex gap-2">
           <DialogClose asChild>

@@ -11,9 +11,8 @@ import type {
   RecommendedView,
 } from "@/features/chats/models";
 import { toColumnFormat } from "@/features/chats/models";
-import type { ReportSavedResult } from "./model";
 
-// saved_results의 display/plan(서버 raw)을 채팅과 동일한 도메인(ChatChart/Metric/Evidence/
+// 분석 결과 스냅샷의 display/plan(서버 raw)을 채팅과 동일한 도메인(ChatChart/Metric/Evidence/
 // Display/Plan)으로 투영한다. 채팅 결과 뷰 카탈로그(ChartView 등)를 그대로 재사용하기 위함.
 // 투영 규칙은 채팅 매퍼와 동일하게 맞춘다(chats 파일은 수정하지 않으므로 reports에 재현).
 
@@ -180,7 +179,13 @@ export interface ReportResult {
   plan?: ChatPlan;
 }
 
-export const projectResult = (r: ReportSavedResult): ReportResult => ({
+// 분석 결과 스냅샷(display/plan) → 채팅 렌더 도메인. block / saved 어디서 와도 동일.
+export interface ResultSnapshotInput {
+  display?: ComposerDisplayDto;
+  plan?: AnalysisPlanDto;
+}
+
+export const projectResult = (r: ResultSnapshotInput): ReportResult => ({
   recommendedView: mapRecommendedView(r.display),
   chart: mapChart(r.display),
   metric: mapMetric(r.display),

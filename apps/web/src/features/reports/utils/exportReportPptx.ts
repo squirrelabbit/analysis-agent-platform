@@ -3,8 +3,8 @@
 // PptxGenJS의 addChart/addTable/addText로 편집 가능한 개체를 만들 수 있다.
 // 정책: 블록 1개 = 슬라이드 1장. 차트도 네이티브(bar/line/diverging_bar→col bar).
 import type Pptx from "pptxgenjs";
-import type { ReportBlock, LibraryItem } from "../models/editor";
-import type { ReportResult } from "../models/result";
+import type { ReportBlock } from "../models/editor";
+import { projectResult, type ReportResult } from "../models/result";
 import type { ChatChart, ChatDisplay } from "@/features/chats/models";
 
 // LAYOUT_WIDE = 13.33 x 7.5 inch.
@@ -25,9 +25,13 @@ const cell = (v: unknown): string =>
 const safeFilename = (title: string): string =>
   (title || "보고서").replace(/[\\/:*?"<>|]/g, "_");
 
-/** 블록의 표시 제목 — 사용자 지정 > 라이브러리 원제목 > fallback. */
-const blockTitle = (block: ReportBlock, lib?: LibraryItem): string =>
-  (block.title && block.title.trim()) || lib?.title?.trim() || "분석 결과";
+/** 블록의 표시 제목 — 사용자 지정 > 스냅샷 기본 제목 > fallback. */
+const blockTitle = (block: ReportBlock): string => {
+  if (block.title && block.title.trim()) return block.title.trim();
+  if (block.kind === "section")
+    return block.section?.defaultTitle?.trim() || "섹션";
+  return block.result?.defaultTitle?.trim() || "분석 결과";
+};
 
 /** ChatChart → PptxGenJS 네이티브 차트 데이터. */
 const chartData = (chart: ChatChart) => {
@@ -60,12 +64,14 @@ function renderBlock(
   pptx: Pptx,
   slide: ReturnType<Pptx["addSlide"]>,
   block: ReportBlock,
-  lib: LibraryItem | undefined,
 ) {
-  const result: ReportResult | undefined = lib?.result;
+  const result: ReportResult | undefined = block.result
+    ? projectResult(block.result)
+    : undefined;
+  const question = block.result?.question;
 
   // 제목.
-  slide.addText(blockTitle(block, lib), {
+  slide.addText(blockTitle(block), {
     x: MARGIN,
     y: 0.3,
     w: CONTENT_W,
@@ -78,8 +84,8 @@ function renderBlock(
 
   let cursorY = 1.05;
   // 원 질문 칩(opts.q).
-  if (block.opts?.q && lib?.question?.trim()) {
-    slide.addText(`Q. ${lib.question.trim()}`, {
+  if (block.opts?.q && question?.trim()) {
+    slide.addText(`Q. ${question.trim()}`, {
       x: MARGIN,
       y: cursorY,
       w: CONTENT_W,
@@ -196,6 +202,26 @@ function renderBlock(
     return;
   }
 
+  // 기본 템플릿 섹션 — 패널을 요약 텍스트(제목·view)로 나열한다(차트는 에디터/PDF에서 확인).
+  if (block.kind === "section" && block.section) {
+    const lines = block.section.rows.flatMap((row) =>
+      row.panels.map((p) => ({
+        text: p.title?.trim() || `(${p.view})`,
+        options: { bullet: true, fontSize: 13, color: "334155", fontFace: KR_FONT },
+      })),
+    );
+    if (lines.length) {
+      slide.addText(lines, {
+        x: MARGIN,
+        y: bodyY,
+        w: CONTENT_W,
+        h: bodyH,
+        valign: "top",
+      });
+    }
+    return;
+  }
+
   // text 블록 등 시각 개체가 없으면 제목/해석만으로 충분(이미 위에 렌더됨).
 }
 
@@ -206,7 +232,6 @@ function renderBlock(
 export async function exportReportPPTX(
   title: string,
   blocks: ReportBlock[],
-  libById: (id: string) => LibraryItem | undefined,
 ): Promise<boolean> {
   if (!blocks.length) return false;
   const PptxGenJS = (await import("pptxgenjs")).default;
@@ -218,7 +243,7 @@ export async function exportReportPPTX(
   for (const block of blocks) {
     const slide = pptx.addSlide();
     try {
-      renderBlock(pptx, slide, block, libById(block.libId));
+      renderBlock(pptx, slide, block);
     } catch (err) {
       // 한 블록 실패가 전체 내보내기를 막지 않도록 격리.
       slide.addText(

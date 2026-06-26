@@ -1,57 +1,77 @@
 import { useCallback, useState } from "react";
+import { createClientId } from "@/shared/utils/id";
+import { projectResult } from "@/features/reports/models/result";
+import { normalizeBlocks } from "@/features/reports/models/block";
+import type { ReportBlock } from "@/features/reports/models";
 import type { ChatMessage } from "../models";
 
-// 보고서 패널 스테이징 상태. 채팅 결과 카드를 우측 패널에 모아 제목·메모를 편집하고
-// 순서를 바꾼 뒤 한 번에 보고서 문서로 만든다(시안 「분석 채팅 - 보고서 패널」).
+// 보고서 패널 스테이징 상태. 채팅 결과 카드 + 기초분석 템플릿 섹션을 패널에 모아
+// 제목·메모를 편집하고 순서를 바꾼 뒤, 한 번에 보고서 문서(POST /reports)로 만든다.
 //
-// 식별자는 runId(스냅샷 단위). cardState/messages는 제거해도 유지(sticky)해서,
-// 제목·메모 편집이 채팅 카드와 패널 사이를 오가도 보존되고 재추가 시 복원된다.
-//
-// 패널은 스레드 전환과 무관하게 유지된다 — 여러 채팅 스레드의 결과를 한 보고서에
-// 모을 수 있다. 결과는 추가 시점의 스레드(runId→threadId)를 함께 보관해, 보고서
-// 생성 시 각 결과를 자기 스레드 기준으로 보관함에 저장한다(백엔드 thread 검증 충족).
+// 스테이지는 에디터와 동일한 self-contained ReportBlock 배열이다(kind: result | section).
+//   - result : 채팅 분석 결과 스냅샷(runId로 중복 방지). display/plan raw 보존.
+//   - section: 기초분석 템플릿 섹션(section_id로 중복 방지).
+// 보고서 생성 시 이 blocks를 그대로 POST → 에디터가 normalizeBlock으로 다시 읽어 렌더한다.
 
-export interface PanelCardState {
-  title: string;
-  note: string;
+function deriveResultTitle(msg: ChatMessage, question?: string): string {
+  const fromDisplay = msg.rawDisplay?.title?.trim() || msg.display?.title?.trim();
+  if (fromDisplay) return fromDisplay;
+  const q = question?.trim();
+  if (q) return q;
+  const c = msg.content.trim();
+  if (c) return c.length > 40 ? `${c.slice(0, 40)}…` : c;
+  return "분석 결과";
 }
 
-export type CardType = "metric" | "quote" | "chart" | "table";
-
-// 메인 결과 선택 규칙(metric > evidence > chart > table)에 맞춘 카드 타입.
-export function cardType(msg: ChatMessage): CardType {
-  if (msg.metric) return "metric";
-  if (msg.evidence) return "quote";
-  if (msg.chart) return "chart";
-  return "table";
-}
-
-// 카드 기본 제목 — 결과에 별도 제목 필드가 없어 display/chart 제목을 쓰고, 없으면 일반 라벨.
-function defaultTitle(msg: ChatMessage): string {
-  return msg.display?.title ?? msg.chart?.title ?? "분석 결과";
+function buildResultBlock(msg: ChatMessage, question?: string): ReportBlock {
+  const pr = projectResult({ display: msg.rawDisplay, plan: msg.rawPlan });
+  const hasDetail = (!!pr.metric || !!pr.evidence || !!pr.chart) && !!pr.display;
+  return {
+    uid: createClientId(),
+    kind: "result",
+    title: null,
+    interp: "",
+    opts: { q: !!question?.trim(), detail: hasDetail, plan: false },
+    span: 12,
+    height: null,
+    newRow: true,
+    result: {
+      runId: msg.runId,
+      question: question?.trim() ?? "",
+      assistantContent: msg.content,
+      defaultTitle: deriveResultTitle(msg, question),
+      display: msg.rawDisplay,
+      plan: msg.rawPlan,
+    },
+  };
 }
 
 export interface ReportPanelApi {
-  staged: string[];
+  staged: ReportBlock[];
   panelOpen: boolean;
   reportTitle: string;
   count: number;
-  messageOf: (runId: string) => ChatMessage | undefined;
-  /** 결과가 추가될 때 보관된 출처 스레드 id(없으면 undefined → run에서 유도). */
-  threadOf: (runId: string) => string | undefined;
-  cardStateOf: (runId: string) => PanelCardState;
-  /** 편집된 제목 또는 메시지 기준 기본 제목(스테이징 전에도 정확). */
-  titleFor: (msg: ChatMessage) => string;
-  isAdded: (runId: string) => boolean;
-  /**
-   * 결과를 패널에 추가. 새로 추가되면 true, 이미 있으면 false.
-   * threadId는 출처 스레드(보고서 생성 시 보관함 저장에 사용).
-   */
-  add: (msg: ChatMessage, threadId?: string) => boolean;
-  remove: (runId: string) => void;
+  expandedId: string | null;
+  hasSections: boolean;
+  /** 불러온 기존 보고서 id(null=새 보고서). 저장 시 PUT(갱신) vs POST(생성) 결정. */
+  loadedReportId: string | null;
+  /** 대상 보고서가 정해졌는지(새 보고서 시작 또는 기존 불러오기). false면 결과 추가 전 선택 필요. */
+  started: boolean;
+  /** 기존 보고서를 스테이지로 불러온다(이어서 편집·추가 → 저장 시 갱신). */
+  loadReport: (reportId: string, title: string, blocks: unknown[]) => void;
+  /** 새 보고서로 시작(스테이지 비움). */
+  startNew: () => void;
+  /** runId가 이미 스테이지에 추가됐는지(중복 추가 방지/카드 상태). */
+  isAddedRun: (runId: string) => boolean;
+  /** 채팅 결과를 스테이지에 추가. 새로 추가되면 true, 이미 있으면 false. */
+  addResult: (msg: ChatMessage, question?: string) => boolean;
+  /** 기초분석 템플릿 섹션 블록을 추가(section_id 중복은 건너뜀). 추가된 개수 반환. */
+  addSections: (blocks: ReportBlock[]) => number;
+  remove: (uid: string) => void;
   reorder: (from: number, to: number) => void;
-  setTitle: (runId: string, title: string) => void;
-  setNote: (runId: string, note: string) => void;
+  setTitle: (uid: string, title: string) => void;
+  setNote: (uid: string, note: string) => void;
+  toggleExpand: (uid: string) => void;
   clearAll: () => void;
   togglePanel: () => void;
   openPanel: () => void;
@@ -61,79 +81,85 @@ export interface ReportPanelApi {
 }
 
 export function useReportPanel(): ReportPanelApi {
-  const [staged, setStaged] = useState<string[]>([]);
+  const [staged, setStaged] = useState<ReportBlock[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [reportTitle, setReportTitleState] = useState("");
-  const [cards, setCards] = useState<Record<string, PanelCardState>>({});
-  const [messages, setMessages] = useState<Record<string, ChatMessage>>({});
-  // runId → 추가 시점의 출처 스레드 id(여러 스레드 결과 집계 지원).
-  const [threads, setThreads] = useState<Record<string, string>>({});
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [loadedReportId, setLoadedReportId] = useState<string | null>(null);
+  const [started, setStarted] = useState(false);
 
-  const messageOf = useCallback(
-    (runId: string) => messages[runId],
-    [messages],
-  );
-
-  const threadOf = useCallback(
-    (runId: string) => threads[runId],
-    [threads],
-  );
-
-  const cardStateOf = useCallback(
-    (runId: string): PanelCardState =>
-      cards[runId] ?? {
-        title: messages[runId] ? defaultTitle(messages[runId]) : "분석 결과",
-        note: "",
-      },
-    [cards, messages],
-  );
-
-  const titleFor = useCallback(
-    (msg: ChatMessage): string => {
-      const runId = msg.runId;
-      if (runId && cards[runId]) return cards[runId].title;
-      return defaultTitle(msg);
+  const loadReport = useCallback(
+    (reportId: string, title: string, blocks: unknown[]) => {
+      setStaged(normalizeBlocks(blocks));
+      setLoadedReportId(reportId);
+      setReportTitleState(title);
+      setExpandedId(null);
+      setStarted(true);
+      setPanelOpen(true);
     },
-    [cards],
+    [],
   );
 
-  const isAdded = useCallback(
-    (runId: string) => staged.includes(runId),
+  const startNew = useCallback(() => {
+    setStaged([]);
+    setLoadedReportId(null);
+    setReportTitleState("");
+    setExpandedId(null);
+    setStarted(true);
+    setPanelOpen(true);
+  }, []);
+
+  const isAddedRun = useCallback(
+    (runId: string) => staged.some((b) => b.result?.runId === runId),
     [staged],
   );
 
-  const add = useCallback((msg: ChatMessage, threadId?: string): boolean => {
-    const runId = msg.runId;
-    if (!runId) return false;
+  const addResult = useCallback((msg: ChatMessage, question?: string): boolean => {
+    if (!msg.runId) return false;
     let added = false;
     setStaged((prev) => {
-      if (prev.includes(runId)) return prev;
+      if (prev.some((b) => b.result?.runId === msg.runId)) return prev;
       added = true;
-      return [...prev, runId];
+      const block = buildResultBlock(msg, question);
+      setExpandedId(block.uid);
+      return [...prev, block];
     });
-    // 스냅샷·기본 편집상태·출처 스레드는 항상 보존(이미 있으면 덮어쓰지 않음).
-    setMessages((prev) => (prev[runId] ? prev : { ...prev, [runId]: msg }));
-    setCards((prev) =>
-      prev[runId]
-        ? prev
-        : { ...prev, [runId]: { title: defaultTitle(msg), note: "" } },
-    );
-    if (threadId)
-      setThreads((prev) =>
-        prev[runId] ? prev : { ...prev, [runId]: threadId },
-      );
     setPanelOpen(true);
     return added;
   }, []);
 
-  const remove = useCallback((runId: string) => {
-    // staged에서만 제거 — cardState/messages는 유지해 편집·재추가를 보존.
-    setStaged((prev) => prev.filter((id) => id !== runId));
+  const addSections = useCallback((blocks: ReportBlock[]): number => {
+    let count = 0;
+    setStaged((prev) => {
+      const existing = new Set(
+        prev
+          .filter((b) => b.kind === "section")
+          .map((b) => b.section?.sectionId),
+      );
+      const fresh = blocks.filter(
+        (b) => b.kind === "section" && !existing.has(b.section?.sectionId),
+      );
+      count = fresh.length;
+      if (!fresh.length) return prev;
+      return [...prev, ...fresh];
+    });
+    setPanelOpen(true);
+    return count;
+  }, []);
+
+  const remove = useCallback((uid: string) => {
+    setStaged((prev) => prev.filter((b) => b.uid !== uid));
   }, []);
 
   const reorder = useCallback((from: number, to: number) => {
     setStaged((prev) => {
-      if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length)
+      if (
+        from === to ||
+        from < 0 ||
+        to < 0 ||
+        from >= prev.length ||
+        to >= prev.length
+      )
         return prev;
       const next = [...prev];
       const [moved] = next.splice(from, 1);
@@ -142,26 +168,27 @@ export function useReportPanel(): ReportPanelApi {
     });
   }, []);
 
-  const setTitle = useCallback((runId: string, title: string) => {
-    setCards((prev) => ({
-      ...prev,
-      [runId]: { title, note: prev[runId]?.note ?? "" },
-    }));
+  const setTitle = useCallback((uid: string, title: string) => {
+    setStaged((prev) =>
+      prev.map((b) => (b.uid === uid ? { ...b, title } : b)),
+    );
   }, []);
 
-  const setNote = useCallback((runId: string, note: string) => {
-    setCards((prev) => ({
-      ...prev,
-      [runId]: { title: prev[runId]?.title ?? "분석 결과", note },
-    }));
+  const setNote = useCallback((uid: string, note: string) => {
+    setStaged((prev) =>
+      prev.map((b) => (b.uid === uid ? { ...b, interp: note } : b)),
+    );
   }, []);
+
+  const toggleExpand = useCallback(
+    (uid: string) => setExpandedId((cur) => (cur === uid ? null : uid)),
+    [],
+  );
 
   const clearAll = useCallback(() => setStaged([]), []);
-
   const togglePanel = useCallback(() => setPanelOpen((o) => !o), []);
   const openPanel = useCallback(() => setPanelOpen(true), []);
   const closePanel = useCallback(() => setPanelOpen(false), []);
-
   const setReportTitle = useCallback(
     (title: string) => setReportTitleState(title),
     [],
@@ -171,9 +198,9 @@ export function useReportPanel(): ReportPanelApi {
     setStaged([]);
     setPanelOpen(false);
     setReportTitleState("");
-    setCards({});
-    setMessages({});
-    setThreads({});
+    setExpandedId(null);
+    setLoadedReportId(null);
+    setStarted(false);
   }, []);
 
   return {
@@ -181,16 +208,20 @@ export function useReportPanel(): ReportPanelApi {
     panelOpen,
     reportTitle,
     count: staged.length,
-    messageOf,
-    threadOf,
-    cardStateOf,
-    titleFor,
-    isAdded,
-    add,
+    expandedId,
+    hasSections: staged.some((b) => b.kind === "section"),
+    loadedReportId,
+    started,
+    loadReport,
+    startNew,
+    isAddedRun,
+    addResult,
+    addSections,
     remove,
     reorder,
     setTitle,
     setNote,
+    toggleExpand,
     clearAll,
     togglePanel,
     openPanel,

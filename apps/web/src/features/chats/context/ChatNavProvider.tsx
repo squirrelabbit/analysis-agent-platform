@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { useDatasets } from "@/features/datasets/hooks/dataset.query";
@@ -18,8 +18,19 @@ export function ChatNavProvider({ children }: { children: ReactNode }) {
   const [datasetId, setDatasetIdState] = useState("");
   const [threadId, setThreadId] = useState<string | null>(null);
   const [isComposing, setComposing] = useState(false);
+  // 새 대화 시작 신호(threadId만으로는 이미 null인 상태에서 다시 누른 걸 구분 못 함).
+  const [newThreadNonce, setNewThreadNonce] = useState(0);
 
   const activeDatasetId = datasetId || datasets[0]?.id || "";
+
+  // 채팅 화면에 "진입"할 때마다(다른 라우트→채팅) 항상 새 대화로 시작한다.
+  // (threadId는 ProjectLayout 레벨 컨텍스트라 그대로 두면 이전에 보던 스레드를 끌고 온다.)
+  // 채팅 안에서 스레드를 고르는 건 isChatRoute가 계속 true라 영향 없음.
+  const wasChatRoute = useRef(false);
+  useEffect(() => {
+    if (isChatRoute && !wasChatRoute.current) setThreadId(null);
+    wasChatRoute.current = isChatRoute;
+  }, [isChatRoute]);
 
   // 채팅 라우트에서만 스레드 목록을 가져온다(데이터셋/보고서 화면에선 fetch 안 함).
   const threadsQuery = useChatThreads(
@@ -47,7 +58,9 @@ export function ChatNavProvider({ children }: { children: ReactNode }) {
       newThread: () => {
         if (isComposing) return;
         setThreadId(null);
+        setNewThreadNonce((n) => n + 1);
       },
+      newThreadNonce,
       setThreadId,
       deleteThread: async (id) => {
         if (isComposing || deleteMutation.isPending) return;
@@ -71,6 +84,7 @@ export function ChatNavProvider({ children }: { children: ReactNode }) {
     activeDatasetId,
     threadId,
     isComposing,
+    newThreadNonce,
     threadsQuery.data,
     threadsQuery.isLoading,
     deleteMutation,

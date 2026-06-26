@@ -147,7 +147,7 @@ export default function Sidebar({ project }: { project: Project }) {
                   <Icon className="h-4 w-4 shrink-0" />
                   {!isCollapsed && menu.name}
                 </div>
-                {!isCollapsed && (
+                {!isCollapsed && menu.badge && (
                   <Badge
                     className={cn(
                       active

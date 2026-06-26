@@ -2,6 +2,10 @@ import { apiClient } from "@/api/client";
 import type {
   ReportCreateRequestDto,
   ReportDto,
+  ReportFromTemplateRequestDto,
+  ReportFromTemplateResponseDto,
+  ReportItemAppendRequestDto,
+  ReportItemAppendResponseDto,
   ReportListResponseDto,
   ReportUpdateRequestDto,
 } from "../models";
@@ -24,6 +28,28 @@ export const reportDocApi = {
   create: (projectId: string, body: ReportCreateRequestDto) =>
     apiClient
       .post<ReportDto>(`/projects/${projectId}/reports`, body)
+      .then((r) => r.data),
+
+  // POST 기본 템플릿 생성. dataset_id의 active version으로 데이터 기초 분석 보고서를 만든다.
+  fromTemplate: (projectId: string, body: ReportFromTemplateRequestDto) =>
+    apiClient
+      .post<ReportFromTemplateResponseDto>(
+        `/projects/${projectId}/reports/from_template`,
+        body,
+      )
+      .then((r) => r.data),
+
+  // POST item append. 기존 보고서 blocks 뒤에 분석 결과(run_id) 1개를 추가한다.
+  appendItem: (
+    projectId: string,
+    reportId: string,
+    body: ReportItemAppendRequestDto,
+  ) =>
+    apiClient
+      .post<ReportItemAppendResponseDto>(
+        `/projects/${projectId}/reports/${reportId}/item`,
+        body,
+      )
       .then((r) => r.data),
 
   // PUT 전체 갱신 (title + blocks 교체).

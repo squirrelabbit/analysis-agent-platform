@@ -1,29 +1,4 @@
-import type { AnalysisPlanDto, ComposerDisplayDto } from "@/features/chats/models";
-
-// GET /projects/{project_id}/saved_results — 보고서 보관함(저장 시점 분석 스냅샷).
-// display/plan은 채팅 composer.display / plan과 동일 shape를 재사용한다(중복 정의 X).
-// 저장(POST)·삭제(DELETE)는 채팅에서 수행하므로 여기선 조회/목록 계약만 둔다.
-export interface ReportSavedResultDto {
-  result_id: string;
-  project_id: string;
-  dataset_id: string;
-  dataset_version_id: string;
-  thread_id: string;
-  run_id: string;
-  source_message_id: string;
-  title: string;
-  question: string;
-  assistant_content: string;
-  display?: ComposerDisplayDto;
-  plan?: AnalysisPlanDto;
-  created_at: string;
-}
-
-export interface ReportSavedResultListResponseDto {
-  items: ReportSavedResultDto[];
-}
-
-// ── 보고서 문서(Report) — saved_results를 조합한 블록 문서 CRUD ──
+// ── 보고서 문서(Report) — 채팅 분석 결과 item / 기본 템플릿 블록 문서 CRUD ──
 // blocks는 control-plane이 영속만 하는 opaque JSON 배열(블록 contract는 프론트 에디터 소유).
 export interface ReportSummaryDto {
   report_id: string;
@@ -38,6 +13,8 @@ export interface ReportDto {
   report_id: string;
   project_id: string;
   title: string;
+  // 기본 템플릿으로 만든 보고서가 묶인 dataset_version(일반 보고서면 빈 문자열/생략).
+  dataset_version_id?: string;
   blocks: unknown[];
   created_at: string;
   updated_at: string;
@@ -55,4 +32,40 @@ export interface ReportCreateRequestDto {
 export interface ReportUpdateRequestDto {
   title?: string;
   blocks?: unknown[];
+}
+
+// POST /projects/{project_id}/reports/from_template — dataset_id의 active version으로
+// 기본 템플릿 보고서를 생성한다(active version이 clean ready여야 한다).
+export interface ReportFromTemplateRequestDto {
+  template_id: string;
+  dataset_id: string;
+}
+
+export interface ReportMissingSectionDto {
+  section_id: string;
+  reason: string;
+}
+
+export interface ReportFromTemplateResponseDto {
+  report: ReportDto;
+  included_sections: string[];
+  missing_sections: ReportMissingSectionDto[];
+}
+
+// POST /projects/{project_id}/reports/{report_id}/item — 기존 보고서 blocks 뒤에 item 1개 append.
+// 보통 run_id만 보내면 type=analysis_result로 추가된다.
+export interface ReportItemAppendRequestDto {
+  run_id?: string;
+  type?: string;
+  thread_id?: string;
+  title?: string;
+  interp?: string;
+  options?: Record<string, unknown>;
+  layout?: Record<string, unknown>;
+}
+
+export interface ReportItemAppendResponseDto {
+  report: ReportDto;
+  // 추가된 item 블록(opaque — 블록 렌더 계약은 프론트 에디터 소유).
+  item: Record<string, unknown>;
 }
