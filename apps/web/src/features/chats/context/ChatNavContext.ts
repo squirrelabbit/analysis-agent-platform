@@ -21,6 +21,8 @@ export interface ChatNavValue {
   selectThread: (id: string) => void;
   /** 새 대화 시작(threadId 해제). */
   newThread: () => void;
+  /** 새 대화가 시작될 때마다 증가하는 카운터 — ChatPage가 보고서 패널 자동 열기 신호로 구독. */
+  newThreadNonce: number;
   /** 전송 직후 새 서버 threadId로 승격할 때 ChatPage가 직접 쓰는 무가드 setter. */
   setThreadId: (id: string | null) => void;
   /** 대화 삭제 — 활성 스레드를 지우면 threadId도 해제. */

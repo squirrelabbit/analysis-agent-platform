@@ -31,18 +31,6 @@ export const useAnalysisChat = (projectId: string, datasetId: string) => {
   });
 };
 
-// silverone 2026-06-10 — 분석 결과를 보고서 보관함에 저장. project 스코프라
-// dataset/version은 백엔드가 run에서 유도한다. 보고서 탭 API 연동은 아직
-// 없으므로 별도 invalidate는 하지 않는다(저장 성공 여부만 사용).
-export const useSaveReportResult = (projectId: string) =>
-  useMutation({
-    mutationFn: ({ runId, threadId }: { runId: string; threadId?: string }) =>
-      chatApi.saveResult(projectId, {
-        run_id: runId,
-        thread_id: threadId,
-      }),
-  });
-
 export const useDeleteChatThread = (projectId: string, datasetId: string) => {
   const queryClient = useQueryClient();
   return useMutation({

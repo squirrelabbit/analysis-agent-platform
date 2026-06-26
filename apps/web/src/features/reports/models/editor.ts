@@ -1,36 +1,76 @@
 // 분석 보고서 에디터 뷰모델.
-// 보관함 항목(LibraryItem)·블록(ReportBlock)·캔버스 상태(ReportState).
-// 결과 렌더는 채팅 결과 뷰 카탈로그를 재사용한다 — LibraryItem.result(ReportResult)로 보관.
-// 실데이터(saved_results)는 models/library.ts의 어댑터가 LibraryItem으로 변환해 공급한다.
-import type { ReportResult } from "./result";
+// 보고서 블록은 self-contained snapshot이다 — 채팅 분석 결과(result) 또는 기본 템플릿
+// 섹션(section) 둘 중 하나를 들고 있고, 블록 자체에 렌더에 필요한 데이터를 모두 보존한다.
+// (옛 saved_results 보관함 + libId 참조 모델은 제거됐다 — 백엔드 item/from_template
+//  엔드포인트가 블록에 스냅샷을 박제해 돌려준다.)
+import type { AnalysisPlanDto, ComposerDisplayDto } from "@/features/chats/models";
 
-export type LibType = "chart" | "table" | "text";
+// ── 블록 콘텐츠 스냅샷 ──
+export type BlockKind = "result" | "section";
 
-export interface LibraryItem {
-  id: string;
-  type: LibType;
-  title: string;
-  sub: string;
-  /** 출처 분석 질문(원 질문) */
+// 채팅 분석 결과 스냅샷(item 블록). display/plan은 채팅 composer와 동일 shape.
+export interface ResultSnapshot {
+  runId?: string;
+  threadId?: string;
   question: string;
-  /** 채팅과 동일하게 렌더하기 위한 결과 도메인(chart/metric/evidence/display/plan). */
-  result: ReportResult;
+  assistantContent: string;
+  /** 결과 기본 제목(block.title이 null이면 이 값 사용). */
+  defaultTitle: string;
+  display?: ComposerDisplayDto;
+  plan?: AnalysisPlanDto;
+}
+
+// 기본 템플릿 패널(자급자족 — view별로 data 모양이 다르다).
+// 계약: docs/api/report_basic_template.sample.md.
+export type TemplateView =
+  | "stat_grid"
+  | "bar"
+  | "doughnut"
+  | "table"
+  | "stacked_bar"
+  | "rank"
+  | "text";
+
+export interface TemplatePanel {
+  view: TemplateView | string;
+  /** "full" | "3/4" | "2/3" | "1/2" | "1/3" | "1/4" */
+  width: string;
+  title?: string;
+  /** count | percent | ratio | number | code | text (주 축 값 표현). */
+  value_format?: string;
+  data: Record<string, unknown>;
+}
+
+export interface TemplateRow {
+  panels: TemplatePanel[];
+}
+
+// 기본 템플릿 섹션 스냅샷(흰 카드 1장 = 한 블록).
+export interface SectionSnapshot {
+  sectionId: string;
+  defaultTitle: string;
+  /** "doc" | "clause" 등 집계 단위(메타). */
+  unitBasis?: string;
+  /** "2025년 기준" 등 — 제목 옆 배지. */
+  scopeLabel?: string;
+  rows: TemplateRow[];
 }
 
 // ── 보고서 블록 상태 ──
 export interface BlockOpts {
-  /** 원 질문 칩 표시 */
+  /** 원 질문 칩 표시 (result 블록 전용) */
   q: boolean;
-  /** 상세 데이터 폴드 표시 */
+  /** 상세 데이터 폴드 표시 (result 블록 전용) */
   detail: boolean;
-  /** 분석 계획 폴드 표시 */
+  /** 분석 계획 폴드 표시 (result 블록 전용) */
   plan: boolean;
 }
 
 export interface ReportBlock {
   uid: string;
-  libId: string;
-  /** 사용자 지정 표시 제목(null이면 라이브러리 원제목) */
+  /** 콘텐츠 종류 — result(분석 결과) | section(기본 템플릿 섹션). */
+  kind: BlockKind;
+  /** 사용자 지정 표시 제목(null이면 스냅샷 기본 제목) */
   title: string | null;
   /** 해석 문구 */
   interp: string;
@@ -47,9 +87,12 @@ export interface ReportBlock {
   height: number | null;
   /**
    * true면 새 줄에서 시작(한 줄 차지). false면 앞 블록과 같은 줄에 이어 배치(나란히).
-   * 자동 packing은 하지 않으며, 옆에 드롭할 때만 false로 설정된다.
    */
   newRow: boolean;
+  /** kind==="result" */
+  result?: ResultSnapshot;
+  /** kind==="section" */
+  section?: SectionSnapshot;
 }
 
 // 보고서 캔버스 그리드 컬럼 수.
@@ -92,19 +135,12 @@ export interface ReportState {
   selected: string | null;
   /**
    * 현재 state가 어떤 보고서(reportId)로 hydrate됐는지. null이면 아직 미hydrate(DEFAULT).
-   * 자동저장 가드가 이 값으로 "현재 state가 이 보고서 것인지"를 state와 원자적으로 판단한다
-   * (ref로 판단하면 hydrate effect가 state보다 한 렌더 앞서 세팅돼 stale 빈 블록을 저장하는 race 발생).
+   * 자동저장 가드가 이 값으로 "현재 state가 이 보고서 것인지"를 state와 원자적으로 판단한다.
    */
   hydratedId: string | null;
 }
 
-export const LIB_TYPE_LABEL: Record<LibType, string> = {
-  chart: "차트",
-  table: "표",
-  text: "원문",
-};
-
-// 보고서 기본(빈) 상태 — 초기화 시 복원. 블록은 보관함에서 추가한다.
+// 보고서 기본(빈) 상태 — 초기화 시 복원. 블록은 채팅 분석 결과/템플릿에서 들어온다.
 export const DEFAULT_STATE = (): ReportState => ({
   title: "분석 보고서",
   mode: "edit",

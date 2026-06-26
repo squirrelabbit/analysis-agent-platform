@@ -5,29 +5,15 @@ import { useReducer } from "react";
 import {
   DEFAULT_STATE,
   type BlockOpts,
-  type ReportBlock,
   type ReportMode,
   type ReportState,
 } from "../models/editor";
-
-let uidc = 100;
-function newUid(): string {
-  return "b" + uidc++ + "_" + Math.floor(Math.random() * 1e6).toString(36);
-}
 
 type Action =
   | { type: "hydrate"; state: ReportState }
   | { type: "setTitle"; title: string }
   | { type: "setMode"; mode: ReportMode }
   | { type: "select"; uid: string | null }
-  | {
-      type: "addBlock";
-      libId: string;
-      atIdx?: number;
-      newRow?: boolean;
-      // 보관함 항목에 상세표가 있는지(추가 시 detail 폴드 기본 표시 여부). 호출부에서 전달.
-      hasDetail?: boolean;
-    }
   | { type: "moveBlock"; from: number; to: number; newRow?: boolean }
   | { type: "deleteBlock"; uid: string }
   | { type: "setBlockTitle"; uid: string; title: string }
@@ -53,23 +39,6 @@ function reducer(state: ReportState, action: Action): ReportState {
       };
     case "select":
       return { ...state, selected: action.uid };
-    case "addBlock": {
-      const blk: ReportBlock = {
-        uid: newUid(),
-        libId: action.libId,
-        title: null,
-        interp: "",
-        opts: { q: true, detail: !!action.hasDetail, plan: false },
-        span: 12,
-        height: null,
-        newRow: action.newRow ?? true,
-      };
-      const blocks = [...state.blocks];
-      if (action.atIdx == null || action.atIdx >= blocks.length)
-        blocks.push(blk);
-      else blocks.splice(action.atIdx, 0, blk);
-      return { ...state, blocks, selected: blk.uid };
-    }
     case "moveBlock": {
       const { from } = action;
       let { to } = action;

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, Send } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { FileText, Plus, Send } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,10 @@ import { cn } from "@/lib/utils";
 import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { createClientId } from "@/shared/utils/id";
 import { useDatasets } from "@/features/datasets/hooks/dataset.query";
+import { buildApi } from "@/features/versions/api/build.api";
+import { reportDocApi } from "@/features/reports/api/reportDoc.api";
+import { useReports } from "@/features/reports/hooks/reportDoc.query";
+import { normalizeBlocks } from "@/features/reports/models/block";
 import { useAnalysisChat } from "../hooks/chat.mutation";
 import { useChatThread } from "../hooks/chat.query";
 import { useReportPanel } from "../hooks/useReportPanel";
@@ -52,9 +57,25 @@ export function ChatPage() {
 
   const threadDetail = useChatThread(projectId, activeDatasetId, nav.threadId);
   const chat = useAnalysisChat(projectId, activeDatasetId);
-  // 보고서 패널 — 결과 카드를 모아 제목·메모·순서 편집 후 한 번에 보고서 문서 생성.
+  // 보고서 패널 — 결과/기초분석 섹션을 스테이지에 모아 편집 후 한 번에 보고서 문서 생성.
   const panel = useReportPanel();
   const createReport = useCreateReportFromPanel(projectId);
+  // 기초분석 가져오기 — 선택한 데이터셋의 active version 기초분석을 블록으로 적재.
+  const activeVersionId = useMemo(
+    () =>
+      datasets.find((d) => d.id === activeDatasetId)?.activeDatasetVersionId ??
+      "",
+    [datasets, activeDatasetId],
+  );
+  const loadTemplate = useMutation({
+    mutationFn: () =>
+      buildApi.getBasicAnalysis(projectId, activeDatasetId, activeVersionId),
+  });
+  // 보고서 목록(드롭다운) + 기존 보고서 불러오기(blocks → 스테이지).
+  const reportsQuery = useReports(projectId);
+  const loadReportMut = useMutation({
+    mutationFn: (reportId: string) => reportDocApi.get(projectId, reportId),
+  });
   // 결과 액션 토스트 — 1.6초 후 자동 숨김.
   const [toast, setToast] = useState<{ msg: string; visible: boolean }>({
     msg: "",
@@ -158,8 +179,8 @@ export function ChatPage() {
   // 스레드 전환·새 대화·삭제(컨텍스트가 threadId를 바꿈)에 반응해 진행 중 턴·에러를
   // 리셋하고 강제 하단 스크롤을 건다. 단 handleSend의 null→서버threadId 승격은
   // pendingTurn 보존을 위해 한 번 건너뛴다.
-  // 보고서 패널은 일부러 리셋하지 않는다 — 여러 스레드의 결과를 한 보고서에 모을 수
-  // 있도록 스레드 전환과 무관하게 유지한다(보고서 생성/전체 비우기/채팅 이탈 시 정리).
+  // 보고서 연동(target)은 일부러 리셋하지 않는다 — active report를 스레드 전환과 무관하게
+  // 유지해 여러 스레드의 결과를 한 보고서에 모을 수 있게 한다.
   useEffect(() => {
     if (skipThreadResetRef.current) {
       skipThreadResetRef.current = false;
@@ -181,6 +202,18 @@ export function ChatPage() {
   useEffect(() => {
     setComposing(chat.isPending);
   }, [chat.isPending, setComposing]);
+
+  // 새 채팅을 시작하면(헤더·사이드바 어디서든) 보고서 패널을 자동으로 연다 →
+  // 결과를 모을 대상 보고서를 바로 고르거나 만들 수 있게 한다. 최초 마운트는 건너뛴다.
+  const newChatMounted = useRef(false);
+  const openPanel = panel.openPanel;
+  useEffect(() => {
+    if (!newChatMounted.current) {
+      newChatMounted.current = true;
+      return;
+    }
+    openPanel();
+  }, [nav.newThreadNonce, openPanel]);
 
   async function handleSend() {
     const text = input.trim();
@@ -220,15 +253,57 @@ export function ChatPage() {
     }
   }
 
+  // assistant 결과의 원 질문 — 직전 user 메시지 내용(블록 질문 칩 + 기본 제목에 사용).
+  function questionFor(msg: ChatMessage): string | undefined {
+    const idx = messages.findIndex((m) => m.id === msg.id);
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i].role === "user") return messages[i].content;
+    }
+    return undefined;
+  }
+
   function handleAddToReport(msg: ChatMessage) {
     if (!msg.runId) return;
-    // 추가 시점의 스레드를 출처로 보관 — 다른 스레드 결과도 한 보고서에 모을 수 있다.
-    const added = panel.add(msg, nav.threadId ?? undefined);
+    const added = panel.addResult(msg, questionFor(msg));
     if (added) {
       showToast("보고서에 추가했습니다");
     } else {
       panel.openPanel();
       showToast("이미 보고서에 추가된 결과입니다");
+    }
+  }
+
+  async function handleLoadTemplate() {
+    if (!activeDatasetId || !activeVersionId) {
+      showToast("데이터셋의 활성 버전이 없습니다");
+      return;
+    }
+    try {
+      const resp = await loadTemplate.mutateAsync();
+      const added = panel.addSections(normalizeBlocks(resp.blocks));
+      showToast(
+        added > 0
+          ? `기초분석 ${added}개 섹션을 가져왔습니다`
+          : "가져올 새 섹션이 없습니다",
+      );
+    } catch (err) {
+      showToast(extractErrorMessage(err));
+    }
+  }
+
+  // 새 보고서 — 스테이지를 비우고 기초분석 보고서를 기본 블록으로 가져온다.
+  function handleNewReport() {
+    panel.startNew();
+    void handleLoadTemplate();
+  }
+
+  // 기존 보고서를 스테이지로 불러온다(이어서 편집·추가 → 저장 시 갱신).
+  async function handleSelectExisting(reportId: string) {
+    try {
+      const r = await loadReportMut.mutateAsync(reportId);
+      panel.loadReport(r.report_id, r.title, r.blocks);
+    } catch (err) {
+      showToast(extractErrorMessage(err));
     }
   }
 
@@ -238,9 +313,7 @@ export function ChatPage() {
       await createReport.create({
         staged: panel.staged,
         reportTitle: panel.reportTitle,
-        threadOf: panel.threadOf,
-        messageOf: panel.messageOf,
-        cardStateOf: panel.cardStateOf,
+        loadedReportId: panel.loadedReportId,
       });
       // 성공 시 에디터로 이동(navigate)되므로 별도 토스트 없음.
     } catch (err) {
@@ -280,32 +353,41 @@ export function ChatPage() {
               </SelectContent>
             </Select>
 
-            {/* 보고서 토글 — 추가된 결과가 1개 이상일 때 노출(시안 .rtoggle) */}
-            {panel.count >= 1 && (
-              <button
-                type="button"
-                onClick={panel.togglePanel}
+            {/* 새 채팅 — 현재 스레드를 비우고(사이드바 이력과 공유) 보고서 패널을 연다. */}
+            <button
+              type="button"
+              onClick={nav.newThread}
+              disabled={nav.isComposing}
+              className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 text-[11px] font-semibold text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900 disabled:opacity-40"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              새 채팅
+            </button>
+
+            {/* 보고서 패널 토글 — 스테이지에 담긴 블록 수 배지. */}
+            <button
+              type="button"
+              onClick={panel.togglePanel}
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-bold transition",
+                panel.panelOpen
+                  ? "border-zinc-900 bg-zinc-900 text-white"
+                  : "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100",
+              )}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              보고서
+              <span
                 className={cn(
-                  "inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-bold transition",
+                  "grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px] font-extrabold",
                   panel.panelOpen
-                    ? "border-zinc-900 bg-zinc-900 text-white"
-                    : "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100",
+                    ? "bg-white/25 text-white"
+                    : "bg-violet-600 text-white",
                 )}
               >
-                <FileText className="h-3.5 w-3.5" />
-                보고서
-                <span
-                  className={cn(
-                    "grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px] font-extrabold",
-                    panel.panelOpen
-                      ? "bg-white/25 text-white"
-                      : "bg-violet-600 text-white",
-                  )}
-                >
-                  {panel.count}
-                </span>
-              </button>
-            )}
+                {panel.count}
+              </span>
+            </button>
           </div>
         </div>
 
@@ -341,11 +423,7 @@ export function ChatPage() {
                   onAddToReport={
                     canReport ? () => handleAddToReport(msg) : undefined
                   }
-                  isAdded={canReport ? panel.isAdded(msg.runId!) : false}
-                  title={canReport ? panel.titleFor(msg) : undefined}
-                  onTitleChange={
-                    canReport ? (v) => panel.setTitle(msg.runId!, v) : undefined
-                  }
+                  isAdded={canReport ? panel.isAddedRun(msg.runId!) : false}
                   onToast={showToast}
                 />
               );
@@ -410,15 +488,18 @@ export function ChatPage() {
 
       <ReportPanel
         panel={panel}
-        onCreate={handleCreateReport}
-        creating={createReport.isPending}
+        reports={reportsQuery.data ?? []}
+        reportsLoading={reportsQuery.isLoading || loadReportMut.isPending}
+        onSelectExisting={handleSelectExisting}
+        onNewReport={handleNewReport}
+        onSave={handleCreateReport}
+        saving={createReport.isPending}
+        templateLoading={loadTemplate.isPending}
       />
 
-      {/* 미저장 보고서 편집 경고 — 패널에 담긴 결과가 있고, 보고서 생성으로 인한
+      {/* 미저장 보고서 편집 경고 — 스테이지에 담긴 블록이 있고, 보고서 생성으로 인한
           의도된 이동이 아닐 때만 활성화한다. */}
-      <UnsavedReportGuard
-        active={panel.count > 0 && !createReport.isPending}
-      />
+      <UnsavedReportGuard active={panel.count > 0 && !createReport.isPending} />
 
       <ChatToast message={toast.msg} visible={toast.visible} />
     </div>

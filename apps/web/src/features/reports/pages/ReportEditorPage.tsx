@@ -3,19 +3,17 @@
 // "추가"하지 않고, 기존 블록의 글(제목·해석 문구·표시 옵션)과 레이아웃 구조
 // (드래그 정렬·너비·높이·삭제)만 편집한 뒤 PDF/HTML/PPTX로 내보낸다.
 // 보고서 문서 API(GET 단건 → hydrate, 변경분 디바운스 PUT 자동저장)와 연동된다.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { AlertCircle, Check, FileText, Loader2, Pencil } from "lucide-react";
 import Breadcrumbs from "@/components/common/Breadcrumbs";
 import { cn } from "@/lib/utils";
 import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { useProjectDetail } from "@/features/projects/hooks/project.query";
-import { savedResultToLibraryItem } from "../models/library";
-import { useSavedResults } from "../hooks/report.query";
 import { useReport } from "../hooks/reportDoc.query";
 import { useUpdateReport } from "../hooks/reportDoc.mutation";
 import { useReportEditor } from "../hooks/useReportEditor";
-import type { ReportBlock as ReportBlockModel } from "../models";
+import { normalizeBlocks } from "../models/block";
 import { ReportBlock } from "../components/ReportBlock";
 import { BlockPopover } from "../components/BlockPopover";
 import {
@@ -66,7 +64,10 @@ export default function ReportEditorPage() {
   // 단건 로드 시 1회 hydrate. blocks는 에디터가 소유하는 contract라 그대로 캐스팅.
   useEffect(() => {
     if (!report) return;
-    const blocks = (report.blocks as ReportBlockModel[]) ?? [];
+    // 서버 raw 블록(분석 결과 item / 템플릿 섹션 / 이미 저장된 에디터 블록)을 모두
+    // 에디터 ReportBlock으로 정규화한다(멱등). lastSaved도 정규화 결과로 맞춰
+    // hydrate 직후 불필요한 자동저장이 트리거되지 않게 한다.
+    const blocks = normalizeBlocks(report.blocks);
     dispatch({
       type: "hydrate",
       state: {
@@ -148,18 +149,6 @@ export default function ReportEditorPage() {
     [],
   );
 
-  // 보관함(saved_results) 실데이터 → 에디터 뷰모델(LibraryItem) + id 조회 맵.
-  const { data: saved } = useSavedResults(projectId);
-  const library = useMemo(
-    () => (saved ?? []).map(savedResultToLibraryItem),
-    [saved],
-  );
-  const libMap = useMemo(
-    () => new Map(library.map((l) => [l.id, l])),
-    [library],
-  );
-  const libById = (id: string) => libMap.get(id);
-
   const blocksRef = useRef<HTMLDivElement>(null);
   const gripDragUid = useRef<string | null>(null);
   const [dropMarker, setDropMarker] = useState<DropMarker | null>(null);
@@ -171,7 +160,6 @@ export default function ReportEditorPage() {
 
   const isEdit = state.mode === "edit";
   const selectedBlock = state.blocks.find((b) => b.uid === state.selected);
-  const selectedLib = selectedBlock ? libById(selectedBlock.libId) : undefined;
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -363,7 +351,7 @@ export default function ReportEditorPage() {
   const handleExport = (fmt: ExportFormat) => {
     if (fmt === "pptx") {
       // 블록 1개 = 슬라이드 1장, 네이티브 PPT 개체(텍스트/표/차트)로 내보낸다.
-      exportReportPPTX(state.title, state.blocks, libById)
+      exportReportPPTX(state.title, state.blocks)
         .then((ok) =>
           showToast(
             ok ? "PPTX 파일을 다운로드했어요" : "내보낼 내용이 없습니다",
@@ -496,36 +484,31 @@ export default function ReportEditorPage() {
                 {state.blocks.length === 0 ? (
                   <EmptyReport />
                 ) : (
-                  state.blocks.map((b, i) => {
-                    const lib = libById(b.libId);
-                    if (!lib) return null;
-                    return (
-                      <ReportBlock
-                        key={b.uid}
-                        block={b}
-                        lib={lib}
-                        index={i}
-                        mode={state.mode}
-                        selected={state.selected === b.uid}
-                        sheetRef={blocksRef}
-                        onEdit={(uid) => dispatch({ type: "select", uid })}
-                        onGripDragStart={(uid) => {
-                          gripDragUid.current = uid;
-                        }}
-                        onGripDragEnd={() => {
-                          gripDragUid.current = null;
-                          setDropMarker(null);
-                          stopAutoScroll();
-                        }}
-                        onSetSpan={(uid, span) =>
-                          dispatch({ type: "setSpan", uid, span })
-                        }
-                        onSetHeight={(uid, height) =>
-                          dispatch({ type: "setHeight", uid, height })
-                        }
-                      />
-                    );
-                  })
+                  state.blocks.map((b, i) => (
+                    <ReportBlock
+                      key={b.uid}
+                      block={b}
+                      index={i}
+                      mode={state.mode}
+                      selected={state.selected === b.uid}
+                      sheetRef={blocksRef}
+                      onEdit={(uid) => dispatch({ type: "select", uid })}
+                      onGripDragStart={(uid) => {
+                        gripDragUid.current = uid;
+                      }}
+                      onGripDragEnd={() => {
+                        gripDragUid.current = null;
+                        setDropMarker(null);
+                        stopAutoScroll();
+                      }}
+                      onSetSpan={(uid, span) =>
+                        dispatch({ type: "setSpan", uid, span })
+                      }
+                      onSetHeight={(uid, height) =>
+                        dispatch({ type: "setHeight", uid, height })
+                      }
+                    />
+                  ))
                 )}
 
                 {/* 드롭 삽입 위치 막대(그리드 위 absolute) — 세로/가로 자동 */}
@@ -557,10 +540,9 @@ export default function ReportEditorPage() {
       </div>
 
       {/* 블록 속성 팝오버 */}
-      {isEdit && selectedBlock && selectedLib && (
+      {isEdit && selectedBlock && (
         <BlockPopover
           block={selectedBlock}
-          lib={selectedLib}
           onClose={() => dispatch({ type: "select", uid: null })}
           onSetTitle={(title) =>
             dispatch({ type: "setBlockTitle", uid: selectedBlock.uid, title })

@@ -229,6 +229,8 @@ export const mapAnalyzeResponse = (
             dto.run?.run_id ||
             dto.assistant_message.run_id?.trim() ||
             undefined,
+          rawDisplay: display,
+          rawPlan: dto.result?.plan,
         }
       : undefined;
 
@@ -279,6 +281,8 @@ const mapStoredMessage = (dto: AnalysisMessageDto): ChatMessage => {
     chartFallbackReason,
     plan: mapPlan(dto.plan),
     runId: dto.run_id?.trim() || undefined,
+    rawDisplay: dto.display,
+    rawPlan: dto.plan,
   };
 };
 

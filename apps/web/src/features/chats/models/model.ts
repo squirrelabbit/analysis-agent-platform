@@ -1,4 +1,4 @@
-import type { ChatRole } from "./dto";
+import type { AnalysisPlanDto, ChatRole, ComposerDisplayDto } from "./dto";
 import type { ColumnFormat } from "./format";
 
 export interface ChatTableDisplay {
@@ -113,9 +113,14 @@ export interface ChatMessage {
   // 표시되지 않는다 (사용자 정책).
   runStatus?: RunStatus;
   runError?: string;
-  // silverone 2026-06-10 — 보고서 보관함 저장에 필요한 run id. assistant
+  // silverone 2026-06-10 — 보고서 결과 식별에 필요한 run id. assistant
   // 메시지에만, POST 응답·thread detail 양쪽에서 채워진다(스냅샷 대상 식별).
   runId?: string;
+  // 보고서 블록(self-contained)을 클라이언트에서 조립하기 위한 raw 스냅샷.
+  // 채팅 렌더는 mapped(display/chart/…)를 쓰지만, 보고서 블록은 에디터가 동일하게
+  // 재투영(projectResult)할 수 있도록 서버 raw(ComposerDisplayDto/AnalysisPlanDto)를 보존한다.
+  rawDisplay?: ComposerDisplayDto;
+  rawPlan?: AnalysisPlanDto;
 }
 
 export interface ChatThread {

@@ -1,37 +1,41 @@
-import { ChevronDown, GripVertical, Pencil, X } from "lucide-react";
+import { useMemo } from "react";
+import { BarChart3, ChevronDown, GripVertical, Pencil, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ChatMessage } from "../models";
+import { projectResult } from "@/features/reports/models/result";
+import TemplateSection from "@/features/reports/components/TemplateSection";
+import type { ReportBlock } from "@/features/reports/models";
 import ChartView from "./ChartView";
 import DisplayTable from "./DisplayTable";
 import EvidenceCardList from "./EvidenceCardList";
 import MetricCompareView from "./MetricCompareView";
 import EditableText from "./EditableText";
 
-// 시안 「분석 채팅 - 보고서 패널」 .scard — 패널에 쌓인 결과 카드 1개.
-// 드래그 핸들 + 제거 / 편집 제목 / 결과 본문 / 편집 메모.
+// 패널에 쌓인 블록 카드 1개. result(분석 결과) / section(기초분석 템플릿) 둘 다 렌더.
+// 드래그 핸들 + 접기/펼치기(accordion) + 편집 제목 + 결과 본문 + 편집 메모.
 
-// 메인 결과 선택(metric > evidence > chart > table) — MessageBubble과 동일 규칙.
-function ResultBody({ message }: { message: ChatMessage }) {
-  if (message.metric) return <MetricCompareView metric={message.metric} />;
-  if (message.evidence) return <EvidenceCardList evidence={message.evidence} />;
-  if (message.chart) return <ChartView chart={message.chart} />;
-  if (message.display) return <DisplayTable display={message.display} />;
+// result 본문 — 메인 결과 선택(metric > evidence > chart > table), 채팅과 동일.
+function ResultBody({ block }: { block: ReportBlock }) {
+  const r = useMemo(
+    () => (block.result ? projectResult(block.result) : undefined),
+    [block.result],
+  );
+  if (!r) return <p className="text-xs text-zinc-400">표시할 결과가 없습니다</p>;
+  if (r.metric) return <MetricCompareView metric={r.metric} />;
+  if (r.evidence) return <EvidenceCardList evidence={r.evidence} />;
+  if (r.chart) return <ChartView chart={r.chart} />;
+  if (r.display) return <DisplayTable display={r.display} />;
   return <p className="text-xs text-zinc-400">표시할 결과가 없습니다</p>;
 }
 
 export type DropHint = "before" | "after" | null;
 
 interface ReportPanelCardProps {
-  message: ChatMessage;
-  title: string;
-  note: string;
+  block: ReportBlock;
   onTitleChange: (value: string) => void;
   onNoteChange: (value: string) => void;
   onRemove: () => void;
-  // accordion: 접힘 상태 + 토글. 접히면 제목 행만 보인다.
   collapsed: boolean;
   onToggle: () => void;
-  // 드래그 정렬
   isDragging: boolean;
   dropHint: DropHint;
   onDragStartCard: () => void;
@@ -41,9 +45,7 @@ interface ReportPanelCardProps {
 }
 
 export default function ReportPanelCard({
-  message,
-  title,
-  note,
+  block,
   onTitleChange,
   onNoteChange,
   onRemove,
@@ -56,6 +58,12 @@ export default function ReportPanelCard({
   onDropCard,
   onDragEndCard,
 }: ReportPanelCardProps) {
+  const isSection = block.kind === "section";
+  const defaultTitle = isSection
+    ? block.section?.defaultTitle || "섹션"
+    : block.result?.defaultTitle || "분석 결과";
+  const title = block.title != null ? block.title : defaultTitle;
+
   return (
     <div
       onDragOver={(e) => {
@@ -99,7 +107,15 @@ export default function ReportPanelCard({
             )}
           />
         </button>
-        {/* editable title (편집 가능한 카드 제목) */}
+        {isSection && (
+          <span
+            title="기초분석 섹션"
+            className="grid h-5.5 w-5.5 shrink-0 place-items-center rounded-md bg-violet-50 text-violet-600"
+          >
+            <BarChart3 className="h-3.5 w-3.5" />
+          </span>
+        )}
+        {/* editable title */}
         <div className="group flex min-w-0 flex-1 items-start gap-1.5">
           <EditableText
             value={title}
@@ -119,17 +135,20 @@ export default function ReportPanelCard({
         </button>
       </div>
 
-      {/* 접힌 카드는 제목 행만 — 결과 본문·메모는 펼쳤을 때만 렌더 */}
+      {/* 접힌 카드는 제목 행만 — 본문·메모는 펼쳤을 때만 렌더 */}
       {!collapsed && (
         <>
-          {/* rendered result — 결과 컴포넌트의 자체 박스만(중첩 래퍼 제거) */}
           <div className="px-3">
-            <ResultBody message={message} />
+            {isSection ? (
+              block.section && <TemplateSection rows={block.section.rows} />
+            ) : (
+              <ResultBody block={block} />
+            )}
           </div>
 
           {/* editable note */}
           <EditableText
-            value={note}
+            value={block.interp}
             onChange={onNoteChange}
             multiline
             placeholder="메모를 추가…"

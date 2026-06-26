@@ -1,17 +1,32 @@
 import { useEffect, useRef, useState } from "react";
-import { FileText, Loader2, Pencil, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  FileText,
+  Loader2,
+  Pencil,
+  Plus,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { ReportSummary } from "@/features/reports/models";
 import type { ReportPanelApi } from "../hooks/useReportPanel";
 import ReportPanelCard, { type DropHint } from "./ReportPanelCard";
 
-// 시안 「분석 채팅 - 보고서 패널」 우측 슬라이드 패널.
-// 헤더(제목/카운트/닫기) · 보고서 제목바 · 카드 리스트(빈 상태) · 푸터(비우기 + 보고서 만들기).
-// 폭 0 ↔ 432px 트랜지션으로 슬라이드.
+// 채팅 우측 보고서 패널.
+//   상단 드롭다운: 기존 보고서 불러오기(이어서 편집 → 저장 시 갱신) / 새 보고서(생성).
+//   본문 staging: 기초분석 가져오기 + 결과/섹션 카드(accordion + 드래그 정렬) + 제목/메모.
+//   저장: 새 보고서 → POST /reports, 불러온 보고서 → PUT /reports/{id}.
 
 interface ReportPanelProps {
   panel: ReportPanelApi;
-  onCreate: () => void;
-  creating: boolean;
+  reports: ReportSummary[];
+  reportsLoading: boolean;
+  onSelectExisting: (reportId: string) => void;
+  onNewReport: () => void;
+  onSave: () => void;
+  saving: boolean;
+  templateLoading: boolean;
 }
 
 interface DropTarget {
@@ -19,40 +34,66 @@ interface DropTarget {
   after: boolean;
 }
 
-export default function ReportPanel({ panel, onCreate, creating }: ReportPanelProps) {
+export default function ReportPanel({
+  panel,
+  reports,
+  reportsLoading,
+  onSelectExisting,
+  onNewReport,
+  onSave,
+  saving,
+  templateLoading,
+}: ReportPanelProps) {
   const {
     staged,
     panelOpen,
     reportTitle,
     count,
-    messageOf,
-    cardStateOf,
+    expandedId,
+    loadedReportId,
     setReportTitle,
     setTitle,
     setNote,
     remove,
     reorder,
+    toggleExpand,
     clearAll,
     closePanel,
   } = panel;
 
+  // 보고서 선택 드롭다운 — 로컬 UI 상태(바깥 클릭 시 닫힘).
+  const [menuOpen, setMenuOpen] = useState(false);
+  const selectorRef = useRef<HTMLDivElement>(null);
+  const showMenu = menuOpen && panelOpen;
+
+  useEffect(() => {
+    if (!showMenu) return;
+    function onDocClick(e: MouseEvent) {
+      if (!selectorRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [showMenu]);
+
+  const selectionTitle = loadedReportId
+    ? reportTitle.trim() ||
+      reports.find((r) => r.reportId === loadedReportId)?.title ||
+      "제목 없는 보고서"
+    : "새 보고서";
+
+  function handleSelect(reportId: string) {
+    setMenuOpen(false);
+    onSelectExisting(reportId);
+  }
+
+  function handleNew() {
+    setMenuOpen(false);
+    onNewReport();
+  }
+
+  // ── 드래그 정렬 + 자동 스크롤 ──
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
-
-  // accordion: 한 번에 하나만 펼친다. 카드를 새로 추가하면 기존 카드는 접히고
-  // 새로 들어온 카드만 펼쳐지도록 expandedId를 새 runId로 옮긴다.
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const prevStaged = useRef<string[]>([]);
-  useEffect(() => {
-    const added = staged.find((id) => !prevStaged.current.includes(id));
-    if (added) setExpandedId(added);
-    prevStaged.current = staged;
-  }, [staged]);
-  const toggleExpand = (runId: string) =>
-    setExpandedId((cur) => (cur === runId ? null : runId));
-
-  // 드래그로 카드 순서 변경 시, 리스트 위/아래 가장자리에서 자동 스크롤.
-  // (HTML5 DnD는 컨테이너를 자동 스크롤해 주지 않아 화면 밖으로 못 옮기는 문제 해결.)
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScroll = useRef<{ vy: number; raf: number }>({ vy: 0, raf: 0 });
 
@@ -71,8 +112,8 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
     const el = scrollRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const EDGE = 56; // 가장자리 감지 영역(px)
-    const MAX = 16; // 프레임당 최대 스크롤(px)
+    const EDGE = 56;
+    const MAX = 16;
     let vy = 0;
     if (clientY < r.top + EDGE)
       vy = -MAX * Math.min(1, (r.top + EDGE - clientY) / EDGE);
@@ -91,11 +132,14 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
     }
   };
 
-  // 언마운트 시 진행 중인 자동 스크롤 정리.
   useEffect(() => stopAutoScroll, []);
 
   function handleDrop() {
-    if (dragIndex !== null && dropTarget !== null && dropTarget.index !== dragIndex) {
+    if (
+      dragIndex !== null &&
+      dropTarget !== null &&
+      dropTarget.index !== dragIndex
+    ) {
       const from = dragIndex;
       let to = dropTarget.index + (dropTarget.after ? 1 : 0);
       if (from < to) to -= 1;
@@ -121,57 +165,188 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
       )}
     >
       <div className="flex h-full w-108 flex-col">
-        {/* header */}
-        <div className="flex shrink-0 items-center gap-2.5 border-b border-zinc-200 px-4 py-3.5">
-          <span className="grid h-7.5 w-7.5 place-items-center rounded-lg bg-violet-50 text-violet-700">
-            <FileText className="h-4.25 w-4.25" />
-          </span>
-          <span className="text-[14.5px] font-bold text-zinc-900">보고서 구성</span>
-          <span className="grid h-5.25 min-w-5.25 place-items-center rounded-full bg-violet-600 px-1.75 text-xs font-extrabold text-white">
-            {count}
-          </span>
+        {/* 상단 보고서 선택 바 */}
+        <div className="flex shrink-0 items-center gap-2 border-b border-zinc-200 bg-zinc-50/70 px-3 py-3">
+          <div ref={selectorRef} className="relative min-w-0 flex-1">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              disabled={reportsLoading}
+              className={cn(
+                "flex h-10 w-full items-center gap-2.5 rounded-[10px] border bg-white px-2.5 text-left transition disabled:opacity-60",
+                showMenu
+                  ? "border-violet-500 ring-[3px] ring-violet-100"
+                  : "border-zinc-200 hover:border-zinc-300",
+              )}
+            >
+              <span
+                className={cn(
+                  "grid h-6.5 w-6.5 shrink-0 place-items-center rounded-lg",
+                  loadedReportId
+                    ? "bg-violet-50 text-violet-700"
+                    : "bg-zinc-100 text-zinc-400",
+                )}
+              >
+                <FileText className="h-3.75 w-3.75" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13.5px] font-bold leading-tight text-zinc-900">
+                  {reportsLoading ? "불러오는 중…" : selectionTitle}
+                </span>
+                <span className="block truncate text-[10.5px] font-semibold text-zinc-400">
+                  {loadedReportId ? "기존 보고서 편집 중" : "새 보고서 (저장 안 됨)"} ·
+                  블록 {count}개
+                </span>
+              </span>
+              <ChevronDown
+                className={cn(
+                  "h-4 w-4 shrink-0 text-zinc-400 transition-transform",
+                  showMenu && "rotate-180",
+                )}
+              />
+            </button>
+
+            {showMenu && (
+              <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-40 max-h-90 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl">
+                <button
+                  type="button"
+                  onClick={handleNew}
+                  className="flex w-full items-center gap-2.5 rounded-[9px] p-2.25 text-left text-[13px] font-bold text-violet-700 transition hover:bg-violet-50"
+                >
+                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-violet-600 text-white">
+                    <Plus className="h-3.75 w-3.75" />
+                  </span>
+                  새 보고서
+                </button>
+                <div className="mx-1 my-1.5 h-px bg-zinc-100" />
+                <div className="px-2.25 pb-1.25 pt-0.5 text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">
+                  기존 보고서 불러오기
+                </div>
+                {reports.length === 0 ? (
+                  <div className="px-2.25 py-2.5 text-[12.5px] font-semibold text-zinc-400">
+                    기존 보고서 없음
+                  </div>
+                ) : (
+                  reports.map((r) => {
+                    const on = r.reportId === loadedReportId;
+                    return (
+                      <button
+                        key={r.reportId}
+                        type="button"
+                        onClick={() => handleSelect(r.reportId)}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 rounded-[9px] p-2.25 text-left transition",
+                          on ? "bg-violet-50" : "hover:bg-zinc-100",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "grid h-7 w-7 shrink-0 place-items-center rounded-lg",
+                            on
+                              ? "bg-white text-violet-700"
+                              : "bg-zinc-100 text-zinc-500",
+                          )}
+                        >
+                          <FileText className="h-3.75 w-3.75" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              "block truncate text-[13px] font-bold",
+                              on ? "text-violet-700" : "text-zinc-900",
+                            )}
+                          >
+                            {r.title || "제목 없는 보고서"}
+                          </span>
+                          <span className="mt-px block text-[11px] font-semibold text-zinc-400">
+                            블록 {r.blockCount}개
+                          </span>
+                        </span>
+                        {on && <Check className="h-4 w-4 shrink-0 text-violet-700" />}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleNew}
+            title="새 보고서"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] border border-zinc-200 bg-white text-zinc-500 transition hover:border-violet-500 hover:bg-violet-50 hover:text-violet-700"
+          >
+            <Plus className="h-4.5 w-4.5" />
+          </button>
           <button
             type="button"
             onClick={closePanel}
             title="패널 닫기"
-            className="ml-auto grid h-8 w-8 place-items-center rounded-lg text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-900"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-900"
           >
             <X className="h-4.5 w-4.5" />
           </button>
         </div>
 
+        {/* 보고서 제목 + 기초분석 가져오기 */}
+        <div className="shrink-0 space-y-2.5 border-b border-zinc-200 px-4 py-3">
+          <div>
+            <label className="mb-1.5 block text-[10.5px] font-extrabold uppercase tracking-wide text-zinc-400">
+              보고서 제목
+            </label>
+            <div className="flex items-center gap-2 rounded-lg border border-transparent px-1.5 py-1 transition hover:bg-zinc-100 focus-within:border-violet-500 focus-within:bg-white focus-within:ring-2 focus-within:ring-violet-100">
+              <Pencil className="h-3.75 w-3.75 shrink-0 text-zinc-400" />
+              <input
+                value={reportTitle}
+                onChange={(e) => setReportTitle(e.target.value)}
+                placeholder="제목 없는 보고서"
+                className="min-w-0 flex-1 bg-transparent text-[15px] font-bold text-zinc-900 outline-none placeholder:font-bold placeholder:text-zinc-400"
+              />
+            </div>
+          </div>
+        </div>
+
         {count === 0 ? (
-          /* empty state */
-          <div className="flex flex-1 flex-col items-center justify-center gap-3.5 px-7 text-center">
-            <span className="grid h-13 w-13 place-items-center rounded-[15px] bg-zinc-100 text-zinc-400">
-              <FileText className="h-6.5 w-6.5" />
+          /* empty state — 새 보고서(기초분석 가져오기) / 기존 보고서 사용(드롭다운) */
+          <div className="flex flex-1 flex-col items-center justify-center gap-3.75 px-7.5 text-center">
+            <span className="grid h-14 w-14 place-items-center rounded-2xl bg-zinc-100 text-zinc-400">
+              <FileText className="h-7 w-7" />
             </span>
-            <h4 className="text-[14.5px] font-bold text-zinc-600">
-              아직 추가된 결과가 없습니다
+            <h4 className="text-[15.5px] font-extrabold text-zinc-900">
+              보고서가 선택되지 않았습니다
             </h4>
-            <p className="max-w-57.5 text-[12.5px] leading-relaxed text-zinc-400">
-              분석 결과 카드의 <b className="font-semibold">보고서에 추가</b>를 누르면
-              여기에 쌓이고, 한 번에 보고서로 만들 수 있습니다.
+            <p className="max-w-62.5 text-[12.5px] leading-relaxed text-zinc-400">
+              새 보고서는 기초분석 결과를 기본 블록으로 가져옵니다. 기존 보고서를
+              불러와 이어서 편집할 수도 있습니다.
             </p>
+            <div className="mt-1 flex w-full max-w-60 flex-col gap-2.25">
+              <button
+                type="button"
+                onClick={onNewReport}
+                disabled={templateLoading}
+                className="inline-flex h-10.5 items-center justify-center gap-1.75 rounded-xl bg-violet-600 text-[13.5px] font-bold text-white transition hover:bg-violet-700 disabled:opacity-60"
+              >
+                {templateLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+                새 보고서 만들기
+              </button>
+              <button
+                type="button"
+                onClick={() => setMenuOpen(true)}
+                disabled={reportsLoading || reports.length === 0}
+                className="inline-flex h-10.5 items-center justify-center gap-1.75 rounded-xl border border-zinc-200 bg-white text-[13.5px] font-bold text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900 disabled:opacity-50"
+              >
+                <FileText className="h-4 w-4" />
+                기존 보고서 사용
+              </button>
+            </div>
           </div>
         ) : (
           <>
-            {/* report title */}
-            <div className="shrink-0 border-b border-zinc-200 bg-zinc-50/70 px-4 py-3">
-              <label className="mb-1.5 block text-[10.5px] font-extrabold uppercase tracking-wide text-zinc-400">
-                보고서 제목
-              </label>
-              <div className="flex items-center gap-2 rounded-lg border border-transparent px-1.5 py-1 transition hover:bg-zinc-100 focus-within:border-violet-500 focus-within:bg-white focus-within:ring-2 focus-within:ring-violet-100">
-                <Pencil className="h-3.75 w-3.75 shrink-0 text-zinc-400" />
-                <input
-                  value={reportTitle}
-                  onChange={(e) => setReportTitle(e.target.value)}
-                  placeholder="제목 없는 보고서"
-                  className="min-w-0 flex-1 bg-transparent text-[15px] font-bold text-zinc-900 outline-none placeholder:font-bold placeholder:text-zinc-400"
-                />
-              </div>
-            </div>
-
             {/* card list */}
             <div
               ref={scrollRef}
@@ -181,34 +356,27 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
               }}
               className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3.5"
             >
-              {staged.map((runId, index) => {
-                const msg = messageOf(runId);
-                if (!msg) return null;
-                const cs = cardStateOf(runId);
-                return (
-                  <ReportPanelCard
-                    key={runId}
-                    message={msg}
-                    title={cs.title}
-                    note={cs.note}
-                    onTitleChange={(v) => setTitle(runId, v)}
-                    onNoteChange={(v) => setNote(runId, v)}
-                    onRemove={() => remove(runId)}
-                    collapsed={expandedId !== runId}
-                    onToggle={() => toggleExpand(runId)}
-                    isDragging={dragIndex === index}
-                    dropHint={dropHintFor(index)}
-                    onDragStartCard={() => setDragIndex(index)}
-                    onDragOverCard={(after) => setDropTarget({ index, after })}
-                    onDropCard={handleDrop}
-                    onDragEndCard={() => {
-                      setDragIndex(null);
-                      setDropTarget(null);
-                      stopAutoScroll();
-                    }}
-                  />
-                );
-              })}
+              {staged.map((block, index) => (
+                <ReportPanelCard
+                  key={block.uid}
+                  block={block}
+                  onTitleChange={(v) => setTitle(block.uid, v)}
+                  onNoteChange={(v) => setNote(block.uid, v)}
+                  onRemove={() => remove(block.uid)}
+                  collapsed={expandedId !== block.uid}
+                  onToggle={() => toggleExpand(block.uid)}
+                  isDragging={dragIndex === index}
+                  dropHint={dropHintFor(index)}
+                  onDragStartCard={() => setDragIndex(index)}
+                  onDragOverCard={(after) => setDropTarget({ index, after })}
+                  onDropCard={handleDrop}
+                  onDragEndCard={() => {
+                    setDragIndex(null);
+                    setDropTarget(null);
+                    stopAutoScroll();
+                  }}
+                />
+              ))}
             </div>
 
             {/* footer */}
@@ -216,7 +384,7 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
               <button
                 type="button"
                 onClick={clearAll}
-                disabled={creating}
+                disabled={saving}
                 title="전체 비우기"
                 className="grid h-10 w-11 place-items-center rounded-xl border border-zinc-200 bg-white text-zinc-500 transition hover:border-zinc-300 hover:text-zinc-900 disabled:opacity-50"
               >
@@ -224,19 +392,19 @@ export default function ReportPanel({ panel, onCreate, creating }: ReportPanelPr
               </button>
               <button
                 type="button"
-                onClick={onCreate}
-                disabled={creating}
+                onClick={onSave}
+                disabled={saving}
                 className="flex h-10 flex-1 items-center justify-center gap-1.75 rounded-xl bg-violet-600 text-[13.5px] font-bold text-white transition hover:bg-violet-700 disabled:opacity-60"
               >
-                {creating ? (
+                {saving ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    만드는 중…
+                    {loadedReportId ? "저장 중…" : "만드는 중…"}
                   </>
                 ) : (
                   <>
                     <FileText className="h-4 w-4" />
-                    보고서 만들기
+                    {loadedReportId ? "보고서 저장" : "보고서 만들기"}
                   </>
                 )}
               </button>

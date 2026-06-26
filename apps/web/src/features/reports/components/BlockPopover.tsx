@@ -13,9 +13,9 @@ import {
   GRID_COLS,
   spanLabel,
   type BlockOpts,
-  type LibraryItem,
   type ReportBlock,
 } from "../models/editor";
+import { projectResult } from "../models/result";
 
 const PANEL_W = 300;
 
@@ -81,7 +81,6 @@ function Label({ children }: { children: React.ReactNode }) {
 
 export function BlockPopover({
   block,
-  lib,
   onClose,
   onSetTitle,
   onSetInterp,
@@ -91,7 +90,6 @@ export function BlockPopover({
   onDelete,
 }: {
   block: ReportBlock;
-  lib: LibraryItem;
   onClose: () => void;
   onSetTitle: (title: string) => void;
   onSetInterp: (interp: string) => void;
@@ -143,11 +141,15 @@ export function BlockPopover({
     };
   }, [block.uid, block.span]);
 
-  const title = block.title != null ? block.title : lib.title;
-  // 메인이 표가 아니면(metric/evidence/chart) display를 상세 데이터로 보여줄 수 있다.
-  const r = lib.result;
+  const isSection = block.kind === "section";
+  const defaultTitle = isSection
+    ? block.section?.defaultTitle || "섹션"
+    : block.result?.defaultTitle || "분석 결과";
+  const title = block.title != null ? block.title : defaultTitle;
+  // result 블록만 표시 옵션(원질문/상세/분석계획)을 제공한다.
+  const r = block.result ? projectResult(block.result) : undefined;
   const hasDetail =
-    (!!r.metric || !!r.evidence || !!r.chart) && !!r.display;
+    !!r && (!!r.metric || !!r.evidence || !!r.chart) && !!r.display;
 
   return (
     <>
@@ -196,26 +198,30 @@ export function BlockPopover({
           className="h-19 w-full resize-none rounded-lg border border-zinc-200 px-2.75 py-2.25 text-[13px] leading-relaxed text-zinc-900 outline-none transition focus:border-violet-500 focus:ring-3 focus:ring-violet-100"
         />
 
-        <Label>표시 옵션</Label>
-        <OptRow
-          icon={<MessageSquare className="h-3.75 w-3.75" />}
-          label="원 질문 표시"
-          on={block.opts.q}
-          onToggle={() => onToggleOpt("q")}
-        />
-        <OptRow
-          icon={<Table2 className="h-3.75 w-3.75" />}
-          label={hasDetail ? "상세 데이터 포함" : "상세 데이터 포함 (없음)"}
-          on={block.opts.detail}
-          disabled={!hasDetail}
-          onToggle={() => onToggleOpt("detail")}
-        />
-        <OptRow
-          icon={<ClipboardCheck className="h-3.75 w-3.75" />}
-          label="분석 계획 포함"
-          on={block.opts.plan}
-          onToggle={() => onToggleOpt("plan")}
-        />
+        {!isSection && (
+          <>
+            <Label>표시 옵션</Label>
+            <OptRow
+              icon={<MessageSquare className="h-3.75 w-3.75" />}
+              label="원 질문 표시"
+              on={block.opts.q}
+              onToggle={() => onToggleOpt("q")}
+            />
+            <OptRow
+              icon={<Table2 className="h-3.75 w-3.75" />}
+              label={hasDetail ? "상세 데이터 포함" : "상세 데이터 포함 (없음)"}
+              on={block.opts.detail}
+              disabled={!hasDetail}
+              onToggle={() => onToggleOpt("detail")}
+            />
+            <OptRow
+              icon={<ClipboardCheck className="h-3.75 w-3.75" />}
+              label="분석 계획 포함"
+              on={block.opts.plan}
+              onToggle={() => onToggleOpt("plan")}
+            />
+          </>
+        )}
 
         <Label>너비</Label>
         <div className="flex items-center gap-2.5">
