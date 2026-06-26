@@ -1760,86 +1760,14 @@ paths:
                 $ref: "#/components/schemas/DatasetBuildJob"
         "404":
           $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/saved_results:
-    post:
-      tags: [Reports]
-      summary: 분석 결과를 보고서 보관함에 저장 (스냅샷)
-      description: |
-        채팅에서 완료된 분석 결과(`run_id`)를 보고서 보관함에 저장한다.
-        저장 시점의 `composer.display` / `plan` / `assistant_content`를
-        스냅샷으로 박제해 보존한다 — 이후 같은 질문을 재실행하거나 thread를
-        지워도 보관함 항목은 변하지 않는다. project / dataset / version은 run에서
-        유도한다. `title` 미지정 시 display.title → question 순으로 서버가 유도.
-
-        completed 상태가 아니거나 result_json이 없으면 400.
-      operationId: createSavedResult
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ReportSavedResultCreateRequest"
-      responses:
-        "201":
-          description: 저장된 보관함 항목
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ReportSavedResult"
-        "400":
-          $ref: "#/components/responses/ErrorResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-    get:
-      tags: [Reports]
-      summary: 보고서 보관함 목록 (project 스코프, 최신순)
-      description: |
-        project의 저장된 분석 결과 목록을 최신순으로 반환한다.
-        `dataset_id` query로 특정 dataset만 필터할 수 있다(미지정 시 전체).
-      operationId: listSavedResults
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - name: dataset_id
-          in: query
-          required: false
-          description: 특정 dataset의 항목만 필터 (미지정 시 project 전체)
-          schema:
-            type: string
-      responses:
-        "200":
-          description: 보관함 목록
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ReportSavedResultListResponse"
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
-  /projects/{project_id}/saved_results/{result_id}:
-    delete:
-      tags: [Reports]
-      summary: 보고서 보관함 항목 삭제
-      operationId: deleteSavedResult
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - name: result_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "204":
-          description: 삭제 완료
-        "404":
-          $ref: "#/components/responses/ErrorResponse"
   /projects/{project_id}/reports/from_template:
     post:
       tags: [Reports]
       summary: 기본 템플릿으로 보고서 생성 (데이터 기초 분석)
       description: |
-        clean ready인 dataset_version을 대상으로 템플릿 config(config/report_templates/*.json)에
-        따라 빌드 summary를 블록으로 채운 보고서를 생성한다. required_build가 ready인 섹션만
+        dataset_id를 받아 그 dataset의 active version(clean ready)을 대상으로 템플릿
+        config(config/report_templates/*.json)에 따라 빌드 summary를 블록으로 채운 보고서를
+        생성한다. active version이 없으면 400. required_build가 ready인 섹션만
         만들고 나머지는 missing_sections로 반환. 블록 data·source는 생성 시점 snapshot.
         값 표현(count/percent)·배치(layout/view/width)는 템플릿이 결정해 응답에 실린다
         (계약: docs/api/report_basic_template.sample.md).
@@ -1900,10 +1828,11 @@ paths:
       tags: [Reports]
       summary: 보고서 문서 생성
       description: |
-        saved_results(보관함)를 조합한 보고서 문서를 생성한다. blocks는 작성
-        당시 snapshot을 복제해 담는 opaque JSON 배열로, control-plane은 영속만
-        책임지고 블록 contract는 프론트(보고서 에디터)가 소유한다. blocks
-        미지정 시 빈 배열로 저장. 1차는 CRUD만 — 공유/재생성/export는 후속.
+        빈/커스텀 보고서 문서를 생성한다. blocks는 작성 당시 snapshot을 복제해
+        담는 opaque JSON 배열로, control-plane은 영속만 책임지고 블록 contract는
+        프론트(보고서 에디터)가 소유한다. blocks 미지정 시 빈 배열로 저장.
+        분석 결과 추가는 POST /reports/{report_id}/item, 템플릿 생성은
+        POST /reports/from_template.
       operationId: createReport
       parameters:
         - $ref: "#/components/parameters/ProjectId"
@@ -1992,6 +1921,37 @@ paths:
       responses:
         "204":
           description: 삭제 완료
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/reports/{report_id}/item:
+    post:
+      tags: [Reports]
+      summary: 보고서에 item(블록) 추가
+      description: |
+        기존 보고서의 blocks 뒤에 item 1개를 append한다(새 보고서를 만들지 않음).
+        report_id는 유지되고 updated_at만 갱신. type=analysis_result는 run_id가
+        가리키는 완료된 분석 결과에서 question/assistant_content/display/plan을
+        그 시점 스냅샷으로 박제한다(재실행·재빌드와 무관하게 근거 보존). 응답으로
+        갱신된 보고서 + 추가된 item을 반환해 프론트가 즉시 에디터에 반영한다.
+      operationId: appendReportItem
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ReportId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportItemAppendRequest"
+      responses:
+        "201":
+          description: 갱신된 보고서 + 추가된 item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportItemAppendResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
 components:
@@ -2998,59 +2958,6 @@ components:
             예시 `"게시일"`. 명시 안 하면 `created_at` 컬럼은 모두 null. parse 실패 / Invalid date /
             빈 값은 row별 null로 처리 (전체 row는 유지). 분리형 date(`pub_year` / `month` / `day`)
             지원은 후속 PR (`date_parts`).
-    ReportSavedResultCreateRequest:
-      type: object
-      required: [run_id]
-      properties:
-        run_id:
-          type: string
-          description: 스냅샷할 완료된 분석 run id
-        thread_id:
-          type: string
-          description: (선택) 검증용 — run의 thread와 일치해야 한다
-        title:
-          type: string
-          description: (선택) 표시 제목. 미지정 시 서버가 display.title→question에서 유도
-    ReportSavedResult:
-      type: object
-      description: |
-        보고서 보관함 항목. 저장 시점의 분석 결과 스냅샷.
-        display/plan은 채팅의 composer.display / plan과 동일 shape.
-      properties:
-        result_id:
-          type: string
-        project_id:
-          type: string
-        dataset_id:
-          type: string
-        dataset_version_id:
-          type: string
-        thread_id:
-          type: string
-        run_id:
-          type: string
-        source_message_id:
-          type: string
-        title:
-          type: string
-        question:
-          type: string
-        assistant_content:
-          type: string
-        display:
-          $ref: "#/components/schemas/ComposerDisplay"
-        plan:
-          $ref: "#/components/schemas/AnalyzePlanView"
-        created_at:
-          type: string
-          format: date-time
-    ReportSavedResultListResponse:
-      type: object
-      properties:
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/ReportSavedResult"
     ReportBlock:
       type: object
       description: |
@@ -3136,6 +3043,46 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReportBlock"
+    ReportItemAppendRequest:
+      type: object
+      description: "보통 run_id만 보내면 된다(type 생략 시 analysis_result). 나머지는 모두 선택."
+      properties:
+        run_id:
+          type: string
+          description: "추가할 분석 실행 id. type=analysis_result(기본)일 때 필수."
+        type:
+          type: string
+          description: "analysis_result(기본) | (향후 text 등). 보통 생략."
+          example: analysis_result
+        thread_id:
+          type: string
+          description: "지정 시 run의 thread와 일치해야 함(잘못된 thread 추가 방지)."
+        title:
+          type: string
+          description: "미지정 시 display.title → question → assistant_content 순으로 유도."
+        interp:
+          type: string
+          description: "운영자 해석/코멘트(선택)."
+        options:
+          type: object
+          additionalProperties: true
+          description: "표시 옵션(show_question/show_detail/show_plan 등) — 프론트 렌더용, 그대로 저장."
+        layout:
+          type: object
+          additionalProperties: true
+          description: "배치(span/height/new_row 등) — 프론트 렌더용, 그대로 저장."
+    ReportItemAppendResponse:
+      type: object
+      properties:
+        report:
+          $ref: "#/components/schemas/Report"
+        item:
+          type: object
+          additionalProperties: true
+          description: >
+            추가된 item. type=analysis_result는 uid/type/run_id/thread_id/title/
+            question/assistant_content/display/plan + interp/options/layout. 블록
+            렌더 계약은 프론트(보고서 에디터)가 소유.
     ReportListResponse:
       type: object
       properties:
@@ -3145,14 +3092,17 @@ components:
             $ref: "#/components/schemas/ReportSummary"
     ReportFromTemplateRequest:
       type: object
-      description: 기본 템플릿 생성 요청. dataset_version_id는 clean ready여야 한다.
+      description: |
+        기본 템플릿 생성 요청. dataset_id를 받아 그 dataset의 active version으로 보고서를
+        만든다(active version이 clean ready여야 한다). active version이 없으면 400.
       properties:
         template_id:
           type: string
           example: unstructured_basic_v1
-        dataset_version_id:
+        dataset_id:
           type: string
-      required: [template_id, dataset_version_id]
+          description: 보고서를 만들 dataset. 이 dataset의 active version이 대상이 된다.
+      required: [template_id, dataset_id]
     ReportFromTemplateResponse:
       type: object
       description: 생성된 보고서 + 어떤 섹션이 들어갔고(included) build 미완으로 빠졌는지(missing).

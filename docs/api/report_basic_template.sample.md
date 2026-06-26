@@ -8,11 +8,12 @@ Content-Type: application/json
 
 {
   "template_id": "unstructured_basic_v1",
-  "dataset_version_id": "ver_abc"
+  "dataset_id": "ds_abc"
 }
 ```
 
-- `dataset_version_id`는 **clean ready**여야 함. 아니면 `400`(`clean_not_ready`).
+- `dataset_id`의 **active version**을 대상으로 한다. active version이 없으면 `400`.
+- 그 active version은 **clean ready**여야 함. 아니면 `400`(`clean_not_ready`).
 - 섹션은 해당 버전에서 **build artifact가 ready인 것만** 생성. 나머지는 `missing_sections`.
 
 ---
