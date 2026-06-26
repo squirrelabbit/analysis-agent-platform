@@ -2,6 +2,7 @@ package service
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -12,6 +13,49 @@ import (
 	_ "github.com/marcboeker/go-duckdb"
 	"github.com/xuri/excelize/v2"
 )
+
+// sourceSummaryMetaKey — 버전 metadata에 캐시되는 source 프리뷰(컬럼/행수/샘플) 키.
+// source 파일은 버전당 immutable이라 생성/업로드 시 1회 계산해 캐시하면 매 조회마다
+// CSV를 전체 스캔(COUNT/DESCRIBE)하던 비용을 없앤다. (silverone 2026-06-26)
+const sourceSummaryMetaKey = "source_summary"
+
+// buildSourceSummaryCache — 생성 시점에 source 프리뷰를 계산해 metadata 캐시용 map으로
+// 돌려준다. ready가 아니면(파일 없음/미지원) nil → 캐시 생략(조회 시 재계산 fallback).
+func buildSourceSummaryCache(storageURI string) map[string]any {
+	summary := loadDatasetSourceSummary(storageURI, defaultDatasetSourceSummarySampleLimit)
+	if summary == nil || summary.Status != "ready" {
+		return nil
+	}
+	b, err := json.Marshal(summary)
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil
+	}
+	return m
+}
+
+// cachedSourceSummary — metadata에 캐시된 source 프리뷰가 있으면 복원(없으면 nil).
+func cachedSourceSummary(metadata map[string]any) *domain.DatasetSourceSummary {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata[sourceSummaryMetaKey]
+	if !ok || raw == nil {
+		return nil
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var summary domain.DatasetSourceSummary
+	if err := json.Unmarshal(b, &summary); err != nil {
+		return nil
+	}
+	return &summary
+}
 
 func loadDatasetSourceSummary(storageURI string, sampleLimit int) *domain.DatasetSourceSummary {
 	storageURI = strings.TrimSpace(storageURI)
@@ -200,7 +244,10 @@ func datasetSourceDuckDBRelation(path string, format string) (string, error) {
 	case "parquet":
 		return fmt.Sprintf("read_parquet('%s')", escapedPath), nil
 	case "csv", "tsv":
-		return fmt.Sprintf("read_csv_auto('%s', HEADER=TRUE, SAMPLE_SIZE=-1)", escapedPath), nil
+		// SAMPLE_SIZE=-1(전체 스캔 타입추론)은 프리뷰(컬럼명/행수/샘플)엔 불필요하고 큰
+		// 파일에서 매우 느리다(특히 HDD). 기본 샘플링으로 DESCRIBE/샘플을 가볍게.
+		// 행수는 COUNT(*)가 어차피 1패스 스캔이라 정확. (silverone 2026-06-26)
+		return fmt.Sprintf("read_csv_auto('%s', HEADER=TRUE)", escapedPath), nil
 	case "jsonl":
 		return fmt.Sprintf("read_json_auto('%s')", escapedPath), nil
 	default:

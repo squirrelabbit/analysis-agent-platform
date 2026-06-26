@@ -354,7 +354,11 @@ func deriveDocsExtraColumns(version domain.DatasetVersion) []map[string]any {
 	if cols := docsExtraColumnsFromAnalysis(version); len(cols) > 0 {
 		return cols
 	}
-	summary := loadDatasetSourceSummary(version.StorageURI, 0)
+	// 캐시된 프리뷰 우선(전체 스캔 회피). 없으면 계산.
+	summary := cachedSourceSummary(version.Metadata)
+	if summary == nil {
+		summary = loadDatasetSourceSummary(version.StorageURI, 0)
+	}
 	if summary == nil || len(summary.Columns) == 0 {
 		return nil
 	}

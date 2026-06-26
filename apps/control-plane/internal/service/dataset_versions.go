@@ -197,6 +197,11 @@ func (s *DatasetService) buildDatasetVersionRecord(projectID string, dataset dom
 	if embeddingRequired {
 		version.Metadata["embedding_required"] = true
 	}
+	// source 프리뷰를 생성 시 1회 계산해 캐시 — 이후 조회마다 CSV 전체 스캔(COUNT/DESCRIBE)
+	// 하던 비용 제거. 파일은 버전당 immutable이라 안전. 실패(파일 미존재 등) 시 생략.
+	if cache := buildSourceSummaryCache(storageURI); cache != nil {
+		version.Metadata[sourceSummaryMetaKey] = cache
+	}
 	return version, nil
 }
 
@@ -239,7 +244,12 @@ func (s *DatasetService) GetDatasetVersion(projectID, datasetID, datasetVersionI
 		return domain.DatasetVersion{}, ErrNotFound{Resource: "dataset version"}
 	}
 	enrichDatasetVersionView(&version)
-	version.SourceSummary = loadDatasetSourceSummary(version.StorageURI, defaultDatasetSourceSummarySampleLimit)
+	// 생성 시 캐시된 프리뷰가 있으면 그대로(전체 스캔 회피). 없으면(legacy 버전) 계산.
+	if cached := cachedSourceSummary(version.Metadata); cached != nil {
+		version.SourceSummary = cached
+	} else {
+		version.SourceSummary = loadDatasetSourceSummary(version.StorageURI, defaultDatasetSourceSummarySampleLimit)
+	}
 	if err := s.attachDatasetVersionArtifacts(&version); err != nil {
 		return domain.DatasetVersion{}, err
 	}
@@ -429,7 +439,11 @@ func summarizeDatasetVersionForList(version domain.DatasetVersion) domain.Datase
 	if item.OriginalFilename == "" {
 		item.OriginalFilename = metadataNestedString(version.Metadata, "upload", "stored_filename")
 	}
-	summary := loadDatasetSourceSummary(version.StorageURI, 0)
+	// 캐시된 프리뷰 우선(목록은 버전마다 호출돼 전체 스캔 누적이 큼). 없으면 계산.
+	summary := cachedSourceSummary(version.Metadata)
+	if summary == nil {
+		summary = loadDatasetSourceSummary(version.StorageURI, 0)
+	}
 	if summary != nil {
 		if summary.RowCount != nil {
 			item.RowCount = *summary.RowCount
