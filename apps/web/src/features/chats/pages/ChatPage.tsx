@@ -32,15 +32,18 @@ import { useCreateReportFromPanel } from "../hooks/useCreateReportFromPanel";
 import { useChatNav } from "../context/ChatNavContext";
 import type { ChatMessage } from "../models";
 import MessageBubble from "../components/MessageBubble";
-import ChatToast from "../components/ChatToast";
+import ChatToast, { type ToastTone } from "../components/ChatToast";
 import ReportPanel from "../components/ReportPanel";
 import UnsavedReportGuard from "../components/UnsavedReportGuard";
 
-function extractErrorMessage(err: unknown): string {
+function extractErrorMessage(
+  err: unknown,
+  fallback = "분석 실행 중 오류가 발생했습니다.",
+): string {
   const detail = (
     err as { response?: { data?: { detail?: string } } }
   )?.response?.data?.detail;
-  return detail || "분석 실행 중 오류가 발생했습니다.";
+  return detail || fallback;
 }
 
 interface PendingTurn {
@@ -82,15 +85,20 @@ export function ChatPage() {
   const loadReportMut = useMutation({
     mutationFn: (reportId: string) => reportDocApi.get(projectId, reportId),
   });
-  // 결과 액션 토스트 — 1.6초 후 자동 숨김.
-  const [toast, setToast] = useState<{ msg: string; visible: boolean }>({
+  // 결과 액션 토스트 — 1.6초 후 자동 숨김. tone으로 성공/경고 아이콘 구분.
+  const [toast, setToast] = useState<{
+    msg: string;
+    visible: boolean;
+    tone: ToastTone;
+  }>({
     msg: "",
     visible: false,
+    tone: "success",
   });
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function showToast(msg: string) {
-    setToast({ msg, visible: true });
+  function showToast(msg: string, tone: ToastTone = "success") {
+    setToast({ msg, visible: true, tone });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(
       () => setToast((t) => ({ ...t, visible: false })),
@@ -283,7 +291,7 @@ export function ChatPage() {
     // 대상 보고서가 정해지지 않았으면 추가하지 않고 안내 — 먼저 새로 만들거나 선택해야 한다.
     if (!panel.started) {
       panel.openPanel();
-      showToast("먼저 보고서를 만들거나 선택해 주세요");
+      showToast("먼저 보고서를 만들거나 선택해 주세요", "warn");
       return;
     }
     const added = panel.addResult(msg, questionFor(msg));
@@ -291,32 +299,33 @@ export function ChatPage() {
       showToast("보고서에 추가했습니다");
     } else {
       panel.openPanel();
-      showToast("이미 보고서에 추가된 결과입니다");
+      showToast("이미 보고서에 추가된 결과입니다", "warn");
     }
   }
 
-  async function handleLoadTemplate() {
+  // 새 보고서 — 기초분석 보고서를 먼저 가져온 뒤에야 새 보고서를 시작한다.
+  // 기초분석 로드가 실패하면 startNew를 호출하지 않아 started가 false로 남고,
+  // 대상 보고서가 없으니 결과 "보고서에 추가"도 차단된다(미선택 가드 유지).
+  async function handleNewReport() {
     if (!activeDatasetId || !activeVersionId) {
-      showToast("데이터셋의 활성 버전이 없습니다");
+      showToast("데이터셋의 활성 버전이 없습니다", "warn");
       return;
     }
+    let sections: ReturnType<typeof normalizeBlocks>;
     try {
       const resp = await loadTemplate.mutateAsync();
-      const added = panel.addSections(normalizeBlocks(resp.blocks));
-      showToast(
-        added > 0
-          ? `기초분석 ${added}개 섹션을 가져왔습니다`
-          : "가져올 새 섹션이 없습니다",
-      );
+      sections = normalizeBlocks(resp.blocks);
     } catch (err) {
-      showToast(extractErrorMessage(err));
+      showToast(extractErrorMessage(err, "기초분석을 가져오지 못했습니다"), "warn");
+      return;
     }
-  }
-
-  // 새 보고서 — 스테이지를 비우고 기초분석 보고서를 기본 블록으로 가져온다.
-  function handleNewReport() {
     panel.startNew();
-    void handleLoadTemplate();
+    const added = panel.addSections(sections);
+    showToast(
+      added > 0
+        ? `기초분석 ${added}개 섹션을 가져왔습니다`
+        : "새 보고서를 시작했습니다",
+    );
   }
 
   // 기존 보고서를 스테이지로 불러온다(이어서 편집·추가 → 저장 시 갱신).
@@ -325,7 +334,7 @@ export function ChatPage() {
       const r = await loadReportMut.mutateAsync(reportId);
       panel.loadReport(r.report_id, r.title, r.blocks);
     } catch (err) {
-      showToast(extractErrorMessage(err));
+      showToast(extractErrorMessage(err, "보고서를 불러오지 못했습니다"), "warn");
     }
   }
 
@@ -547,7 +556,7 @@ export function ChatPage() {
           의도된 이동이 아닐 때만 활성화한다. */}
       <UnsavedReportGuard active={panel.count > 0 && !createReport.isPending} />
 
-      <ChatToast message={toast.msg} visible={toast.visible} />
+      <ChatToast message={toast.msg} visible={toast.visible} tone={toast.tone} />
     </div>
   );
 }
