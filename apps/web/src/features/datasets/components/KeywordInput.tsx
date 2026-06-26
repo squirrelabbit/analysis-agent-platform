@@ -15,6 +15,8 @@ export function KeywordInput({ value, onChange, placeholder }: KeywordInputProps
   const [input, setInput] = useState('');
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // 한글 등 IME 조합 중 Enter는 무시 — 마지막 음절이 중복 칩으로 박히는 것 방지.
+    if (e.nativeEvent.isComposing) return;
     if (e.key === 'Enter' && input.trim()) {
       e.preventDefault();
       const newKeyword = input.trim();

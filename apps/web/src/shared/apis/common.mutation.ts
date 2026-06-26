@@ -14,11 +14,20 @@ export const useDownloadFile = () => {
       const disposition = headers["content-disposition"];
 
       if (disposition) {
-        // 따옴표 캡처 회피: 따옴표 안/밖을 분리해 매칭.
-        // (기존 /filename="?(.+)"?/ 는 .+ greedy로 끝 " 까지 캡처해 파일명 끝에
-        //  "가 들어가고 OS가 _로 sanitize → clause_label.csv_ 되는 버그.)
-        const match = disposition.match(/filename="([^"]+)"|filename=([^;]+)/);
-        if (match) filename = (match[1] ?? match[2] ?? filename).trim();
+        // 한글 등은 RFC 5987 filename*(UTF-8 percent-encoded)를 우선 읽어 decode한다.
+        // (헤더는 latin-1로 해석돼 raw UTF-8 filename=은 깨지므로 filename*가 정답.)
+        const star = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+        if (star) {
+          try {
+            filename = decodeURIComponent(star[1].trim());
+          } catch {
+            filename = star[1].trim();
+          }
+        } else {
+          // fallback: 따옴표 안/밖을 분리해 매칭(.+ greedy로 끝 " 캡처 버그 회피).
+          const match = disposition.match(/filename="([^"]+)"|filename=([^;]+)/);
+          if (match) filename = (match[1] ?? match[2] ?? filename).trim();
+        }
       }
 
       const url = window.URL.createObjectURL(data);

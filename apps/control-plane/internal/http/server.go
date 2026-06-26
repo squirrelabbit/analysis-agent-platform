@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	stdhttp "net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -793,6 +794,22 @@ func (s *Server) handleDeleteDatasetVersion(w stdhttp.ResponseWriter, r *stdhttp
 	w.WriteHeader(stdhttp.StatusNoContent)
 }
 
+// contentDispositionAttachment — 다운로드 파일명을 RFC 5987로 인코딩한다. 한글 등 비ASCII를
+// Content-Disposition에 raw로 넣으면 헤더가 latin-1로 해석돼 깨진다(mojibake). ASCII
+// fallback(filename=)과 UTF-8 percent-encoded(filename*=)를 함께 실어 구·신 클라이언트 호환.
+func contentDispositionAttachment(filename string) string {
+	asciiFallback := make([]rune, 0, len(filename))
+	for _, r := range filename {
+		if r < 0x20 || r > 0x7e || r == '"' || r == '\\' {
+			asciiFallback = append(asciiFallback, '_')
+		} else {
+			asciiFallback = append(asciiFallback, r)
+		}
+	}
+	enc := strings.ReplaceAll(url.QueryEscape(filename), "+", "%20")
+	return "attachment; filename=" + strconv.Quote(string(asciiFallback)) + "; filename*=UTF-8''" + enc
+}
+
 func (s *Server) handleDownloadSourceDataset(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	sourcePath, filename, contentType, err := s.datasetService.ResolveSourceDownload(
 		r.PathValue("project_id"),
@@ -815,7 +832,7 @@ func (s *Server) handleDownloadSourceDataset(w stdhttp.ResponseWriter, r *stdhtt
 	defer handle.Close()
 
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
+	w.Header().Set("Content-Disposition", contentDispositionAttachment(filename))
 	w.WriteHeader(stdhttp.StatusOK)
 	_, _ = io.Copy(w, handle)
 }
@@ -865,7 +882,7 @@ func (s *Server) streamArtifactCSV(
 	defer handle.Close()
 
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(filename))
+	w.Header().Set("Content-Disposition", contentDispositionAttachment(filename))
 	w.WriteHeader(stdhttp.StatusOK)
 	if _, err := w.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
 		return
