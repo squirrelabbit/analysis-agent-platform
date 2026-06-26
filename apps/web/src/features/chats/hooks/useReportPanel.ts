@@ -55,6 +55,8 @@ export interface ReportPanelApi {
   hasSections: boolean;
   /** 불러온 기존 보고서 id(null=새 보고서). 저장 시 PUT(갱신) vs POST(생성) 결정. */
   loadedReportId: string | null;
+  /** 대상 보고서가 정해졌는지(새 보고서 시작 또는 기존 불러오기). false면 결과 추가 전 선택 필요. */
+  started: boolean;
   /** 기존 보고서를 스테이지로 불러온다(이어서 편집·추가 → 저장 시 갱신). */
   loadReport: (reportId: string, title: string, blocks: unknown[]) => void;
   /** 새 보고서로 시작(스테이지 비움). */
@@ -84,6 +86,7 @@ export function useReportPanel(): ReportPanelApi {
   const [reportTitle, setReportTitleState] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loadedReportId, setLoadedReportId] = useState<string | null>(null);
+  const [started, setStarted] = useState(false);
 
   const loadReport = useCallback(
     (reportId: string, title: string, blocks: unknown[]) => {
@@ -91,6 +94,7 @@ export function useReportPanel(): ReportPanelApi {
       setLoadedReportId(reportId);
       setReportTitleState(title);
       setExpandedId(null);
+      setStarted(true);
       setPanelOpen(true);
     },
     [],
@@ -101,6 +105,7 @@ export function useReportPanel(): ReportPanelApi {
     setLoadedReportId(null);
     setReportTitleState("");
     setExpandedId(null);
+    setStarted(true);
     setPanelOpen(true);
   }, []);
 
@@ -195,6 +200,7 @@ export function useReportPanel(): ReportPanelApi {
     setReportTitleState("");
     setExpandedId(null);
     setLoadedReportId(null);
+    setStarted(false);
   }, []);
 
   return {
@@ -205,6 +211,7 @@ export function useReportPanel(): ReportPanelApi {
     expandedId,
     hasSections: staged.some((b) => b.kind === "section"),
     loadedReportId,
+    started,
     loadReport,
     startNew,
     isAddedRun,

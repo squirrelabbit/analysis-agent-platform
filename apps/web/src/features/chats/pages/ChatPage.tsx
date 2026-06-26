@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import type { PanelImperativeHandle } from "react-resizable-panels";
 import { FileText, Plus, Send } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 import {
   Select,
   SelectContent,
@@ -215,6 +221,16 @@ export function ChatPage() {
     openPanel();
   }, [nav.newThreadNonce, openPanel]);
 
+  // 보고서 패널(ResizablePanel) — panelOpen을 진실로 두고 collapse/expand를 동기화한다.
+  // 너비 조정은 ResizableHandle 드래그가 담당(react-resizable-panels).
+  const reportPanelRef = useRef<PanelImperativeHandle>(null);
+  useEffect(() => {
+    const p = reportPanelRef.current;
+    if (!p) return;
+    if (panel.panelOpen && p.isCollapsed()) p.expand();
+    else if (!panel.panelOpen && !p.isCollapsed()) p.collapse();
+  }, [panel.panelOpen]);
+
   async function handleSend() {
     const text = input.trim();
     if (!text || isLoading || !activeDatasetId) return;
@@ -264,6 +280,12 @@ export function ChatPage() {
 
   function handleAddToReport(msg: ChatMessage) {
     if (!msg.runId) return;
+    // 대상 보고서가 정해지지 않았으면 추가하지 않고 안내 — 먼저 새로 만들거나 선택해야 한다.
+    if (!panel.started) {
+      panel.openPanel();
+      showToast("먼저 보고서를 만들거나 선택해 주세요");
+      return;
+    }
     const added = panel.addResult(msg, questionFor(msg));
     if (added) {
       showToast("보고서에 추가했습니다");
@@ -326,16 +348,18 @@ export function ChatPage() {
 
   return (
     <div className="flex h-full overflow-hidden bg-zinc-50">
-      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-        {/* 헤더 */}
-        <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-zinc-100 shrink-0">
+      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+      <ResizablePanel id="chat-main" minSize="35%" className="min-w-0">
+      <div className="@container flex h-full flex-col min-h-0 overflow-hidden">
+        {/* 헤더 — 채팅 폭이 좁아지면(컨테이너 쿼리) 세로로 쌓는다. */}
+        <div className="flex items-center justify-between gap-2 px-5 py-3 bg-white border-b border-zinc-100 shrink-0 @max-2xl:flex-col @max-2xl:items-start @max-2xl:gap-2.5">
           <div>
             <h2 className="text-sm font-medium text-zinc-900">분석 채팅</h2>
             <p className="text-[11px] text-zinc-400 mt-0.5">
               선택한 데이터셋의 활성 버전 기준으로 분석합니다.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 @max-2xl:w-full @max-2xl:flex-wrap">
             <span className="text-[11px] text-zinc-500">데이터셋</span>
             <Select
               value={nav.activeDatasetId}
@@ -485,17 +509,39 @@ export function ChatPage() {
           </div>
         </div>
       </div>
+      </ResizablePanel>
 
-      <ReportPanel
-        panel={panel}
-        reports={reportsQuery.data ?? []}
-        reportsLoading={reportsQuery.isLoading || loadReportMut.isPending}
-        onSelectExisting={handleSelectExisting}
-        onNewReport={handleNewReport}
-        onSave={handleCreateReport}
-        saving={createReport.isPending}
-        templateLoading={loadTemplate.isPending}
-      />
+      {/* 채팅 ↔ 보고서 패널 너비 조정 핸들(보고서 패널이 열렸을 때만 노출) */}
+      <ResizableHandle withHandle className={cn(!panel.panelOpen && "hidden")} />
+
+      <ResizablePanel
+        panelRef={reportPanelRef}
+        id="report-panel"
+        collapsible
+        collapsedSize={0}
+        defaultSize={panel.panelOpen ? 432 : 0}
+        minSize={320}
+        maxSize={720}
+        onResize={(size) => {
+          // 핸들 드래그로 접거나 펼칠 때 panelOpen과 동기화한다.
+          const collapsed = size.inPixels < 1;
+          if (collapsed && panel.panelOpen) panel.closePanel();
+          else if (!collapsed && !panel.panelOpen) panel.openPanel();
+        }}
+        className="min-w-0"
+      >
+        <ReportPanel
+          panel={panel}
+          reports={reportsQuery.data ?? []}
+          reportsLoading={reportsQuery.isLoading || loadReportMut.isPending}
+          onSelectExisting={handleSelectExisting}
+          onNewReport={handleNewReport}
+          onSave={handleCreateReport}
+          saving={createReport.isPending}
+          templateLoading={loadTemplate.isPending}
+        />
+      </ResizablePanel>
+      </ResizablePanelGroup>
 
       {/* 미저장 보고서 편집 경고 — 스테이지에 담긴 블록이 있고, 보고서 생성으로 인한
           의도된 이동이 아닐 때만 활성화한다. */}

@@ -158,13 +158,8 @@ export default function ReportPanel({
   }
 
   return (
-    <div
-      className={cn(
-        "flex shrink-0 flex-col overflow-hidden border-l border-zinc-200 bg-white transition-[width] duration-300 ease-in-out",
-        panelOpen ? "w-108" : "w-0",
-      )}
-    >
-      <div className="flex h-full w-108 flex-col">
+    <div className="flex h-full w-full flex-col overflow-hidden bg-white">
+      <div className="flex h-full flex-col">
         {/* 상단 보고서 선택 바 */}
         <div className="flex shrink-0 items-center gap-2 border-b border-zinc-200 bg-zinc-50/70 px-3 py-3">
           <div ref={selectorRef} className="relative min-w-0 flex-1">
