@@ -98,6 +98,7 @@ func (s *DatasetService) BuildDocGenuineness(projectID, datasetID, datasetVersio
 	// 모델·다른 파일일 때만). 그래야 새 모델 1회 실행만으로 옛 결과와 비교 가능.
 	legacyRun, hasLegacy := pendingLegacyDocGenuinenessRun(version.Metadata, outputPath)
 	version.Metadata["doc_genuineness_status"] = "running"
+	delete(version.Metadata, "doc_genuineness_cancelled") // 재실행은 처음부터
 	version.Metadata["doc_genuineness_uri"] = outputPath
 	version.Metadata["doc_genuineness_ref"] = outputPath
 	version.Metadata["doc_genuineness_progress_ref"] = progressPath
@@ -161,6 +162,7 @@ func (s *DatasetService) BuildDocGenuineness(projectID, datasetID, datasetVersio
 			version.Metadata["doc_genuineness_status"] = "cancelled"
 			delete(version.Metadata, "doc_genuineness_ref")
 			delete(version.Metadata, "doc_genuineness_uri")
+			removeArtifactFileQuietly(outputPath)
 		} else {
 			delete(version.Metadata, "doc_genuineness_cancelled")
 		}
@@ -276,6 +278,7 @@ func (s *DatasetService) buildDocGenuinenessVerify(
 			version.Metadata["doc_genuineness_status"] = "cancelled"
 			delete(version.Metadata, "doc_genuineness_ref")
 			delete(version.Metadata, "doc_genuineness_uri")
+			removeArtifactFileQuietly(outputPath)
 		} else {
 			delete(version.Metadata, "doc_genuineness_cancelled")
 		}

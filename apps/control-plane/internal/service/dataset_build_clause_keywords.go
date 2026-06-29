@@ -39,6 +39,7 @@ func (s *DatasetService) BuildClauseKeywords(projectID, datasetID, datasetVersio
 	progressPath := outputPath + ".progress.json"
 
 	version.Metadata["clause_keywords_status"] = "running"
+	delete(version.Metadata, "clause_keywords_cancelled") // 재실행은 처음부터
 	version.Metadata["clause_keywords_uri"] = outputPath
 	version.Metadata["clause_keywords_ref"] = outputPath
 	version.Metadata["clause_keywords_progress_ref"] = progressPath
@@ -111,6 +112,7 @@ func (s *DatasetService) BuildClauseKeywords(projectID, datasetID, datasetVersio
 			version.Metadata["clause_keywords_status"] = "cancelled"
 			delete(version.Metadata, "clause_keywords_ref")
 			delete(version.Metadata, "clause_keywords_uri")
+			removeArtifactFileQuietly(keywordsRef)
 		} else {
 			delete(version.Metadata, "clause_keywords_cancelled")
 		}

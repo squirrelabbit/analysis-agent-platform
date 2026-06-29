@@ -50,6 +50,7 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 		version.Metadata = map[string]any{}
 	}
 	version.Metadata["clause_label_status"] = "running"
+	delete(version.Metadata, "clause_label_cancelled") // 재실행은 처음부터 — 이전 중단 표시 제거
 	version.Metadata["clause_label_mode"] = clauseLabelMode(isVerify)
 	version.Metadata["clause_label_uri"] = outputPath
 	version.Metadata["clause_label_ref"] = outputPath
@@ -183,6 +184,8 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 			version.Metadata["clause_label_status"] = "cancelled"
 			delete(version.Metadata, "clause_label_ref")
 			delete(version.Metadata, "clause_label_uri")
+			// 부분 파일 삭제 — 재실행이 같은 경로로 ref를 다시 잡아도 stale이 안 보이게.
+			removeArtifactFileQuietly(clauseRef)
 		} else {
 			delete(version.Metadata, "clause_label_cancelled")
 		}

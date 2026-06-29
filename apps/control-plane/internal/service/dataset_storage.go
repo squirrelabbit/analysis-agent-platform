@@ -73,6 +73,18 @@ func (s *DatasetService) datasetArtifactPathOrFallback(version domain.DatasetVer
 	return strings.TrimSpace(version.StorageURI) + "." + filename
 }
 
+// removeArtifactFileQuietly — 빌드 중단 시 worker가 남긴 부분 artifact 파일을 지운다
+// (silverone 2026-06-29). 중단은 결과를 저장하지 않으므로(재실행=처음부터) 파일도
+// 남기면 안 된다 — metadata ref만 지우면 재실행이 같은 deterministic 경로로 ref를
+// 다시 잡아 stale 부분본이 노출됐다. 없는 파일/빈 경로는 무시.
+func removeArtifactFileQuietly(path string) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return
+	}
+	_ = os.Remove(path)
+}
+
 func (s *DatasetService) removeDatasetArtifacts(projectID, datasetID string) error {
 	roots := []string{s.uploadRoot, s.artifactRoot}
 	for _, root := range roots {
