@@ -75,7 +75,7 @@ POST /projects/{pid}/datasets/{did}/versions/{vid}/analyze    ← explicit versi
 - `config/task_registry.json` — *control plane이 실행하는 내부 task* (dataset_build).
   - Go: `internal/registry.TaskPathFor("<name>")`로 task_path lookup (hardcoded 금지)
   - Python: `task_registry.task_definition("<name>")` 사용
-  - ADR-018 (β2)로 hot path 호출 task는 `dataset_clean` / `dataset_doc_genuineness` / `dataset_clause_label` 3종.
+  - ADR-018 (β2) 당시 hot path는 `dataset_clean` / `dataset_doc_genuineness` / `dataset_clause_label` 3종. 이후 2026-06-10에 `dataset_clause_keywords`(Kiwi 키워드 추출, LLOA 무관)가 추가돼 **현재 4종**.
 
 ### Dataset Build 단계
 
