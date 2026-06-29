@@ -28,6 +28,7 @@ from ..prompt_options import load_prompt_body
 from ..clients.lloa import LloaClient, LloaConfig, LloaResponseParseError
 from ..obs import get, skill_handler
 from ..taxonomies import DEFAULT_TAXONOMY_ID, Taxonomy, load_taxonomy, render_aspect_taxonomy_block
+from . import _cancel
 from ._chunking import build_sentence_chunks, split_anchor_sentences
 from ._common import write_progress
 from ._prompt_slots import extract_extra_slot
@@ -416,6 +417,10 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
     aspect_counts: dict[str, int] = {asp: 0 for asp in taxonomy.aspect_keys_set}
     completed_docs = 0
     clauses_by_doc: dict[str, list[dict[str, Any]]] = {}
+    # 빌드 중단(silverone 2026-06-29) — control-plane이 /tasks/cancel 보내면 event set.
+    # 루프에서 확인 → 남은 doc 멈추고 거기까지 결과만 보존. begin은 직전 잔여 event를 clear.
+    cancelled = False
+    cancel_event = _cancel.begin(dataset_version_id)
 
     # 단일 모드도 문장 앵커(2026-06-17): kiwipiepy로 문장을 고정 분리 → 1모델 classify →
     # 문장별 explode. 교차검증(verify)과 동일 분석 방법·동일 프롬프트(clause_label/<버전>).
@@ -428,6 +433,9 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
 
     def _process(item: tuple[int, str, str, str]) -> tuple[str, list[dict[str, Any]], Exception | None]:
         _, doc_id, _doc_title, doc_text = item
+        # 취소 후 아직 시작 안 한 doc은 작업(LLM/kiwi) 없이 즉시 반환 → 큐 잔여가 순식간에 비워짐.
+        if cancel_event.is_set():
+            return doc_id, [], None
         try:
             sentences = split_anchor_sentences(doc_text)
             if not sentences:
@@ -436,6 +444,11 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
             chunks = build_sentence_chunks(sentences, max_sentences=40, max_chars=12000, overlap=0)
             labels: dict[int, dict[str, Any]] = {}
             for start0, sub in chunks:
+                # 중단(silverone 2026-06-29) — 긴 문서(chunk 多)가 in-flight여도 chunk
+                # 사이에서 멈춘다. 외부 루프의 doc 단위 취소만으로는 진행 중 긴 doc을
+                # 못 멈춰 체감이 느렸다(거기까지 labels는 보존).
+                if cancel_event.is_set():
+                    break
                 local = _label_sentences(client, system_prompt, sub, max_tokens, allowed_aspect, fallback_aspect)
                 for li, label in local.items():
                     gi = start0 + li  # start0(0-based chunk offset) + li(1-based) = 전역 1-based
@@ -458,6 +471,14 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
             futures = {executor.submit(_process, item): item for item in target_docs}
             for future in as_completed(futures):
+                # 취소 감지 시 즉시 멈춘다 — 남은 future 취소 + 루프 탈출. 부분 결과는
+                # 저장 안 하므로(재실행=처음부터) 드레인하지 않는다. break해야 진행률도
+                # 그 자리에 멈춘다(드레인하면 빈 doc로 완료수가 치솟아 98%로 보임).
+                if cancel_event.is_set():
+                    for pending in futures:
+                        pending.cancel()
+                    cancelled = True
+                    break
                 doc_id, clauses, exc = future.result()
                 if exc is not None:
                     LOGGER.warning(
@@ -508,13 +529,16 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
 
     processed_docs = skipped_by_filter + skipped_empty + completed_docs
 
+    _cancel.end(dataset_version_id)
+
     if progress_path:
         write_progress(
             progress_path,
-            processed_rows=target_count,
+            # 중단이면 처리분만(100% 아님). 정상 완료면 대상 전체.
+            processed_rows=completed_docs if cancelled else target_count,
             total_rows=target_count,
             started_at=started_at,
-            message="clause_label completed",
+            message="clause_label cancelled" if cancelled else "clause_label completed",
         )
 
     summary = {
@@ -524,6 +548,7 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
         "skipped_by_filter": skipped_by_filter,
         "skipped_empty": skipped_empty,
         "parse_failures": parse_failures,
+        "cancelled": cancelled,
         "clause_count": clause_count,
         "sentiment_counts": sentiment_counts,
         "aspect_counts": aspect_counts,

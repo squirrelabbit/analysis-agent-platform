@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle, Loader } from "lucide-react";
+import { AlertCircle, CheckCircle, Loader, Ban } from "lucide-react";
 
 export const getStatusColor = (status: string) => {
   switch (status) {
@@ -6,6 +6,8 @@ export const getStatusColor = (status: string) => {
       return "bg-emerald-100 text-emerald-800";
     case "running":
       return "bg-yellow-100 text-yellow-800";
+    case "cancelled":
+      return "bg-amber-100 text-amber-800";
     case "not_requested":
     case "not_started":
     case "waiting":
@@ -42,6 +44,8 @@ export const getStatusLabel = (status: string) => {
       return "실패";
     case "completed":
       return "완료";
+    case "cancelled":
+      return "중단됨";
     default:
       return status;
   }
@@ -63,6 +67,8 @@ export const getStatusIcon = (status: string) => {
       return <AlertCircle className="w-5 h-5 text-red-600" />;
     case "completed":
       return <CheckCircle className="w-5 h-5 text-emerald-600" />;
+    case "cancelled":
+      return <Ban className="w-5 h-5 text-amber-600" />;
     default:
       return null;
   }

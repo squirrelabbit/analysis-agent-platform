@@ -39,6 +39,7 @@ func (s *DatasetService) BuildClauseKeywords(projectID, datasetID, datasetVersio
 	progressPath := outputPath + ".progress.json"
 
 	version.Metadata["clause_keywords_status"] = "running"
+	delete(version.Metadata, "clause_keywords_cancelled") // 재실행은 처음부터
 	version.Metadata["clause_keywords_uri"] = outputPath
 	version.Metadata["clause_keywords_ref"] = outputPath
 	version.Metadata["clause_keywords_progress_ref"] = progressPath
@@ -105,6 +106,16 @@ func (s *DatasetService) BuildClauseKeywords(projectID, datasetID, datasetVersio
 	delete(version.Metadata, "clause_keywords_error")
 	if summary, ok := artifact["summary"].(map[string]any); ok {
 		version.Metadata["clause_keywords_summary"] = summary
+		// 빌드 중단(silverone 2026-06-29) — 중단 시 부분 결과 미저장(status=cancelled + ref 제거).
+		if c, _ := summary["cancelled"].(bool); c {
+			version.Metadata["clause_keywords_cancelled"] = true
+			version.Metadata["clause_keywords_status"] = "cancelled"
+			delete(version.Metadata, "clause_keywords_ref")
+			delete(version.Metadata, "clause_keywords_uri")
+			removeArtifactFileQuietly(keywordsRef)
+		} else {
+			delete(version.Metadata, "clause_keywords_cancelled")
+		}
 	}
 	if err := s.store.SaveDatasetVersion(version); err != nil {
 		return domain.DatasetVersion{}, err

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -137,6 +138,30 @@ func datasetVersionBuildJobStatus(job domain.DatasetBuildJob) domain.DatasetVers
 		ErrorMessage: job.ErrorMessage,
 		Diagnostics:  job.Diagnostics,
 	}
+}
+
+// CancelDatasetBuild — 실행 중인 build를 협조적으로 멈춘다(silverone 2026-06-29).
+// worker에 cancel 신호를 보내면 실행 중 task가 남은 doc 처리를 멈추고 거기까지 결과를
+// 보존(부분 artifact)한 뒤 정상 반환한다 → 기존 완료 경로가 그대로 저장하고 BuildX가
+// summary.cancelled를 보고 metadata <type>_cancelled를 기록한다. job/Temporal 상태는 건드리지
+// 않는다(완료 경로가 자연 처리, 경쟁 회피). running/queued job이 없으면 ErrInvalidArgument.
+func (s *DatasetService) CancelDatasetBuild(projectID, datasetID, datasetVersionID, buildType string) error {
+	version, err := s.GetDatasetVersion(projectID, datasetID, datasetVersionID)
+	if err != nil {
+		return err
+	}
+	active, err := s.findActiveDatasetBuildJob(projectID, version.DatasetVersionID, buildType)
+	if err != nil {
+		return err
+	}
+	if active == nil {
+		return ErrInvalidArgument{Message: "no running build to cancel for this version/type"}
+	}
+	// 협조적 취소 신호(best-effort). worker가 처리 중 task를 멈추고 부분 결과를 반환한다.
+	if err := s.cancelWorkerBuild(context.Background(), version.DatasetVersionID); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *DatasetService) findActiveDatasetBuildJob(projectID, datasetVersionID, buildType string) (*domain.DatasetBuildJob, error) {

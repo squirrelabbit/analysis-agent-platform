@@ -8,7 +8,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, Play, RotateCw } from "lucide-react";
+import { Loader2, Play, RotateCw, AlertTriangle } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { compactObject } from "@/shared/utils/clean";
@@ -31,12 +31,18 @@ export default function BuildDialog({
   stage,
   status,
   disabled = false,
+  prereqReady = true,
+  prereqLabel = "",
 }: {
   stage: BuildJobType;
   formId: string;
   status: string;
   /** 외부 사유(예: 다운로드 중)로 강제 비활성화 */
   disabled?: boolean;
+  /** 선행 단계가 완료됐는지. false면 실행 대신 경고를 띄운다. */
+  prereqReady?: boolean;
+  /** 선행 단계 이름(경고 문구용). */
+  prereqLabel?: string;
 }) {
   const { projectId, datasetId } = useParams();
   const { mutateAsync } = useBuildJob();
@@ -80,8 +86,19 @@ export default function BuildDialog({
       </DialogTrigger>
       <DialogContent className="sm:max-w-md flex flex-col max-h-[80vh]">
         <DialogHeader className="shrink-0">
-          <DialogTitle>분석을 실행하시겠습니까?</DialogTitle>
+          <DialogTitle>
+            {prereqReady ? "분석을 실행하시겠습니까?" : "이전 단계를 먼저 완료하세요"}
+          </DialogTitle>
         </DialogHeader>
+        {!prereqReady ? (
+          <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>
+              <b>{prereqLabel}</b> 단계가 아직 완료되지 않았습니다. 파이프라인은 순서대로
+              실행해야 합니다 — 먼저 {prereqLabel}를 완료한 뒤 이 단계를 실행하세요.
+            </p>
+          </div>
+        ) : (
         <div className="flex-1 overflow-y-auto">
           {stage == "clean" && (
             <BuildCleanForm
@@ -174,13 +191,16 @@ export default function BuildDialog({
             />
           )}
         </div>
+        )}
         <DialogFooter className="flex gap-2">
           <Button variant="outline" onClick={() => setOpen(false)}>
-            취소
+            {prereqReady ? "취소" : "확인"}
           </Button>
-          <Button type="submit" form={formId}>
-            실행
-          </Button>
+          {prereqReady && (
+            <Button type="submit" form={formId}>
+              실행
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -154,6 +154,20 @@ export const buildApi = {
       )
       .then(({ data }) => data),
 
+  // 실행 중 build 중단(silverone 2026-06-29) — worker가 남은 doc 처리를 멈추고 거기까지
+  // 결과를 보존한다. doc_genuineness / clause_label / clause_keywords만 지원.
+  cancelBuildVersion: (
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+    type: BuildJobType,
+  ) =>
+    apiClient
+      .post(
+        `/projects/${projectId}/datasets/${datasetId}/versions/${versionId}/${type}/cancel`,
+      )
+      .then(({ data }) => data),
+
   // silverone 2026-06-11 — 진성 라벨 수동 보정. PATCH로 set, DELETE override로
   // 되돌리기. effective genuineness/reason은 GET doc_genuineness 응답에서 합성된다.
   setGenuinenessOverride: (

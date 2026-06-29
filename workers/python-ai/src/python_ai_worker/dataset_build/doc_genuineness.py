@@ -22,6 +22,7 @@ from ..config_paths import resolve_config_dir
 from ..clients.lloa import LloaClient, LloaConfig, LloaResponseParseError
 from ..obs import get, skill_handler
 from ..prompt_options import load_prompt_body
+from . import _cancel
 from ._chunking import build_sentence_chunks, split_anchor_sentences
 from ._common import write_progress
 from ._prompt_slots import extract_extra_slot
@@ -326,6 +327,7 @@ def _classify_doc(
 def _chunk_aggregate_classify(
     client: LloaClient, *, system_prompt: str, doc_id: str, doc_text: str,
     max_tokens: int, max_sentences: int, max_chars: int, overlap: int,
+    cancel_event: Any = None,
 ) -> dict[str, Any]:
     """긴 문서를 문장 window chunk로 나눠 각 chunk를 분류하고 "진성 hit 우선"으로
     aggregate (ADR-029). chunk 실패는 그 chunk만 uncertain 취급(doc 안 죽임). genuine
@@ -338,6 +340,9 @@ def _chunk_aggregate_classify(
     first_genuine_reason = ""
     prompt_toks = comp_toks = 0
     for ci, (start0, sub) in enumerate(chunks):
+        # 중단(silverone 2026-06-29) — 긴 문서가 in-flight여도 chunk 사이에서 멈춘다.
+        if cancel_event is not None and cancel_event.is_set():
+            break
         try:
             r = _classify_doc(
                 client, system_prompt=system_prompt, doc_id=f"{doc_id}#c{ci}",
@@ -505,6 +510,7 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
             client, system_prompt=system_prompt, doc_id=doc_id, doc_text=doc_text,
             max_tokens=max_tokens, max_sentences=chunk_max_sentences,
             max_chars=chunk_max_chars, overlap=chunk_overlap,
+            cancel_event=cancel_event,
         )
         final = agg["genuineness"]
         record: dict[str, Any] = {
@@ -532,6 +538,9 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
 
     def _process(item: tuple[int, str, str]) -> dict[str, Any]:
         _, target_doc_id, doc_text = item
+        # 취소 후 시작된 doc은 작업 없이 즉시 skip 반환 → 큐 잔여가 순식간에 비워짐.
+        if cancel_event.is_set():
+            return {"doc_id": target_doc_id, "skipped_cancel": True}
         if chunking_enabled and len(doc_text) > max_input_chars:
             return _process_chunked(target_doc_id, doc_text)
         used_text, original_length, used_length, truncated = _truncate_text(
@@ -570,11 +579,24 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         return outcome
 
     completed = len(records_by_doc)  # empty shortcuts 이미 처리됨
+    # 빌드 중단(silverone 2026-06-29) — /tasks/cancel로 event set 시 남은 doc 멈추고 보존.
+    cancelled = False
+    cancel_event = _cancel.begin(dataset_version_id)
     if lloa_targets:
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
             futures = {executor.submit(_process, item): item for item in lloa_targets}
             for future in as_completed(futures):
+                # 취소 감지 시 즉시 멈춘다(남은 future 취소 + 탈출). 부분 결과 저장 안 함.
+                # break해야 진행률도 그 자리에 멈춘다(드레인하면 완료수가 치솟음).
+                if cancel_event.is_set():
+                    for pending in futures:
+                        pending.cancel()
+                    cancelled = True
+                    break
                 outcome = future.result()
+                if outcome.get("skipped_cancel"):
+                    cancelled = True
+                    continue
                 doc_id = outcome["doc_id"]
                 if outcome.get("chunked"):
                     chunked_doc_count += 1
@@ -694,6 +716,8 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
             "(DATASET_BUILD_MAX_FAILURE_RATE로 조정 가능)."
         )
 
+    _cancel.end(dataset_version_id)
+
     # 패스 3: 원본 row 순서로 jsonl write.
     processed = 0
     with output_path.open("w", encoding="utf-8") as dst:
@@ -710,15 +734,16 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         write_progress(
             progress_path,
             processed_rows=processed,
-            total_rows=processed,
+            total_rows=total_rows if cancelled else processed,
             started_at=started_at,
-            message="doc_genuineness completed",
+            message="doc_genuineness cancelled" if cancelled else "doc_genuineness completed",
         )
 
     summary = {
         "input_artifact_ref": clean_artifact_ref,
         "input_row_count": total_rows,
         "processed_row_count": processed,
+        "cancelled": cancelled,
         "tier_counts": tier_counts,
         "parse_failures": parse_failures,
         "request_failures": request_failures,
