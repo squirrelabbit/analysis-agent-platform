@@ -24,7 +24,7 @@ from ..obs import get, skill_handler
 from ..prompt_options import load_prompt_body
 from . import _cancel
 from ._chunking import build_sentence_chunks, split_anchor_sentences
-from ._common import build_provenance, write_progress
+from ._common import build_provenance, check_failure_rate, write_progress
 from ._prompt_slots import extract_extra_slot
 
 LOGGER = get(__name__)
@@ -709,15 +709,13 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
     # per-doc 격리(uncertain fallback)는 소수 flaky doc 보호용 — LLOA 서버 다운으로
     # 대부분/전부 실패한 결과를 "완료"로 덮으면 운영자가 망가진 결과를 정상으로 오인한다.
     failure_count = request_failures + parse_failures
-    max_failure_rate = config.dataset_build_max_failure_rate
-    if total_rows > 0 and failure_count / total_rows >= max_failure_rate:
-        raise RuntimeError(
-            "dataset_doc_genuineness aborted: LLOA 실패율 "
-            f"{failure_count / total_rows:.0%} (request_failures={request_failures}, "
-            f"parse_failures={parse_failures}, total={total_rows}) >= 임계 "
-            f"{max_failure_rate:.0%}. LLOA 서버 상태를 확인하고 재시도하세요 "
-            "(DATASET_BUILD_MAX_FAILURE_RATE로 조정 가능)."
-        )
+    check_failure_rate(
+        task="dataset_doc_genuineness",
+        failures=failure_count,
+        total=total_rows,
+        max_rate=config.dataset_build_max_failure_rate,
+        detail=f"request_failures={request_failures}, parse_failures={parse_failures}",
+    )
 
     _cancel.end(dataset_version_id)
 

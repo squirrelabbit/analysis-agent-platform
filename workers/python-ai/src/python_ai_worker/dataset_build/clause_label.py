@@ -30,7 +30,7 @@ from ..obs import get, skill_handler
 from ..taxonomies import DEFAULT_TAXONOMY_ID, Taxonomy, load_taxonomy, render_aspect_taxonomy_block
 from . import _cancel
 from ._chunking import build_sentence_chunks, split_anchor_sentences
-from ._common import build_provenance, write_progress
+from ._common import build_provenance, check_failure_rate, write_progress
 from ._prompt_slots import extract_extra_slot
 
 LOGGER = get(__name__)
@@ -507,14 +507,14 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
     # (LLOA HTTP 에러는 _process에서 안 잡혀 이미 fail-loud — 여기는 LLOA가 200을 주되
     # 전부 파싱 불가한 경우 등 degraded 결과를 "완료"로 덮지 않기 위한 가드.)
     attempted = len(target_docs)
-    max_failure_rate = config.dataset_build_max_failure_rate
-    if attempted > 0 and parse_failures / attempted >= max_failure_rate:
-        raise RuntimeError(
-            "dataset_clause_label aborted: 파싱 실패율 "
-            f"{parse_failures / attempted:.0%} (parse_failures={parse_failures}, "
-            f"attempted={attempted}) >= 임계 {max_failure_rate:.0%}. LLOA 응답/서버 "
-            "상태를 확인하고 재시도하세요 (DATASET_BUILD_MAX_FAILURE_RATE로 조정 가능)."
-        )
+    check_failure_rate(
+        task="dataset_clause_label",
+        failures=parse_failures,
+        total=attempted,
+        max_rate=config.dataset_build_max_failure_rate,
+        detail=f"parse_failures={parse_failures}",
+        reason="파싱 실패율",
+    )
 
     # 3) 결과 jsonl 출력 (원본 row 순서 보존)
     with output_path.open("w", encoding="utf-8") as dst:

@@ -75,6 +75,37 @@ def build_provenance(
     }
 
 
+# ── partial-failure 가드 (ADR-031 3단계 — cross-cutting 공통화) ──────────────
+# LLOA build에서 일부 doc 실패는 per-doc 격리로 흡수하지만, 실패율이 임계를 넘으면
+# (LLOA 서버 다운 등) degraded 결과를 "완료"로 덮지 않게 fail-loud 중단한다. 이 가드가
+# doc_genuineness/clause_label에 같은 골격으로 중복돼 있어 공통화한다. verify 경로는
+# per-doc judge 격리라 별도(이 가드 미적용).
+class DatasetBuildFailureRateExceeded(RuntimeError):
+    """LLOA build 실패율이 임계(DATASET_BUILD_MAX_FAILURE_RATE)를 넘어 fail-loud 중단."""
+
+
+def check_failure_rate(
+    *,
+    task: str,
+    failures: int,
+    total: int,
+    max_rate: float,
+    detail: str,
+    reason: str = "LLOA 실패율",
+) -> None:
+    """failures/total >= max_rate면 DatasetBuildFailureRateExceeded를 raise.
+
+    DatasetBuildFailureRateExceeded는 RuntimeError 서브클래스라 기존 RuntimeError를
+    잡는 호출부와 호환된다(동작 보존, 타입만 구체화).
+    """
+    if total > 0 and failures / total >= max_rate:
+        raise DatasetBuildFailureRateExceeded(
+            f"{task} aborted: {reason} {failures / total:.0%} "
+            f"({detail}, total={total}) >= 임계 {max_rate:.0%}. LLOA 서버/응답 상태를 "
+            "확인하고 재시도하세요 (DATASET_BUILD_MAX_FAILURE_RATE로 조정 가능)."
+        )
+
+
 def stable_source_index(row: dict[str, Any], fallback_index: int) -> int:
     try:
         return int(row.get("source_row_index") or fallback_index)

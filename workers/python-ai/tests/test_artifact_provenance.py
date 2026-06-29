@@ -5,7 +5,9 @@ import unittest
 
 from python_ai_worker.dataset_build._common import (
     ARTIFACT_SCHEMA_VERSION,
+    DatasetBuildFailureRateExceeded,
     build_provenance,
+    check_failure_rate,
 )
 
 
@@ -58,6 +60,24 @@ class BuildProvenanceTests(unittest.TestCase):
         )
         self.assertEqual(p["judge_model_id"], "j")
         self.assertEqual(p["verify_mode"], "cross_model")
+
+
+class FailureRateGuardTests(unittest.TestCase):
+    """partial-failure 공통 가드 (ADR-031 3단계)."""
+
+    def test_raises_when_at_or_above_threshold(self) -> None:
+        with self.assertRaises(DatasetBuildFailureRateExceeded):
+            check_failure_rate(task="t", failures=5, total=10, max_rate=0.5, detail="x")
+
+    def test_no_raise_below_threshold(self) -> None:
+        check_failure_rate(task="t", failures=4, total=10, max_rate=0.5, detail="x")
+
+    def test_no_raise_when_total_zero(self) -> None:
+        check_failure_rate(task="t", failures=0, total=0, max_rate=0.5, detail="x")
+
+    def test_is_runtime_error_subclass(self) -> None:
+        # 기존 RuntimeError를 잡던 호출부와 호환되어야 한다.
+        self.assertTrue(issubclass(DatasetBuildFailureRateExceeded, RuntimeError))
 
 
 if __name__ == "__main__":
