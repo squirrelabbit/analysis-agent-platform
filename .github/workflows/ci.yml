@@ -36,6 +36,27 @@ jobs:
         working-directory: apps/control-plane
         run: go build ./...
 
+  web-build:
+    # silverone 2026-06-29 — web(tsc -b + vite build) 게이트. docker가 쓰는 빌드와
+    # 동일해, JSX/타입 에러로 docker 빌드가 깨지는 회귀를 PR에서 잡는다. 외부 API·
+    # docker 의존 없어 GitHub Actions에서 바로 가능.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: npm ci
+      - name: Build web
+        working-directory: apps/web
+        run: npm run build
+
   release-guard:
     # silverone 2026-05-27 — Codex adversarial review fix-4. release safety:
     # openapi parse + boot-time destructive SQL guard. smoke는 docker 의존이라
@@ -49,8 +70,10 @@ jobs:
         with:
           ruby-version: "3.2"
       - name: openapi YAML parse
+        # frontend.yaml은 현재 미생성 상태라 존재할 때만 검증한다(부재 시 CI를 깨지
+        # 않게). 생성/폐지 결정은 별도 트랙. openapi.yaml은 항상 필수.
         run: |
-          ruby -e 'require "yaml"; YAML.load_file("docs/api/openapi.yaml"); YAML.load_file("docs/api/openapi.frontend.yaml"); puts "ok"'
+          ruby -e 'require "yaml"; YAML.load_file("docs/api/openapi.yaml"); f="docs/api/openapi.frontend.yaml"; YAML.load_file(f) if File.exist?(f); puts "ok"'
       - name: boot-time destructive SQL guard (grep)
         run: |
           if grep -rnE 'DROP TABLE IF EXISTS (report_drafts|executions|skill_plans|analysis_requests)' \
