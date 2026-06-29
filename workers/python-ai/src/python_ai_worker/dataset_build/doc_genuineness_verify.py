@@ -23,7 +23,7 @@ from .. import runtime as rt
 from ..clients.lloa import LloaClient, LloaConfig, LloaResponseParseError
 from ..config import load_config
 from ..prompt_options import load_prompt_body
-from ._common import write_progress
+from ._common import build_provenance, write_progress
 from .doc_genuineness import (
     _ALLOWED_TIERS,
     _CHUNK_MAX_CHARS,
@@ -434,6 +434,28 @@ def run_dataset_doc_genuineness_verify(payload: dict[str, Any]) -> dict[str, Any
         "models": {"a": model_a, "b": model_b, "judge": judge_model},
         "prompt_version": prompt_version,
         "judge_prompt_version": judge_prompt_version,
+        # ADR-031 2단계 — provenance 표준 블록. verify는 2 classify model을 정렬 join으로
+        # model_id에 식별(deterministic_hash가 모델 조합을 반영하도록).
+        "provenance": build_provenance(
+            producer_task="dataset_doc_genuineness",
+            dataset_version_id=dataset_version_id,
+            model_id="|".join(sorted([model_a, model_b])),
+            judge_model_id=judge_model,
+            prompt_version=prompt_version,
+            verify_mode="cross_model",
+            chunking_config=(
+                {
+                    "strategy": "sentence_window",
+                    "threshold_chars": max_input_chars,
+                    "max_chunk_sentences": chunk_max_sentences,
+                    "max_chunk_chars": chunk_max_chars,
+                    "overlap_sentences": chunk_overlap,
+                }
+                if chunking_enabled
+                else None
+            ),
+            input_artifact_refs=[clean_artifact_ref] if clean_artifact_ref else [],
+        ),
         "applied": {
             "prompt_version": prompt_version,
             "judge_prompt_version": judge_prompt_version,

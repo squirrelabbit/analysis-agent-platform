@@ -32,7 +32,7 @@ from ..config import load_config
 from ..prompt_options import load_prompt_body
 from . import _cancel
 from ._chunking import build_sentence_chunks, split_anchor_sentences as _split_anchor_sentences
-from ._common import write_progress
+from ._common import build_provenance, write_progress
 from .clause_label import (
     _ALLOWED_ASPECT,
     _ALLOWED_SENTIMENT,
@@ -672,6 +672,23 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
         "taxonomy_id": taxonomy.taxonomy_id,
         "taxonomy_hash": taxonomy.taxonomy_hash,
         "prompt_version": classify_version,
+        # ADR-031 2단계 — provenance 표준 블록. verify 2 classify model을 정렬 join.
+        "provenance": build_provenance(
+            producer_task="dataset_clause_label",
+            dataset_version_id=dataset_version_id,
+            model_id="|".join(sorted([model_a, model_b])),
+            judge_model_id=judge_model,
+            prompt_version=classify_version,
+            taxonomy_id=taxonomy.taxonomy_id,
+            verify_mode="cross_model",
+            chunking_config={
+                "strategy": "sentence_window",
+                "max_chunk_sentences": max_chunk_sentences,
+                "max_chunk_chars": max_chunk_chars,
+                "overlap_sentences": overlap_sentences,
+            },
+            input_artifact_refs=[clean_artifact_ref] if clean_artifact_ref else [],
+        ),
         "judge_prompt_version": judge_version,
         "applied": {
             "classify_models": [model_a, model_b],

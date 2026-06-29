@@ -22,7 +22,7 @@ from typing import Any
 
 from .. import runtime as rt
 from . import _cancel
-from ._common import write_progress
+from ._common import build_provenance, write_progress
 from .keyword_extractor import DEFAULT_KEYWORD_STOPWORDS_RULE, KiwiKeywordExtractor
 
 
@@ -202,6 +202,14 @@ def run_dataset_clause_keywords(payload: dict[str, Any]) -> dict[str, Any]:
         "dictionary_block_count": len(block_terms),
         "dictionary_synonym_count": len(synonym_map),
         "top_keywords": [{"keyword": k, "count": c} for k, c in top_keywords],
+        # ADR-031 2단계 — provenance 표준 블록. keywords는 LLOA 무관(Kiwi)이라 model 없음.
+        "provenance": build_provenance(
+            producer_task="dataset_clause_keywords",
+            dataset_version_id=dataset_version_id,
+            model_id=None,
+            prompt_version=None,
+            input_artifact_refs=[input_ref] if input_ref else [],
+        ),
     }
     return {
         "notes": [
