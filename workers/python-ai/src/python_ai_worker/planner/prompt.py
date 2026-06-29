@@ -305,7 +305,6 @@ _ORDERED_SKILL_NAMES: tuple[str, ...] = (
     "calculate",
     "sort",
     "present",
-    "summarize",
 )
 
 

@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 요청된 범위 밖의 리팩토링, rename, import 정리, formatting-only 변경은 하지 않는다.
 - 미사용으로 보이는 코드/파일도 호출 경로 확인 전 임의 삭제하지 않는다.
 - API 계약이 바뀌면 `docs/api/openapi.yaml`을 반드시 함께 갱신한다. 프론트 영향이 있으면 `docs/api/openapi.frontend.yaml`도 함께.
-- δ-4 (2026-05-21)로 plan은 planner(LLM)가 plan_v2로 직접 생성하므로 plan skill 카탈로그(`config/skill_bundle.json`)는 삭제됐다. plan_v2 8 skill catalog는 `workers/python-ai/src/python_ai_worker/planner/schema.py`의 `SKILL_CATALOG`로 잠금되어 있다. dataset_build task를 추가·제거하면 `config/task_registry.json`, worker handler, 테스트, `docs/skill/*`를 함께 점검한다.
+- δ-4 (2026-05-21)로 plan은 planner(LLM)가 plan_v2로 직접 생성하므로 plan skill 카탈로그(`config/skill_bundle.json`)는 삭제됐다. plan_v2 7 skill catalog는 `workers/python-ai/src/python_ai_worker/planner/schema.py`의 `SKILL_CATALOG`로 잠금되어 있다. dataset_build task를 추가·제거하면 `config/task_registry.json`, worker handler, 테스트, `docs/skill/*`를 함께 점검한다.
 - 검증 실패를 성공처럼 요약하지 않는다. 일부만 확인했으면 일부라고 명시.
 
 ---
@@ -71,7 +71,7 @@ POST /projects/{pid}/datasets/{did}/versions/{vid}/analyze    ← explicit versi
 
 **plan_v2 / Task Registry**
 
-- plan_v2 — planner가 8 skill (join / filter / aggregate / compare / calculate / sort / present / summarize)과 3 RESERVED input table (docs / clauses / genuineness)로 plan을 생성한다. catalog는 `workers/python-ai/src/python_ai_worker/planner/schema.py:SKILL_CATALOG`로 잠금. δ-4로 `config/skill_bundle.json`은 삭제됐다.
+- plan_v2 — planner가 7 skill (join / filter / aggregate / compare / calculate / sort / present)과 3 RESERVED input table (docs / clauses / genuineness)로 plan을 생성한다. (summarize는 2026-06-29 제거 — executor 빌더 부재로 hard-fail이었고 자연어 요약은 composer가 합성) catalog는 `workers/python-ai/src/python_ai_worker/planner/schema.py:SKILL_CATALOG`로 잠금. δ-4로 `config/skill_bundle.json`은 삭제됐다.
 - `config/task_registry.json` — *control plane이 실행하는 내부 task* (dataset_build).
   - Go: `internal/registry.TaskPathFor("<name>")`로 task_path lookup (hardcoded 금지)
   - Python: `task_registry.task_definition("<name>")` 사용
