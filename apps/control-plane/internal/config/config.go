@@ -32,10 +32,6 @@ type Config struct {
 	TemporalRecoveryMode                    string
 	TemporalAnalysisMaxConcurrentActivities int
 	TemporalBuildMaxConcurrentActivities    int
-	DatasetBuildPrepareMaxConcurrent        int
-	DatasetBuildSentimentMaxConcurrent      int
-	DatasetBuildEmbeddingMaxConcurrent      int
-	DatasetBuildClusterMaxConcurrent        int
 	AnthropicExecutionTokenCeiling          int
 	PythonAIWorkerHTTPTimeoutSec            int
 	// silverone 2026-06-08 — plan reuse(POC-1) 기능 토글. follow-up 질의를
@@ -137,10 +133,6 @@ func Load() Config {
 	}
 	analysisMaxConcurrentActivities := envPositiveInt("TEMPORAL_ANALYSIS_MAX_CONCURRENT_ACTIVITIES", 8)
 	buildMaxConcurrentActivities := envPositiveInt("TEMPORAL_BUILD_MAX_CONCURRENT_ACTIVITIES", 4)
-	prepareMaxConcurrent := envPositiveInt("DATASET_BUILD_PREPARE_MAX_CONCURRENT", 3)
-	sentimentMaxConcurrent := envPositiveInt("DATASET_BUILD_SENTIMENT_MAX_CONCURRENT", 2)
-	embeddingMaxConcurrent := envPositiveInt("DATASET_BUILD_EMBEDDING_MAX_CONCURRENT", 1)
-	clusterMaxConcurrent := envPositiveInt("DATASET_BUILD_CLUSTER_MAX_CONCURRENT", 1)
 	anthropicExecutionTokenCeiling := envNonNegativeInt("ANTHROPIC_EXECUTION_TOKEN_CEILING", 0)
 	// Python AI worker LLM-backed skills can take well over 30s when the
 	// schema strict-mode is in effect (Anthropic JSON schema enforcement
@@ -175,10 +167,6 @@ func Load() Config {
 		TemporalRecoveryMode:                    temporalRecoveryMode,
 		TemporalAnalysisMaxConcurrentActivities: analysisMaxConcurrentActivities,
 		TemporalBuildMaxConcurrentActivities:    buildMaxConcurrentActivities,
-		DatasetBuildPrepareMaxConcurrent:        prepareMaxConcurrent,
-		DatasetBuildSentimentMaxConcurrent:      sentimentMaxConcurrent,
-		DatasetBuildEmbeddingMaxConcurrent:      embeddingMaxConcurrent,
-		DatasetBuildClusterMaxConcurrent:        clusterMaxConcurrent,
 		AnthropicExecutionTokenCeiling:          anthropicExecutionTokenCeiling,
 		PythonAIWorkerHTTPTimeoutSec:            pythonAIWorkerHTTPTimeoutSec,
 		PlanReuseEnabled:                        envBool("ANALYSIS_PLAN_REUSE_ENABLED", false),
