@@ -24,6 +24,15 @@ const CANCELLABLE_BUILD_TYPES: BuildJobType[] = [
   "clause_keywords",
 ];
 
+// 파이프라인 선행 단계 — 다음 단계는 앞 단계가 완료(ready)돼야 실행 가능.
+// 백엔드도 prereq 미충족 시 거부하지만, 프론트에서 실행 전에 경고를 준다.
+const BUILD_PREREQ: Partial<Record<BuildJobType, BuildJobType>> = {
+  doc_genuineness: "clean",
+  clause_label: "doc_genuineness",
+  clause_keywords: "clause_label",
+};
+const PREREQ_READY_STATUSES = ["ready", "completed"];
+
 interface PipelineCardProps {
   versionId: string;
   type: BuildJobType;
@@ -93,6 +102,13 @@ export default function PipelineCard({ versionId, type }: PipelineCardProps) {
   const percent = data?.progress?.percent ?? 0;
   const running = isBuildRunning(status);
   const cancellable = running && CANCELLABLE_BUILD_TYPES.includes(type);
+
+  // 선행 단계 준비 여부 — 안 끝났으면 실행 시 경고. prereq가 없으면(clean) 항상 ready로 본다.
+  // (prereqType이 없으면 자기 type으로 쿼리 — 같은 키라 캐시 재사용, 네트워크 추가 없음.)
+  const prereqType = BUILD_PREREQ[type];
+  const { data: prereqData } = useBuildVersion(prereqType ?? type);
+  const prereqReady =
+    !prereqType || PREREQ_READY_STATUSES.includes(prereqData?.status ?? "");
 
   // 빌드가 더 이상 running이 아니면(멈춤/완료) 중단 요청 상태 해제.
   useEffect(() => {
@@ -179,6 +195,8 @@ export default function PipelineCard({ versionId, type }: PipelineCardProps) {
             stage={type}
             status={status}
             disabled={isDownloading}
+            prereqReady={prereqReady}
+            prereqLabel={prereqType ? buildLabel(prereqType) : ""}
           />
         </div>
       </CardContent>
