@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 확인되지 않은 내용은 `확인 필요:`로 표시한다. 추정으로 API 계약, 환경변수, 설정값을 만들지 않는다.
 - 요청된 범위 밖의 리팩토링, rename, import 정리, formatting-only 변경은 하지 않는다.
 - 미사용으로 보이는 코드/파일도 호출 경로 확인 전 임의 삭제하지 않는다.
-- API 계약이 바뀌면 `docs/api/openapi.yaml`을 반드시 함께 갱신한다. 프론트 영향이 있으면 `docs/api/openapi.frontend.yaml`도 함께.
+- API 계약이 바뀌면 `docs/api/openapi.yaml`을 반드시 함께 갱신한다. (openapi.frontend.yaml은 폐지 — openapi.yaml 단일 source)
 - δ-4 (2026-05-21)로 plan은 planner(LLM)가 plan_v2로 직접 생성하므로 plan skill 카탈로그(`config/skill_bundle.json`)는 삭제됐다. plan_v2 8 skill catalog는 `workers/python-ai/src/python_ai_worker/planner/schema.py`의 `SKILL_CATALOG`로 잠금되어 있다. dataset_build task를 추가·제거하면 `config/task_registry.json`, worker handler, 테스트, `docs/skill/*`를 함께 점검한다.
 - 검증 실패를 성공처럼 요약하지 않는다. 일부만 확인했으면 일부라고 명시.
 
@@ -177,8 +177,9 @@ PYTHONPATH=workers/python-ai/src python -m python_ai_worker.main --describe
 
 ## 주요 참조 문서
 
-- `docs/api/openapi.yaml` — 전체 HTTP API 계약 (기준 문서)
-- `docs/api/openapi.frontend.yaml` — 프론트 필수 API 계약
+- `docs/api/openapi.yaml` — 전체 HTTP API 계약 (기준 문서, 단일 source)
+  - (openapi.frontend.yaml은 2026-06-29 폐지 — 수기 유지 불가로 소실됐었음. 프론트 전용
+    계약이 필요하면 openapi.yaml tag 기반 자동 생성 파생물로 재도입)
 - `docs/observability.md` — 현재 observability 구현 범위와 Request ID 정책
 - `docs/skill/skill_registry.md` — runtime skill 계약 요약
 - `docs/skill/skill_implementation_status.md` — skill별 구현 방식과 안정도

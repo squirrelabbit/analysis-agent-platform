@@ -106,11 +106,11 @@ func (s *Server) routes() {
 	// 사용 가능한 taxonomy 목록 (선택 UI — 데이터셋 metadata.taxonomy_id용).
 	s.mux.HandleFunc("GET /taxonomies", s.handleTaxonomies)
 	s.mux.HandleFunc("GET /openapi.yaml", s.handleOpenAPI)
-	s.mux.HandleFunc("GET /openapi.frontend.yaml", s.handleFrontendOpenAPI)
 	s.mux.HandleFunc("GET /swagger", s.handleSwaggerUI)
 	s.mux.HandleFunc("GET /swagger/", s.handleSwaggerUI)
-	s.mux.HandleFunc("GET /swagger/frontend", s.handleFrontendSwaggerUI)
-	s.mux.HandleFunc("GET /swagger/frontend/", s.handleFrontendSwaggerUI)
+	// openapi.frontend.yaml / swagger/frontend 라우트는 제거됨 (2026-06-29) —
+	// 해당 파일이 미생성 상태라 호출 시 500을 냈다. 프론트 전용 계약이 실제 필요해지면
+	// openapi.yaml tag 기반 자동 생성 파생물로 재도입한다(수기 원본 금지).
 	// 5/6 화면기획서 B안 채택 (vault prompt_저장_정책.md): 전역 prompt
 	// 라이브러리(/prompts) 화면 안 만들기로 결정. 글로벌 prompt는 .md 코드
 	// 계약, 프로젝트별만 DB(project_prompts). 옛 전역 라우트 5개 + handler +
@@ -387,10 +387,6 @@ func (s *Server) handleOpenAPI(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 	s.handleOpenAPIFile(w, strings.TrimSpace(s.cfg.OpenAPIPath))
 }
 
-func (s *Server) handleFrontendOpenAPI(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
-	s.handleOpenAPIFile(w, strings.TrimSpace(s.cfg.FrontendOpenAPIPath))
-}
-
 func (s *Server) handleOpenAPIFile(w stdhttp.ResponseWriter, path string) {
 	if path == "" {
 		writeError(w, stdhttp.StatusInternalServerError, "openapi path is not configured")
@@ -410,12 +406,6 @@ func (s *Server) handleSwaggerUI(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(stdhttp.StatusOK)
 	_, _ = io.WriteString(w, swaggerUIHTML("/openapi.yaml"))
-}
-
-func (s *Server) handleFrontendSwaggerUI(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(stdhttp.StatusOK)
-	_, _ = io.WriteString(w, swaggerUIHTML("/openapi.frontend.yaml"))
 }
 
 func appendVary(header stdhttp.Header, value string) {
