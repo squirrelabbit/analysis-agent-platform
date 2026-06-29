@@ -2,75 +2,6 @@
   "version": "1",
   "tasks": [
     {
-      "task_name": "dataset_prepare",
-      "engine": "python-ai",
-      "task_path": "/tasks/dataset_prepare",
-      "kind": "dataset_build",
-      "visibility": "internal",
-      "description": "Normalize and filter raw text rows into a prepared dataset artifact.",
-      "dataset_source": "request",
-      "result_kind": "dataset_artifact",
-      "result_scope": "full_dataset",
-      "fallback_policy": "rule_fallback_allowed",
-      "quality_tier": "llm_dependent",
-      "result_scope_policy": "dynamic",
-      "allowed_runtime_result_scopes": [
-        "full_dataset",
-        "partial_build"
-      ]
-    },
-    {
-      "task_name": "sentiment_label",
-      "engine": "python-ai",
-      "task_path": "/tasks/sentiment_label",
-      "kind": "dataset_build",
-      "visibility": "internal",
-      "description": "Attach deterministic sentiment labels to prepared text rows.",
-      "dataset_source": "prepared",
-      "requires_prepare": true,
-      "result_kind": "dataset_artifact",
-      "result_scope": "full_dataset",
-      "fallback_policy": "rule_fallback_allowed",
-      "quality_tier": "llm_dependent",
-      "result_scope_policy": "dynamic",
-      "allowed_runtime_result_scopes": [
-        "full_dataset",
-        "partial_build"
-      ]
-    },
-    {
-      "task_name": "embedding",
-      "engine": "python-ai",
-      "task_path": "/tasks/embedding",
-      "kind": "dataset_build",
-      "visibility": "internal",
-      "description": "Produce embedding vectors for unstructured rows.",
-      "dataset_source": "prepared",
-      "requires_prepare": true,
-      "result_kind": "dataset_artifact",
-      "result_scope": "full_dataset",
-      "fallback_policy": "rule_fallback_allowed",
-      "quality_tier": "heuristic",
-      "result_scope_policy": "static"
-    },
-    {
-      "task_name": "dataset_segment",
-      "engine": "python-ai",
-      "task_path": "/tasks/dataset_segment",
-      "kind": "dataset_build",
-      "visibility": "internal",
-      "description": "[DEPRECATED ADR-017] clause_label이 LLOA 한 호출로 절·문장 분리 + 라벨링까지 통합 처리하므로 더 이상 필요 없음. 코드는 7/30 이후 완전 삭제 예정. 기존 호출자 호환 위해 보존.",
-      "dataset_source": "clean",
-      "result_kind": "dataset_artifact",
-      "result_scope": "full_dataset",
-      "fallback_policy": "rule_fallback_allowed",
-      "quality_tier": "heuristic",
-      "result_scope_policy": "static",
-      "deprecated": true,
-      "replacement": "dataset_clause_label",
-      "sunset_after": "2026-07-30"
-    },
-    {
       "task_name": "dataset_clause_label",
       "engine": "python-ai",
       "task_path": "/tasks/dataset_clause_label",
@@ -99,34 +30,6 @@
       "result_scope_policy": "static"
     },
     {
-      "task_name": "dataset_embedding_cluster",
-      "engine": "python-ai",
-      "task_path": "/tasks/dataset_embedding_cluster",
-      "kind": "dataset_build",
-      "visibility": "internal",
-      "description": "5-step pipeline STEP 4 — is_relevant=true clause text embedding + cluster. 1 step = 2 artifact (clause_embedding + cluster).",
-      "dataset_source": "clause_label",
-      "result_kind": "dataset_artifact",
-      "result_scope": "full_dataset",
-      "fallback_policy": "rule_fallback_allowed",
-      "quality_tier": "heuristic",
-      "result_scope_policy": "static"
-    },
-    {
-      "task_name": "dataset_keyword_index",
-      "engine": "python-ai",
-      "task_path": "/tasks/dataset_keyword_index",
-      "kind": "dataset_build",
-      "visibility": "internal",
-      "description": "5-step pipeline STEP 5 — is_relevant=true clause Kiwi noun + stopwords + 임베딩 정규화 후보. 1 step = 2 artifact (raw_keyword + normalized_keyword_candidates).",
-      "dataset_source": "clause_label",
-      "result_kind": "dataset_artifact",
-      "result_scope": "full_dataset",
-      "fallback_policy": "rule_fallback_allowed",
-      "quality_tier": "heuristic",
-      "result_scope_policy": "static"
-    },
-    {
       "task_name": "dataset_clean",
       "engine": "python-ai",
       "task_path": "/tasks/dataset_clean",
@@ -148,15 +51,6 @@
       "fallback_policy": "rule_fallback_allowed",
       "quality_tier": "llm_dependent",
       "result_scope_policy": "static"
-    },
-    {
-      "task_name": "dataset_cluster_build",
-      "engine": "python-ai",
-      "task_path": "/tasks/dataset_cluster_build",
-      "kind": "dataset_build",
-      "visibility": "internal",
-      "description": "Materialize dataset-level cluster summary and membership artifacts from embedding chunks.",
-      "dataset_source": "embedding"
     }
   ]
 }

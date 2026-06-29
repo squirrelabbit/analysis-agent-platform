@@ -602,20 +602,17 @@ func (a *DatasetBuildActivities) getLimiter() *datasetBuildLimiter {
 }
 
 type datasetBuildLimiter struct {
-	clean     chan struct{}
-	prepare   chan struct{}
-	sentiment chan struct{}
-	embedding chan struct{}
-	cluster   chan struct{}
+	clean chan struct{}
 }
 
 func newDatasetBuildLimiter(limits DatasetBuildConcurrencyLimits) *datasetBuildLimiter {
+	// ADR-018 후 dataset build hot path는 clean / doc_genuineness / clause_label /
+	// clause_keywords. acquire의 semaphore()는 "clean"만 반환하므로, 옛 단계 세마포어
+	// (prepare/sentiment/embedding/cluster)는 도달 불가 dead allocation이라 제거했다.
+	// doc_genuineness/clause_label은 worker 내부 ThreadPoolExecutor로 동시성 제어한다.
+	// clean 한도는 동작 보존을 위해 stale 필드명 limits.Prepare를 그대로 쓴다.
 	return &datasetBuildLimiter{
-		clean:     makeSemaphore(limits.Prepare),
-		prepare:   makeSemaphore(limits.Prepare),
-		sentiment: makeSemaphore(limits.Sentiment),
-		embedding: makeSemaphore(limits.Embedding),
-		cluster:   makeSemaphore(limits.Cluster),
+		clean: makeSemaphore(limits.Prepare),
 	}
 }
 
