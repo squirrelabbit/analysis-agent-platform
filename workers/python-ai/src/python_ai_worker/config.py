@@ -43,6 +43,7 @@ class WorkerConfig:
     lloa_prepend_no_think: bool = True
     lloa_retry_max_attempts: int = 3
     lloa_retry_base_delay_sec: float = 1.5
+    lloa_retry_max_delay_sec: float = 8.0
     # silverone 2026-06-08 — dataset build(doc_genuineness/clause_label)에서 LLOA
     # 실패(요청/파싱)율이 이 비율 이상이면 build를 fail-loud로 중단한다. per-doc 격리는
     # 소수 flaky doc 보호용이지, LLOA 서버 다운(전부 실패)까지 "완료"로 덮으면 운영자가
@@ -102,6 +103,7 @@ def load_config() -> WorkerConfig:
         not in {"0", "false", "no", "off"},
         lloa_retry_max_attempts=max(1, int(os.getenv("LLOA_RETRY_MAX_ATTEMPTS", "3"))),
         lloa_retry_base_delay_sec=max(0.0, float(os.getenv("LLOA_RETRY_BASE_DELAY_SEC", "1.5"))),
+        lloa_retry_max_delay_sec=max(0.0, float(os.getenv("LLOA_RETRY_MAX_DELAY_SEC", "8.0"))),
         dataset_build_max_failure_rate=min(
             1.0, max(0.0, float(os.getenv("DATASET_BUILD_MAX_FAILURE_RATE", "0.5")))
         ),
