@@ -82,13 +82,10 @@ func (s *DatasetService) BuildClean(projectID, datasetID, datasetVersionID strin
 	}
 
 	// 5/11 (silverone): dataset_build를 plan skill과 분리한다는 결정에 따라
-	// clean 단계가 PythonBuildClient로 첫 마이그레이션. taskPath/timeout/4xx-5xx
-	// wrap 로직은 client 내부에 그대로 이동했다. 다른 build 단계는 후속 작업.
-	// response 변환은 동일 shape의 workerTaskResponse(다른 7 service가 아직
-	// runWorkerTask 사용 중)로 옮겨서 기존 후속 처리 코드 (artifactString 등)
-	// 변경 없이 호환.
-	buildResp, err := s.buildClient().RunDatasetClean(context.Background(), payload)
-	response := workerTaskResponse{Notes: buildResp.Notes, Artifact: buildResp.Artifact, Artifacts: buildResp.Artifacts}
+	// 모든 build이 buildClient port(RunTask/RunDatasetClean)로 통일됐다(ADR-031 4단계,
+	// 2026-06-29). taskPath/timeout/4xx-5xx wrap은 client 내부에 있고, 후속 처리
+	// (artifactString 등)는 동일 shape의 response를 그대로 쓴다.
+	response, err := s.buildClient().RunDatasetClean(context.Background(), payload)
 	if err != nil {
 		version.CleanStatus = "failed"
 		version.Metadata["clean_status"] = "failed"

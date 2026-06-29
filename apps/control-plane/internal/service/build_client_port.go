@@ -11,9 +11,9 @@ import (
 // satisfy하고, 테스트는 fake를 `buildClientOverride`로 주입해 실제 worker 없이 build
 // orchestration을 검증할 수 있다.
 //
-// 배경: 현재 worker 호출은 `runWorkerTask`(DatasetService 메서드)와
-// `PythonBuildClient.RunTask`로 2경로 혼재한다(struct 주석 참조). 이 port가 그 통일의
-// 첫 단계 — 호출부는 그대로 두고 의존을 인터페이스로 바꿔 fake 가능성부터 확보한다.
+// 모든 dataset_build worker 호출은 이 port의 RunTask/RunDatasetClean으로 통일됐다
+// (ADR-031 4단계, 2026-06-29 — 옛 runWorkerTask 2경로 제거). 호출부는 인터페이스에
+// 의존하므로 테스트에서 fake(buildClientOverride)를 주입해 worker 없이 검증할 수 있다.
 type datasetBuildTaskClient interface {
 	RunTask(ctx context.Context, taskPath string, payload map[string]any) (skills.PythonBuildTaskResponse, error)
 	RunDatasetClean(ctx context.Context, payload map[string]any) (skills.PythonBuildTaskResponse, error)

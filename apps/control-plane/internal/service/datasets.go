@@ -36,10 +36,8 @@ type DatasetService struct {
 	// PYTHON_AI_WORKER_HTTP_TIMEOUT_SEC를 SetPythonAITaskTimeout으로 주입한다.
 	// 미설정(0 이하)이면 postPythonAITask가 defaultPythonAITaskTimeout으로 fallback.
 	pythonAITaskTimeout time.Duration
-	// 5/11 (silverone): dataset_build HTTP 호출은 PythonBuildClient로 분리.
-	// 기존 `runWorkerTask` generic helper는 dataset_build_*.go가 직접
-	// 호출하지 않고 client method를 호출하도록 점진 마이그레이션 중.
-	// dataset_clean이 첫 마이그레이션 대상 — 다른 build 단계는 후속 작업.
+	// dataset_build worker 호출은 PythonBuildClient(RunTask/RunDatasetClean)로 통일됨.
+	// (5/11 분리 시작 → ADR-031 4단계 2026-06-29 통일 완료 — runWorkerTask 제거.)
 	pythonBuildClient *skills.PythonBuildClient
 	// silverone 2026-06-29 (ADR-031 4단계) — worker 호출 경계 port. test fake 주입용
 	// override. nil이면 concrete pythonBuildClient를 쓴다(운영 무영향). worker 없이
