@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import runtime as rt
+from . import _cancel
 from ._common import write_progress
 from .keyword_extractor import DEFAULT_KEYWORD_STOPWORDS_RULE, KiwiKeywordExtractor
 
@@ -134,9 +135,16 @@ def run_dataset_clause_keywords(payload: dict[str, Any]) -> dict[str, Any]:
     clauses_with_keywords = 0
     keyword_row_count = 0
     keyword_counts: dict[str, int] = {}
+    # 빌드 중단(silverone 2026-06-29) — /tasks/cancel로 event set 시 멈춤. 증분 write라
+    # 거기까지 결과는 이미 파일에 보존됨.
+    cancelled = False
+    cancel_event = _cancel.begin(dataset_version_id)
 
     with output_path.open("w", encoding="utf-8") as dst:
         for rec in records:
+            if cancel_event.is_set():
+                cancelled = True
+                break
             clause_count += 1
             keywords = extractor.extract(str(rec.get("clause") or ""))
             if keywords:
@@ -169,13 +177,15 @@ def run_dataset_clause_keywords(payload: dict[str, Any]) -> dict[str, Any]:
                     message="clause_keywords processing",
                 )
 
+    _cancel.end(dataset_version_id)
+
     if progress_path:
         write_progress(
             progress_path,
-            processed_rows=total_rows,
+            processed_rows=clause_count,
             total_rows=total_rows,
             started_at=started_at,
-            message="clause_keywords completed",
+            message="clause_keywords cancelled" if cancelled else "clause_keywords completed",
         )
 
     top_keywords = sorted(keyword_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:20]
@@ -185,6 +195,7 @@ def run_dataset_clause_keywords(payload: dict[str, Any]) -> dict[str, Any]:
         "clauses_with_keywords": clauses_with_keywords,
         "keyword_row_count": keyword_row_count,
         "unique_keyword_count": len(keyword_counts),
+        "cancelled": cancelled,
         "extractor_version": extractor.version,
         "keyword_min_len": min_len,
         "keyword_stopwords_rule": stopwords_rule,

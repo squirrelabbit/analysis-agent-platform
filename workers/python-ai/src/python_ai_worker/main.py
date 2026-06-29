@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from .config import load_config
+from .dataset_build import _cancel as dataset_build_cancel
 from .obs import bind_request_context, clear_request_context, get, init
 from .runtime.rule_config import rule_config_status
 from .task_router import canonical_task_name, capability_names, capability_payload, run_task
@@ -269,6 +270,26 @@ def make_handler(
                 self._write_json(
                     HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
                     {"error": f"request body {size} bytes exceeds limit {max_request_bytes}"},
+                    request_id=request_id,
+                    started_at=started_at,
+                )
+                return
+
+            # 빌드 취소(silverone 2026-06-29) — 경량 in-memory 신호. task 세마포어와 독립이라
+            # worker가 포화(running build)여도 즉시 접수된다. dispatch 경로를 타지 않는다.
+            if self.path[len(prefix):] == "cancel":
+                try:
+                    raw_body = self.rfile.read(size)
+                    payload = json.loads(raw_body or b"{}")
+                except ValueError as exc:
+                    self.close_connection = True
+                    self._write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)}, request_id=request_id, started_at=started_at)
+                    return
+                version_id = str(payload.get("dataset_version_id") or "").strip()
+                found = dataset_build_cancel.request(version_id) if version_id else False
+                self._write_json(
+                    HTTPStatus.OK,
+                    {"cancelled": found, "dataset_version_id": version_id},
                     request_id=request_id,
                     started_at=started_at,
                 )

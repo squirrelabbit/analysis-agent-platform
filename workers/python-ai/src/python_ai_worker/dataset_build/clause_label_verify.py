@@ -30,6 +30,7 @@ from .. import runtime as rt
 from ..clients.lloa import LloaClient, LloaConfig, LloaResponseParseError
 from ..config import load_config
 from ..prompt_options import load_prompt_body
+from . import _cancel
 from ._chunking import build_sentence_chunks, split_anchor_sentences as _split_anchor_sentences
 from ._common import write_progress
 from .clause_label import (
@@ -435,8 +436,11 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
 
     def _process_doc(item: tuple[int, str, str]) -> tuple[str, list[dict[str, Any]], dict[str, int], int]:
         _, doc_id, doc_text = item
-        sentences = _split_anchor_sentences(doc_text)
         stats = {k: 0 for k in ("agree", "union", "sentiment_auto", "judge", "needs_review", "dropped", "partial", "chunk_failures")}
+        # 취소 후 시작된 doc은 작업 없이 즉시 반환 → 큐 잔여가 순식간에 비워짐.
+        if cancel_event.is_set():
+            return doc_id, [], stats, 0
+        sentences = _split_anchor_sentences(doc_text)
         rows_out: list[dict[str, Any]] = []
         if not sentences:
             return doc_id, rows_out, stats, 0
@@ -477,6 +481,9 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
             chunk_of: dict[int, int] = {}
             fails = 0
             for ci, (start0, sub) in enumerate(chunks):
+                # 중단(silverone 2026-06-29) — 긴 문서가 in-flight여도 chunk 사이에서 멈춤.
+                if cancel_event.is_set():
+                    break
                 try:
                     local = _label_sentences(client, classify_system_prompt, sub, max_tokens, allowed_aspect, fallback_aspect)
                 except (LloaResponseParseError, OSError, ValueError):
@@ -554,10 +561,17 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
     total_chunks = 0
     chunked_doc_count = 0
     processed = 0
+    # 빌드 중단(silverone 2026-06-29) — /tasks/cancel로 event set 시 남은 doc 멈추고 보존.
+    cancelled = False
+    cancel_event = _cancel.begin(dataset_version_id)
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = {executor.submit(_process_doc, t): t for t in targets}
         for future in as_completed(futures):
+            # break 안 함 — in-flight doc 결과를 마저 수집해 보존. 취소 후 시작된 doc은
+            # _process_doc가 즉시 빈 결과로 반환하므로 큐가 빠르게 빈다.
             doc_id, recs, stats, chunk_count = future.result()
+            if cancel_event.is_set():
+                cancelled = True
             rows_by_doc[doc_id] = recs
             for k, v in stats.items():
                 agg[k] += v
@@ -567,6 +581,7 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
             processed += 1
             if progress_path and (processed % 10 == 0 or processed == target_count):
                 write_progress(progress_path, processed_rows=processed, total_rows=target_count, started_at=started_at, message="clause_label verify processing")
+    _cancel.end(dataset_version_id)
 
     clause_count = 0
     sentiment_counts: dict[str, int] = {s: 0 for s in _ALLOWED_SENTIMENT}
@@ -603,12 +618,19 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
                             pa_conf[ck] = pa_conf.get(ck, 0) + 1
 
     if progress_path:
-        write_progress(progress_path, processed_rows=target_count, total_rows=target_count, started_at=started_at, message="clause_label verify completed")
+        write_progress(
+            progress_path,
+            processed_rows=processed if cancelled else target_count,
+            total_rows=target_count,
+            started_at=started_at,
+            message="clause_label verify cancelled" if cancelled else "clause_label verify completed",
+        )
 
     summary = {
         "mode": "verify",
         "input_row_count": total_rows,
         "processed_row_count": len(rows_by_doc),
+        "cancelled": cancelled,
         "clause_count": clause_count,
         "resolution_counts": {
             "agree": agg["agree"], "union": agg["union"], "sentiment_auto": agg["sentiment_auto"],
