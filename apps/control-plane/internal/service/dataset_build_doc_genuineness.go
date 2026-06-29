@@ -125,7 +125,7 @@ func (s *DatasetService) BuildDocGenuineness(projectID, datasetID, datasetVersio
 		payload["model_id"] = strings.TrimSpace(*input.ModelID)
 	}
 
-	response, err := s.runWorkerTask(context.Background(), registry.TaskPathFor("dataset_doc_genuineness"), payload)
+	response, err := s.buildClient().RunTask(context.Background(), registry.TaskPathFor("dataset_doc_genuineness"), payload)
 	if err != nil {
 		version.Metadata["doc_genuineness_status"] = "failed"
 		version.Metadata["doc_genuineness_error"] = err.Error()
@@ -242,7 +242,7 @@ func (s *DatasetService) buildDocGenuinenessVerify(
 		payload["judge_model"] = strings.TrimSpace(*input.JudgeModel)
 	}
 
-	response, err := s.runWorkerTask(context.Background(), registry.TaskPathFor("dataset_doc_genuineness"), payload)
+	response, err := s.buildClient().RunTask(context.Background(), registry.TaskPathFor("dataset_doc_genuineness"), payload)
 	if err != nil {
 		version.Metadata["doc_genuineness_status"] = "failed"
 		version.Metadata["doc_genuineness_error"] = err.Error()

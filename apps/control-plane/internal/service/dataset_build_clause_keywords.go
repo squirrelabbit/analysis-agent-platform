@@ -75,7 +75,7 @@ func (s *DatasetService) BuildClauseKeywords(projectID, datasetID, datasetVersio
 		}
 	}
 
-	response, err := s.runWorkerTask(context.Background(), registry.TaskPathFor("dataset_clause_keywords"), payload)
+	response, err := s.buildClient().RunTask(context.Background(), registry.TaskPathFor("dataset_clause_keywords"), payload)
 	if err != nil {
 		version.Metadata["clause_keywords_status"] = "failed"
 		version.Metadata["clause_keywords_error"] = err.Error()

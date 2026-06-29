@@ -135,12 +135,14 @@ def execute_analyze_plan(
 
 
 def _resolve_artifact_paths(dataset_version_id: str) -> ArtifactPaths:
-    """control plane lookup stub. 4단계에서는 미구현 — payload에 ``artifact_paths``를
-    명시적으로 보내야 한다.
+    """정상 경로에서는 호출되지 않는다(fail-loud 가드).
 
-    실제 lookup은 (b) production path 단계에서 control plane 통합 시점에 구현한다.
-    그때 control plane이 ``dataset_version_id``로 path를 resolve한 결과를
-    payload에 inject하는 (1) 방식으로 정리한다.
+    production 경로는 control-plane이 analyze 호출 시 ``artifact_paths``를 항상
+    payload에 주입한다(Go ``analyze.go`` ``paths.asPayload()``). 따라서 이 함수는
+    "직접 worker 호출 + artifact_paths 미주입" 같은 잘못된 사용에서만 도달하며,
+    그때 silent fallback 대신 명확한 에러로 끊는다(silverone 2026-05-21 4단계 결정).
+    worker-side dataset_version_id lookup은 의도적으로 구현하지 않는다(경계: path
+    resolve는 control-plane 책임).
     """
 
     raise ArtifactPathResolutionError(
