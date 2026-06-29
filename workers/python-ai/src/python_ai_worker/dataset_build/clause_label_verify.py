@@ -567,11 +567,14 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = {executor.submit(_process_doc, t): t for t in targets}
         for future in as_completed(futures):
-            # break 안 함 — in-flight doc 결과를 마저 수집해 보존. 취소 후 시작된 doc은
-            # _process_doc가 즉시 빈 결과로 반환하므로 큐가 빠르게 빈다.
-            doc_id, recs, stats, chunk_count = future.result()
+            # 취소 감지 시 즉시 멈춘다(남은 future 취소 + 탈출). 부분 결과 저장 안 함.
+            # break해야 진행률도 그 자리에 멈춘다(드레인하면 완료수가 치솟음).
             if cancel_event.is_set():
+                for pending in futures:
+                    pending.cancel()
                 cancelled = True
+                break
+            doc_id, recs, stats, chunk_count = future.result()
             rows_by_doc[doc_id] = recs
             for k, v in stats.items():
                 agg[k] += v

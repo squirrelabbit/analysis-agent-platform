@@ -586,13 +586,17 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
             futures = {executor.submit(_process, item): item for item in lloa_targets}
             for future in as_completed(futures):
+                # 취소 감지 시 즉시 멈춘다(남은 future 취소 + 탈출). 부분 결과 저장 안 함.
+                # break해야 진행률도 그 자리에 멈춘다(드레인하면 완료수가 치솟음).
+                if cancel_event.is_set():
+                    for pending in futures:
+                        pending.cancel()
+                    cancelled = True
+                    break
                 outcome = future.result()
-                # 취소 후 시작돼 skip된 doc은 무시(break 안 함 — in-flight는 마저 수집·보존).
                 if outcome.get("skipped_cancel"):
                     cancelled = True
                     continue
-                if cancel_event.is_set():
-                    cancelled = True
                 doc_id = outcome["doc_id"]
                 if outcome.get("chunked"):
                     chunked_doc_count += 1
