@@ -24,7 +24,7 @@ from ..obs import get, skill_handler
 from ..prompt_options import load_prompt_body
 from . import _cancel
 from ._chunking import build_sentence_chunks, split_anchor_sentences
-from ._common import write_progress
+from ._common import build_provenance, write_progress
 from ._prompt_slots import extract_extra_slot
 
 LOGGER = get(__name__)
@@ -770,6 +770,27 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         "reasoning_effort": lloa_config.reasoning_effort,
         "total_prompt_tokens": total_prompt_tokens,
         "total_completion_tokens": total_completion_tokens,
+        # ADR-031 2단계 — provenance 표준 블록(흩어진 model/prompt/chunking을 통일).
+        # 기존 산재 필드(model/prompt_version/chunking)는 호환 위해 유지.
+        "provenance": build_provenance(
+            producer_task="dataset_doc_genuineness",
+            dataset_version_id=dataset_version_id,
+            model_id=lloa_config.model,
+            prompt_version=prompt_version,
+            verify_mode=None,
+            chunking_config=(
+                {
+                    "strategy": "sentence_window",
+                    "threshold_chars": max_input_chars,
+                    "max_chunk_sentences": chunk_max_sentences,
+                    "max_chunk_chars": chunk_max_chars,
+                    "overlap_sentences": chunk_overlap,
+                }
+                if chunking_enabled
+                else None
+            ),
+            input_artifact_refs=[clean_artifact_ref] if clean_artifact_ref else [],
+        ),
         # silverone 2026-05-22 (PR-α2) — 실행 당시 적용된 subject variables snapshot.
         # dataset.metadata가 나중에 바뀌어도 "이 결과는 어떤 기준으로 만들어졌나"를
         # 추적할 수 있게 artifact summary에 남긴다. control plane이 이 값을

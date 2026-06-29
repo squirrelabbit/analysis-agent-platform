@@ -7,11 +7,72 @@ detector, text joiner를 모아둔다. 단일 entry point에만 종속된 helper
 entry point 모듈에 그대로 둔다.
 """
 
+import hashlib
 import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+
+# ── artifact provenance 표준 블록 (ADR-031 2단계) ───────────────────────────
+# LLM build 결과는 "값"만이 아니라 "어떤 model/prompt/taxonomy/chunking/verify로
+# 만들어졌나"가 결과의 일부다. 각 build summary에 흩어져 있던 provenance를 표준
+# `provenance` 블록으로 통일해, "왜 지난번이랑 다르지?" 추적을 가능하게 한다.
+ARTIFACT_SCHEMA_VERSION = "1.0"
+
+
+def _stable_hash(obj: Any) -> str:
+    payload = json.dumps(obj, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def build_provenance(
+    *,
+    producer_task: str,
+    dataset_version_id: str,
+    model_id: str | None = None,
+    prompt_version: str | None = None,
+    taxonomy_id: str | None = None,
+    judge_model_id: str | None = None,
+    verify_mode: str | None = None,
+    chunking_config: dict[str, Any] | None = None,
+    input_artifact_refs: list[str] | None = None,
+) -> dict[str, Any]:
+    """artifact provenance 표준 블록을 만든다.
+
+    ``deterministic_hash``는 LLM **출력**이 아니라 **입력+설정**(producer_task / model /
+    judge_model / prompt / taxonomy / verify_mode / chunking_config / input_refs)
+    식별자다. LLM은 같은 입력도 run마다 출력이 다를 수 있으므로(self-consistency
+    측정 참조), "같은 설정으로 만든 결과인가"를 식별하는 용도다. ``created_at``은
+    실제 생성 시각(hash에는 포함 안 함).
+    """
+    refs = list(input_artifact_refs or [])
+    chunk_hash = _stable_hash(chunking_config) if chunking_config else None
+    identity = {
+        "producer_task": producer_task,
+        "model_id": model_id,
+        "judge_model_id": judge_model_id,
+        "prompt_version": prompt_version,
+        "taxonomy_id": taxonomy_id,
+        "verify_mode": verify_mode,
+        "chunking_config": chunking_config,
+        "input_artifact_refs": sorted(refs),
+    }
+    return {
+        "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+        "producer_task": producer_task,
+        "dataset_version_id": dataset_version_id,
+        "model_id": model_id,
+        "judge_model_id": judge_model_id,
+        "prompt_version": prompt_version,
+        "taxonomy_id": taxonomy_id,
+        "verify_mode": verify_mode,
+        "chunking_config_hash": chunk_hash,
+        "input_artifact_refs": refs,
+        "deterministic_hash": _stable_hash(identity),
+        "created_at": datetime.now(UTC).isoformat(),
+    }
 
 
 def stable_source_index(row: dict[str, Any], fallback_index: int) -> int:
