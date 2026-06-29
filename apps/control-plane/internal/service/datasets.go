@@ -41,6 +41,10 @@ type DatasetService struct {
 	// 호출하지 않고 client method를 호출하도록 점진 마이그레이션 중.
 	// dataset_clean이 첫 마이그레이션 대상 — 다른 build 단계는 후속 작업.
 	pythonBuildClient *skills.PythonBuildClient
+	// silverone 2026-06-29 (ADR-031 4단계) — worker 호출 경계 port. test fake 주입용
+	// override. nil이면 concrete pythonBuildClient를 쓴다(운영 무영향). worker 없이
+	// build orchestration을 테스트할 수 있게 하는 첫 단계.
+	buildClientOverride datasetBuildTaskClient
 	// silverone 2026-05-28 subpackage pilot — 옛 dataset_prompts.go (823 lines)을
 	// internal/service/datasetprompts/로 분리. DatasetService는 facade method로
 	// 같은 public 시그니처를 유지하고 위임만 한다.
@@ -75,7 +79,10 @@ func NewDatasetService(repository store.Repository, pythonAIWorkerURL string, up
 // `service.pythonAIWorkerURL = server.URL`로 직접 필드 할당하는 기존 패턴을
 // 깨지 않기 위해 호출 시점에 BaseURL 동기화. 5/11 (silverone) dataset_build를
 // plan skill과 분리한다는 결정에 따른 첫 마이그레이션 (clean) 도입.
-func (s *DatasetService) buildClient() *skills.PythonBuildClient {
+func (s *DatasetService) buildClient() datasetBuildTaskClient {
+	if s.buildClientOverride != nil {
+		return s.buildClientOverride
+	}
 	url := strings.TrimSpace(s.pythonAIWorkerURL)
 	if s.pythonBuildClient == nil {
 		s.pythonBuildClient = skills.NewPythonBuildClient(url, s.httpClient)
