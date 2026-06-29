@@ -144,7 +144,7 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 		}
 	}
 
-	response, err := s.runWorkerTask(context.Background(), registry.TaskPathFor("dataset_clause_label"), payload)
+	response, err := s.buildClient().RunTask(context.Background(), registry.TaskPathFor("dataset_clause_label"), payload)
 	if err != nil {
 		version.Metadata["clause_label_status"] = "failed"
 		version.Metadata["clause_label_error"] = err.Error()
