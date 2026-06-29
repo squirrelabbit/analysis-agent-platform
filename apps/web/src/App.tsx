@@ -10,9 +10,6 @@ import { ChatPage } from "./features/chats/pages/ChatPage";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ProjectLayout from "./layout/ProjectLayout";
 import ProjectPage from "./pages/ProjectPage";
-// import DatasetDetail from "./features/datasets/pages/DatasetDetail"; // 리디자인으로 교체
-
-// import DatasetContainer from "./features/datasets/pages/DatasetContainer"; // 리디자인으로 교체
 import DatasetListRedesign from "./features/datasets/redesign/DatasetListRedesign";
 import VersionDetailPage from "./features/versions/pages/VersionDetailPage";
 import DatasetVersionListRedesign from "./features/versions/redesign/DatasetVersionListRedesign";
