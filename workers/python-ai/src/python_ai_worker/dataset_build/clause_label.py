@@ -15,6 +15,7 @@ artifact를 읽어 필터링한다. default는 *모든 doc 처리*.
 """
 
 import json
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -66,6 +67,25 @@ _ALLOWED_GENUINENESS_FILTER = {"genuine_review", "non_review", "uncertain"}
 # silverone 2026-06-16 — legacy mixed tier 제거, uncertain으로 통합.
 _DEFAULT_INCLUDE_GENUINENESS: list[str] = ["genuine_review", "uncertain"]
 _DEFAULT_CONCURRENCY = 8
+# per-build LLOA 동시 호출 수: payload > env > default 8, cap 32. doc_genuineness와 동일 패턴.
+# (silverone 2026-06-29 성능 튜닝 — clause_label이 빌드 시간 1위라 concurrency가 핵심 레버.)
+_MAX_CONCURRENCY = 32
+_CLAUSE_LABEL_CONCURRENCY_ENV = "LLOA_CLAUSE_LABEL_CONCURRENCY"
+
+
+def _resolve_concurrency(payload: dict[str, Any]) -> int:
+    def _pos(v: Any) -> int | None:
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            return None
+        return n if n > 0 else None
+
+    if (v := _pos(payload.get("concurrency"))) is not None:
+        return min(_MAX_CONCURRENCY, v)
+    if (v := _pos(os.environ.get(_CLAUSE_LABEL_CONCURRENCY_ENV))) is not None:
+        return min(_MAX_CONCURRENCY, v)
+    return _DEFAULT_CONCURRENCY
 
 
 def _find_prompt_path(name: str) -> Path | None:
@@ -374,7 +394,7 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
     subject_config = _extract_subject_config(payload)
     system_prompt = _render_subject_prompt(template, subject_config)
     max_tokens = int(payload.get("max_tokens") or 8192)
-    concurrency = max(1, int(payload.get("concurrency") or _DEFAULT_CONCURRENCY))
+    concurrency = _resolve_concurrency(payload)
 
     # 단일 모드 clause_label은 문장 단위가 아니라 doc 통째 LLM 추출이라 genuine_spans는
     # 적용 안 함(span 제한은 문장앵커 verify 경로 전용, ADR-029).

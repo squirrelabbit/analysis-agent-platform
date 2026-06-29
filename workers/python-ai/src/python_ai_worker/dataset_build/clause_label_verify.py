@@ -38,6 +38,7 @@ from .clause_label import (
     _ALLOWED_SENTIMENT,
     _DEFAULT_CONCURRENCY,
     _FALLBACK_ASPECT,
+    _resolve_concurrency,
     _extract_subject_config,
     _inject_primary_area,
     _inject_taxonomy,
@@ -406,7 +407,7 @@ def run_dataset_clause_label_verify(payload: dict[str, Any]) -> dict[str, Any]:
 
     max_tokens = int(payload.get("max_tokens") or 8192)
     judge_max_tokens = int(payload.get("judge_max_tokens") or 4096)
-    concurrency = max(1, int(payload.get("concurrency") or _DEFAULT_CONCURRENCY))
+    concurrency = _resolve_concurrency(payload)
     max_chunk_sentences = max(1, int(payload.get("max_chunk_sentences") or _MAX_CHUNK_SENTENCES))
     max_chunk_chars = max(1, int(payload.get("max_chunk_chars") or _MAX_CHUNK_CHARS))
     overlap_sentences = max(0, int(payload.get("overlap_sentences") if payload.get("overlap_sentences") is not None else _DEFAULT_OVERLAP_SENTENCES))
