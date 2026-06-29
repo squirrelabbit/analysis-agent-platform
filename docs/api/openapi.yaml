@@ -2010,6 +2010,150 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/keyword_dictionary:
+    get:
+      tags: [Datasets]
+      summary: 키워드 사전 규칙 목록
+      description: |
+        데이터셋 단위 키워드 정제 규칙(block/synonym) 목록. 원본 artifact는 불변이고
+        조회 overlay로 적용된다(Phase 1). active=false(soft delete) 규칙도 포함될 수 있다.
+      operationId: listKeywordDictionaryRules
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: 규칙 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeywordDictionaryRuleListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+    post:
+      tags: [Datasets]
+      summary: 키워드 사전 규칙 생성/수정
+      description: |
+        rule_type="block"(source_term 제외) | "synonym"(source_term→target_term 병합).
+        같은 source_term이 있으면 갱신. 스코프는 dataset(모든 버전 공통 어휘).
+      operationId: setKeywordDictionaryRule
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KeywordDictionaryRuleRequest"
+      responses:
+        "200":
+          description: 생성/수정된 규칙
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeywordDictionaryRule"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/keyword_dictionary/history:
+    get:
+      tags: [Datasets]
+      summary: 키워드 사전 변경 이력
+      description: append-only 이력(add/update/deactivate/reactivate/delete). 감사용.
+      operationId: listKeywordDictionaryHistory
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+      responses:
+        "200":
+          description: 변경 이력 목록
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeywordDictionaryEventListResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/keyword_dictionary/{rule_id}:
+    delete:
+      tags: [Datasets]
+      summary: 키워드 사전 규칙 삭제
+      description: 규칙 hard delete. 사유는 query(?reason=) 또는 body {reason} 둘 다 허용.
+      operationId: deleteKeywordDictionaryRule
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - name: rule_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: reason
+          in: query
+          required: false
+          schema: { type: string }
+          description: 감사 로그용 사유(선택). body {reason}로도 가능.
+      responses:
+        "204":
+          description: 삭제 완료
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/keyword_dictionary/{rule_id}/deactivate:
+    post:
+      tags: [Datasets]
+      summary: 키워드 사전 규칙 비활성화 (soft delete)
+      description: active=false로 전환(복구·감사 가능). body {reason} 선택.
+      operationId: deactivateKeywordDictionaryRule
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - name: rule_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KeywordDictionaryRuleActiveRequest"
+      responses:
+        "200":
+          description: 비활성화된 규칙
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeywordDictionaryRule"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+  /projects/{project_id}/datasets/{dataset_id}/keyword_dictionary/{rule_id}/reactivate:
+    post:
+      tags: [Datasets]
+      summary: 키워드 사전 규칙 재활성화
+      description: active=true로 복구. body {reason} 선택.
+      operationId: reactivateKeywordDictionaryRule
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - name: rule_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KeywordDictionaryRuleActiveRequest"
+      responses:
+        "200":
+          description: 재활성화된 규칙
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeywordDictionaryRule"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
 components:
   responses:
     ErrorResponse:
@@ -4919,3 +5063,73 @@ components:
           type: string
           description: "verify 모드 judge 모델 (allowlist model_id). 생략 시 classify_models[1]."
         force: { type: boolean }
+    KeywordDictionaryRule:
+      type: object
+      description: 데이터셋 단위 키워드 정제 규칙 (block 제외 / synonym 병합).
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        dataset_id: { type: string }
+        rule_type:
+          type: string
+          enum: [block, synonym]
+          description: block=source_term 제외, synonym=source_term→target_term 병합
+        source_term: { type: string }
+        target_term:
+          type: string
+          description: synonym일 때 대표어. block이면 무시.
+        active:
+          type: boolean
+          description: false면 soft delete(복구·감사용)
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [id, project_id, dataset_id, rule_type, source_term, active, created_at, updated_at]
+    KeywordDictionaryEvent:
+      type: object
+      description: 키워드 사전 변경 이력(append-only).
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        dataset_id: { type: string }
+        rule_id: { type: string }
+        event_type:
+          type: string
+          description: add / update / deactivate / reactivate / delete
+        before_payload: { type: string, description: "변경 전 규칙 snapshot(JSON 문자열)" }
+        after_payload: { type: string, description: "변경 후 규칙 snapshot(JSON 문자열)" }
+        reason: { type: string }
+        actor_id: { type: string, description: "ADR-025 세션 사용자" }
+        created_at: { type: string, format: date-time }
+      required: [id, project_id, dataset_id, rule_id, event_type, created_at]
+    KeywordDictionaryRuleRequest:
+      type: object
+      description: 키워드 사전 규칙 생성/수정 요청.
+      properties:
+        rule_type:
+          type: string
+          enum: [block, synonym]
+        source_term: { type: string }
+        target_term:
+          type: string
+          description: synonym일 때 대표어. block이면 무시.
+        reason: { type: string, description: "감사 로그용 사유(선택)" }
+      required: [rule_type, source_term]
+    KeywordDictionaryRuleActiveRequest:
+      type: object
+      description: 비활성화/재활성화 요청(사유 선택).
+      properties:
+        reason: { type: string }
+    KeywordDictionaryRuleListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/KeywordDictionaryRule" }
+      required: [items]
+    KeywordDictionaryEventListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/KeywordDictionaryEvent" }
+      required: [items]
