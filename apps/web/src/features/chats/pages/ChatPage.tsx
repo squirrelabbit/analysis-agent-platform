@@ -101,6 +101,11 @@ export function ChatPage() {
     return stages.find((s) => s.status !== "ready") ?? null;
   }, [activeVersion.data]);
   const buildNotReady = !!activeVersionId && pendingBuild !== null;
+  // 데이터셋은 골랐지만 활성 버전이 없는 경우(업로드/활성화 전). 채팅을 보내면 백엔드가
+  // 'dataset has no active version'으로 막으므로, 입력 단계에서 미리 비활성화한다.
+  const noActiveVersion = !!activeDatasetId && !activeVersionId;
+  // 분석(채팅) 불가 상태 통합 — 데이터셋 미선택 / 활성 버전 없음 / 전처리 미완.
+  const cannotAnalyze = !activeDatasetId || noActiveVersion || buildNotReady;
   const loadTemplate = useMutation({
     mutationFn: () =>
       buildApi.getBasicAnalysis(projectId, activeDatasetId, activeVersionId),
@@ -526,20 +531,22 @@ export function ChatPage() {
               placeholder={
                 !activeDatasetId
                   ? "데이터셋을 선택하세요"
-                  : buildNotReady
-                    ? pendingBuild?.status === "failed"
-                      ? `${pendingBuild.label} 전처리가 실패했습니다. 다시 빌드해 주세요`
-                      : `${pendingBuild?.label} 전처리가 준비 중입니다. 완료 후 분석할 수 있어요`
-                    : "분석 질문을 입력하세요..."
+                  : noActiveVersion
+                    ? "활성 버전이 없습니다. 데이터셋을 업로드·활성화한 뒤 분석할 수 있어요"
+                    : buildNotReady
+                      ? pendingBuild?.status === "failed"
+                        ? `${pendingBuild.label} 전처리가 실패했습니다. 다시 빌드해 주세요`
+                        : `${pendingBuild?.label} 전처리가 준비 중입니다. 완료 후 분석할 수 있어요`
+                      : "분석 질문을 입력하세요..."
               }
               className="flex-1 h-9 text-sm"
-              disabled={isLoading || !activeDatasetId || buildNotReady}
+              disabled={isLoading || cannotAnalyze}
             />
             <Button
               variant="secondary"
               size="sm"
               onClick={handleSend}
-              disabled={!input.trim() || isLoading || !activeDatasetId || buildNotReady}
+              disabled={!input.trim() || isLoading || cannotAnalyze}
               className="px-4 h-9"
             >
               <Send className="w-3.5 h-3.5" />
