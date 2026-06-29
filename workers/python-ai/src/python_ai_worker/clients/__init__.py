@@ -1,5 +1,5 @@
-"""LLM provider clients (Anthropic, OpenAI embeddings, LLOA)."""
+"""LLM provider clients (Anthropic, LLOA)."""
 
-from . import anthropic, lloa, openai  # noqa: F401
+from . import anthropic, lloa  # noqa: F401
 
-__all__ = ["anthropic", "lloa", "openai"]
+__all__ = ["anthropic", "lloa"]

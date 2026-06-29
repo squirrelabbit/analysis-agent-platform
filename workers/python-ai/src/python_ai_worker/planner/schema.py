@@ -4,9 +4,10 @@ from __future__ import annotations
 
 silverone 2026-05-21 결정:
 - multi-table input: docs / clauses / genuineness (RESERVED)
-- skill 8개: join / filter / aggregate / compare / calculate / sort / present / summarize
+- skill 7개: join / filter / aggregate / compare / calculate / sort / present
+  (summarize는 2026-06-29 제거 — executor 빌더가 없어 plan에 들어가면 hard-fail이었고,
+   자연어 요약은 composer(final_answer wrapper)가 이미 합성한다)
 - executor backend: DuckDB
-- summarize는 plan step skill, final_answer는 별도 wrapper
 - plan storage: 기존 skill_plans 테이블 + plan_version 분기
 - ``input`` 필드는 standard table name 또는 이전 step id (둘 다 허용). table name은
   RESERVED라 step id로 사용 금지.
@@ -246,17 +247,6 @@ SKILL_CATALOG: dict[str, SkillSpec] = {
         input_type="table",
         output_type="presentation",
         params_schema=render_params_schema(PRESENT_SPEC),
-    ),
-    "summarize": SkillSpec(
-        name="summarize",
-        description="수치 결과를 부분적으로 자연어로 설명한다. 최종 답변 wrapper(final_answer)와 별개의 plan step 단위 요약.",
-        input_type="table",
-        output_type="text",
-        params_schema={
-            "input": "table_or_step_id",
-            "focus": "string — 요약 관점",
-            "prompt_version": "string|null",
-        },
     ),
 }
 

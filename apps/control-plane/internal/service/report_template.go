@@ -20,8 +20,10 @@ import (
 
 // CreateReportFromTemplate — 기본 템플릿으로 보고서를 생성한다(ADR: 데이터 기초 분석 보고서).
 // clean ready인 dataset_version만 대상. 각 섹션은 required_build가 ready일 때만 블록으로
-// 채워지고, 아니면 missing_sections에 기록한다. summary는 빌드 때 계산된 걸 reshape할 뿐
-// (추가 집계 없음). 생성된 블록엔 데이터 스냅샷 + source binding을 함께 저장(나중에 "갱신" 용).
+// 채워지고, 아니면 missing_sections에 기록한다. 템플릿 조립 자체는 빌드 때 계산된 summary를
+// reshape할 뿐이지만, 일부 섹션(loadChannelGenuineBreakdown/loadRecentYearStats)은
+// on-demand로 DuckDB 집계를 수행한다(ADR-024 경계 부채 — 후속 worker 이동 대상).
+// 생성된 블록엔 데이터 스냅샷 + source binding을 함께 저장(나중에 "갱신" 용).
 // 계약: docs/api/report_basic_template.sample.md
 func (s *DatasetService) CreateReportFromTemplate(projectID string, req domain.ReportFromTemplateRequest) (domain.ReportFromTemplateResponse, error) {
 	// dataset_id → 그 dataset의 active version으로 해석(analyze 흐름과 동일 패턴).
@@ -111,7 +113,8 @@ type reportTemplateBuild struct {
 }
 
 // buildReportTemplateBlocks — 템플릿 섹션을 순회해 ready인 build만 블록으로 reshape한다.
-// 추가 집계 없이 빌드 때 계산된 summary를 재구성할 뿐. 저장하지 않는다.
+// 대부분은 빌드 때 계산된 summary 재구성이지만, channel_distribution/recent_year 섹션은
+// 하위 load*가 on-demand DuckDB 집계를 한다(ADR-024 부채 — worker 이동 대상). 저장하지 않는다.
 func (s *DatasetService) buildReportTemplateBlocks(projectID, templateID, versionID string) (reportTemplateBuild, error) {
 	if err := s.requireProject(projectID); err != nil {
 		return reportTemplateBuild{}, err

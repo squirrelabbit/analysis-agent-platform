@@ -6,8 +6,8 @@ silverone 2026-05-21 3단계 결정:
 - step output은 step_id 이름의 temp view로 누적
 - clauses.clause_id 자동 생성 (doc_id + ROW_NUMBER OVER PARTITION BY doc_id)
 - docs.created_at은 표준 timestamp 필수 — 없거나 cast 실패 시 명확한 error
-- 1차 범위: join / filter / aggregate / compare / calculate / sort / present
-  (summarize는 LLM 호출 필요 — 후속)
+- 범위: join / filter / aggregate / compare / calculate / sort / present (7 skill)
+  (summarize는 2026-06-29 제거 — 자연어 요약은 composer가 합성)
 """
 
 from .context import ArtifactPaths, ExecutorContext, ExecutorContextError

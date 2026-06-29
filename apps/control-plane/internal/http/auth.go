@@ -121,7 +121,7 @@ func isPublicAuthPath(path string) bool {
 	switch path {
 	case "/health", "/runtime_status", "/metrics",
 		"/auth/config", "/auth/google/start", "/auth/google/callback",
-		"/openapi.yaml", "/openapi.frontend.yaml":
+		"/openapi.yaml":
 		return true
 	}
 	return strings.HasPrefix(path, "/swagger")

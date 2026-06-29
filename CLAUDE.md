@@ -11,8 +11,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 확인되지 않은 내용은 `확인 필요:`로 표시한다. 추정으로 API 계약, 환경변수, 설정값을 만들지 않는다.
 - 요청된 범위 밖의 리팩토링, rename, import 정리, formatting-only 변경은 하지 않는다.
 - 미사용으로 보이는 코드/파일도 호출 경로 확인 전 임의 삭제하지 않는다.
-- API 계약이 바뀌면 `docs/api/openapi.yaml`을 반드시 함께 갱신한다. 프론트 영향이 있으면 `docs/api/openapi.frontend.yaml`도 함께.
-- δ-4 (2026-05-21)로 plan은 planner(LLM)가 plan_v2로 직접 생성하므로 plan skill 카탈로그(`config/skill_bundle.json`)는 삭제됐다. plan_v2 8 skill catalog는 `workers/python-ai/src/python_ai_worker/planner/schema.py`의 `SKILL_CATALOG`로 잠금되어 있다. dataset_build task를 추가·제거하면 `config/task_registry.json`, worker handler, 테스트, `docs/skill/*`를 함께 점검한다.
+- API 계약이 바뀌면 `docs/api/openapi.yaml`을 반드시 함께 갱신한다. (openapi.frontend.yaml은 폐지 — openapi.yaml 단일 source)
+- δ-4 (2026-05-21)로 plan은 planner(LLM)가 plan_v2로 직접 생성하므로 plan skill 카탈로그(`config/skill_bundle.json`)는 삭제됐다. plan_v2 7 skill catalog는 `workers/python-ai/src/python_ai_worker/planner/schema.py`의 `SKILL_CATALOG`로 잠금되어 있다. dataset_build task를 추가·제거하면 `config/task_registry.json`, worker handler, 테스트, `docs/skill/*`를 함께 점검한다.
 - 검증 실패를 성공처럼 요약하지 않는다. 일부만 확인했으면 일부라고 명시.
 
 ---
@@ -71,7 +71,7 @@ POST /projects/{pid}/datasets/{did}/versions/{vid}/analyze    ← explicit versi
 
 **plan_v2 / Task Registry**
 
-- plan_v2 — planner가 8 skill (join / filter / aggregate / compare / calculate / sort / present / summarize)과 3 RESERVED input table (docs / clauses / genuineness)로 plan을 생성한다. catalog는 `workers/python-ai/src/python_ai_worker/planner/schema.py:SKILL_CATALOG`로 잠금. δ-4로 `config/skill_bundle.json`은 삭제됐다.
+- plan_v2 — planner가 7 skill (join / filter / aggregate / compare / calculate / sort / present)과 3 RESERVED input table (docs / clauses / genuineness)로 plan을 생성한다. (summarize는 2026-06-29 제거 — executor 빌더 부재로 hard-fail이었고 자연어 요약은 composer가 합성) catalog는 `workers/python-ai/src/python_ai_worker/planner/schema.py:SKILL_CATALOG`로 잠금. δ-4로 `config/skill_bundle.json`은 삭제됐다.
 - `config/task_registry.json` — *control plane이 실행하는 내부 task* (dataset_build).
   - Go: `internal/registry.TaskPathFor("<name>")`로 task_path lookup (hardcoded 금지)
   - Python: `task_registry.task_definition("<name>")` 사용
@@ -177,8 +177,9 @@ PYTHONPATH=workers/python-ai/src python -m python_ai_worker.main --describe
 
 ## 주요 참조 문서
 
-- `docs/api/openapi.yaml` — 전체 HTTP API 계약 (기준 문서)
-- `docs/api/openapi.frontend.yaml` — 프론트 필수 API 계약
+- `docs/api/openapi.yaml` — 전체 HTTP API 계약 (기준 문서, 단일 source)
+  - (openapi.frontend.yaml은 2026-06-29 폐지 — 수기 유지 불가로 소실됐었음. 프론트 전용
+    계약이 필요하면 openapi.yaml tag 기반 자동 생성 파생물로 재도입)
 - `docs/observability.md` — 현재 observability 구현 범위와 Request ID 정책
 - `docs/skill/skill_registry.md` — runtime skill 계약 요약
 - `docs/skill/skill_implementation_status.md` — skill별 구현 방식과 안정도
@@ -216,7 +217,7 @@ rename PR 완료: code 심볼은 `planner` / `executor`로 정리, HTTP task pat
 - **analysis thread 모델 + display contract** — 완료. plan step별 화면용 display(label, expression) 합성 포함.
 - **Q4 plan 안정성 closure** — 완료.
 - **clause_label 속도 개선 + 9-aspect taxonomy** — 완료.
-- **GitLab CI 1차 구성** — `.gitlab-ci.yml` go-test / python-test(3.11) / release-guard 3 job. smoke 제외.
+- **CI 1차 구성** — **GitHub Actions `.github/workflows/ci.yml`** (go-tests / python-tests(3.11) / web-build / release-guard). smoke 제외. (※ 과거 메모의 "GitLab CI / `.gitlab-ci.yml`"는 오기 — 실제는 GitHub Actions)
 
 ### 다음 우선순위 (2026-06-01 갱신)
 
@@ -227,7 +228,7 @@ rename PR 완료: code 심볼은 `planner` / `executor`로 정리, HTTP task pat
 2. **composer PR-B / 답변 품질 개선** — LLM composer는 optional. 도입 전 평가 필요.
 3. **demo fixture rebuild** — 7/30 데모 1주 전 operator rebuild.
 4. **validator contract refactor** — R1~R5 pilot 완료. 후속은 ADR-021 결정 후 진행.
-5. **GitLab CI 후속** — smoke / manual staging job은 2차 후보 (docker compose + LLOA/Anthropic 외부 API 의존).
+5. **CI 후속** — smoke / manual staging job은 2차 후보 (docker compose + LLOA/Anthropic 외부 API 의존).
 
 ### 옛 트랙 메모 (δ-4 이전, history 보존)
 

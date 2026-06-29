@@ -24,15 +24,10 @@ class WorkerConfig:
     anthropic_retry_max_delay_sec: float = 8.0
     anthropic_prompt_cache_enabled: bool = True
     openai_api_key: str | None = None
-    openai_api_url: str = "https://api.openai.com/v1/embeddings"
+    # info-only(health/describe 노출) — embedding 모듈 삭제 후에도 응답 contract 보존용.
     openai_embedding_model: str = "text-embedding-3-small"
     openai_embedding_dimensions: int = 0
-    openai_embedding_batch_size: int = 32
-    openai_timeout_sec: float = 30.0
     local_embedding_model: str = "intfloat/multilingual-e5-small"
-    anthropic_input_price_per_million_tokens: float = 0.0
-    anthropic_output_price_per_million_tokens: float = 0.0
-    openai_embedding_price_per_million_tokens: float = 0.0
     # LLOA (사내 wisenut vLLM) — 전처리 LLM 단계(doc_genuineness, clause_label) 전용
     lloa_api_key: str | None = None
     lloa_api_url: str = "http://210.180.82.135:9023/v1/chat/completions"
@@ -43,6 +38,7 @@ class WorkerConfig:
     lloa_prepend_no_think: bool = True
     lloa_retry_max_attempts: int = 3
     lloa_retry_base_delay_sec: float = 1.5
+    lloa_retry_max_delay_sec: float = 8.0
     # silverone 2026-06-08 — dataset build(doc_genuineness/clause_label)에서 LLOA
     # 실패(요청/파싱)율이 이 비율 이상이면 build를 fail-loud로 중단한다. per-doc 격리는
     # 소수 flaky doc 보호용이지, LLOA 서버 다운(전부 실패)까지 "완료"로 덮으면 운영자가
@@ -77,15 +73,9 @@ def load_config() -> WorkerConfig:
         anthropic_prompt_cache_enabled=os.getenv("ANTHROPIC_PROMPT_CACHE_ENABLED", "true").strip().lower()
         not in {"0", "false", "no", "off"},
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
-        openai_api_url=os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/embeddings"),
         openai_embedding_model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
         openai_embedding_dimensions=int(os.getenv("OPENAI_EMBEDDING_DIMENSIONS", "0")),
-        openai_embedding_batch_size=max(1, int(os.getenv("OPENAI_EMBEDDING_BATCH_SIZE", "32"))),
-        openai_timeout_sec=float(os.getenv("OPENAI_TIMEOUT_SEC", "30")),
         local_embedding_model=os.getenv("LOCAL_EMBEDDING_MODEL", "intfloat/multilingual-e5-small"),
-        anthropic_input_price_per_million_tokens=max(0.0, float(os.getenv("ANTHROPIC_INPUT_PRICE_PER_MILLION_TOKENS", "0"))),
-        anthropic_output_price_per_million_tokens=max(0.0, float(os.getenv("ANTHROPIC_OUTPUT_PRICE_PER_MILLION_TOKENS", "0"))),
-        openai_embedding_price_per_million_tokens=max(0.0, float(os.getenv("OPENAI_EMBEDDING_PRICE_PER_MILLION_TOKENS", "0"))),
         # LLOA_API_KEY is canonical; WISENUT_* names remain direct-run fallbacks.
         lloa_api_key=(
             os.getenv("LLOA_API_KEY")
@@ -102,6 +92,7 @@ def load_config() -> WorkerConfig:
         not in {"0", "false", "no", "off"},
         lloa_retry_max_attempts=max(1, int(os.getenv("LLOA_RETRY_MAX_ATTEMPTS", "3"))),
         lloa_retry_base_delay_sec=max(0.0, float(os.getenv("LLOA_RETRY_BASE_DELAY_SEC", "1.5"))),
+        lloa_retry_max_delay_sec=max(0.0, float(os.getenv("LLOA_RETRY_MAX_DELAY_SEC", "8.0"))),
         dataset_build_max_failure_rate=min(
             1.0, max(0.0, float(os.getenv("DATASET_BUILD_MAX_FAILURE_RATE", "0.5")))
         ),

@@ -110,7 +110,7 @@ class DatasetSpecificColumnsRendererTests(unittest.TestCase):
 
 
 class SkillCatalogRendererTests(unittest.TestCase):
-    def test_all_eight_skills_present_in_order(self) -> None:
+    def test_all_seven_skills_present_in_order(self) -> None:
         rendered = render_skill_catalog()
         order = [
             rendered.find("### join"),
@@ -120,10 +120,10 @@ class SkillCatalogRendererTests(unittest.TestCase):
             rendered.find("### calculate"),
             rendered.find("### sort"),
             rendered.find("### present"),
-            rendered.find("### summarize"),
         ]
         self.assertTrue(all(idx >= 0 for idx in order), f"missing skill heading: {order}")
         self.assertEqual(order, sorted(order), "skills must render in fixed order")
+        self.assertNotIn("### summarize", rendered)
 
     def test_filter_params_rendered(self) -> None:
         rendered = render_skill_catalog()
