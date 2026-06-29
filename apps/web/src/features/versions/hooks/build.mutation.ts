@@ -20,6 +20,24 @@ export const useBuildJob = <T>() => {
   });
 };
 
+// 실행 중 build 중단(silverone 2026-06-29) — worker가 거기까지 결과 보존 후 멈춘다.
+// 성공해도 즉시 멈추진 않으므로(진행 중 호출 마무리) 폴링을 그대로 두고 상태가
+// cancelled로 바뀌길 기다린다. invalidate로 stage 상태도 갱신.
+export const useCancelBuildJob = () => {
+  const { projectId, datasetId, versionId } = useVersionParams();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ type }: { type: BuildJobType }) =>
+      buildApi.cancelBuildVersion(projectId, datasetId, versionId, type),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: buildKeys.all });
+      queryClient.invalidateQueries({
+        queryKey: versionKeys.detail(projectId, datasetId, versionId),
+      });
+    },
+  });
+};
+
 // silverone 2026-06-11 — 진성 라벨 수동 보정. set/되돌리기 후 doc_genuineness
 // view를 invalidate해 effective label·summary를 다시 받는다.
 export const useGenuinenessOverride = () => {
