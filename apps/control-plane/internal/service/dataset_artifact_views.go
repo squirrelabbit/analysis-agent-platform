@@ -130,7 +130,7 @@ func (s *DatasetService) GetCleanView(projectID, datasetID, datasetVersionID str
 	if ref == "" {
 		ref = strings.TrimSpace(metadataString(version.Metadata, "clean_uri", ""))
 	}
-	view.Status = resolveArtifactStatus(ref, latestJob, version.CleanStatus)
+	view.Status = resolveArtifactStatus(ref, latestJob, version.CleanStatus, false)
 	enrichViewWithJob(&view, latestJob, version.Metadata, datasetBuildTypeClean)
 
 	// clean summary는 build 완료 시 metadata에 캐시돼 있어 그대로 노출. ready가
@@ -168,7 +168,7 @@ func (s *DatasetService) GetDocGenuinenessView(
 	if ref == "" {
 		ref = strings.TrimSpace(metadataString(version.Metadata, "doc_genuineness_uri", ""))
 	}
-	view.Status = resolveArtifactStatus(ref, latestJob, metadataString(version.Metadata, "doc_genuineness_status", ""))
+	view.Status = resolveArtifactStatus(ref, latestJob, metadataString(version.Metadata, "doc_genuineness_status", ""), metadataBool(version.Metadata, "doc_genuineness_cancelled"))
 	enrichViewWithJob(&view, latestJob, version.Metadata, docGenuinenessBuildType)
 
 	if !artifactReadyForView(ref) {
@@ -289,7 +289,7 @@ func (s *DatasetService) GetClauseLabelView(
 	if ref == "" {
 		ref = strings.TrimSpace(metadataString(version.Metadata, "clause_label_uri", ""))
 	}
-	view.Status = resolveArtifactStatus(ref, latestJob, metadataString(version.Metadata, "clause_label_status", ""))
+	view.Status = resolveArtifactStatus(ref, latestJob, metadataString(version.Metadata, "clause_label_status", ""), metadataBool(version.Metadata, "clause_label_cancelled"))
 	enrichViewWithJob(&view, latestJob, version.Metadata, clauseLabelBuildType)
 
 	// silverone 2026-06-17 — 진행 중(running/queued) 빌드의 "이번 실행" 메타를
@@ -484,8 +484,15 @@ func normalizeArtifactPagination(limit, offset int) (int, int) {
 //   - artifact 없음 + job 없음 → not_started
 //   - 최근 job queued/running/failed → 그 status
 //   - artifact ref 있음 + 최근 job completed → completed
-func resolveArtifactStatus(ref string, latestJob *domain.DatasetBuildJob, metadataStatus string) string {
+func resolveArtifactStatus(ref string, latestJob *domain.DatasetBuildJob, metadataStatus string, cancelled bool) string {
 	hasArtifact := strings.TrimSpace(ref) != ""
+	// 빌드 중단(silverone 2026-06-29) — 중단 시 부분 결과는 노출하지 않으려고 BuildX가
+	// ref를 비우고 metadata <type>_cancelled=true를 둔다. 여기선 status만 "cancelled"로
+	// 표시(뷰는 ref가 없어 결과 미표시, 보고서/analyze는 not-ready로 제외). 단 재실행 중
+	// (job queued/running)이면 그 진행 상태를 우선해 이전 cancelled 잔재를 덮는다.
+	if cancelled && (latestJob == nil || (latestJob.Status != "running" && latestJob.Status != "queued")) {
+		return "cancelled"
+	}
 	if latestJob == nil {
 		if hasArtifact {
 			// 옛 dataset에서 job row 없이 artifact만 있는 케이스 — completed로 본다.

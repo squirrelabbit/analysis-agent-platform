@@ -258,6 +258,34 @@ func (s *Server) handleCreateClauseLabelJob(w stdhttp.ResponseWriter, r *stdhttp
 	writeJSON(w, stdhttp.StatusAccepted, response.AsAccepted())
 }
 
+// handleCancelBuild — 실행 중인 build를 협조적으로 중단(silverone 2026-06-29). build type별
+// 명시 라우트(.../{type}/cancel)가 호출. worker에 중단 신호를 보내 남은 doc 처리를 멈추고
+// 거기까지 결과를 보존한다. running/queued build 없으면 400.
+func (s *Server) handleCancelBuild(w stdhttp.ResponseWriter, r *stdhttp.Request, buildType string) {
+	if err := s.datasetService.CancelDatasetBuild(
+		r.PathValue("project_id"),
+		r.PathValue("dataset_id"),
+		r.PathValue("version_id"),
+		buildType,
+	); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusAccepted, map[string]any{"status": "cancelling", "build_type": buildType})
+}
+
+func (s *Server) handleCancelDocGenuinenessBuild(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	s.handleCancelBuild(w, r, "doc_genuineness")
+}
+
+func (s *Server) handleCancelClauseLabelBuild(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	s.handleCancelBuild(w, r, "clause_label")
+}
+
+func (s *Server) handleCancelClauseKeywordsBuild(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	s.handleCancelBuild(w, r, "clause_keywords")
+}
+
 // silverone 2026-06-10 — clause_keywords 대시보드/조회 (화면 polling용).
 // summary(KPI/aspect/sentiment/top5) + 필터(aspect/sentiment/q)·페이징된 item table.
 func (s *Server) handleGetClauseKeywordsView(w stdhttp.ResponseWriter, r *stdhttp.Request) {

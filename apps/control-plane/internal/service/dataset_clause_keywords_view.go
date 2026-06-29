@@ -51,7 +51,7 @@ func (s *DatasetService) GetClauseKeywordsView(
 	if ref == "" {
 		ref = strings.TrimSpace(metadataString(version.Metadata, "clause_keywords_uri", ""))
 	}
-	view.Status = resolveArtifactStatus(ref, latestJob, metadataString(version.Metadata, "clause_keywords_status", ""))
+	view.Status = resolveArtifactStatus(ref, latestJob, metadataString(version.Metadata, "clause_keywords_status", ""), metadataBool(version.Metadata, "clause_keywords_cancelled"))
 	enrichViewWithJob(&view, latestJob, version.Metadata, datasetBuildTypeClauseKeywords)
 
 	if !artifactReadyForView(ref) {

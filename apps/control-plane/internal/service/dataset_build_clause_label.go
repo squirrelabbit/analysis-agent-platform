@@ -175,6 +175,17 @@ func (s *DatasetService) BuildClauseLabel(projectID, datasetID, datasetVersionID
 	delete(version.Metadata, "clause_label_error")
 	if summary, ok := artifact["summary"].(map[string]any); ok {
 		version.Metadata["clause_label_summary"] = summary
+		// 빌드 중단(silverone 2026-06-29) — 중단 시 부분 결과는 남기지 않는다(저장/표시 X).
+		// status=cancelled + ref 제거 → 뷰는 결과 미표시, 보고서/analyze는 not-ready로
+		// 제외, 재실행은 처음부터(기존 재실행 버튼이 덮어씀).
+		if c, _ := summary["cancelled"].(bool); c {
+			version.Metadata["clause_label_cancelled"] = true
+			version.Metadata["clause_label_status"] = "cancelled"
+			delete(version.Metadata, "clause_label_ref")
+			delete(version.Metadata, "clause_label_uri")
+		} else {
+			delete(version.Metadata, "clause_label_cancelled")
+		}
 		// silverone 2026-05-28 — doc_genuineness PR-α2 패턴. Python worker가
 		// summary.applied에 실행 당시 subject variables snapshot을 남긴다.
 		// 별도 top-level key로도 보존해 version metadata에서 바로 접근 가능하게.

@@ -166,6 +166,11 @@ func (s *Server) routes() {
 	// embedding_cluster/keyword_index 7 task + document_cluster_profile은
 	// (β2) 결정으로 제거 (2026-05-19).
 	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label", s.handleCreateClauseLabelJob)
+	// 실행 중 build 중단(silverone 2026-06-29). type별 명시 라우트 — literal `cancel`
+	// 세그먼트가 `clause_label/{clause_id}` 와일드카드보다 우선해 충돌 없음.
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label/cancel", s.handleCancelClauseLabelBuild)
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/doc_genuineness/cancel", s.handleCancelDocGenuinenessBuild)
+	s.mux.HandleFunc("POST /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_keywords/cancel", s.handleCancelClauseKeywordsBuild)
 	// 2026-05-21 — 화면 polling용 GET. status + applied + summary + items 페이지 반환.
 	// POST와 같은 path에 method routing.
 	s.mux.HandleFunc("GET /projects/{project_id}/datasets/{dataset_id}/versions/{version_id}/clause_label", s.handleGetClauseLabelView)

@@ -155,6 +155,15 @@ func (s *DatasetService) BuildDocGenuineness(projectID, datasetID, datasetVersio
 	promptVersion := ""
 	if summary, ok := artifact["summary"].(map[string]any); ok {
 		version.Metadata["doc_genuineness_summary"] = summary
+		// 빌드 중단(silverone 2026-06-29) — 중단 시 부분 결과 미저장(status=cancelled + ref 제거).
+		if c, _ := summary["cancelled"].(bool); c {
+			version.Metadata["doc_genuineness_cancelled"] = true
+			version.Metadata["doc_genuineness_status"] = "cancelled"
+			delete(version.Metadata, "doc_genuineness_ref")
+			delete(version.Metadata, "doc_genuineness_uri")
+		} else {
+			delete(version.Metadata, "doc_genuineness_cancelled")
+		}
 		// silverone 2026-05-22 (PR-α2) — Python worker가 summary.applied 안에
 		// 실행 당시 subject variables snapshot을 남긴다. 별도 top-level key로
 		// 도 보존해 version metadata에서 바로 접근 가능하게.
@@ -261,6 +270,15 @@ func (s *DatasetService) buildDocGenuinenessVerify(
 	delete(version.Metadata, "doc_genuineness_runs")
 	if summary, ok := artifact["summary"].(map[string]any); ok {
 		version.Metadata["doc_genuineness_summary"] = summary
+		// 빌드 중단(silverone 2026-06-29) — 중단 시 부분 결과 미저장(status=cancelled + ref 제거).
+		if c, _ := summary["cancelled"].(bool); c {
+			version.Metadata["doc_genuineness_cancelled"] = true
+			version.Metadata["doc_genuineness_status"] = "cancelled"
+			delete(version.Metadata, "doc_genuineness_ref")
+			delete(version.Metadata, "doc_genuineness_uri")
+		} else {
+			delete(version.Metadata, "doc_genuineness_cancelled")
+		}
 		if applied, ok := summary["applied"].(map[string]any); ok {
 			version.Metadata["doc_genuineness_applied"] = applied
 		}
