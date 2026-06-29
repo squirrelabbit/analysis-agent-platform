@@ -30,7 +30,7 @@ from ..obs import get, skill_handler
 from ..taxonomies import DEFAULT_TAXONOMY_ID, Taxonomy, load_taxonomy, render_aspect_taxonomy_block
 from . import _cancel
 from ._chunking import build_sentence_chunks, split_anchor_sentences
-from ._common import write_progress
+from ._common import build_provenance, write_progress
 from ._prompt_slots import extract_extra_slot
 
 LOGGER = get(__name__)
@@ -565,6 +565,15 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
         # taxonomy_id ↔ planner taxonomy_id 정합성 체크에 사용.
         "taxonomy_id": taxonomy.taxonomy_id,
         "taxonomy_hash": taxonomy.taxonomy_hash,
+        # ADR-031 2단계 — provenance 표준 블록.
+        "provenance": build_provenance(
+            producer_task="dataset_clause_label",
+            dataset_version_id=dataset_version_id,
+            model_id=lloa_config.model,
+            prompt_version=prompt_version,
+            taxonomy_id=taxonomy.taxonomy_id,
+            input_artifact_refs=[clean_artifact_ref] if clean_artifact_ref else [],
+        ),
         # silverone 2026-05-28 — 실행 당시 적용된 subject variables snapshot.
         # doc_genuineness PR-α2와 동일한 패턴. subject metadata가 누락된 옛
         # dataset이면 festival default값이 기록된다.
