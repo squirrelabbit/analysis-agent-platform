@@ -77,6 +77,9 @@ def _client_for_model(config, model: str, *, reasoning_effort, prepend_no_think:
             timeout_sec=config.lloa_timeout_sec,
             reasoning_effort=reasoning_effort,
             prepend_no_think=prepend_no_think,
+            retry_max_attempts=config.lloa_retry_max_attempts,
+            retry_base_delay_sec=config.lloa_retry_base_delay_sec,
+            retry_max_delay_sec=config.lloa_retry_max_delay_sec,
         )
     )
 

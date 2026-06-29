@@ -214,5 +214,45 @@ class HelperTests(unittest.TestCase):
             _parse_json_text("no json here")
 
 
+class LloaRetryTests(unittest.TestCase):
+    """LLOA HTTP retry — transient 오류는 backoff 재시도, parse 실패는 즉시 실패."""
+
+    def _retry_config(self) -> LloaConfig:
+        # base_delay=0 → sleep 없이 즉시 재시도(테스트 빠름).
+        return LloaConfig(
+            api_key="k", api_url="http://lloa.example/v1/chat/completions",
+            model="m", max_tokens=10, timeout_sec=5,
+            retry_max_attempts=3, retry_base_delay_sec=0.0, retry_max_delay_sec=0.0,
+        )
+
+    def test_retries_transient_http_error_then_succeeds(self) -> None:
+        from urllib.error import HTTPError
+
+        calls = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):  # type: ignore[no-untyped-def]
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise HTTPError(req.full_url, 503, "Service Unavailable", {}, None)
+            return _FakeResponse(_completion('{"genuineness": "genuine_review"}'))
+
+        client = LloaClient(self._retry_config(), urlopen=fake_urlopen)
+        resp = client.create_json_response(system="s", user="u")
+        self.assertEqual(calls["n"], 2)  # 1 fail(503) + 1 success
+        self.assertEqual(resp.body, {"genuineness": "genuine_review"})
+
+    def test_parse_error_is_not_retried(self) -> None:
+        calls = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):  # type: ignore[no-untyped-def]
+            calls["n"] += 1
+            return _FakeResponse(_completion("definitely not json"))
+
+        client = LloaClient(self._retry_config(), urlopen=fake_urlopen)
+        with self.assertRaises(LloaResponseParseError):
+            client.create_json_response(system="s", user="u")
+        self.assertEqual(calls["n"], 1)  # parse 실패는 non-retryable → 1회만
+
+
 if __name__ == "__main__":
     unittest.main()

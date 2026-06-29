@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from typing import Any, Callable
 from urllib import request
 
+from ..runtime.llm_guards import RetryPolicy, with_retry
+
 
 @dataclass(frozen=True)
 class LloaConfig:
@@ -28,6 +30,12 @@ class LloaConfig:
     timeout_sec: float
     reasoning_effort: str | None = "low"  # "low" / "medium" / "high" / None
     prepend_no_think: bool = True
+    # silverone 2026-06-29 — LLOA HTTP 호출 retry(transient 429/5xx/connection).
+    # 사내 vLLM이 일시 불안정할 때 doc 단위 fallback(uncertain/빈 절)으로 조용히
+    # 떨어지지 않도록 backoff 재시도. parse 실패는 non-retryable이라 즉시 raise.
+    retry_max_attempts: int = 3
+    retry_base_delay_sec: float = 1.5
+    retry_max_delay_sec: float = 8.0
 
 
 @dataclass(frozen=True)
@@ -115,8 +123,21 @@ class LloaClient:
             },
         )
 
-        with self._urlopen(http_request, timeout=self._config.timeout_sec) as response:
-            body = json.loads(response.read().decode("utf-8"))
+        def _request() -> dict[str, Any]:
+            with self._urlopen(http_request, timeout=self._config.timeout_sec) as response:
+                return json.loads(response.read().decode("utf-8"))
+
+        # transient HTTP/connection 오류만 backoff 재시도. JSON parse 실패 등 non-retryable은
+        # with_retry가 즉시 re-raise한다(is_retryable_exception).
+        body = with_retry(
+            "lloa.create_json_response",
+            _request,
+            RetryPolicy(
+                max_attempts=self._config.retry_max_attempts,
+                base_delay_sec=self._config.retry_base_delay_sec,
+                max_delay_sec=self._config.retry_max_delay_sec,
+            ),
+        )
 
         choice = (body.get("choices") or [{}])[0]
         message = choice.get("message") or {}

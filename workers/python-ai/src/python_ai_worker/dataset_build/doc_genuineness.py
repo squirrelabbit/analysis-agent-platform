@@ -429,6 +429,9 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         # reasoning_effort=config.lloa_reasoning_effort,
         reasoning_effort='low',
         prepend_no_think=config.lloa_prepend_no_think,
+        retry_max_attempts=config.lloa_retry_max_attempts,
+        retry_base_delay_sec=config.lloa_retry_base_delay_sec,
+        retry_max_delay_sec=config.lloa_retry_max_delay_sec,
     )
     client = LloaClient(lloa_config)
 

@@ -361,6 +361,9 @@ def run_dataset_clause_label(payload: dict[str, Any]) -> dict[str, Any]:
         timeout_sec=config.lloa_timeout_sec,
         reasoning_effort=config.lloa_reasoning_effort,
         prepend_no_think=config.lloa_prepend_no_think,
+        retry_max_attempts=config.lloa_retry_max_attempts,
+        retry_base_delay_sec=config.lloa_retry_base_delay_sec,
+        retry_max_delay_sec=config.lloa_retry_max_delay_sec,
     )
     client = LloaClient(lloa_config)
 
