@@ -33,6 +33,9 @@ COPY config/report_templates /app/config/report_templates
 COPY config/report_metrics.json /app/config/report_metrics.json
 # report 엔진의 aspect key→한글 라벨 조회용(없으면 key로 fallback).
 COPY config/taxonomies /app/config/taxonomies
+# dataset profile 정의(server.go 부팅 시 로드). 누락 시 graceful nil이라 크래시는
+# 없지만 컨테이너에서 profile이 조용히 비활성화돼 로컬과 동작이 달라진다.
+COPY config/dataset_profiles.json /app/config/dataset_profiles.json
 
 EXPOSE 8080
 

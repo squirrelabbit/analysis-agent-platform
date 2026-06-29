@@ -216,7 +216,7 @@ rename PR 완료: code 심볼은 `planner` / `executor`로 정리, HTTP task pat
 - **analysis thread 모델 + display contract** — 완료. plan step별 화면용 display(label, expression) 합성 포함.
 - **Q4 plan 안정성 closure** — 완료.
 - **clause_label 속도 개선 + 9-aspect taxonomy** — 완료.
-- **GitLab CI 1차 구성** — `.gitlab-ci.yml` go-test / python-test(3.11) / release-guard 3 job. smoke 제외.
+- **CI 1차 구성** — **GitHub Actions `.github/workflows/ci.yml`** (go-tests / python-tests(3.11) / web-build / release-guard). smoke 제외. (※ 과거 메모의 "GitLab CI / `.gitlab-ci.yml`"는 오기 — 실제는 GitHub Actions)
 
 ### 다음 우선순위 (2026-06-01 갱신)
 
@@ -227,7 +227,7 @@ rename PR 완료: code 심볼은 `planner` / `executor`로 정리, HTTP task pat
 2. **composer PR-B / 답변 품질 개선** — LLM composer는 optional. 도입 전 평가 필요.
 3. **demo fixture rebuild** — 7/30 데모 1주 전 operator rebuild.
 4. **validator contract refactor** — R1~R5 pilot 완료. 후속은 ADR-021 결정 후 진행.
-5. **GitLab CI 후속** — smoke / manual staging job은 2차 후보 (docker compose + LLOA/Anthropic 외부 API 의존).
+5. **CI 후속** — smoke / manual staging job은 2차 후보 (docker compose + LLOA/Anthropic 외부 API 의존).
 
 ### 옛 트랙 메모 (δ-4 이전, history 보존)
 
