@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"analysis-support-platform/control-plane/internal/domain"
@@ -58,27 +57,16 @@ type WaitingExecutionResumer interface {
 }
 
 type DatasetBuildActivities struct {
-	Repo        store.Repository
-	Builder     DatasetBuildRunner
-	Resumer     WaitingExecutionResumer
-	Now         func() time.Time
-	Concurrency DatasetBuildConcurrencyLimits
-
-	limiterOnce sync.Once
-	limiter     *datasetBuildLimiter
+	Repo    store.Repository
+	Builder DatasetBuildRunner
+	Resumer WaitingExecutionResumer
+	Now     func() time.Time
 }
 
 type DatasetBuildFailureInput struct {
 	WorkflowInput DatasetBuildWorkflowInput `json:"workflow_input"`
 	ErrorMessage  string                    `json:"error_message"`
 	ErrorType     string                    `json:"error_type,omitempty"`
-}
-
-type DatasetBuildConcurrencyLimits struct {
-	Prepare   int `json:"prepare"`
-	Sentiment int `json:"sentiment"`
-	Embedding int `json:"embedding"`
-	Cluster   int `json:"cluster"`
 }
 
 // RuntimeRegistrar — Temporal worker가 workflow + activity를 등록할 때 호출하는
@@ -265,12 +253,10 @@ func (a *DatasetBuildActivities) ExecuteDatasetBuildJob(ctx context.Context, inp
 		return err
 	}
 
-	release, err := a.acquireBuildSlot(ctx, job.BuildType)
-	if err != nil {
-		return err
-	}
-	defer release()
-
+	// build 동시성은 Temporal worker의 MaxConcurrentActivityExecutionSize
+	// (TEMPORAL_BUILD_MAX_CONCURRENT_ACTIVITIES)로만 제어한다. per-build-type
+	// 세마포어(limiter)는 Concurrency가 한 번도 설정되지 않아 런타임 inert였고
+	// ADR-018 후 제거됐다(2026-06-29).
 	switch job.BuildType {
 	case "clean":
 		request, err := decodeBuildRequest[domain.DatasetCleanRequest](job.Request)
@@ -589,63 +575,5 @@ func stringsValue(value any) string {
 	return fmt.Sprint(value)
 }
 
-func (a *DatasetBuildActivities) acquireBuildSlot(ctx context.Context, buildType string) (func(), error) {
-	limiter := a.getLimiter()
-	return limiter.acquire(ctx, buildType)
-}
-
-func (a *DatasetBuildActivities) getLimiter() *datasetBuildLimiter {
-	a.limiterOnce.Do(func() {
-		a.limiter = newDatasetBuildLimiter(a.Concurrency)
-	})
-	return a.limiter
-}
-
-type datasetBuildLimiter struct {
-	clean     chan struct{}
-	prepare   chan struct{}
-	sentiment chan struct{}
-	embedding chan struct{}
-	cluster   chan struct{}
-}
-
-func newDatasetBuildLimiter(limits DatasetBuildConcurrencyLimits) *datasetBuildLimiter {
-	return &datasetBuildLimiter{
-		clean:     makeSemaphore(limits.Prepare),
-		prepare:   makeSemaphore(limits.Prepare),
-		sentiment: makeSemaphore(limits.Sentiment),
-		embedding: makeSemaphore(limits.Embedding),
-		cluster:   makeSemaphore(limits.Cluster),
-	}
-}
-
-func (l *datasetBuildLimiter) acquire(ctx context.Context, buildType string) (func(), error) {
-	semaphore := l.semaphore(buildType)
-	if semaphore == nil {
-		return func() {}, nil
-	}
-	select {
-	case semaphore <- struct{}{}:
-		return func() {
-			<-semaphore
-		}, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-func (l *datasetBuildLimiter) semaphore(buildType string) chan struct{} {
-	switch buildType {
-	case "clean":
-		return l.clean
-	default:
-		return nil
-	}
-}
-
-func makeSemaphore(size int) chan struct{} {
-	if size <= 0 {
-		return nil
-	}
-	return make(chan struct{}, size)
-}
+// dataset build per-type 세마포어(limiter)는 ADR-018 후 제거됨(2026-06-29). 동시성은
+// Temporal worker의 MaxConcurrentActivityExecutionSize로만 제어한다.
