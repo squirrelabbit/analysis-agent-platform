@@ -4,7 +4,8 @@ from __future__ import annotations
 
 silverone 2026-05-21 δ (old plan layer 제거): rule trigger/sequence 기반 planner,
 13 skill, validator/policy 카탈로그 모두 삭제. 남은 task:
-  - dataset_build 3종: dataset_clean / dataset_doc_genuineness / dataset_clause_label
+  - dataset_build 4종: dataset_clean / dataset_doc_genuineness / dataset_clause_label /
+    dataset_clause_keywords (clause_keywords는 2026-06-10 추가, Kiwi 키워드·LLOA 무관)
   - plan_v2 흐름 2종: analyze / plan (executor.service)
     - silverone 2026-06-01: canonical task name은 `analyze` / `plan`. 옛
       `analyze_v2` / `plan_v2`는 backward-compatible alias로 dispatch 됨.
