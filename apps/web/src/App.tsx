@@ -10,9 +10,6 @@ import { ChatPage } from "./features/chats/pages/ChatPage";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ProjectLayout from "./layout/ProjectLayout";
 import ProjectPage from "./pages/ProjectPage";
-// import DatasetDetail from "./features/datasets/pages/DatasetDetail"; // 리디자인으로 교체
-
-// import DatasetContainer from "./features/datasets/pages/DatasetContainer"; // 리디자인으로 교체
 import DatasetListRedesign from "./features/datasets/redesign/DatasetListRedesign";
 import VersionDetailPage from "./features/versions/pages/VersionDetailPage";
 import DatasetVersionListRedesign from "./features/versions/redesign/DatasetVersionListRedesign";
@@ -47,9 +44,7 @@ const router = createBrowserRouter(
             path="doc-genuineness-compare"
             element={<DocGenuinenessComparePage />}
           />
-          {/* <Route path="prompts" element={<PromptPage />} /> */}
         </Route>
-        {/* <Route path="scenarios" element={<ScenarioPage />} /> */}
         <Route path="chats" element={<ChatPage />} />
         <Route path="reports" element={<ReportListPage />} />
         {/* 에디터: reportId 라우팅 추가. */}
