@@ -876,19 +876,12 @@ class PresentRuleTests(unittest.TestCase):
         self.assertIn("params.format_invalid", _codes(_wrap([step])))
 
 
-class SummarizeRuleTests(unittest.TestCase):
-    def test_valid_summarize(self) -> None:
-        plan = _wrap(
-            [
-                _filter_step("a"),
-                {"id": "sum", "skill": "summarize", "params": {"input": "a", "focus": "상위 5개 aspect"}},
-            ]
-        )
-        self.assertEqual(collect_plan_issues(plan), [])
-
-    def test_focus_empty(self) -> None:
-        step = {"id": "sum", "skill": "summarize", "params": {"input": "clauses", "focus": ""}}
-        self.assertIn("params.focus_empty", _codes(_wrap([step])))
+class SummarizeRemovedTests(unittest.TestCase):
+    # summarize는 2026-06-29 SKILL_CATALOG에서 제거 — executor 빌더가 없어 hard-fail이었고
+    # 자연어 요약은 composer가 합성한다. plan에 들어오면 unknown skill로 거절되어야 한다.
+    def test_summarize_rejected(self) -> None:
+        step = {"id": "sum", "skill": "summarize", "params": {"input": "clauses", "focus": "x"}}
+        self.assertNotEqual(collect_plan_issues(_wrap([step])), [])
 
 
 class SkillCatalogTests(unittest.TestCase):

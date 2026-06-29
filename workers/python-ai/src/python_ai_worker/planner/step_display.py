@@ -270,14 +270,6 @@ def _display_present(p: dict[str, Any]) -> dict[str, str]:
     return {"label": "결과 표시", "expression": expr}
 
 
-def _display_summarize(p: dict[str, Any]) -> dict[str, str]:
-    focus = _str_param(p, "focus")
-    expr = "SUMMARIZE"
-    if focus:
-        expr += " focus=" + focus
-    return {"label": "자연어 요약", "expression": expr}
-
-
 _BUILDERS = {
     "filter": _display_filter,
     "join": _display_join,
@@ -286,7 +278,6 @@ _BUILDERS = {
     "calculate": _display_calculate,
     "sort": _display_sort,
     "present": _display_present,
-    "summarize": _display_summarize,
 }
 
 

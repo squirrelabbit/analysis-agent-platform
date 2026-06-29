@@ -417,8 +417,6 @@ def _validate_skill_params(
         _validate_sort(params, ctx)
     elif skill_name == "present":
         _validate_present(params, ctx)
-    elif skill_name == "summarize":
-        _validate_summarize(params, ctx)
 
     # silverone 2026-06-09 — schema-lineage: step input에 join 안 된 다른 table 전유
     # 컬럼 참조를 plan 단계에서 잡는다(executor Binder Error → planner-repairable issue).
@@ -590,7 +588,7 @@ def _infer_contributing_tables(
     if not isinstance(params, dict):
         return None
     visiting = visiting | {ref}
-    if skill in ("filter", "sort", "calculate", "present", "summarize", "aggregate"):
+    if skill in ("filter", "sort", "calculate", "present", "aggregate"):
         return _infer_contributing_tables(
             str(params.get("input") or ""), step_lookup, visiting=visiting
         )
@@ -1326,15 +1324,6 @@ def _validate_present(params: dict[str, Any], ctx: _StepContext) -> None:
     CONTRACTS["present"].validate(params, ctx)
 
 
-def _validate_summarize(params: dict[str, Any], ctx: _StepContext) -> None:
-    if not _check_required_keys(params, ("input", "focus"), ctx):
-        return
-    _check_input_ref(params.get("input"), "input", ctx)
-    focus = str(params.get("focus") or "").strip()
-    if not focus:
-        ctx.issue(code="params.focus_empty", message="summarize.focus must not be empty")
-
-
 # ===== recipe param validation (R2a, silverone 2026-06-04) =====
 #
 # recipe step은 planner output에 남고 실행 시 expand_recipes가 atomic으로 lower한다
@@ -2067,7 +2056,7 @@ def _infer_step_output_columns(
             visiting=visiting,
         )
 
-    # 그 외 (present / summarize) — 보수적으로 None 반환.
+    # 그 외 (present) — 보수적으로 None 반환.
     # present는 chain 끝에서만 쓰이므로 정의 안 함.
     return None
 

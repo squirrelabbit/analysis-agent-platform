@@ -139,12 +139,6 @@ class PresentDisplayParityTests(unittest.TestCase):
         self.assertEqual(out["expression"], "TABLE")
 
 
-class SummarizeDisplayParityTests(unittest.TestCase):
-    def test_summarize_focus(self) -> None:
-        out = build_step_display(_step("summarize", {"focus": "부정 비율 추이"}))
-        self.assertEqual(out, {"label": "자연어 요약", "expression": "SUMMARIZE focus=부정 비율 추이"})
-
-
 class ScopeAndShapeTests(unittest.TestCase):
     def test_unknown_skill_returns_none(self) -> None:
         self.assertIsNone(build_step_display(_step("nope", {"x": 1})))

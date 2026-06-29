@@ -694,33 +694,6 @@ class GuardrailTests(unittest.TestCase):
             with ExecutorContext(paths) as ctx, self.assertRaises(PlanValidationError):
                 execute_plan(ctx, bad_plan)
 
-    def test_summarize_skill_unsupported_in_first_cut(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmpdir = Path(tmp)
-            paths = _fixture_paths(tmpdir)
-            plan = {
-                "plan_version": "v2",
-                "steps": [
-                    {
-                        "id": "agg",
-                        "skill": "aggregate",
-                        "params": {
-                            "input": "clauses",
-                            "group_by": ["aspect"],
-                            "metrics": [{"name": "count", "function": "count", "column": "*"}],
-                        },
-                    },
-                    {
-                        "id": "sum_step",
-                        "skill": "summarize",
-                        "params": {"input": "agg", "focus": "상위 aspect"},
-                    },
-                ],
-            }
-            with ExecutorContext(paths) as ctx, self.assertRaises(ExecutorError) as exc:
-                execute_plan(ctx, plan)
-            self.assertIn("summarize", str(exc.exception))
-
 
 if __name__ == "__main__":
     unittest.main()

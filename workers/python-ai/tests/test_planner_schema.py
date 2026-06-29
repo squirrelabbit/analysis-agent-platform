@@ -89,10 +89,10 @@ class PlanV2TableSchemaTests(unittest.TestCase):
 
 
 class PlanV2SkillCatalogTests(unittest.TestCase):
-    def test_skill_catalog_exactly_eight(self) -> None:
+    def test_skill_catalog_exactly_seven(self) -> None:
         self.assertEqual(
             set(SKILL_CATALOG.keys()),
-            {"join", "filter", "aggregate", "compare", "calculate", "sort", "present", "summarize"},
+            {"join", "filter", "aggregate", "compare", "calculate", "sort", "present"},
         )
 
     def test_skill_names_match_keys(self) -> None:
@@ -135,11 +135,6 @@ class PlanV2SkillCatalogTests(unittest.TestCase):
         # silverone 2026-06-02 — columns 추가 (present.columns hard constraint).
         self.assertEqual(set(params.keys()), {"input", "format", "title", "columns", "limit"})
         self.assertEqual(SKILL_CATALOG["present"].output_type, "presentation")
-
-    def test_summarize_params_and_output(self) -> None:
-        params = SKILL_CATALOG["summarize"].params_schema
-        self.assertEqual(set(params.keys()), {"input", "focus", "prompt_version"})
-        self.assertEqual(SKILL_CATALOG["summarize"].output_type, "text")
 
 
 class PlanV2SkillParamEnumTests(unittest.TestCase):
