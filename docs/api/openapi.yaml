@@ -1657,6 +1657,36 @@ paths:
                 $ref: "#/components/schemas/AnalysisThreadDetail"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+    patch:
+      tags: [Analysis]
+      summary: analysis thread 제목 수정
+      description: |
+        thread의 title을 수정한다 (#28, silverone 2026-06-30). 해당 project_id +
+        dataset_id에 속한 thread만 수정 가능 — dataset이 다르거나 thread가 없으면 404.
+        title은 필수(공백 trim 후 비면 400), 80자(rune) 초과는 잘린다. title 외 필드는
+        변경하지 않는다.
+      operationId: updateAnalysisThread
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/ThreadId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalysisThreadUpdateRequest"
+      responses:
+        "200":
+          description: 수정된 analysis thread
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisThread"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
     delete:
       tags: [Analysis]
       summary: analysis thread 단건 삭제
@@ -3452,6 +3482,14 @@ components:
       properties:
         title:
           type: string
+    AnalysisThreadUpdateRequest:
+      type: object
+      description: thread 제목 수정 (#28). title은 필수 — 공백만이면 400.
+      properties:
+        title:
+          type: string
+          description: 새 제목. 공백 trim 후 비면 400, 80자(rune) 초과는 잘림.
+      required: [title]
     AnalysisThreadListResponse:
       type: object
       properties:

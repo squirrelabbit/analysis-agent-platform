@@ -464,6 +464,12 @@ type AnalysisThreadCreateRequest struct {
 	Title string `json:"title,omitempty"`
 }
 
+// AnalysisThreadUpdateRequest — thread 제목(title) 수정 요청 (#28, silverone 2026-06-30).
+// title은 필수 — 공백 trim 후 비면 400.
+type AnalysisThreadUpdateRequest struct {
+	Title string `json:"title"`
+}
+
 type AnalysisThreadListResponse struct {
 	Items []AnalysisThread `json:"items"`
 }
