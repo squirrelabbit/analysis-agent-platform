@@ -54,10 +54,12 @@ export interface ReportPanelApi {
   /** 펼쳐진 카드 uid 집합. 여러 카드를 동시에 펼칠 수 있다(다중 열기). */
   expandedIds: Set<string>;
   hasSections: boolean;
-  /** 불러온 기존 보고서 id(null=새 보고서). 저장 시 PUT(갱신) vs POST(생성) 결정. */
+  /** 불러온/저장된 보고서 id(null=아직 저장 안 된 새 보고서). 저장 시 PUT(갱신) vs POST(생성) 결정. */
   loadedReportId: string | null;
   /** 대상 보고서가 정해졌는지(새 보고서 시작 또는 기존 불러오기). false면 결과 추가 전 선택 필요. */
   started: boolean;
+  /** 마지막 저장 이후 스테이지에 변경(추가/삭제/순서/제목/메모)이 있는지. 미저장 가드 판단용. */
+  dirty: boolean;
   /** 기존 보고서를 스테이지로 불러온다(이어서 편집·추가 → 저장 시 갱신). */
   loadReport: (reportId: string, title: string, blocks: unknown[]) => void;
   /** 새 보고서로 시작(스테이지 비움). */
@@ -73,6 +75,9 @@ export interface ReportPanelApi {
   setTitle: (uid: string, title: string) => void;
   setNote: (uid: string, note: string) => void;
   toggleExpand: (uid: string) => void;
+  /** 저장만(이동 없이) 성공한 뒤 호출 — 이후 재저장이 갱신(PUT)이 되도록 보고서 id를
+   *  기억하고, dirty를 내려 미저장 가드를 끈다. staged/펼침 상태는 유지. */
+  markSaved: (reportId: string) => void;
   clearAll: () => void;
   togglePanel: () => void;
   openPanel: () => void;
@@ -88,6 +93,7 @@ export function useReportPanel(): ReportPanelApi {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [loadedReportId, setLoadedReportId] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
   const loadReport = useCallback(
     (reportId: string, title: string, blocks: unknown[]) => {
@@ -96,6 +102,7 @@ export function useReportPanel(): ReportPanelApi {
       setReportTitleState(title);
       setExpandedIds(new Set());
       setStarted(true);
+      setDirty(false);
       setPanelOpen(true);
     },
     [],
@@ -107,6 +114,7 @@ export function useReportPanel(): ReportPanelApi {
     setReportTitleState("");
     setExpandedIds(new Set());
     setStarted(true);
+    setDirty(false);
     setPanelOpen(true);
   }, []);
 
@@ -124,6 +132,7 @@ export function useReportPanel(): ReportPanelApi {
       const block = buildResultBlock(msg, question);
       // 새로 추가된 카드는 펼쳐 두되, 기존에 펼친 카드는 그대로 둔다(다중 열기).
       setExpandedIds((cur) => new Set(cur).add(block.uid));
+      setDirty(true);
       return [...prev, block];
     });
     setPanelOpen(true);
@@ -143,6 +152,7 @@ export function useReportPanel(): ReportPanelApi {
       );
       count = fresh.length;
       if (!fresh.length) return prev;
+      setDirty(true);
       return [...prev, ...fresh];
     });
     setPanelOpen(true);
@@ -157,6 +167,7 @@ export function useReportPanel(): ReportPanelApi {
       next.delete(uid);
       return next;
     });
+    setDirty(true);
   }, []);
 
   const reorder = useCallback((from: number, to: number) => {
@@ -174,18 +185,21 @@ export function useReportPanel(): ReportPanelApi {
       next.splice(to, 0, moved);
       return next;
     });
+    setDirty(true);
   }, []);
 
   const setTitle = useCallback((uid: string, title: string) => {
     setStaged((prev) =>
       prev.map((b) => (b.uid === uid ? { ...b, title } : b)),
     );
+    setDirty(true);
   }, []);
 
   const setNote = useCallback((uid: string, note: string) => {
     setStaged((prev) =>
       prev.map((b) => (b.uid === uid ? { ...b, interp: note } : b)),
     );
+    setDirty(true);
   }, []);
 
   const toggleExpand = useCallback(
@@ -199,14 +213,23 @@ export function useReportPanel(): ReportPanelApi {
     [],
   );
 
-  const clearAll = useCallback(() => setStaged([]), []);
+  const markSaved = useCallback((reportId: string) => {
+    setLoadedReportId(reportId);
+    setStarted(true);
+    setDirty(false);
+  }, []);
+
+  const clearAll = useCallback(() => {
+    setStaged([]);
+    setDirty(true);
+  }, []);
   const togglePanel = useCallback(() => setPanelOpen((o) => !o), []);
   const openPanel = useCallback(() => setPanelOpen(true), []);
   const closePanel = useCallback(() => setPanelOpen(false), []);
-  const setReportTitle = useCallback(
-    (title: string) => setReportTitleState(title),
-    [],
-  );
+  const setReportTitle = useCallback((title: string) => {
+    setReportTitleState(title);
+    setDirty(true);
+  }, []);
 
   const reset = useCallback(() => {
     setStaged([]);
@@ -215,6 +238,7 @@ export function useReportPanel(): ReportPanelApi {
     setExpandedIds(new Set());
     setLoadedReportId(null);
     setStarted(false);
+    setDirty(false);
   }, []);
 
   return {
@@ -226,6 +250,7 @@ export function useReportPanel(): ReportPanelApi {
     hasSections: staged.some((b) => b.kind === "section"),
     loadedReportId,
     started,
+    dirty,
     loadReport,
     startNew,
     isAddedRun,
@@ -236,6 +261,7 @@ export function useReportPanel(): ReportPanelApi {
     setTitle,
     setNote,
     toggleExpand,
+    markSaved,
     clearAll,
     togglePanel,
     openPanel,
