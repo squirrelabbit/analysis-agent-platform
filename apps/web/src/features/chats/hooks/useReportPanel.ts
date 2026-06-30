@@ -51,7 +51,8 @@ export interface ReportPanelApi {
   panelOpen: boolean;
   reportTitle: string;
   count: number;
-  expandedId: string | null;
+  /** 펼쳐진 카드 uid 집합. 여러 카드를 동시에 펼칠 수 있다(다중 열기). */
+  expandedIds: Set<string>;
   hasSections: boolean;
   /** 불러온 기존 보고서 id(null=새 보고서). 저장 시 PUT(갱신) vs POST(생성) 결정. */
   loadedReportId: string | null;
@@ -84,7 +85,7 @@ export function useReportPanel(): ReportPanelApi {
   const [staged, setStaged] = useState<ReportBlock[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [reportTitle, setReportTitleState] = useState("");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [loadedReportId, setLoadedReportId] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
 
@@ -93,7 +94,7 @@ export function useReportPanel(): ReportPanelApi {
       setStaged(normalizeBlocks(blocks));
       setLoadedReportId(reportId);
       setReportTitleState(title);
-      setExpandedId(null);
+      setExpandedIds(new Set());
       setStarted(true);
       setPanelOpen(true);
     },
@@ -104,7 +105,7 @@ export function useReportPanel(): ReportPanelApi {
     setStaged([]);
     setLoadedReportId(null);
     setReportTitleState("");
-    setExpandedId(null);
+    setExpandedIds(new Set());
     setStarted(true);
     setPanelOpen(true);
   }, []);
@@ -121,7 +122,8 @@ export function useReportPanel(): ReportPanelApi {
       if (prev.some((b) => b.result?.runId === msg.runId)) return prev;
       added = true;
       const block = buildResultBlock(msg, question);
-      setExpandedId(block.uid);
+      // 새로 추가된 카드는 펼쳐 두되, 기존에 펼친 카드는 그대로 둔다(다중 열기).
+      setExpandedIds((cur) => new Set(cur).add(block.uid));
       return [...prev, block];
     });
     setPanelOpen(true);
@@ -149,6 +151,12 @@ export function useReportPanel(): ReportPanelApi {
 
   const remove = useCallback((uid: string) => {
     setStaged((prev) => prev.filter((b) => b.uid !== uid));
+    setExpandedIds((cur) => {
+      if (!cur.has(uid)) return cur;
+      const next = new Set(cur);
+      next.delete(uid);
+      return next;
+    });
   }, []);
 
   const reorder = useCallback((from: number, to: number) => {
@@ -181,7 +189,13 @@ export function useReportPanel(): ReportPanelApi {
   }, []);
 
   const toggleExpand = useCallback(
-    (uid: string) => setExpandedId((cur) => (cur === uid ? null : uid)),
+    (uid: string) =>
+      setExpandedIds((cur) => {
+        const next = new Set(cur);
+        if (next.has(uid)) next.delete(uid);
+        else next.add(uid);
+        return next;
+      }),
     [],
   );
 
@@ -198,7 +212,7 @@ export function useReportPanel(): ReportPanelApi {
     setStaged([]);
     setPanelOpen(false);
     setReportTitleState("");
-    setExpandedId(null);
+    setExpandedIds(new Set());
     setLoadedReportId(null);
     setStarted(false);
   }, []);
@@ -208,7 +222,7 @@ export function useReportPanel(): ReportPanelApi {
     panelOpen,
     reportTitle,
     count: staged.length,
-    expandedId,
+    expandedIds,
     hasSections: staged.some((b) => b.kind === "section"),
     loadedReportId,
     started,

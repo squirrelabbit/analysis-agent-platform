@@ -49,7 +49,7 @@ export default function ReportPanel({
     panelOpen,
     reportTitle,
     count,
-    expandedId,
+    expandedIds,
     loadedReportId,
     setReportTitle,
     setTitle,
@@ -358,7 +358,7 @@ export default function ReportPanel({
                   onTitleChange={(v) => setTitle(block.uid, v)}
                   onNoteChange={(v) => setNote(block.uid, v)}
                   onRemove={() => remove(block.uid)}
-                  collapsed={expandedId !== block.uid}
+                  collapsed={!expandedIds.has(block.uid)}
                   onToggle={() => toggleExpand(block.uid)}
                   isDragging={dragIndex === index}
                   dropHint={dropHintFor(index)}
