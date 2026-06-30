@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Check,
+  ExternalLink,
   FileText,
   Loader2,
   Minus,
@@ -190,6 +191,30 @@ export default function GenuinenessTab() {
     {
       header: "정제 텍스트",
       cell: (item) => <ExpandableTextCell text={item.cleanedText} />,
+    },
+    {
+      // 정제 텍스트와 판별 결과 사이 — 원본 게시글 URL을 새 탭으로 여는 버튼.
+      // source_json에 원문 URL이 있는 행에만 노출(없으면 "-").
+      header: "URL",
+      headerClassName: "w-16 text-center",
+      cell: (item) => (
+        <td className="px-3 py-3 text-center">
+          {item.sourceUrl ? (
+            <a
+              href={item.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="원문 보기"
+              aria-label="원문 보기"
+              className="inline-grid h-7 w-7 place-items-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-violet-600"
+            >
+              <ExternalLink className="h-4 w-4" />
+            </a>
+          ) : (
+            <span className="text-zinc-300">-</span>
+          )}
+        </td>
+      ),
     },
     {
       header: "판별 결과",

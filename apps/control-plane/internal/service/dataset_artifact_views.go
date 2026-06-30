@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -542,6 +543,50 @@ func latestJobForBuildType(s *DatasetService, projectID, datasetVersionID, build
 // prompt_version 회수. silverone 2026-05-28 (옵션 A) — cleanRef가 주어지면
 // cleaned.parquet의 cleaned_text를 doc_id 기준 LEFT JOIN해 items 응답에
 // 포함한다. join miss는 본문 null로 두고 obs warning으로 카운트 노출.
+// extractSourceURL — clean source_json에서 원문 URL을 뽑는다(진성 결과 화면 원문 버튼용).
+// 값 전체가 http(s) URL인 첫 컬럼을 고른다 — 전용 URL/permalink 컬럼. 본문처럼 URL을
+// "포함"만 하는 긴 텍스트는 공백 때문에 제외된다. URL 컬럼명은 데이터셋마다 달라(URL/url/
+// 링크 등) 키 이름이 아니라 값 형태로 판별한다(키워드 하드코딩 회피). 키는 정렬해 결정적.
+func extractSourceURL(sourceJSON string) string {
+	s := strings.TrimSpace(sourceJSON)
+	if s == "" {
+		return ""
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(s), &record); err != nil {
+		return ""
+	}
+	keys := make([]string, 0, len(record))
+	for k := range record {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		str, ok := record[k].(string)
+		if !ok {
+			continue
+		}
+		str = strings.TrimSpace(str)
+		if (strings.HasPrefix(str, "https://") || strings.HasPrefix(str, "http://")) &&
+			!strings.ContainsAny(str, " \t\r\n") {
+			return str
+		}
+	}
+	return ""
+}
+
+// parquetSourceJSONExpr — clean parquet에 source_json 컬럼이 있으면 ``c.source_json``,
+// 없으면 ``NULL AS source_json``을 돌려준다. 레거시/테스트 fixture parquet엔 컬럼이 없어
+// 직접 참조하면 Binder Error로 JOIN 전체가 실패(본문까지 누락)하므로 존재를 먼저 확인한다.
+func parquetSourceJSONExpr(db *sql.DB, cleanSource string) string {
+	var n int
+	q := fmt.Sprintf("SELECT COUNT(*) FROM (DESCRIBE SELECT * FROM %s) WHERE column_name = 'source_json'", cleanSource)
+	if err := db.QueryRow(q).Scan(&n); err != nil || n == 0 {
+		return "NULL AS source_json"
+	}
+	return "c.source_json"
+}
+
 func loadDocGenuinenessArtifact(ref, cleanRef string, limit, offset int, datasetVersionID, genuineness string) (map[string]any, string, int, []map[string]any, error) {
 	db, cleanup, err := openTempDuckDB()
 	if err != nil {
@@ -585,16 +630,17 @@ func loadDocGenuinenessArtifact(ref, cleanRef string, limit, offset int, dataset
 		// 동일 값 ({version_id}:row:N). LEFT JOIN으로 본문 누락 시에도
 		// item은 그대로 유지하고 cleaned_text만 null.
 		cleanSource := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+		sourceJSONExpr := parquetSourceJSONExpr(db, cleanSource)
 		itemQuery := fmt.Sprintf(
-			`SELECT dg.doc_id, dg.genuineness, dg.reason, dg.source, c.cleaned_text
+			`SELECT dg.doc_id, dg.genuineness, dg.reason, dg.source, c.cleaned_text, %s
 			 FROM %s AS dg
 			 LEFT JOIN %s AS c ON dg.doc_id = c.row_id
 			 %s
 			 ORDER BY dg.doc_id
 			 LIMIT %d OFFSET %d`,
-			source, cleanSource, whereJoin, limit, offset,
+			sourceJSONExpr, source, cleanSource, whereJoin, limit, offset,
 		)
-		items, err := scanArtifactRows(db, itemQuery, []string{"doc_id", "genuineness", "reason", "source", "cleaned_text"})
+		items, err := scanArtifactRows(db, itemQuery, []string{"doc_id", "genuineness", "reason", "source", "cleaned_text", "source_json"})
 		if err != nil {
 			// JOIN 실패 시(예: cleaned.parquet에 row_id 컬럼 없음) 본문 없이
 			// 기존 schema로 fallback. 운영자 진단용 obs warning.
@@ -624,6 +670,13 @@ func loadDocGenuinenessArtifact(ref, cleanRef string, limit, offset int, dataset
 				"miss_count", missCount,
 				"total", total,
 			)
+		}
+		// 원문 URL 추출(진성 화면 원문 버튼) — source_json은 응답에 노출하지 않고
+		// source_url만 남긴다(원본 전체 누출 방지).
+		for _, item := range items {
+			sj, _ := item["source_json"].(string)
+			item["source_url"] = extractSourceURL(sj)
+			delete(item, "source_json")
 		}
 		return summary, prompt, filteredTotal, items, nil
 	}
@@ -704,7 +757,7 @@ func loadDocGenuinenessVerifyArtifact(ref, cleanRef string, limit, offset int, g
 
 	cols := []string{
 		"doc_id", "final_label", "needs_review", "resolution", "is_disagreement",
-		"model_a_result", "model_b_result", "judge_result", "cleaned_text",
+		"model_a_result", "model_b_result", "judge_result", "cleaned_text", "source_json",
 	}
 	selectExpr := func(prefix string) string {
 		return fmt.Sprintf(
@@ -720,15 +773,16 @@ func loadDocGenuinenessVerifyArtifact(ref, cleanRef string, limit, offset int, g
 	var itemQuery string
 	if cleanRef != "" {
 		cleanSource := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+		sourceJSONExpr := parquetSourceJSONExpr(db, cleanSource)
 		itemQuery = fmt.Sprintf(
-			`SELECT %s, c.cleaned_text
+			`SELECT %s, c.cleaned_text, %s
 			 FROM %s AS dg LEFT JOIN %s AS c ON dg.doc_id = c.row_id
 			 %s ORDER BY dg.doc_id LIMIT %d OFFSET %d`,
-			selectExpr("dg."), source, cleanSource, whereJoin, limit, offset,
+			selectExpr("dg."), sourceJSONExpr, source, cleanSource, whereJoin, limit, offset,
 		)
 	} else {
 		itemQuery = fmt.Sprintf(
-			`SELECT %s, NULL AS cleaned_text
+			`SELECT %s, NULL AS cleaned_text, NULL AS source_json
 			 FROM %s %s ORDER BY doc_id LIMIT %d OFFSET %d`,
 			selectExpr(""), source, whereSource, limit, offset,
 		)
@@ -749,6 +803,12 @@ func loadDocGenuinenessVerifyArtifact(ref, cleanRef string, limit, offset int, g
 			"needs_review":    docVerifyBool(raw["needs_review"]),
 			"is_disagreement": docVerifyBool(raw["is_disagreement"]),
 			"cleaned_text":    raw["cleaned_text"],
+		}
+		// 원문 URL(진성 화면 원문 버튼). source_json 자체는 응답에 넣지 않는다.
+		if sj, ok := raw["source_json"].(string); ok {
+			item["source_url"] = extractSourceURL(sj)
+		} else {
+			item["source_url"] = ""
 		}
 		modelA := docVerifyObject(raw["model_a_result"])
 		modelB := docVerifyObject(raw["model_b_result"])
