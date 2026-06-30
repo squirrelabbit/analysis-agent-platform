@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import unittest
 
+from python_ai_worker import runtime as rt
 from python_ai_worker.dataset_build.clean import _normalize_whitespace
 
 
@@ -54,6 +55,30 @@ class NormalizeWhitespaceTests(unittest.TestCase):
             _normalize_whitespace(raw),
             "강릉 문화재야행\n너무 좋았어요!!\n재방문 의사 있음",
         )
+
+
+class CleanPipelineNewlinePreservationTests(unittest.TestCase):
+    """end-to-end 회귀: `_strip_known_noise_phrases`(내부 _normalize_prepared_text) →
+    `_normalize_whitespace` 전체 경로에서 줄바꿈이 살아남는지 잠근다. 1차 수정이
+    _normalize_prepared_text의 `\\s+` 합치기를 놓쳐 \\n이 공백으로 죽던 회귀(#17)."""
+
+    def _full_clean(self, text: str) -> str:
+        # clean.py:245 의 실제 순서 그대로.
+        return _normalize_whitespace(rt._strip_known_noise_phrases(text))
+
+    def test_single_newline_survives_full_path(self) -> None:
+        self.assertEqual(self._full_clean("제목\n본문"), "제목\n본문")
+
+    def test_blank_lines_collapse_to_single_newline(self) -> None:
+        self.assertEqual(self._full_clean("제목\n\n\n본문"), "제목\n본문")
+
+    def test_newline_not_converted_to_space(self) -> None:
+        result = self._full_clean("첫 줄\n둘째 줄")
+        self.assertIn("\n", result)
+        self.assertEqual(result, "첫 줄\n둘째 줄")
+
+    def test_intraline_multiple_spaces_still_collapse(self) -> None:
+        self.assertEqual(self._full_clean("a     b\nc     d"), "a b\nc d")
 
 
 if __name__ == "__main__":
