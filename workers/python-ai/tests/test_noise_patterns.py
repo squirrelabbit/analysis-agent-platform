@@ -64,13 +64,18 @@ class NoisePatternsConfigContractTests(unittest.TestCase):
 
 
 class NoiseScrubBehaviorTests(unittest.TestCase):
-    """`_apply_noise_scrub`의 동작 잠금. import는 test 내부에서 — module의 다른
-    의존성(asset_client 등)이 test_*_*.py side에서 lazy load되어야 의미 있음."""
+    """`_apply_noise_scrub`(noise 제거) + 최종 normalize_whitespace 동작 잠금.
+    #17 통합 후 _apply_noise_scrub은 공백 정리를 하지 않고 noise만 제거한다 — 공백/줄바꿈
+    합치기는 cleaned_text 최종 normalize_whitespace 단일 함수가 담당하므로, 여기서도
+    scrub 결과에 normalize_whitespace를 적용한 실제 파이프라인 산출을 검증한다.
+    import는 test 내부에서 — module의 다른 의존성(asset_client 등) lazy load 목적."""
 
     def setUp(self) -> None:
         from python_ai_worker.dataset_build import _apply_noise_scrub
+        from python_ai_worker.runtime.common import normalize_whitespace
 
         self.scrub = _apply_noise_scrub
+        self.norm = normalize_whitespace
         self.patterns = [
             re.compile(r"존재하지 않는 이미지입니다\.?"),
             re.compile(r"존재하지 않는 스티커입니다\.?"),
@@ -82,25 +87,25 @@ class NoiseScrubBehaviorTests(unittest.TestCase):
         # 5/11 sentence cluster 검증 sample 그대로 — cluster 13/14/20 fragment.
         text = "안목해변에 내려서 또 바다 구경하다가 존재하지 않는 이미지입니다."
         scrubbed, hits = self.scrub(text, self.patterns)
-        self.assertEqual(scrubbed, "안목해변에 내려서 또 바다 구경하다가")
+        self.assertEqual(self.norm(scrubbed), "안목해변에 내려서 또 바다 구경하다가")
         self.assertEqual(hits.get(r"존재하지 않는 이미지입니다\.?"), 1)
 
     def test_strip_sticker_placeholder_keeps_surrounding_text(self) -> None:
         text = "넘나좋은것ㅎㅎㅎ존재하지 않는 스티커입니다."
         scrubbed, hits = self.scrub(text, self.patterns)
-        self.assertEqual(scrubbed, "넘나좋은것ㅎㅎㅎ")
+        self.assertEqual(self.norm(scrubbed), "넘나좋은것ㅎㅎㅎ")
         self.assertEqual(hits.get(r"존재하지 않는 스티커입니다\.?"), 1)
 
     def test_strip_network_error_pure_noise(self) -> None:
         text = "네트워크 오류가 발생했습니다."
         scrubbed, hits = self.scrub(text, self.patterns)
-        self.assertEqual(scrubbed, "")
+        self.assertEqual(self.norm(scrubbed), "")
         self.assertEqual(hits.get(r"네트워크 오류가 발생했습니다\.?"), 1)
 
     def test_multiple_occurrences_counted(self) -> None:
         text = "존재하지 않는 이미지입니다. 본문 일부 존재하지 않는 이미지입니다."
         scrubbed, hits = self.scrub(text, self.patterns)
-        self.assertEqual(scrubbed, "본문 일부")
+        self.assertEqual(self.norm(scrubbed), "본문 일부")
         self.assertEqual(hits.get(r"존재하지 않는 이미지입니다\.?"), 2)
 
     def test_no_patterns_returns_unchanged(self) -> None:
@@ -120,7 +125,7 @@ class NoiseScrubBehaviorTests(unittest.TestCase):
         # 마침표/!/? 만나기 전까지 strip.
         text = "후기 본문 50m NAVER Corp.강릉대도호부관아강원특별자치도 강릉시 임영로131번길 6 임영관 끝."
         scrubbed, hits = self.scrub(text, self.patterns)
-        self.assertEqual(scrubbed, "후기 본문 .")
+        self.assertEqual(self.norm(scrubbed), "후기 본문 .")
         self.assertEqual(hits.get(r"50m NAVER Corp\.[^.!?]{0,300}"), 1)
 
     def test_naver_pattern_stops_at_exclamation(self) -> None:
