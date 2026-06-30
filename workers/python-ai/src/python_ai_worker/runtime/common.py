@@ -263,12 +263,26 @@ def _normalize_pos_prefixes(value: Any) -> list[str]:
     return normalized
 
 
+def normalize_whitespace(text: str) -> str:
+    """공백/줄바꿈 정규화 단일 source (#17). 연속 공백·줄바꿈을 각각 1개로 줄이되
+    **단일은 그대로 유지**한다. 줄바꿈은 공백으로 합치지 않고 보존한다(가독성).
+
+    dataset_build clean(_normalize_whitespace 별칭)과 _normalize_prepared_text가 이
+    한 함수를 공유한다 — 줄바꿈/공백 정책 변경은 **여기 1곳만** 고치면 된다(옛 구조는
+    같은 규칙이 3곳에 흩어져 있어 #17 때 여러 번 고쳐야 했다)."""
+    if not text:
+        return text
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[^\S\n]+", " ", text)  # 줄바꿈 외 공백류(스페이스/탭) 연속 → 단일 공백
+    text = re.sub(r" *\n *", "\n", text)   # 줄 끝/시작 잔여 공백 제거
+    text = re.sub(r"\n{2,}", "\n", text)   # 연속 줄바꿈 → 단일(빈 줄 제거)
+    return text.strip()
+
+
 def _normalize_prepared_text(text: str) -> str:
-    normalized = text.strip()
-    # 줄바꿈 외 공백류만 단일 공백으로 — 줄바꿈은 보존한다(류소현 개선요청 #17).
-    # clean 경로에서 cleaned_text 최종 _normalize_whitespace가 \n{2,}→\n 등 줄 단위
-    # 정리를 마저 한다. garbage 감지/토큰화 호출처는 \n↔공백이 무관(토큰 경계 동일).
-    normalized = re.sub(r"[^\S\n]+", " ", normalized)
+    # 공백/줄바꿈 정규화는 normalize_whitespace 단일 함수에 위임(#17 통합). 여기서는
+    # 문장부호·구분자 정리만 더한다. garbage 감지/토큰화 호출처는 \n↔공백이 무관(토큰 경계 동일).
+    normalized = normalize_whitespace(text)
     normalized = re.sub(r"[!?.]{2,}", ".", normalized)
     normalized = re.sub(r"[_\-=/]{3,}", " ", normalized)
     return normalized.strip()
@@ -956,6 +970,7 @@ __all__ = [
     "_normalize_stopwords",
     "_normalize_taxonomy_rules",
     "_normalize_token",
+    "normalize_whitespace",
     "_parse_timestamp",
     "_period_end",
     "_period_start",
