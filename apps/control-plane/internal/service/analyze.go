@@ -117,6 +117,15 @@ func (a *AnalyzeService) ExecuteAnalyze(
 		"dataset_version_id": versionID,
 		"artifact_paths":     paths.asPayload(),
 	}
+	// #24 — clause_keywords가 주입될 때만 정제 사전(block/synonym) 활성 규칙을 함께
+	// 넘긴다. worker executor가 clause_keywords view에 overlay(제외·병합)를 적용해
+	// 채팅도 키워드 뷰·보고서와 동일하게 정제 반영된다. best-effort — 규칙 조회 실패나
+	// 빈 목록이면 payload에서 생략(미적용 = 기존 동작).
+	if strings.TrimSpace(paths.ClauseKeywords) != "" {
+		if rules, rerr := a.versions.ListKeywordDictionaryRules(projectID, datasetID, true); rerr == nil && len(rules) > 0 {
+			workerPayload["keyword_dictionary_rules"] = rules
+		}
+	}
 	if len(req.ReuseMetadata) > 0 {
 		// silverone 2026-05-26 (ADR-020 PR-A) — worker composer가 reuse_applied
 		// 템플릿을 선택할 수 있게 hint 전달.
