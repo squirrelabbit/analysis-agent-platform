@@ -65,8 +65,10 @@
       "date_filter": "recent_year",
       "layout": [
         { "panels": [
-          { "view": "doughnut", "width": "2/3", "metric": "sentiment_distribution", "order": ["positive", "neutral", "negative"] },
-          { "view": "table",    "width": "1/3", "metric": "sentiment_distribution", "order": ["positive", "neutral", "negative"] }
+          { "view": "doughnut", "width": "full", "metric": "sentiment_distribution", "order": ["positive", "neutral", "negative"] }
+        ]},
+        { "panels": [  
+          { "view": "table",    "width": "full", "metric": "sentiment_distribution", "order": ["positive", "neutral", "negative"] }
         ] }
       ]
     },
@@ -79,8 +81,10 @@
       "date_filter": "recent_year",
       "layout": [
         { "panels": [
-          { "view": "bar",   "width": "2/3", "metric": "aspect_distribution", "order_by": "count" },
-          { "view": "table", "width": "1/3", "metric": "aspect_distribution", "order_by": "count" }
+          { "view": "bar",   "width": "full", "metric": "aspect_distribution", "order_by": "count" }
+        ]},
+        { "panels": [           
+          { "view": "table", "width": "full", "metric": "aspect_distribution", "order_by": "count" }
         ] }
       ]
     },
