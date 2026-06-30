@@ -56,6 +56,11 @@ type DataTableProps<T> = {
   onPageChange: (page: number) => void;
   /** 페이지/필터 변경으로 API 재호출 중일 때 true → 표 위에 로딩 오버레이 */
   loading?: boolean;
+  /** 행 그룹 키. 주면 같은 키의 연속 행 앞에 그룹 헤더 행을 끼워 넣는다(예: 같은 문서).
+   *  items는 호출부에서 같은 키끼리 인접하도록 정렬돼 있어야 한다. */
+  groupBy?: (item: T) => string;
+  /** 그룹 헤더 내용 렌더러(groupBy와 함께). count=그 그룹의 행 수, firstItem=첫 행. */
+  renderGroupHeader?: (groupKey: string, count: number, firstItem: T) => ReactNode;
 };
 
 /** 빌드 결과 탭의 공통 표: 필터 헤더 + 테이블 + 페이지네이션 푸터 */
@@ -71,7 +76,19 @@ export function DataTable<T>({
   totalCount,
   onPageChange,
   loading = false,
+  groupBy,
+  renderGroupHeader,
 }: DataTableProps<T>) {
+  // 그룹 헤더에 표시할 그룹별 행 수(현재 페이지 기준).
+  const groupCounts = new Map<string, number>();
+  if (groupBy && items) {
+    for (const it of items) {
+      const k = groupBy(it);
+      groupCounts.set(k, (groupCounts.get(k) ?? 0) + 1);
+    }
+  }
+  const grouped = !!groupBy && !!renderGroupHeader;
+
   return (
     <div className="rounded-2xl border border-zinc-100 bg-white shadow-sm overflow-hidden">
       <div className="px-4 py-3 border-b border-zinc-50 flex items-center justify-between flex-wrap gap-2">
@@ -121,16 +138,43 @@ export function DataTable<T>({
                 </td>
               </tr>
             ) : (
-              items.map((item) => (
-                <tr
-                  key={rowKey(item)}
-                  className="hover:bg-zinc-50/60 transition-colors"
-                >
-                  {columns.map((col, i) => (
-                    <Fragment key={i}>{col.cell(item)}</Fragment>
-                  ))}
-                </tr>
-              ))
+              items.map((item, idx) => {
+                const row = (
+                  <tr
+                    key={rowKey(item)}
+                    className="hover:bg-zinc-50/60 transition-colors"
+                  >
+                    {columns.map((col, i) => (
+                      <Fragment key={i}>{col.cell(item)}</Fragment>
+                    ))}
+                  </tr>
+                );
+                if (!grouped) return row;
+                // 그룹 첫 행이면(이전 행과 키가 다르면) 앞에 그룹 헤더 행을 끼운다.
+                // 두 번째 그룹부터는 위쪽 여백(pt-5)으로 문서 사이를 띄운다.
+                const key = groupBy!(item);
+                const prevKey = idx > 0 ? groupBy!(items[idx - 1]) : null;
+                const isStart = key !== prevKey;
+                return (
+                  <Fragment key={rowKey(item)}>
+                    {isStart && (
+                      <tr>
+                        <td
+                          colSpan={columns.length}
+                          className={cn("px-3", idx > 0 && "pt-5")}
+                        >
+                          {renderGroupHeader!(
+                            key,
+                            groupCounts.get(key) ?? 1,
+                            item,
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                    {row}
+                  </Fragment>
+                );
+              })
             )}
           </tbody>
         </table>
