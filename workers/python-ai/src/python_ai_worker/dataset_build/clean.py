@@ -86,8 +86,13 @@ def _load_noise_patterns(payload: dict[str, Any]) -> tuple[list[re.Pattern[str]]
 
 
 def _apply_noise_scrub(text: str, patterns: list[re.Pattern[str]]) -> tuple[str, dict[str, int]]:
-    """text에 inline scrub 적용. 매치된 pattern은 공백으로 치환, 다중 공백은 단일로.
-    반환: (scrubbed text, pattern별 hit count 딕셔너리)."""
+    """text에 inline scrub 적용. 매치된 pattern은 공백으로 치환한다.
+    반환: (scrubbed text, pattern별 hit count 딕셔너리).
+
+    noise 제거가 남긴 다중 공백(스페이스/탭)만 여기서 정리하되 **줄바꿈은 보존**한다.
+    (옛 `\\s+ → " "` 합치기는 줄바꿈까지 공백으로 삭제했다 — 류소현 개선요청 2026-06-30.)
+    줄/문단 단위 최종 정규화는 cleaned_text 최종의 _normalize_whitespace가 noise 유무와
+    무관하게 일괄 담당한다."""
     hits: dict[str, int] = {}
     if not patterns or not text:
         return text, hits
@@ -98,8 +103,25 @@ def _apply_noise_scrub(text: str, patterns: list[re.Pattern[str]]) -> tuple[str,
             hits[pattern.pattern] = hits.get(pattern.pattern, 0) + len(matched)
             scrubbed = pattern.sub(" ", scrubbed)
     if hits:
-        scrubbed = re.sub(r"\s+", " ", scrubbed).strip()
+        # 줄바꿈 외 공백류만 단일 공백으로 — 줄바꿈은 보존(_normalize_whitespace가 최종 정리).
+        scrubbed = re.sub(r"[^\S\n]+", " ", scrubbed).strip()
     return scrubbed, hits
+
+
+def _normalize_whitespace(text: str) -> str:
+    """cleaned_text 공백/줄바꿈 정규화 (류소현 개선요청 2026-06-30).
+
+    연속 공백·줄바꿈을 각각 1개로 줄이되 **단일은 그대로 유지**한다. 줄바꿈은 공백으로
+    합치지 않고 보존한다(가독성). noise scrub 유무와 무관하게 모든 cleaned_text에
+    일관 적용한다.
+    """
+    if not text:
+        return text
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[^\S\n]+", " ", text)  # 줄바꿈 외 공백류(스페이스/탭) 연속 → 단일 공백
+    text = re.sub(r" *\n *", "\n", text)   # 줄 끝/시작 잔여 공백 제거
+    text = re.sub(r"\n{2,}", "\n", text)   # 연속 줄바꿈 → 단일(빈 줄 제거)
+    return text.strip()
 
 
 def _clean_output_schema(analysis_columns: list[AnalysisColumn] | None = None) -> Any:
@@ -220,7 +242,7 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
             # 제거됨. 한글 SNS 후기 분석에서 영문/숫자/공백/모노음절은 모두 의미
             # 신호라 거친 제거가 해롭다. 남은 책임은 known noise phrase strip +
             # whitespace 정규화. 도메인 필터링은 regex_rule_names로 명시.
-            cleaned_text = rt._strip_known_noise_phrases(scrubbed_text)
+            cleaned_text = _normalize_whitespace(rt._strip_known_noise_phrases(scrubbed_text))
             if not cleaned_text:
                 dropped_count += 1
                 continue
