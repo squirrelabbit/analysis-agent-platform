@@ -53,24 +53,30 @@ func NewPostgresStore(databaseURL string) (*PostgresStore, error) {
 }
 
 func (s *PostgresStore) SaveProject(project domain.Project) error {
-	_, err := s.db.Exec(
-		`INSERT INTO projects (project_id, name, description, created_at)
-		 VALUES ($1::uuid, $2, $3, $4)
+	metadata, err := marshalJSON(defaultMetadataMap(project.Metadata))
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(
+		`INSERT INTO projects (project_id, name, description, created_at, metadata)
+		 VALUES ($1::uuid, $2, $3, $4, $5::jsonb)
 		 ON CONFLICT (project_id) DO UPDATE
 		 SET name = EXCLUDED.name,
 		     description = EXCLUDED.description,
-		     created_at = EXCLUDED.created_at`,
+		     created_at = EXCLUDED.created_at,
+		     metadata = EXCLUDED.metadata`,
 		project.ProjectID,
 		project.Name,
 		nullableString(project.Description),
 		project.CreatedAt,
+		metadata,
 	)
 	return err
 }
 
 func (s *PostgresStore) GetProject(projectID string) (domain.Project, error) {
 	row := s.db.QueryRow(
-		`SELECT project_id::text, name, description, created_at
+		`SELECT project_id::text, name, description, created_at, metadata
 		 FROM projects
 		 WHERE project_id = $1::uuid`,
 		projectID,
@@ -78,7 +84,8 @@ func (s *PostgresStore) GetProject(projectID string) (domain.Project, error) {
 
 	var project domain.Project
 	var description sql.NullString
-	if err := row.Scan(&project.ProjectID, &project.Name, &description, &project.CreatedAt); err != nil {
+	var metadataRaw []byte
+	if err := row.Scan(&project.ProjectID, &project.Name, &description, &project.CreatedAt, &metadataRaw); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Project{}, ErrNotFound
 		}
@@ -87,12 +94,15 @@ func (s *PostgresStore) GetProject(projectID string) (domain.Project, error) {
 	if description.Valid {
 		project.Description = &description.String
 	}
+	if err := unmarshalJSON(metadataRaw, &project.Metadata, map[string]any{}); err != nil {
+		return domain.Project{}, err
+	}
 	return project, nil
 }
 
 func (s *PostgresStore) ListProjects() ([]domain.Project, error) {
 	rows, err := s.db.Query(
-		`SELECT project_id::text, name, description, created_at
+		`SELECT project_id::text, name, description, created_at, metadata
 		 FROM projects
 		 ORDER BY created_at ASC, project_id ASC`,
 	)
@@ -105,11 +115,15 @@ func (s *PostgresStore) ListProjects() ([]domain.Project, error) {
 	for rows.Next() {
 		var project domain.Project
 		var description sql.NullString
-		if err := rows.Scan(&project.ProjectID, &project.Name, &description, &project.CreatedAt); err != nil {
+		var metadataRaw []byte
+		if err := rows.Scan(&project.ProjectID, &project.Name, &description, &project.CreatedAt, &metadataRaw); err != nil {
 			return nil, err
 		}
 		if description.Valid {
 			project.Description = &description.String
+		}
+		if err := unmarshalJSON(metadataRaw, &project.Metadata, map[string]any{}); err != nil {
+			return nil, err
 		}
 		items = append(items, project)
 	}
@@ -2312,6 +2326,8 @@ func (s *PostgresStore) ensureSchema(ctx context.Context) error {
 			description TEXT,
 			created_at TIMESTAMPTZ NOT NULL
 		)`,
+		// #31 (2026-07-01) — 프로젝트 레벨 메타데이터(축제 메타 festival 등).
+		`ALTER TABLE projects ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb`,
 		// 5/6 화면기획서 B안 채택: 전역 prompts 테이블 폐기 (글로벌 prompt =
 		// .md 코드 계약). 기존 운영 DB의 ``prompts`` 테이블은 *DROP은 안 함*
 		// — Postgres에 빈 테이블로 잔존해도 영향 0이고, 미래 정책 변경 시
