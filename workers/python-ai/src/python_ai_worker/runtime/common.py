@@ -265,7 +265,10 @@ def _normalize_pos_prefixes(value: Any) -> list[str]:
 
 def _normalize_prepared_text(text: str) -> str:
     normalized = text.strip()
-    normalized = re.sub(r"\s+", " ", normalized)
+    # 줄바꿈 외 공백류만 단일 공백으로 — 줄바꿈은 보존한다(류소현 개선요청 #17).
+    # clean 경로에서 cleaned_text 최종 _normalize_whitespace가 \n{2,}→\n 등 줄 단위
+    # 정리를 마저 한다. garbage 감지/토큰화 호출처는 \n↔공백이 무관(토큰 경계 동일).
+    normalized = re.sub(r"[^\S\n]+", " ", normalized)
     normalized = re.sub(r"[!?.]{2,}", ".", normalized)
     normalized = re.sub(r"[_\-=/]{3,}", " ", normalized)
     return normalized.strip()
