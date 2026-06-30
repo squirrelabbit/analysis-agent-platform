@@ -46,6 +46,7 @@ import {
   BuildTabLoading,
   isBuildRunning,
 } from "../BuildStatusMeta";
+import { GenuinenessCriteriaGuide } from "../GenuinenessCriteriaGuide";
 
 // 필터 옵션: "전체" + 진성 3분류 (라벨은 GENUINENESS_LABELS 단일 출처).
 const FILTER_OPTIONS: { label: string; value: string }[] = [
@@ -506,6 +507,9 @@ export default function GenuinenessTab() {
           />
         ))}
       </div>
+
+      {/* 진성 분류 기준 안내 (토글) — 결과 해석 기준 노출 */}
+      <GenuinenessCriteriaGuide />
 
       {/* 교차검증(verify) 요약 배너 (ADR-026) */}
       {summary.mode === "verify" && (

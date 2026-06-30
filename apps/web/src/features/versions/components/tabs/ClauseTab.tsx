@@ -2,7 +2,6 @@ import { useState, type ReactNode } from "react";
 import {
   FileText,
   Check,
-  ChevronRight,
   Loader2,
   Minus,
   Pencil,
@@ -55,6 +54,7 @@ import {
   isBuildRunning,
 } from "../BuildStatusMeta";
 import ClauseDocDialog from "../ClauseDocDialog";
+import { GuideSection } from "../GuideSection";
 
 // 드릴다운 selector의 "전체" 항목 sentinel key (실제 aspect key와 충돌 방지).
 const ALL_KEY = "__all__";
@@ -640,15 +640,11 @@ export function ClauseTab() {
 
       {/* 절 유형(Aspect) 안내 — 참고 정보라 기본 접힘, 펼치면 카드로 표시 */}
       {taxonomy && taxonomy.aspects.length > 0 && (
-        <details className="group rounded-2xl border border-zinc-100 bg-white px-5 py-3.5 shadow-sm">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm font-bold text-zinc-900 marker:hidden">
-            <ChevronRight className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-90" />
-            절 유형(Aspect) 안내
-            <span className="font-medium text-zinc-400">
-              · {taxonomy.aspects.length}종
-            </span>
-          </summary>
-          <div className="mt-3.5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <GuideSection
+          title="절 유형(Aspect) 안내"
+          meta={`· ${taxonomy.aspects.length}종`}
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {taxonomy.aspects.map((a) => (
               <div
                 key={a.key}
@@ -661,7 +657,7 @@ export function ClauseTab() {
               </div>
             ))}
           </div>
-        </details>
+        </GuideSection>
       )}
 
       {/* Aspect별 감성 분포 (전체 + aspect 드릴다운) */}
