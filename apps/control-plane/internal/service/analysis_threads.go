@@ -110,6 +110,31 @@ func (t *AnalysisThreadService) GetAnalysisThread(projectID, datasetID, threadID
 	return domain.AnalysisThreadDetail{AnalysisThread: thread, Messages: messages}, nil
 }
 
+// UpdateAnalysisThread — thread 제목(title) 수정 (#28, silverone 2026-06-30).
+// project_id+dataset_id+thread_id가 모두 일치하는 thread의 title만 갱신한다.
+// title은 trim 후 비면 400(ErrInvalidArgument), 80 rune 초과는 잘림(analysisTitle —
+// 생성과 동일 규칙). store.SaveAnalysisThread가 upsert라 title+updated_at만 바뀐다.
+// 응답은 갱신 후 재조회한 thread(message_count/last_message 포함).
+func (t *AnalysisThreadService) UpdateAnalysisThread(projectID, datasetID, threadID string, input domain.AnalysisThreadUpdateRequest) (domain.AnalysisThread, error) {
+	title := analysisTitle(input.Title)
+	if title == "" {
+		return domain.AnalysisThread{}, ErrInvalidArgument{Message: "title is required"}
+	}
+	thread, err := t.store.GetAnalysisThread(projectID, datasetID, threadID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return domain.AnalysisThread{}, ErrNotFound{Resource: "analysis thread"}
+		}
+		return domain.AnalysisThread{}, err
+	}
+	thread.Title = title
+	thread.UpdatedAt = time.Now().UTC()
+	if err := t.store.SaveAnalysisThread(thread); err != nil {
+		return domain.AnalysisThread{}, err
+	}
+	return t.store.GetAnalysisThread(projectID, datasetID, threadID)
+}
+
 // DeleteAnalysisThread — thread 단건 삭제 (silverone 2026-06-01, 테스트 정리용).
 // project_id+dataset_id+thread_id가 모두 일치하는 thread만 삭제하며, 일치 row가
 // 없거나 dataset이 다르면 404(ErrNotFound). messages/runs/rejection_events는
