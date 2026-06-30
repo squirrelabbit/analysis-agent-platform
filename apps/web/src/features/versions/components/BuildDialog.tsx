@@ -8,7 +8,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, Play, RotateCw, AlertTriangle } from "lucide-react";
+import { Loader2, Play, RotateCw, AlertTriangle, RefreshCw } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { compactObject } from "@/shared/utils/clean";
@@ -191,6 +191,13 @@ export default function BuildDialog({
             />
           )}
         </div>
+        )}
+        {/* 실행 후 보고서 반영 안내 — 결과는 자동 갱신되지만 보고서는 새로고침이 필요. */}
+        {prereqReady && (
+          <div className="flex items-start gap-1.5 rounded-lg bg-blue-50 px-3 py-2 text-[12px] font-medium text-blue-700">
+            <RefreshCw className="mt-px h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
+            <span>완료 후, 보고서 업데이트를 위해 새로고침을 진행해주세요.</span>
+          </div>
         )}
         <DialogFooter className="flex gap-2">
           <Button variant="outline" onClick={() => setOpen(false)}>

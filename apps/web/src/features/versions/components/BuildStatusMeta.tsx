@@ -1,5 +1,9 @@
-import { Box, Clock, FileText, FileX2, Loader2 } from "lucide-react";
+import { Box, Clock, FileText, FileX2, Loader2, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { formatSecond } from "@/shared/utils/format";
+import { cn } from "@/lib/utils";
+import { buildKeys } from "../api/version.key";
 import type { ProgressType } from "../models/build";
 import type { BuildJobType } from "@/shared/types/common";
 import { buildLabel } from "@/shared/constants/buildLabels";
@@ -85,6 +89,41 @@ export function BuildTimerChip({
   );
 }
 
+// 탭별 새로고침 버튼 — 빌드 결과 쿼리(buildKeys.all, 기초분석보고서 포함)를
+// invalidate해 현재 탭 데이터를 다시 불러온다. 전체 페이지 새로고침(탭 초기화) 없이
+// 결과/보고서를 갱신하기 위함.
+export function BuildRefreshButton({ className }: { className?: string }) {
+  const queryClient = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await queryClient.invalidateQueries({ queryKey: buildKeys.all });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleRefresh}
+      disabled={refreshing}
+      title="이 탭의 결과를 새로고침"
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[12px] font-semibold text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-50",
+        className,
+      )}
+    >
+      <RefreshCw
+        className={cn("h-3.5 w-3.5", refreshing && "animate-spin")}
+        strokeWidth={2}
+      />
+      새로고침
+    </button>
+  );
+}
+
 // 빌드 탭 공통 메타 행: 소요시간(필수) + 프롬프트·모델(applied 있을 때만).
 // clean 단계처럼 applied가 없는 탭은 소요시간 칩만 렌더된다.
 export function BuildMetaBar({
@@ -146,6 +185,8 @@ export function BuildMetaBar({
           </span>
         </>
       )}
+
+      <BuildRefreshButton className="ml-auto" />
     </div>
   );
 }
