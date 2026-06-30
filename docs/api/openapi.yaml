@@ -4438,6 +4438,12 @@ components:
                     type:
                       - string
                       - "null"
+                  source_url:
+                    type: string
+                    description: >
+                      원문 게시글 URL. clean source_json에서 값 전체가 http(s)인 컬럼을
+                      추출(전용 URL/permalink 컬럼). clean join이 없거나 URL 컬럼이 없으면
+                      빈 문자열. 진성 결과 화면에서 정제 텍스트~판별 결과 사이 원문 버튼에 쓴다.
                   final_label:
                     type: ["string", "null"]
                     description: "verify 모드(ADR-026) 권위 라벨. genuineness에도 같은 값이 채워진다(호환). review면 null."
