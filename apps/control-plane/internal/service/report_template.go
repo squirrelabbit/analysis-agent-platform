@@ -288,10 +288,12 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		if ref == "" {
 			return reportBuildRoot{}
 		}
-		// 키워드 정제 사전(silverone 2026-06-25)은 Phase 1에서 키워드 뷰에만 적용한다.
-		// 보고서는 사전 미적용(nil) — 정제 반영이 필요하면 clause_keywords 재빌드(Phase 2).
+		// 키워드 정제 사전(#24) — 보고서도 키워드 뷰와 동일하게 활성 block/synonym을
+		// 조회 overlay로 적용한다. 제외/병합이 재빌드 없이 보고서(감성별 상위 키워드)에
+		// 즉시 반영된다(옛 Phase 1은 nil로 미적용했음). 규칙 조회 실패는 미적용(nil) fallback.
 		// 최신년도 필터(recentYear) — clean에 doc_id JOIN해 최신년도 키워드만 집계.
-		summary, _, _, err := loadClauseKeywordsArtifact(ref, 1, 0, "", "", "", "", nil, recentYearFilters(version, recentYear)...)
+		rules, _ := s.store.ListKeywordDictionaryRules(version.ProjectID, version.DatasetID, true)
+		summary, _, _, err := loadClauseKeywordsArtifact(ref, 1, 0, "", "", "", "", rules, recentYearFilters(version, recentYear)...)
 		if err != nil {
 			return reportBuildRoot{}
 		}

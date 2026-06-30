@@ -25,12 +25,19 @@ class ArtifactPaths:
     - ``clause_keywords`` (optional): clause_keywords jsonl (dataset_clause_keywords
       출력, long-format). 없는 dataset/버전이 대부분이므로 optional — 있을 때만
       ``clause_keywords`` view를 등록한다.
+
+    #24 — ``keyword_block_terms`` / ``keyword_synonym_map``: dataset 단위 키워드 정제
+    사전(block 제외 / synonym 병합)을 clause_keywords view에 overlay로 적용한다. 빈
+    값이면 no-op. control plane이 analyze payload(``keyword_dictionary_rules``)로 넘긴
+    활성 규칙에서 derive한다. frozen 유지를 위해 tuple로 보관(synonym은 (source,target) 쌍).
     """
 
     docs: Path
     clauses: Path
     genuineness: Path
     clause_keywords: Path | None = None
+    keyword_block_terms: tuple[str, ...] = ()
+    keyword_synonym_map: tuple[tuple[str, str], ...] = ()
 
 
 class ExecutorContextError(RuntimeError):
@@ -116,6 +123,11 @@ class ExecutorContext:
         if not resolved.exists():
             return
         literal = self._escape_path_literal(str(resolved.resolve()))
+        # #24 — 정제 사전 overlay. synonym(병합)은 keyword를 대표어로 치환, block(제외)은
+        # WHERE로 행 제거. Go control plane의 buildKeywordDictionarySource와 동일 규칙이라
+        # 키워드 뷰·보고서·채팅이 같은 정제 결과를 본다. 규칙 없으면 평범한 SELECT.
+        keyword_expr = self._keyword_synonym_expr()
+        block_where = self._keyword_block_where()
         self._con.execute(
             f"""
             CREATE OR REPLACE VIEW clause_keywords AS
@@ -125,13 +137,39 @@ class ExecutorContext:
               clause,
               aspect,
               sentiment,
-              keyword,
+              {keyword_expr} AS keyword,
               source,
               extractor_version,
               keyword_rank_in_clause
             FROM read_json('{literal}', format='newline_delimited')
+            {block_where}
             """
         )
+
+    @staticmethod
+    def _quote_term_list(terms: tuple[str, ...]) -> str:
+        return ", ".join("'" + str(t).replace("'", "''") + "'" for t in terms if str(t).strip())
+
+    def _keyword_synonym_expr(self) -> str:
+        """synonym 규칙 → CASE 식(대표어 치환). 없으면 그냥 ``keyword``."""
+        pairs = [(s, t) for s, t in self._artifact_paths.keyword_synonym_map if str(s).strip() and str(t).strip()]
+        if not pairs:
+            return "keyword"
+        by_target: dict[str, list[str]] = {}
+        for source, target in pairs:
+            by_target.setdefault(target, []).append(source)
+        whens = [
+            f"WHEN keyword IN ({self._quote_term_list(tuple(sources))}) THEN '{str(target).replace(chr(39), chr(39) * 2)}'"
+            for target, sources in by_target.items()
+        ]
+        return "CASE " + " ".join(whens) + " ELSE keyword END"
+
+    def _keyword_block_where(self) -> str:
+        """block 규칙 → WHERE 절(행 제거). 없으면 빈 문자열."""
+        blocked = tuple(t for t in self._artifact_paths.keyword_block_terms if str(t).strip())
+        if not blocked:
+            return ""
+        return f"WHERE keyword IS NULL OR keyword NOT IN ({self._quote_term_list(blocked)})"
 
     def _register_genuineness(self) -> None:
         path = self._require_existing(self._artifact_paths.genuineness, "genuineness")

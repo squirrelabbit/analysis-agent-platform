@@ -25,6 +25,9 @@ import (
 type analyzeVersionResolver interface {
 	GetDataset(projectID, datasetID string) (domain.Dataset, error)
 	GetDatasetVersion(projectID, datasetID, versionID string) (domain.DatasetVersion, error)
+	// #24 — clause_keywords 정제 사전(block/synonym)을 analyze 시점에 overlay로
+	// 적용하기 위한 dataset 단위 활성 규칙 조회. 실패는 best-effort(미적용).
+	ListKeywordDictionaryRules(projectID, datasetID string, activeOnly bool) ([]domain.KeywordDictionaryRule, error)
 }
 
 type AnalyzeService struct {

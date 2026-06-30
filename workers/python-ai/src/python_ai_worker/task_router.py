@@ -12,7 +12,7 @@ silverone 2026-05-21 δ (old plan layer 제거): rule trigger/sequence 기반 pl
       응답 body의 `plan_version: "v2"`는 wire version 의미라 유지.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .dataset_build import (
@@ -230,6 +230,19 @@ def _run_analyze(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("analyze payload 'plan' must be an object")
 
     artifact_paths = coerce_artifact_paths_payload(payload.get("artifact_paths"))
+    # #24 — clause_keywords 정제 사전(block/synonym)을 executor clause_keywords view에
+    # overlay로 적용. control plane이 active 규칙을 넘긴 경우만. artifact_paths가 없거나
+    # clause_keywords가 없으면 의미 없으므로 그대로 둔다.
+    if artifact_paths is not None:
+        block_terms, synonym_map = _coerce_keyword_dictionary_rules(
+            payload.get("keyword_dictionary_rules")
+        )
+        if block_terms or synonym_map:
+            artifact_paths = replace(
+                artifact_paths,
+                keyword_block_terms=block_terms,
+                keyword_synonym_map=synonym_map,
+            )
     docs_extra_columns = _coerce_docs_extra_columns(payload.get("docs_extra_columns"))
     conversation_context = _coerce_conversation_context(payload.get("conversation_context"))
 
@@ -401,6 +414,34 @@ def _run_plan(payload: dict[str, Any]) -> dict[str, Any]:
         step_count=len((result.get("plan") or {}).get("steps") or []),
     )
     return result
+
+
+def _coerce_keyword_dictionary_rules(
+    payload: Any,
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
+    """#24 — analyze payload의 ``keyword_dictionary_rules``를 (block terms, synonym 쌍)으로
+    파싱. block은 source_term, synonym은 (source_term, target_term). active=false나
+    형식 불량은 조용히 skip(best-effort overlay). 빈 payload면 둘 다 빈 tuple."""
+    if not isinstance(payload, list):
+        return (), ()
+    block: list[str] = []
+    synonym: list[tuple[str, str]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        if item.get("active") is False:
+            continue
+        rule_type = str(item.get("rule_type") or "").strip()
+        source = str(item.get("source_term") or "").strip()
+        if not source:
+            continue
+        if rule_type == "block":
+            block.append(source)
+        elif rule_type == "synonym":
+            target = str(item.get("target_term") or "").strip()
+            if target and target != source:
+                synonym.append((source, target))
+    return tuple(block), tuple(synonym)
 
 
 def _coerce_docs_extra_columns(payload: Any) -> list[DatasetSpecificColumn] | None:
