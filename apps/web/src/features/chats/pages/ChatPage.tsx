@@ -72,6 +72,8 @@ export function ChatPage() {
   // 보고서 패널 — 결과/기초분석 섹션을 스테이지에 모아 편집 후 한 번에 보고서 문서 생성.
   const panel = useReportPanel();
   const createReport = useCreateReportFromPanel(projectId);
+  // 진행 중인 저장 액션 — "save"(저장만) / "open"(저장 후 이동) / null. 버튼별 스피너용.
+  const [savingAction, setSavingAction] = useState<"save" | "open" | null>(null);
   // 기초분석 가져오기 — 선택한 데이터셋의 active version 기초분석을 블록으로 적재.
   const activeVersionId = useMemo(
     () =>
@@ -368,8 +370,32 @@ export function ChatPage() {
     }
   }
 
-  async function handleCreateReport() {
+  // 저장(머무름): 보고서에 추가한 내용만 저장하고 채팅 화면에 남는다(유실 방지).
+  // 저장 성공 후 markSaved로 보고서 id를 기억해 다음 저장이 갱신(PUT)이 되게 한다.
+  async function handleSaveReport() {
     setErrorMsg(null);
+    setSavingAction("save");
+    try {
+      const doc = await createReport.create(
+        {
+          staged: panel.staged,
+          reportTitle: panel.reportTitle,
+          loadedReportId: panel.loadedReportId,
+        },
+        { navigate: false },
+      );
+      if (doc) panel.markSaved(doc.report_id);
+    } catch (err) {
+      setErrorMsg(extractErrorMessage(err));
+    } finally {
+      setSavingAction(null);
+    }
+  }
+
+  // 저장 후 이동: 저장과 동시에 보고서 에디터로 이동(navigate).
+  async function handleSaveAndOpen() {
+    setErrorMsg(null);
+    setSavingAction("open");
     try {
       await createReport.create({
         staged: panel.staged,
@@ -379,6 +405,8 @@ export function ChatPage() {
       // 성공 시 에디터로 이동(navigate)되므로 별도 토스트 없음.
     } catch (err) {
       setErrorMsg(extractErrorMessage(err));
+    } finally {
+      setSavingAction(null);
     }
   }
 
@@ -581,16 +609,19 @@ export function ChatPage() {
           reportsLoading={reportsQuery.isLoading || loadReportMut.isPending}
           onSelectExisting={handleSelectExisting}
           onNewReport={handleNewReport}
-          onSave={handleCreateReport}
-          saving={createReport.isPending}
+          onSave={handleSaveReport}
+          onSaveAndOpen={handleSaveAndOpen}
+          savingAction={savingAction}
           templateLoading={loadTemplate.isPending}
         />
       </ResizablePanel>
       </ResizablePanelGroup>
 
-      {/* 미저장 보고서 편집 경고 — 스테이지에 담긴 블록이 있고, 보고서 생성으로 인한
-          의도된 이동이 아닐 때만 활성화한다. */}
-      <UnsavedReportGuard active={panel.count > 0 && !createReport.isPending} />
+      {/* 미저장 보고서 편집 경고 — 스테이지에 담긴 블록이 있고 마지막 저장 이후 변경
+          (dirty)이 있을 때만 활성화. 저장(머무름) 직후엔 dirty=false라 경고하지 않는다. */}
+      <UnsavedReportGuard
+        active={panel.count > 0 && panel.dirty && savingAction === null}
+      />
 
       <ChatToast message={toast.msg} visible={toast.visible} tone={toast.tone} />
     </div>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
+  ExternalLink,
   FileText,
   Loader2,
   Pencil,
@@ -24,8 +25,12 @@ interface ReportPanelProps {
   reportsLoading: boolean;
   onSelectExisting: (reportId: string) => void;
   onNewReport: () => void;
+  /** 저장(머무름): 보고서에 추가한 내용만 저장하고 채팅 화면에 남는다. */
   onSave: () => void;
-  saving: boolean;
+  /** 저장 후 이동: 저장과 동시에 보고서 에디터로 이동. */
+  onSaveAndOpen: () => void;
+  /** 진행 중인 저장 액션(버튼별 스피너용). null=대기. */
+  savingAction: "save" | "open" | null;
   templateLoading: boolean;
 }
 
@@ -41,9 +46,12 @@ export default function ReportPanel({
   onSelectExisting,
   onNewReport,
   onSave,
-  saving,
+  onSaveAndOpen,
+  savingAction,
   templateLoading,
 }: ReportPanelProps) {
+  // 둘 중 하나라도 진행 중이면 버튼 전체 비활성화.
+  const saving = savingAction !== null;
   const {
     staged,
     panelOpen,
@@ -385,21 +393,43 @@ export default function ReportPanel({
               >
                 <X className="h-4 w-4" />
               </button>
+              {/* 저장(머무름): 보고서에 추가한 내용만 저장하고 채팅에 남는다(유실 방지). */}
               <button
                 type="button"
                 onClick={onSave}
                 disabled={saving}
+                title="채팅 화면에 머무르며 저장"
+                className="flex h-10 flex-1 items-center justify-center gap-1.75 rounded-xl border border-violet-200 bg-violet-50 text-[13.5px] font-bold text-violet-700 transition hover:bg-violet-100 disabled:opacity-60"
+              >
+                {savingAction === "save" ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    저장 중…
+                  </>
+                ) : (
+                  <>
+                    <FileText className="h-4 w-4" />
+                    저장
+                  </>
+                )}
+              </button>
+              {/* 저장 후 이동: 저장과 동시에 보고서 에디터로 이동. */}
+              <button
+                type="button"
+                onClick={onSaveAndOpen}
+                disabled={saving}
+                title="저장하고 보고서 화면으로 이동"
                 className="flex h-10 flex-1 items-center justify-center gap-1.75 rounded-xl bg-violet-600 text-[13.5px] font-bold text-white transition hover:bg-violet-700 disabled:opacity-60"
               >
-                {saving ? (
+                {savingAction === "open" ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
                     {loadedReportId ? "저장 중…" : "만드는 중…"}
                   </>
                 ) : (
                   <>
-                    <FileText className="h-4 w-4" />
-                    {loadedReportId ? "보고서 저장" : "보고서 만들기"}
+                    <ExternalLink className="h-4 w-4" />
+                    저장 후 이동
                   </>
                 )}
               </button>
