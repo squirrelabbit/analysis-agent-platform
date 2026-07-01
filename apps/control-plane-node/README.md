@@ -28,10 +28,23 @@ DATABASE_URL='postgresql://platform:platform@127.0.0.1:15432/analysis_support' P
 표현 다름. 원인: pg가 timestamptz를 JS `Date`(ms)로 반환. **해결법**: pg 타입 파서로 timestamptz(OID 1184)를
 문자열 passthrough → Go 포맷 정합. (계약-parity 게이트에서 처리)
 
-### ⬜ 다음 PoC 증분 (남은 큰 미지수)
-- **@temporalio/client** ↔ Python workflow 상호운용 (dataset build 트리거 1콜)
-- Python worker HTTP 프록시 1콜 (analyze 등)
-- reverse-proxy로 포팅 경로만 Node 라우팅 (strangler cutover 골격)
+### ✅ 2단계 — Temporal 상호운용 de-risk (완료, 최대 미지수 해소)
+`src/poc/temporal-check.ts` (실행: `node dist/poc/temporal-check.js`). 아무것도 새로 안 띄우고
+기존 Go 워크플로를 읽어 검증:
+- describeTaskQueue(`analysis-support-build`) → **Go temporal-worker 폴러 확인** (Node↔server↔Go worker 동일 채널)
+- Go가 start한 `dataset.build.v1` 실행 목록 조회 (Node가 Go 워크플로 상태 읽음)
+- **시작 입력 페이로드 Go→Node byte-perfect 디코딩** (`DatasetBuildWorkflowInput` = job_id/build_type/...) →
+  **payload 상호운용 확정.** Node client가 같은 JSON으로 start하면 기존 Go worker가 실행(strangler 공존).
+
+**스코프 발견**: 워크플로+5개 액티비티는 **Go temporal-worker**에 있다(Python 아님). 액티비티가 Python
+worker를 HTTP 호출. 따라서 전체 마이그레이션은 control-plane + temporal-worker 둘 다 포함 — 단 strangler로
+Go worker는 후순위, Node control-plane(client)부터 간다.
+
+### ⬜ 다음 증분
+- Node client가 실제로 워크플로 **start**(build 트리거 엔드포인트 포팅) — payload interop 증명됐으니 저위험
+- Python worker HTTP 프록시 1콜 (analyze)
+- reverse-proxy strangler 라우팅 (포팅 경로만 Node)
+- (후순위) Go temporal-worker(workflow+activities) → Node worker
 
 ## 구조
 ```
