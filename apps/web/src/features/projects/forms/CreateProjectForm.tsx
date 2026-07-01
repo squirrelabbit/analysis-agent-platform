@@ -44,10 +44,13 @@ export default function CreateProjectForm({
   formId,
   onSubmit,
   onSuccess,
+  defaultValues,
 }: {
   formId: string;
   onSubmit: (data: CreateProjectRequest) => Promise<void>;
   onSuccess: () => void;
+  // 수정 진입점에서 기존 프로젝트 값을 프리필할 때 넘긴다. 미지정 시 빈 폼(생성).
+  defaultValues?: ProjectFormValues;
 }) {
   const {
     register,
@@ -56,7 +59,12 @@ export default function CreateProjectForm({
     formState: { errors },
   } = useForm<ProjectFormValues>({
     resolver: zodResolver(projectSchema),
-    defaultValues: { name: "", description: "", festivalName: "", periods: [] },
+    defaultValues: defaultValues ?? {
+      name: "",
+      description: "",
+      festivalName: "",
+      periods: [],
+    },
   });
 
   const { fields, append, remove } = useFieldArray({ control, name: "periods" });

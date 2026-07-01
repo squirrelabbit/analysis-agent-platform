@@ -8,6 +8,8 @@ export interface ProjectResponse {
   prompt_count: number,
   analysis_thread_count: number,
   created_at: string,
+  // 상세 조회(GET /projects/{id})에서만 내려온다. 목록 항목에는 없다.
+  metadata?: ProjectMetadata,
 }
 
 export interface ProjectListResponse {
@@ -36,5 +38,12 @@ export interface ProjectMetadata {
 export interface CreateProjectRequest {
   name: string,
   description: string,
+  metadata?: ProjectMetadata,
+}
+
+// PATCH /projects/{id} — non-nil 필드만 반영. metadata는 백엔드에서 key 단위 merge.
+export interface UpdateProjectRequest {
+  name?: string,
+  description?: string,
   metadata?: ProjectMetadata,
 }
