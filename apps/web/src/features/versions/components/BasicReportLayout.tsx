@@ -140,8 +140,10 @@ function PeriodTablePanel({ data }: { data: PeriodTableData }) {
     return <div className="text-[12.5px] text-zinc-400">축제 기간이 설정되지 않았습니다.</div>;
   }
   const rangeText = (r: PeriodTableData["rows"][number]): string => {
-    const start = r.open_start ? "데이터 시작" : r.start_ymd;
-    const end = r.open_end ? "데이터 끝" : r.end_ymd;
+    // 개방형 경계는 백엔드가 실제 데이터 시작/끝 날짜를 채워 준다. 날짜가 있으면 그대로
+    // 쓰고, 비어 있을 때(데이터에 날짜 컬럼이 없음)만 "데이터 시작/끝"으로 대체한다.
+    const start = r.start_ymd || (r.open_start ? "데이터 시작" : "");
+    const end = r.end_ymd || (r.open_end ? "데이터 끝" : "");
     return `${start} ~ ${end}`;
   };
   const badgeCls: Record<string, string> = {

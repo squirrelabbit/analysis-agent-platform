@@ -105,7 +105,8 @@ func TestAnalysisPeriodsView_DerivesAndSorts(t *testing.T) {
 		{"year": 2024, "festival_start": "2024-08-15", "festival_end": "2024-08-17"},
 		{"year": 2025, "festival_start": "2025-08-15", "festival_end": "2025-08-17", "before_days": 3, "after_days": 5},
 	}
-	got := analysisPeriodsView(periods)
+	// dataStart/dataEnd 미지정("") — 개방형 경계는 빈 값으로 남는다(기존 계약).
+	got := analysisPeriodsView(periods, "", "")
 	// 연도 내림차순 + during/before/after → 각 연도 3구간 = 6.
 	if len(got) != 6 {
 		t.Fatalf("len = %d, want 6", len(got))
@@ -135,6 +136,51 @@ func TestAnalysisPeriodsView_DerivesAndSorts(t *testing.T) {
 	}
 	if got[5]["start_ymd"] != "2024-08-18" || got[5]["end_ymd"] != "" {
 		t.Fatalf("2024 after(open) = %v~%v, want 08-18~''", got[5]["start_ymd"], got[5]["end_ymd"])
+	}
+}
+
+// 개방형 경계에 실제 데이터 시작/끝 날짜가 채워지고 open 플래그가 표시되는지.
+func TestAnalysisPeriodsView_FillsOpenBoundaryWithDataDates(t *testing.T) {
+	periods := []map[string]any{
+		{"year": 2026, "festival_start": "2026-08-01", "festival_end": "2026-08-03"},
+	}
+	got := analysisPeriodsView(periods, "2026-06-01", "2026-09-30")
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	// before(개방형): start = 데이터 시작(2026-06-01), open_start=true, end = start-1일.
+	before := got[1]
+	if before["period"] != "before" {
+		t.Fatalf("row1 period = %v, want before", before["period"])
+	}
+	if before["start_ymd"] != "2026-06-01" || before["end_ymd"] != "2026-07-31" {
+		t.Fatalf("before = %v~%v, want 2026-06-01~2026-07-31", before["start_ymd"], before["end_ymd"])
+	}
+	if before["open_start"] != true {
+		t.Fatalf("before open_start should be true")
+	}
+	// after(개방형): end = 데이터 끝(2026-09-30), open_end=true, start = end+1일.
+	after := got[2]
+	if after["start_ymd"] != "2026-08-04" || after["end_ymd"] != "2026-09-30" {
+		t.Fatalf("after = %v~%v, want 2026-08-04~2026-09-30", after["start_ymd"], after["end_ymd"])
+	}
+	if after["open_end"] != true {
+		t.Fatalf("after open_end should be true")
+	}
+
+	// periodTableData는 경계에 날짜가 있어도 명시 open 플래그를 유지해야 한다.
+	table := periodTableData(got)
+	rows, _ := table["rows"].([]any)
+	if len(rows) != 3 {
+		t.Fatalf("table rows = %d, want 3", len(rows))
+	}
+	brow := rows[1].(map[string]any)
+	if brow["open_start"] != true || brow["start_ymd"] != "2026-06-01" {
+		t.Fatalf("table before = open_start %v start %v", brow["open_start"], brow["start_ymd"])
+	}
+	arow := rows[2].(map[string]any)
+	if arow["open_end"] != true || arow["end_ymd"] != "2026-09-30" {
+		t.Fatalf("table after = open_end %v end %v", arow["open_end"], arow["end_ymd"])
 	}
 }
 

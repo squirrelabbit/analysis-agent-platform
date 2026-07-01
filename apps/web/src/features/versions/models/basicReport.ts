@@ -73,10 +73,10 @@ export interface PeriodRow {
   year: number;
   period: string; // before | during | after
   period_label: string; // 축제 전/기간/후
-  start_ymd: string; // "" = 개방형(데이터 시작)
-  end_ymd: string; // "" = 개방형(데이터 끝)
-  open_start: boolean;
-  open_end: boolean;
+  start_ymd: string; // 개방형이면 실제 데이터 시작일(날짜 컬럼 없으면 "")
+  end_ymd: string; // 개방형이면 실제 데이터 끝일(날짜 컬럼 없으면 "")
+  open_start: boolean; // true = 데이터 시작 경계(고정 축제 전 N일이 아님)
+  open_end: boolean; // true = 데이터 끝 경계
   days?: number; // 전/후 ±N일(설정 시)
 }
 export interface PeriodTableData {

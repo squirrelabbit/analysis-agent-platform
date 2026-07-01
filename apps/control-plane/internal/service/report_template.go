@@ -218,9 +218,21 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 			dataset = ds
 			datasetName = ds.Name
 		}
+		cleanRef := reportArtifactRef(version.Metadata, "clean_uri", "cleaned_ref")
+		if cleanRef == "" && version.CleanURI != nil {
+			cleanRef = strings.TrimSpace(*version.CleanURI)
+		}
+		// 원본 게시일 min/max(단일 스캔) — 분석기간 개방형 경계(데이터 시작/끝)와
+		// 개요 "분석 기간" 문자열이 공유한다. 날짜 컬럼이 없으면 둘 다 빈 값.
+		dataStart, dataEnd := "", ""
+		if reportCleanReady(version) && cleanRef != "" {
+			if lo, hi, err := loadDataPeriod(cleanRef); err == nil {
+				dataStart, dataEnd = lo, hi
+			}
+		}
 		period := metadataString(version.Metadata, "data_period", "")
 		if period == "" {
-			period = s.reportDataPeriod(version) // 원본 데이터의 게시일 범위
+			period = formatDataPeriodRange(dataStart, dataEnd) // 원본 데이터의 게시일 범위
 		}
 		model := metadataString(version.Metadata, "clause_label_model", metadataString(version.Metadata, "doc_genuineness_model", ""))
 		if model == "" {
@@ -239,10 +251,6 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		if subject == "" {
 			subject = datasetName
 		}
-		cleanRef := reportArtifactRef(version.Metadata, "clean_uri", "cleaned_ref")
-		if cleanRef == "" && version.CleanURI != nil {
-			cleanRef = strings.TrimSpace(*version.CleanURI)
-		}
 		return reportBuildRoot{root: map[string]any{
 			"dataset_name":  datasetName,
 			"version_label": metadataString(version.Metadata, "version_label", ""),
@@ -250,7 +258,7 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 			"lloa_model":    model,
 			// #31
 			"analysis_subject":    subject,
-			"analysis_periods":    analysisPeriodsView(festPeriods),
+			"analysis_periods":    analysisPeriodsView(festPeriods, dataStart, dataEnd),
 			"collection_channels": loadCollectionValues(cleanRef, collectionChannelCandidates, false),
 			"collection_keywords": loadCollectionValues(cleanRef, collectionKeywordCandidates, true),
 			"type_definitions":    loadTypeDefinitions(resolveReportTaxonomyID(version, dataset)),
@@ -497,25 +505,14 @@ func (s *DatasetService) reportPreprocessModels(metadata map[string]any) string 
 	return strings.Join(order, ", ")
 }
 
-// reportDataPeriod — 분석 개요의 "분석 기간"용. clean이 보존한 source_json의 원본 날짜
-// 컬럼(게시일/작성일/…) 범위를 min~max로. 날짜 컬럼명은 데이터셋마다 다르므로 후보 자동
-// 선택, "Invalid date--" 같은 더러운 값은 TRY_CAST로 거른다.
-func (s *DatasetService) reportDataPeriod(version domain.DatasetVersion) string {
-	if !reportCleanReady(version) {
+// formatDataPeriodRange — 원본 게시일 min/max를 "lo ~ hi"(또는 단일 lo)로. 분석 개요의
+// "분석 기간" 문자열에 쓴다. lo가 없으면 빈 문자열. min/max 산출은 loadDataPeriod가
+// clean source_json의 날짜 컬럼(게시일/작성일/…) 후보 자동선택 + TRY_CAST로 담당한다.
+func formatDataPeriodRange(lo, hi string) string {
+	if strings.TrimSpace(lo) == "" {
 		return ""
 	}
-	cleanRef := reportArtifactRef(version.Metadata, "clean_uri", "cleaned_ref")
-	if cleanRef == "" && version.CleanURI != nil {
-		cleanRef = strings.TrimSpace(*version.CleanURI)
-	}
-	if cleanRef == "" {
-		return ""
-	}
-	lo, hi, err := loadDataPeriod(cleanRef)
-	if err != nil || lo == "" {
-		return ""
-	}
-	if hi == "" || hi == lo {
+	if strings.TrimSpace(hi) == "" || hi == lo {
 		return lo
 	}
 	return lo + " ~ " + hi
@@ -1013,14 +1010,24 @@ func periodTableData(node any) map[string]any {
 		period, _ := m["period"].(string)
 		start, _ := m["start_ymd"].(string)
 		end, _ := m["end_ymd"].(string)
+		// 개방형 여부는 명시 플래그 우선(경계에 실제 데이터 날짜가 채워져도 유지),
+		// 없으면 빈 경계로 파생(하위호환).
+		openStart := strings.TrimSpace(start) == ""
+		if v, ok := m["open_start"].(bool); ok && v {
+			openStart = true
+		}
+		openEnd := strings.TrimSpace(end) == ""
+		if v, ok := m["open_end"].(bool); ok && v {
+			openEnd = true
+		}
 		row := map[string]any{
 			"year":         year,
 			"period":       period,
 			"period_label": labelFor[period],
 			"start_ymd":    start,
 			"end_ymd":      end,
-			"open_start":   strings.TrimSpace(start) == "",
-			"open_end":     strings.TrimSpace(end) == "",
+			"open_start":   openStart,
+			"open_end":     openEnd,
 		}
 		if days, ok := anyToInt(m["days"]); ok && days > 0 {
 			row["days"] = days
@@ -1260,11 +1267,15 @@ func festivalMeta(project domain.Project) (string, []map[string]any) {
 // analysisPeriodsView — 저장된 축제기간(during) + ±N일에서 화면용 before/during/after
 // 구간을 파생한다(2026-07-01 재설계). 연도 내림차순 + during→before→after 정렬.
 //   - during: festival_start ~ festival_end
-//   - before: before_days>0 이면 [start-N, start-1일], 아니면 개방형(end만 start-1일, start="")
-//   - after : after_days>0 이면 [end+1일, end+N], 아니면 개방형(start만 end+1일, end="")
-// 개방형(N 미설정)은 boundary를 ""로 두어 프론트가 "~"로 표기한다. days는 before/after에만
+//   - before: before_days>0 이면 [start-N, start-1일], 아니면 개방형(end만 start-1일,
+//     start=dataStart = 원본 데이터의 최소 게시일)
+//   - after : after_days>0 이면 [end+1일, end+N], 아니면 개방형(start만 end+1일,
+//     end=dataEnd = 원본 데이터의 최대 게시일)
+// 개방형(N 미설정) 경계는 dataStart/dataEnd(실제 데이터 시작/끝 날짜)로 채우고 open_start/
+// open_end 플래그로 "데이터 경계"임을 표시한다. dataStart/dataEnd가 빈 값(날짜 컬럼 없음)이면
+// 경계도 빈 값으로 두어 프론트가 "데이터 시작/끝"으로 표기한다. days는 before/after에만
 // 실어 준다(0=개방형). 실제 날짜 산출은 백엔드가 하고 프론트는 렌더만 한다(재계산 금지).
-func analysisPeriodsView(periods []map[string]any) []map[string]any {
+func analysisPeriodsView(periods []map[string]any, dataStart, dataEnd string) []map[string]any {
 	const dayFmt = "2006-01-02"
 	type row struct {
 		year  int
@@ -1301,7 +1312,8 @@ func analysisPeriodsView(periods []map[string]any) []map[string]any {
 		if beforeDays > 0 {
 			beforeEntry["start_ymd"] = startT.AddDate(0, 0, -beforeDays).Format(dayFmt)
 		} else {
-			beforeEntry["start_ymd"] = "" // 개방형: 데이터 시작
+			beforeEntry["start_ymd"] = dataStart // 개방형: 데이터 시작(실제 최소 게시일, 없으면 "")
+			beforeEntry["open_start"] = true
 		}
 		add(year, 1, beforeEntry)
 		// after
@@ -1313,7 +1325,8 @@ func analysisPeriodsView(periods []map[string]any) []map[string]any {
 		if afterDays > 0 {
 			afterEntry["end_ymd"] = endT.AddDate(0, 0, afterDays).Format(dayFmt)
 		} else {
-			afterEntry["end_ymd"] = "" // 개방형: 데이터 끝
+			afterEntry["end_ymd"] = dataEnd // 개방형: 데이터 끝(실제 최대 게시일, 없으면 "")
+			afterEntry["open_end"] = true
 		}
 		add(year, 2, afterEntry)
 	}
