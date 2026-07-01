@@ -46,10 +46,17 @@ number → "8940"          code → 모노          text → 그대로(+sub)
 | `table` | 위 분포 data를 표로 (또는 `{columns,rows}`) | 차트 옆 표 |
 | `stacked_bar` | `{ categories:[{key,label,total}], series:[{key,label, counts[], percents[]}] }` | 유형별 감성(100% 누적) |
 | `rank` | `{ items:[{rank,label, value}] }` | 유형별 긍정/부정 순위, 키워드 |
+| `period_table` | `{ rows:[{year, period, period_label, start_ymd, end_ymd, open_start, open_end, days?}] }` | 분석 개요 — 축제 전/기간/후 기간표 (#31) |
+| `tag_list` | `{ items:[string] }` | 분석 개요 — 수집 채널/키워드 chip (#31) |
+| `definition_list` | `{ items:[{term, description}] }` | 분석 개요 — 유형 정의 (#31) |
 | `text` | `{ markdown }` | 설명 |
 
 - `bar`= 한 방향 막대(값 1개). `rank`= 순위 1열. (좌우 양방향 `diverging`은 이 디자인 미사용 — 필요 시 후속 추가.)
 - 색은 프론트가 `key`로 매핑. 분포는 count·percent 둘 다 실어 줌(주 축=`value_format`).
+- `period_table` (#31): 축제 메타(project.metadata.festival)의 during + ±N일에서 백엔드가
+  before/during/after 날짜를 파생. `open_start`/`open_end`=true면 그 경계는 개방형(±N일
+  미설정 → 데이터 시작/끝)이라 프론트는 "데이터 시작/끝"으로 표기하고 `start_ymd`/`end_ymd`는
+  ""다. `days`는 ±N일 설정 시에만 실린다.
 
 ---
 

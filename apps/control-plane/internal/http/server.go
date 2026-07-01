@@ -132,6 +132,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /projects", s.handleListProjects)
 	s.mux.HandleFunc("GET /projects/{project_id}", s.handleGetProject)
+	s.mux.HandleFunc("PATCH /projects/{project_id}", s.handleUpdateProject)
 	s.mux.HandleFunc("DELETE /projects/{project_id}", s.handleDeleteProject)
 	s.mux.HandleFunc("GET /projects/{project_id}/prompts", s.handleListProjectPrompts)
 	s.mux.HandleFunc("POST /projects/{project_id}/prompts", s.handleSaveProjectPrompt)
@@ -426,6 +427,21 @@ func appendVary(header stdhttp.Header, value string) {
 func (s *Server) handleGetProject(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	projectID := r.PathValue("project_id")
 	project, err := s.projectService.GetProject(projectID)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, project)
+}
+
+// handleUpdateProject — PATCH /projects/{pid}. 이름/설명/메타(축제) 수정. non-nil 필드만.
+func (s *Server) handleUpdateProject(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	var payload domain.ProjectUpdateRequest
+	if err := decodeJSON(r, &payload); err != nil {
+		writeError(w, stdhttp.StatusBadRequest, err.Error())
+		return
+	}
+	project, err := s.projectService.UpdateProject(r.PathValue("project_id"), payload)
 	if err != nil {
 		s.writeServiceError(w, err)
 		return

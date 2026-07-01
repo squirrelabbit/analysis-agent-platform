@@ -17,3 +17,12 @@ export const useProjectDetail = (projectId: string) =>
     enabled: !!projectId,
     select: mapProject,
   });
+
+// 수정 폼 프리필용 — metadata(축제)까지 포함한 원본 응답을 그대로 쓴다.
+// useProjectDetail과 같은 캐시 키를 공유하되 select만 다르다.
+export const useProjectRaw = (projectId: string, enabled = true) =>
+  useQuery({
+    queryKey: projectKeys.detail(projectId),
+    queryFn: () => projectsApi.getProjectById(projectId),
+    enabled: enabled && !!projectId,
+  });

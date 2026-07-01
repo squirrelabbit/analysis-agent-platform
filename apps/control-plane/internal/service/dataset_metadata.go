@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -459,6 +460,186 @@ func metadataNestedString(metadata map[string]any, key, field string) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+// ── 축제 메타데이터(#31) ──────────────────────────────────────────────────────
+// project.metadata.festival = {name, periods:[{year, festival_start, festival_end,
+//   before_days?, after_days?}]}.
+// 보고서 분석 개요(분석 대상/기간)와 후속 채팅 날짜 해석의 단일 source. 물리 테이블 없이
+// project.metadata 인라인 저장(dataset.metadata.taxonomy_id와 동일 패턴).
+//
+// 데이터 모델(2026-07-01 재설계): 연도별로 "축제기간(during)" start~end만 필수 입력하고,
+// 축제 전/후는 명시 날짜가 아니라 ±N일(before_days/after_days) 창으로 파생한다. N을 안 주면
+// 전/후는 데이터 기준 개방형(축제기간 앞/뒤 전부)이다. before/during/after 날짜 파생은
+// report engine(analysisPeriodsView)이 담당하고, 저장 계약엔 원본(during + N)만 둔다.
+//
+// 축제(=period 단위 enum)의 화면 표기(축제전/기간/후)는 프론트가 담당.
+
+const (
+	festivalPeriodBefore = "before"
+	festivalPeriodDuring = "during"
+	festivalPeriodAfter  = "after"
+)
+
+// normalizeProjectMetadata — 프로젝트 메타데이터를 정규화한다. 현재는 festival만 검증한다
+// (있을 때만). 다른 key는 그대로 통과. nil이면 빈 map.
+func normalizeProjectMetadata(meta map[string]any) (map[string]any, error) {
+	if meta == nil {
+		return map[string]any{}, nil
+	}
+	out := map[string]any{}
+	for k, v := range meta {
+		out[k] = v
+	}
+	if raw, ok := out["festival"]; ok && raw != nil {
+		normalized, err := normalizeFestivalMetadata(raw)
+		if err != nil {
+			return nil, err
+		}
+		out["festival"] = normalized
+	}
+	return out, nil
+}
+
+// normalizeFestivalMetadata — festival 메타데이터를 검증·정규화한다. name 필수, periods는
+// 0개 이상(연도별 점진 입력 허용). 연도별 축제기간(festival_start~festival_end) YYYY-MM-DD
+// 검증 + start<=end + 날짜 연도 일치 + 연도 중복 금지. before_days/after_days는 선택(>=1일
+// 때만 저장, 그 외 미설정=개방형). 실패 시 ErrInvalidArgument.
+func normalizeFestivalMetadata(raw any) (map[string]any, error) {
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return nil, ErrInvalidArgument{Message: "festival must be an object"}
+	}
+	name := ""
+	if v, ok := obj["name"].(string); ok {
+		name = strings.TrimSpace(v)
+	}
+	if name == "" {
+		return nil, ErrInvalidArgument{Message: "festival.name is required"}
+	}
+
+	rawPeriods, _ := obj["periods"].([]any)
+	periods := make([]map[string]any, 0, len(rawPeriods))
+	seenYear := map[int]bool{}
+	for i, rp := range rawPeriods {
+		pm, ok := rp.(map[string]any)
+		if !ok {
+			return nil, ErrInvalidArgument{Message: fmt.Sprintf("festival.periods[%d] must be an object", i)}
+		}
+		year, err := normalizeFestivalYear(pm["year"])
+		if err != nil {
+			return nil, ErrInvalidArgument{Message: fmt.Sprintf("festival.periods[%d].year: %s", i, err.Error())}
+		}
+		if seenYear[year] {
+			return nil, ErrInvalidArgument{Message: fmt.Sprintf("festival.periods: year %d is duplicated (one entry per year)", year)}
+		}
+		seenYear[year] = true
+
+		start, startT, err := normalizeYMD(pm["festival_start"])
+		if err != nil {
+			return nil, ErrInvalidArgument{Message: fmt.Sprintf("festival.periods[%d].festival_start: %s", i, err.Error())}
+		}
+		end, endT, err := normalizeYMD(pm["festival_end"])
+		if err != nil {
+			return nil, ErrInvalidArgument{Message: fmt.Sprintf("festival.periods[%d].festival_end: %s", i, err.Error())}
+		}
+		if endT.Before(startT) {
+			return nil, ErrInvalidArgument{Message: fmt.Sprintf("festival.periods[%d]: festival_end must be >= festival_start", i)}
+		}
+		if startT.Year() != year || endT.Year() != year {
+			return nil, ErrInvalidArgument{Message: fmt.Sprintf("festival.periods[%d]: festival_start/end year must match year %d", i, year)}
+		}
+
+		entry := map[string]any{
+			"year":           year,
+			"festival_start": start,
+			"festival_end":   end,
+		}
+		beforeDays, err := normalizeFestivalDays(pm["before_days"])
+		if err != nil {
+			return nil, ErrInvalidArgument{Message: fmt.Sprintf("festival.periods[%d].before_days: %s", i, err.Error())}
+		}
+		if beforeDays > 0 {
+			entry["before_days"] = beforeDays
+		}
+		afterDays, err := normalizeFestivalDays(pm["after_days"])
+		if err != nil {
+			return nil, ErrInvalidArgument{Message: fmt.Sprintf("festival.periods[%d].after_days: %s", i, err.Error())}
+		}
+		if afterDays > 0 {
+			entry["after_days"] = afterDays
+		}
+		periods = append(periods, entry)
+	}
+	return map[string]any{"name": name, "periods": periods}, nil
+}
+
+// normalizeFestivalYear — JSON number(float64)/int/문자열("2025"/"2025년")을 int 연도로.
+func normalizeFestivalYear(v any) (int, error) {
+	switch t := v.(type) {
+	case float64:
+		return int(t), nil
+	case int:
+		return t, nil
+	case int64:
+		return int(t), nil
+	case string:
+		s := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(t), "년"))
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, fmt.Errorf("invalid year %q", t)
+		}
+		return n, nil
+	default:
+		return 0, fmt.Errorf("year is required")
+	}
+}
+
+// normalizeFestivalDays — 전/후 ±N일. 없음/null/0 이하는 0(미설정=개방형)으로, 그 외 음수는
+// 오류. JSON number(float64)/int/문자열("3") 허용.
+func normalizeFestivalDays(v any) (int, error) {
+	if v == nil {
+		return 0, nil
+	}
+	var n int
+	switch t := v.(type) {
+	case float64:
+		n = int(t)
+	case int:
+		n = t
+	case int64:
+		n = int(t)
+	case string:
+		s := strings.TrimSpace(t)
+		if s == "" {
+			return 0, nil
+		}
+		parsed, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, fmt.Errorf("must be a non-negative integer, got %q", t)
+		}
+		n = parsed
+	default:
+		return 0, fmt.Errorf("must be a non-negative integer")
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("must be a non-negative integer, got %d", n)
+	}
+	return n, nil
+}
+
+// normalizeYMD — YYYY-MM-DD 문자열을 검증하고 정규화 문자열 + time을 돌려준다.
+func normalizeYMD(v any) (string, time.Time, error) {
+	s, _ := v.(string)
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", time.Time{}, fmt.Errorf("date is required (YYYY-MM-DD)")
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("invalid date %q (expected YYYY-MM-DD)", s)
+	}
+	return t.Format("2006-01-02"), t, nil
 }
 
 func ensureParentDir(path string) error {

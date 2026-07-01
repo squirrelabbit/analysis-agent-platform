@@ -15,6 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { Calendar, ChevronRight, X } from "lucide-react";
 import { fmtDate } from "@/shared/utils/format";
 import DeleteDialog from "@/components/common/dialogs/DeleteDialog";
+import EditProjectDialog from "./EditProjectDialog";
 
 interface ProjectItemViewProps {
   project: Project;
@@ -93,6 +94,7 @@ function ProjectGridItem({ project, counts, onDelete }: ProjectItemViewProps) {
               className=" text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100"
               onClick={(e) => e.stopPropagation()}
             >
+              <EditProjectDialog projectId={project.id} />
               <DeleteDialog title="프로젝트" onDelete={onDelete}>
                 <div>프로젝트명: {name}</div>
               </DeleteDialog>
@@ -148,6 +150,7 @@ function ProjectListItem({ project, counts, onDelete }: ProjectItemViewProps) {
               </Badge>
             ))}
           </div>
+          <EditProjectDialog projectId={project.id} />
           <DeleteDialog title="프로젝트 삭제" onDelete={onDelete} Icon={X}>
             <div>프로젝트명: {name}</div>
           </DeleteDialog>

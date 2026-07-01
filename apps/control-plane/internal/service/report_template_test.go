@@ -184,3 +184,63 @@ func TestDigPathAndToFloat(t *testing.T) {
 		t.Errorf("없는 path는 nil이어야")
 	}
 }
+
+// #31 분석 개요 전용 뷰 transformer 잠금.
+func TestPeriodTableData(t *testing.T) {
+	// analysisPeriodsView가 파생한 형태(년 int, 개방형 "" boundary, days).
+	node := []map[string]any{
+		{"year": 2025, "period": "during", "start_ymd": "2025-08-15", "end_ymd": "2025-08-17"},
+		{"year": 2025, "period": "before", "start_ymd": "2025-08-12", "end_ymd": "2025-08-14", "days": 3},
+		{"year": 2025, "period": "after", "start_ymd": "2025-08-18", "end_ymd": "", "days": 0},
+	}
+	out := periodTableData(node)
+	rows, _ := out["rows"].([]any)
+	if len(rows) != 3 {
+		t.Fatalf("rows len = %d, want 3", len(rows))
+	}
+	during := rows[0].(map[string]any)
+	if during["period_label"] != "축제 기간" || during["open_start"] != false || during["open_end"] != false {
+		t.Fatalf("during row = %v", during)
+	}
+	before := rows[1].(map[string]any)
+	if before["period_label"] != "축제 전" {
+		t.Fatalf("before label = %v", before["period_label"])
+	}
+	if d, _ := anyToInt(before["days"]); d != 3 {
+		t.Fatalf("before days = %v, want 3", before["days"])
+	}
+	after := rows[2].(map[string]any)
+	if after["open_end"] != true {
+		t.Fatalf("after open_end should be true (end_ymd '')")
+	}
+	if _, ok := after["days"]; ok {
+		t.Fatalf("days=0은 생략되어야: %v", after["days"])
+	}
+}
+
+func TestTagListData(t *testing.T) {
+	// []string / []any 혼합 + 공백 제거.
+	out := tagListData([]any{"블로그", "  ", "뉴스", 42})
+	items, _ := out["items"].([]any)
+	if len(items) != 2 || items[0] != "블로그" || items[1] != "뉴스" {
+		t.Fatalf("tag_list items = %v, want [블로그 뉴스]", items)
+	}
+}
+
+func TestDefinitionListData(t *testing.T) {
+	node := []map[string]any{
+		{"key": "operation", "label": "운영", "description": "행사 진행·인력·안전"},
+		{"key": "content", "label": "", "description": "프로그램·공연"}, // label 없으면 key
+	}
+	out := definitionListData(node)
+	items, _ := out["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("items len = %d, want 2", len(items))
+	}
+	if items[0].(map[string]any)["term"] != "운영" {
+		t.Fatalf("term[0] = %v, want 운영", items[0].(map[string]any)["term"])
+	}
+	if items[1].(map[string]any)["term"] != "content" {
+		t.Fatalf("term[1] should fall back to key: %v", items[1].(map[string]any)["term"])
+	}
+}
