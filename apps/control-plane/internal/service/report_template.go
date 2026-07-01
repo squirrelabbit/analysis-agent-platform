@@ -803,6 +803,12 @@ func (s *DatasetService) buildReportPanel(version domain.DatasetVersion, panel r
 		out["data"] = stackedData(node, labels)
 	case "rank":
 		out["data"] = rankData(node, src, labels)
+	case "period_table": // #31 분석 기간(축제 전/기간/후)
+		out["data"] = periodTableData(node)
+	case "tag_list": // #31 수집 채널/키워드
+		out["data"] = tagListData(node)
+	case "definition_list": // #31 유형 정의
+		out["data"] = definitionListData(node)
 	default:
 		out["data"] = map[string]any{}
 	}
@@ -983,6 +989,79 @@ func rankData(node any, src *registry.ReportTemplateSource, labels reportLabels)
 	items := make([]any, 0, len(rows))
 	for i, r := range rows {
 		items = append(items, map[string]any{"rank": i + 1, "label": labels.label("summary.aspect", r.key), "value": r.value})
+	}
+	return map[string]any{"items": items}
+}
+
+// ── transformer: period_table (#31 분석 기간 — 축제 전/기간/후) ─────────────
+// analysisPeriodsView가 파생한 [{year,period,start_ymd,end_ymd,days}]를 화면 표 rows로.
+// period_label(축제 전/기간/후) + open_start/open_end(개방형 = "" boundary)를 실어 준다.
+func periodTableData(node any) map[string]any {
+	labelFor := map[string]string{
+		festivalPeriodDuring: "축제 기간",
+		festivalPeriodBefore: "축제 전",
+		festivalPeriodAfter:  "축제 후",
+	}
+	list, _ := asList(node)
+	rows := make([]any, 0, len(list))
+	for _, item := range list {
+		m, ok := asMap(item)
+		if !ok {
+			continue
+		}
+		year, _ := anyToInt(m["year"])
+		period, _ := m["period"].(string)
+		start, _ := m["start_ymd"].(string)
+		end, _ := m["end_ymd"].(string)
+		row := map[string]any{
+			"year":         year,
+			"period":       period,
+			"period_label": labelFor[period],
+			"start_ymd":    start,
+			"end_ymd":      end,
+			"open_start":   strings.TrimSpace(start) == "",
+			"open_end":     strings.TrimSpace(end) == "",
+		}
+		if days, ok := anyToInt(m["days"]); ok && days > 0 {
+			row["days"] = days
+		}
+		rows = append(rows, row)
+	}
+	return map[string]any{"rows": rows}
+}
+
+// ── transformer: tag_list (#31 수집 채널/키워드) ────────────────────────────
+func tagListData(node any) map[string]any {
+	list, _ := asList(node)
+	items := make([]any, 0, len(list))
+	for _, item := range list {
+		s, ok := item.(string)
+		if !ok {
+			continue
+		}
+		if s = strings.TrimSpace(s); s != "" {
+			items = append(items, s)
+		}
+	}
+	return map[string]any{"items": items}
+}
+
+// ── transformer: definition_list (#31 유형 정의) ────────────────────────────
+// type_definitions [{key,label,description}]를 {term,description} 목록으로.
+func definitionListData(node any) map[string]any {
+	list, _ := asList(node)
+	items := make([]any, 0, len(list))
+	for _, item := range list {
+		m, ok := asMap(item)
+		if !ok {
+			continue
+		}
+		term, _ := m["label"].(string)
+		if strings.TrimSpace(term) == "" {
+			term, _ = m["key"].(string)
+		}
+		desc, _ := m["description"].(string)
+		items = append(items, map[string]any{"term": strings.TrimSpace(term), "description": strings.TrimSpace(desc)})
 	}
 	return map[string]any{"items": items}
 }

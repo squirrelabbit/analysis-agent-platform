@@ -9,7 +9,10 @@ export type PanelView =
   | "doughnut"
   | "table"
   | "stacked_bar"
-  | "rank";
+  | "rank"
+  | "period_table"
+  | "tag_list"
+  | "definition_list";
 
 export type ValueFormat = "count" | "percent" | "ratio" | "number" | "code" | "text";
 
@@ -65,12 +68,48 @@ export interface StatGridData {
   items: StatItem[];
 }
 
+// period_table (#31 분석 기간 — 축제 전/기간/후)
+export interface PeriodRow {
+  year: number;
+  period: string; // before | during | after
+  period_label: string; // 축제 전/기간/후
+  start_ymd: string; // "" = 개방형(데이터 시작)
+  end_ymd: string; // "" = 개방형(데이터 끝)
+  open_start: boolean;
+  open_end: boolean;
+  days?: number; // 전/후 ±N일(설정 시)
+}
+export interface PeriodTableData {
+  rows: PeriodRow[];
+}
+
+// tag_list (#31 수집 채널/키워드)
+export interface TagListData {
+  items: string[];
+}
+
+// definition_list (#31 유형 정의)
+export interface DefinitionItem {
+  term: string;
+  description: string;
+}
+export interface DefinitionListData {
+  items: DefinitionItem[];
+}
+
 export interface ReportPanel {
   view: PanelView;
   width: string; // "full" | "3/4" | "2/3" | "1/2" | "1/3" | "1/4"
   value_format?: ValueFormat;
   title?: string;
-  data: DistributionData | StackedData | RankData | StatGridData;
+  data:
+    | DistributionData
+    | StackedData
+    | RankData
+    | StatGridData
+    | PeriodTableData
+    | TagListData
+    | DefinitionListData;
   source?: Record<string, unknown>;
 }
 

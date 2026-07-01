@@ -14,13 +14,22 @@
         { "panels": [
           { "view": "stat_grid", "width": "full",
             "items": [
-              { "key": "dataset", "label": "데이터셋", "format": "text", "source": { "build": "version", "path": "dataset_name" }, "sub_source": { "build": "version", "path": "version_label" } },
-              { "key": "period",  "label": "분석 기간", "format": "text", "source": { "build": "version", "path": "data_period" } },
+              { "key": "subject", "label": "분석 대상", "format": "text", "source": { "build": "version", "path": "analysis_subject" } },
               { "key": "model",   "label": "분석 모델", "format": "code", "source": { "build": "version", "path": "lloa_model" } },
               { "key": "unit",    "label": "분석 단위", "format": "text", "value": "문서 · 절(clause)" },
               { "key": "steps",   "label": "전처리 단계", "format": "text", "value": "정제 · 진성 · 절 라벨링" }
             ]
           }
+        ] },
+        { "panels": [
+          { "view": "period_table", "width": "full", "title": "분석 기간", "source": { "build": "version", "path": "analysis_periods" } }
+        ] },
+        { "panels": [
+          { "view": "tag_list", "width": "1/2", "title": "수집 채널",  "source": { "build": "version", "path": "collection_channels" } },
+          { "view": "tag_list", "width": "1/2", "title": "수집 키워드", "source": { "build": "version", "path": "collection_keywords" } }
+        ] },
+        { "panels": [
+          { "view": "definition_list", "width": "full", "title": "유형 정의", "source": { "build": "version", "path": "type_definitions" } }
         ] }
       ]
     },
