@@ -40,10 +40,20 @@ DATABASE_URL='postgresql://platform:platform@127.0.0.1:15432/analysis_support' P
 worker를 HTTP 호출. 따라서 전체 마이그레이션은 control-plane + temporal-worker 둘 다 포함 — 단 strangler로
 Go worker는 후순위, Node control-plane(client)부터 간다.
 
-### ⬜ 다음 증분
-- Node client가 실제로 워크플로 **start**(build 트리거 엔드포인트 포팅) — payload interop 증명됐으니 저위험
-- Python worker HTTP 프록시 1콜 (analyze)
-- reverse-proxy strangler 라우팅 (포팅 경로만 Node)
+### ✅ 3단계 — Temporal 쓰기경로 de-risk (완료)
+`src/poc/temporal-start.ts` — **Node client가 워크플로 start → Go worker 실행** 확정.
+안전장치: job row 없는 fake job_id로 start → Go 워크플로 첫 액티비티 mark_running이 GetDatasetBuildJob
+ErrNotFound로 멈춰 실제 clean(execute)까지 안 감. pickup(mark_running 스케줄) 확인 후 terminate →
+데이터 변형 0. → Node↔Go worker **양방향** 상호운용 완결(읽기=2단계, 쓰기=3단계).
+
+**de-risk 결론**: 마이그레이션 최대 미지수(DB/계약 parity, Temporal 양방향 interop) 전부 해소.
+남은 건 de-risk가 아니라 **포팅 노동** + 아래 저위험 항목.
+
+### ⬜ 다음 (포팅 단계)
+- read 경로 확대 (datasets/versions/artifact views — 집계는 worker 이동)
+- build 트리거 엔드포인트 정식 포팅 (job insert + workflow start, 3단계 검증됨)
+- Python worker HTTP 프록시 (analyze — 단순 HTTP, 저위험)
+- reverse-proxy strangler 라우팅
 - (후순위) Go temporal-worker(workflow+activities) → Node worker
 
 ## 구조
