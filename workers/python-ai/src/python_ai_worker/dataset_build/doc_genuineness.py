@@ -73,10 +73,14 @@ _ERROR_BODY_LOG_LIMIT = 256
 _DEFAULT_BATCH_SIZE = 1
 _MAX_BATCH_SIZE = 20
 _DOC_GENUINENESS_BATCH_SIZE_ENV = "LLOA_DOC_GENUINENESS_BATCH_SIZE"
-# 배치 응답 max_tokens: reasoning headroom(base) + doc당 작은 출력. cap으로 폭주 방지.
-_BATCH_BASE_MAX_TOKENS = 2048
-_BATCH_PER_DOC_MAX_TOKENS = 256
-_BATCH_MAX_TOKENS_CAP = 16384
+# 배치 응답 max_tokens = per-doc 예산 × actual group_size (2026-07-01).
+# 단일 경로(payload.max_tokens or 4096)와 per-doc 예산을 맞춰, 배치의 정확도
+# 저하가 "토큰 예산 confound"인지 "문서 간 간섭"인지 분리 측정한다. 옛 상수
+# (base 2048 + doc당 256, cap 16384)는 doc당 예산이 단일의 1/6까지 쪼그라들어
+# N 스윕 정확도가 예산 굶김에 오염됐다. 운영/실험용 env override.
+_DEFAULT_BATCH_PER_DOC_MAX_TOKENS = 4096
+_DOC_GENUINENESS_BATCH_PER_DOC_MAX_TOKENS_ENV = "LLOA_DOC_GENUINENESS_BATCH_PER_DOC_MAX_TOKENS"
+_BATCH_MAX_TOKENS_CAP = 65_536  # LLOA_MAX_TOKENS 상한과 정렬
 
 # 단일 doc system prompt에 덧붙이는 배치 모드 지시 — 분류 기준·예시는 그대로
 # 재사용하고 입출력 계약만 단일→배열로 바꾼다(별도 프롬프트 파일 불필요).
@@ -161,6 +165,19 @@ def _resolve_batch_size(payload: dict[str, Any]) -> int:
     if value := _coerce_positive_int(os.environ.get(_DOC_GENUINENESS_BATCH_SIZE_ENV)):
         return min(_MAX_BATCH_SIZE, value)
     return _DEFAULT_BATCH_SIZE
+
+
+def _resolve_batch_per_doc_max_tokens(payload: dict[str, Any]) -> int:
+    """배치 doc당 max_tokens 예산: payload > env > default 4096(=단일 경로와 동일).
+
+    실효 batch_max_tokens = 이 값 × actual group_size (cap _BATCH_MAX_TOKENS_CAP).
+    invalid / 0 / negative는 default로 fallback.
+    """
+    if value := _coerce_positive_int(payload.get("batch_per_doc_max_tokens")):
+        return value
+    if value := _coerce_positive_int(os.environ.get(_DOC_GENUINENESS_BATCH_PER_DOC_MAX_TOKENS_ENV)):
+        return value
+    return _DEFAULT_BATCH_PER_DOC_MAX_TOKENS
 
 
 def _batch_system_prompt(system_prompt: str) -> str:
@@ -403,9 +420,15 @@ def _classify_batch(
             "error_kind": None,
             "status_code": None,
             "error_body": "",
+            # 배치 1회 호출당 finish_reason은 첫 outcome에만 부착(호출 단위 분포 집계용).
+            "batch_finish_reason": None,
         }
         for (doc_id, original_length, used_length, truncated) in prepared
     ]
+
+    def _tag_call(finish_reason: Any) -> None:
+        if outcomes:
+            outcomes[0]["batch_finish_reason"] = str(finish_reason or "")
 
     def _fail_all(error_kind: str, exc: BaseException, *, status_code: Any = None, error_body: str = "") -> list[dict[str, Any]]:
         for outcome in outcomes:
@@ -413,6 +436,7 @@ def _classify_batch(
             outcome["error_kind"] = error_kind
             outcome["status_code"] = status_code
             outcome["error_body"] = error_body
+        _tag_call(f"error:{error_kind}")
         return outcomes
 
     try:
@@ -440,6 +464,8 @@ def _classify_batch(
                 finish_reason=response.finish_reason,
             ),
         )
+
+    _tag_call(response.finish_reason)
 
     by_id: dict[str, dict[str, Any]] = {}
     for entry in body:
@@ -622,6 +648,8 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
     total_chunk_count = 0
     chunk_failure_count = 0
     genuine_span_count = 0
+    # 배치 호출당 finish_reason 분포 (truncation=length 감지용). batch_size>1일 때만 채워짐.
+    batch_finish_reasons: dict[str, int] = {}
 
     # silverone 2026-05-28 (D2) — clause_label 동일 3-패스 패턴:
     # (1) row scan으로 empty shortcut + LLOA target 분리,
@@ -739,23 +767,24 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
     def _is_chunked_target(doc_text: str) -> bool:
         return chunking_enabled and len(doc_text) > max_input_chars
 
+    batch_per_doc_max_tokens = _resolve_batch_per_doc_max_tokens(payload) if batch_size > 1 else None
     if batch_size > 1:
         batch_system = _batch_system_prompt(system_prompt)
-        batch_max_tokens = min(
-            _BATCH_MAX_TOKENS_CAP,
-            _BATCH_BASE_MAX_TOKENS + _BATCH_PER_DOC_MAX_TOKENS * batch_size,
-        )
 
         def _batch_task(group: list[tuple[int, str, str]]) -> list[dict[str, Any]]:
             # 배치 시작 시점에 이미 취소면 호출 없이 즉시 skip 반환.
             if cancel_event.is_set():
                 return [{"doc_id": gid, "skipped_cancel": True} for _, gid, _ in group]
+            # 실효 max_tokens = per-doc 예산 × actual group_size (마지막 그룹은 < batch_size).
+            group_max_tokens = min(
+                _BATCH_MAX_TOKENS_CAP, batch_per_doc_max_tokens * len(group)
+            )
             return _classify_batch(
                 client,
                 batch_system_prompt=batch_system,
                 items=group,
                 max_input_chars=max_input_chars,
-                max_tokens=batch_max_tokens,
+                max_tokens=group_max_tokens,
             )
 
         simple_items = [it for it in lloa_targets if not _is_chunked_target(it[2])]
@@ -784,6 +813,9 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
                     if outcome.get("skipped_cancel"):
                         cancelled = True
                         continue
+                    # 배치 호출당 finish_reason 집계 (첫 outcome에만 부착돼 호출 단위로 셈).
+                    if (fr := outcome.get("batch_finish_reason")) is not None:
+                        batch_finish_reasons[fr] = batch_finish_reasons.get(fr, 0) + 1
                     doc_id = outcome["doc_id"]
                     if outcome.get("chunked"):
                         chunked_doc_count += 1
@@ -950,6 +982,9 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         "model": lloa_config.model,
         "concurrency": concurrency,
         "batch_size": batch_size,
+        # 배치 계측 (2026-07-01) — 토큰 예산 confound / truncation 진단용.
+        "batch_per_doc_max_tokens": batch_per_doc_max_tokens,
+        "batch_finish_reasons": batch_finish_reasons,
         "reasoning_effort": lloa_config.reasoning_effort,
         "total_prompt_tokens": total_prompt_tokens,
         "total_completion_tokens": total_completion_tokens,
