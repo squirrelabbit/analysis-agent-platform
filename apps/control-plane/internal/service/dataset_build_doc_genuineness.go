@@ -146,7 +146,11 @@ func (s *DatasetService) BuildDocGenuineness(projectID, datasetID, datasetVersio
 		genuinenessRef = outputPath
 	}
 	version.Metadata = mergeStringAny(version.Metadata, map[string]any{
-		"doc_genuineness_status":       "ready",
+		"doc_genuineness_status": "ready",
+		// silverone 2026-07-01 — 단일모델 완료가 mode를 명시 리셋. 직전 verify 시도가
+		// 실패해 남긴 stale doc_genuineness_mode="verify"(verify 경로는 시작 시점에 씀)를
+		// 단일모델 artifact가 이어받아 view 로더가 final_label로 집계하다 500 나던 버그 방지.
+		"doc_genuineness_mode":         "single",
 		"doc_genuineness_uri":          genuinenessRef,
 		"doc_genuineness_ref":          genuinenessRef,
 		"doc_genuineness_completed_at": now,
