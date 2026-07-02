@@ -1,6 +1,7 @@
 import { apiClient } from "@/api/client";
 import type {
   AnalysisThreadDetailDto,
+  AnalysisThreadDto,
   AnalysisThreadListResponseDto,
   AnalysisThreadMessageRequest,
   AnalysisThreadMessageResponseDto,
@@ -54,6 +55,19 @@ export const chatApi = {
         `/projects/${projectId}/datasets/${datasetId}/analysis_threads/${threadId}/messages`,
         req,
         { timeout: ANALYSIS_TIMEOUT_MS },
+      )
+      .then((r) => r.data),
+
+  renameThread: (
+    projectId: string,
+    datasetId: string,
+    threadId: string,
+    title: string,
+  ) =>
+    apiClient
+      .patch<AnalysisThreadDto>(
+        `/projects/${projectId}/datasets/${datasetId}/analysis_threads/${threadId}`,
+        { title },
       )
       .then((r) => r.data),
 

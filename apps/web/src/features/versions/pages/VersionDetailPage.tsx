@@ -1,7 +1,6 @@
 import { useVersion } from "../hooks/version.query";
 import type { BuildJobType } from "@/shared/types/common";
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { List } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Breadcrumbs from "@/components/common/Breadcrumbs";
@@ -22,6 +21,15 @@ import { BasicReportTab } from "../components/tabs/BasicReportTab";
 const BASIC_REPORT_TAB = "basic_analysis";
 type VersionTab = BuildJobType | typeof BASIC_REPORT_TAB;
 
+// 활성 탭은 URL ?tab= 으로 관리한다 → 새로고침/공유 시 보던 탭 유지(탭별 새로고침).
+const VERSION_TABS: VersionTab[] = [
+  "clean",
+  "doc_genuineness",
+  "clause_label",
+  "clause_keywords",
+  BASIC_REPORT_TAB,
+];
+
 export default function VersionDetailPage() {
   const navigate = useNavigate();
   const { projectId, datasetId, versionId } = useVersionParams();
@@ -29,7 +37,18 @@ export default function VersionDetailPage() {
   const { data: dataset } = useDataset();
   const { data: version } = useVersion();
   const { data: versions = [] } = useVersionsWithNumber();
-  const [tab, setTab] = useState<VersionTab>("clean");
+
+  // 활성 탭을 URL ?tab= 으로 관리(로컬 state 대신) → 새로고침해도 보던 탭 유지.
+  // 잘못된/없는 값이면 첫 탭("clean")으로 fallback. 탭 전환은 history를 쌓지 않게 replace.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab") as VersionTab | null;
+  const tab: VersionTab =
+    tabParam && VERSION_TABS.includes(tabParam) ? tabParam : "clean";
+  const setTab = (v: VersionTab) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", v);
+    setSearchParams(next, { replace: true });
+  };
 
   if (!version) return null;
 

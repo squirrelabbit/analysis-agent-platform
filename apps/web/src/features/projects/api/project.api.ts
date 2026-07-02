@@ -3,6 +3,7 @@ import type {
   CreateProjectRequest,
   ProjectListResponse,
   ProjectResponse,
+  UpdateProjectRequest,
 } from "../models/dto";
 
 export const projectsApi = {
@@ -14,7 +15,10 @@ export const projectsApi = {
 
   createProject: (req: CreateProjectRequest) =>
     apiClient.post<ProjectResponse>(`/projects`, req).then((r) => r.data),
-  
+
+  updateProject: (id: string, req: UpdateProjectRequest) =>
+    apiClient.patch<ProjectResponse>(`/projects/${id}`, req).then((r) => r.data),
+
   deleteProject: (id: string) =>
     apiClient.delete<void>(`/projects/${id}`).then((r) => r.data),
 };

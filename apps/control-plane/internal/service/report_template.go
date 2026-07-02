@@ -213,22 +213,55 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 	switch build {
 	case "version":
 		datasetName := ""
+		var dataset domain.Dataset
 		if ds, err := s.GetDataset(version.ProjectID, version.DatasetID); err == nil {
+			dataset = ds
 			datasetName = ds.Name
+		}
+		cleanRef := reportArtifactRef(version.Metadata, "clean_uri", "cleaned_ref")
+		if cleanRef == "" && version.CleanURI != nil {
+			cleanRef = strings.TrimSpace(*version.CleanURI)
+		}
+		// 원본 게시일 min/max(단일 스캔) — 분석기간 개방형 경계(데이터 시작/끝)와
+		// 개요 "분석 기간" 문자열이 공유한다. 날짜 컬럼이 없으면 둘 다 빈 값.
+		dataStart, dataEnd := "", ""
+		if reportCleanReady(version) && cleanRef != "" {
+			if lo, hi, err := loadDataPeriod(cleanRef); err == nil {
+				dataStart, dataEnd = lo, hi
+			}
 		}
 		period := metadataString(version.Metadata, "data_period", "")
 		if period == "" {
-			period = s.reportDataPeriod(version) // 원본 데이터의 게시일 범위
+			period = formatDataPeriodRange(dataStart, dataEnd) // 원본 데이터의 게시일 범위
 		}
 		model := metadataString(version.Metadata, "clause_label_model", metadataString(version.Metadata, "doc_genuineness_model", ""))
 		if model == "" {
 			model = s.reportPreprocessModels(version.Metadata) // 전처리에 쓴 LLOA 모델(config label)
+		}
+		// #31 분석 개요 — 분석 대상/기간/수집 채널/수집 키워드/유형 정의.
+		// 축제 메타는 프로젝트 레벨(project.metadata.festival)에서 조회한다(2026-07-01).
+		festName, festPeriods := "", []map[string]any(nil)
+		if project, err := s.store.GetProject(version.ProjectID); err == nil {
+			festName, festPeriods = festivalMeta(project)
+		}
+		subject := festName
+		if subject == "" {
+			subject = datasetSubjectName(dataset) // metadata.doc_genuineness.subject_name
+		}
+		if subject == "" {
+			subject = datasetName
 		}
 		return reportBuildRoot{root: map[string]any{
 			"dataset_name":  datasetName,
 			"version_label": metadataString(version.Metadata, "version_label", ""),
 			"data_period":   period,
 			"lloa_model":    model,
+			// #31
+			"analysis_subject":    subject,
+			"analysis_periods":    analysisPeriodsView(festPeriods, dataStart, dataEnd),
+			"collection_channels": loadCollectionValues(cleanRef, collectionChannelCandidates, false),
+			"collection_keywords": loadCollectionValues(cleanRef, collectionKeywordCandidates, true),
+			"type_definitions":    loadTypeDefinitions(resolveReportTaxonomyID(version, dataset)),
 		}, ready: true}
 	case "clean":
 		if !reportCleanReady(version) {
@@ -288,10 +321,12 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		if ref == "" {
 			return reportBuildRoot{}
 		}
-		// 키워드 정제 사전(silverone 2026-06-25)은 Phase 1에서 키워드 뷰에만 적용한다.
-		// 보고서는 사전 미적용(nil) — 정제 반영이 필요하면 clause_keywords 재빌드(Phase 2).
+		// 키워드 정제 사전(#24) — 보고서도 키워드 뷰와 동일하게 활성 block/synonym을
+		// 조회 overlay로 적용한다. 제외/병합이 재빌드 없이 보고서(감성별 상위 키워드)에
+		// 즉시 반영된다(옛 Phase 1은 nil로 미적용했음). 규칙 조회 실패는 미적용(nil) fallback.
 		// 최신년도 필터(recentYear) — clean에 doc_id JOIN해 최신년도 키워드만 집계.
-		summary, _, _, err := loadClauseKeywordsArtifact(ref, 1, 0, "", "", "", "", nil, recentYearFilters(version, recentYear)...)
+		rules, _ := s.store.ListKeywordDictionaryRules(version.ProjectID, version.DatasetID, true)
+		summary, _, _, err := loadClauseKeywordsArtifact(ref, 1, 0, "", "", "", "", rules, recentYearFilters(version, recentYear)...)
 		if err != nil {
 			return reportBuildRoot{}
 		}
@@ -470,25 +505,14 @@ func (s *DatasetService) reportPreprocessModels(metadata map[string]any) string 
 	return strings.Join(order, ", ")
 }
 
-// reportDataPeriod — 분석 개요의 "분석 기간"용. clean이 보존한 source_json의 원본 날짜
-// 컬럼(게시일/작성일/…) 범위를 min~max로. 날짜 컬럼명은 데이터셋마다 다르므로 후보 자동
-// 선택, "Invalid date--" 같은 더러운 값은 TRY_CAST로 거른다.
-func (s *DatasetService) reportDataPeriod(version domain.DatasetVersion) string {
-	if !reportCleanReady(version) {
+// formatDataPeriodRange — 원본 게시일 min/max를 "lo ~ hi"(또는 단일 lo)로. 분석 개요의
+// "분석 기간" 문자열에 쓴다. lo가 없으면 빈 문자열. min/max 산출은 loadDataPeriod가
+// clean source_json의 날짜 컬럼(게시일/작성일/…) 후보 자동선택 + TRY_CAST로 담당한다.
+func formatDataPeriodRange(lo, hi string) string {
+	if strings.TrimSpace(lo) == "" {
 		return ""
 	}
-	cleanRef := reportArtifactRef(version.Metadata, "clean_uri", "cleaned_ref")
-	if cleanRef == "" && version.CleanURI != nil {
-		cleanRef = strings.TrimSpace(*version.CleanURI)
-	}
-	if cleanRef == "" {
-		return ""
-	}
-	lo, hi, err := loadDataPeriod(cleanRef)
-	if err != nil || lo == "" {
-		return ""
-	}
-	if hi == "" || hi == lo {
+	if strings.TrimSpace(hi) == "" || hi == lo {
 		return lo
 	}
 	return lo + " ~ " + hi
@@ -776,6 +800,12 @@ func (s *DatasetService) buildReportPanel(version domain.DatasetVersion, panel r
 		out["data"] = stackedData(node, labels)
 	case "rank":
 		out["data"] = rankData(node, src, labels)
+	case "period_table": // #31 분석 기간(축제 전/기간/후)
+		out["data"] = periodTableData(node)
+	case "tag_list": // #31 수집 채널/키워드
+		out["data"] = tagListData(node)
+	case "definition_list": // #31 유형 정의
+		out["data"] = definitionListData(node)
 	default:
 		out["data"] = map[string]any{}
 	}
@@ -960,6 +990,89 @@ func rankData(node any, src *registry.ReportTemplateSource, labels reportLabels)
 	return map[string]any{"items": items}
 }
 
+// ── transformer: period_table (#31 분석 기간 — 축제 전/기간/후) ─────────────
+// analysisPeriodsView가 파생한 [{year,period,start_ymd,end_ymd,days}]를 화면 표 rows로.
+// period_label(축제 전/기간/후) + open_start/open_end(개방형 = "" boundary)를 실어 준다.
+func periodTableData(node any) map[string]any {
+	labelFor := map[string]string{
+		festivalPeriodDuring: "축제 기간",
+		festivalPeriodBefore: "축제 전",
+		festivalPeriodAfter:  "축제 후",
+	}
+	list, _ := asList(node)
+	rows := make([]any, 0, len(list))
+	for _, item := range list {
+		m, ok := asMap(item)
+		if !ok {
+			continue
+		}
+		year, _ := anyToInt(m["year"])
+		period, _ := m["period"].(string)
+		start, _ := m["start_ymd"].(string)
+		end, _ := m["end_ymd"].(string)
+		// 개방형 여부는 명시 플래그 우선(경계에 실제 데이터 날짜가 채워져도 유지),
+		// 없으면 빈 경계로 파생(하위호환).
+		openStart := strings.TrimSpace(start) == ""
+		if v, ok := m["open_start"].(bool); ok && v {
+			openStart = true
+		}
+		openEnd := strings.TrimSpace(end) == ""
+		if v, ok := m["open_end"].(bool); ok && v {
+			openEnd = true
+		}
+		row := map[string]any{
+			"year":         year,
+			"period":       period,
+			"period_label": labelFor[period],
+			"start_ymd":    start,
+			"end_ymd":      end,
+			"open_start":   openStart,
+			"open_end":     openEnd,
+		}
+		if days, ok := anyToInt(m["days"]); ok && days > 0 {
+			row["days"] = days
+		}
+		rows = append(rows, row)
+	}
+	return map[string]any{"rows": rows}
+}
+
+// ── transformer: tag_list (#31 수집 채널/키워드) ────────────────────────────
+func tagListData(node any) map[string]any {
+	list, _ := asList(node)
+	items := make([]any, 0, len(list))
+	for _, item := range list {
+		s, ok := item.(string)
+		if !ok {
+			continue
+		}
+		if s = strings.TrimSpace(s); s != "" {
+			items = append(items, s)
+		}
+	}
+	return map[string]any{"items": items}
+}
+
+// ── transformer: definition_list (#31 유형 정의) ────────────────────────────
+// type_definitions [{key,label,description}]를 {term,description} 목록으로.
+func definitionListData(node any) map[string]any {
+	list, _ := asList(node)
+	items := make([]any, 0, len(list))
+	for _, item := range list {
+		m, ok := asMap(item)
+		if !ok {
+			continue
+		}
+		term, _ := m["label"].(string)
+		if strings.TrimSpace(term) == "" {
+			term, _ = m["key"].(string)
+		}
+		desc, _ := m["description"].(string)
+		items = append(items, map[string]any{"term": strings.TrimSpace(term), "description": strings.TrimSpace(desc)})
+	}
+	return map[string]any{"items": items}
+}
+
 // ── transformer: stat_grid ────────────────────────────────────────────────
 
 func (s *DatasetService) statGridData(version domain.DatasetVersion, panel registry.ReportTemplatePanel, cache map[string]reportBuildRoot, labels reportLabels, dateFilter string) map[string]any {
@@ -1129,6 +1242,223 @@ func loadAspectLabels(taxonomyID string) map[string]string {
 	}
 	return out
 }
+
+// ── 분석 개요(#31) 헬퍼 ───────────────────────────────────────────────────────
+
+// festivalMeta — project.metadata.festival에서 축제명 + 정규화된 periods를 꺼낸다.
+// 저장 시 normalizeFestivalMetadata로 검증되며, postgres JSONB 라운드트립으로 periods는
+// []any(map[string]any)로 돌아오므로 그 형태를 흡수한다.
+func festivalMeta(project domain.Project) (string, []map[string]any) {
+	fm, ok := project.Metadata["festival"].(map[string]any)
+	if !ok {
+		return "", nil
+	}
+	name, _ := fm["name"].(string)
+	rawPeriods, _ := fm["periods"].([]any)
+	periods := make([]map[string]any, 0, len(rawPeriods))
+	for _, rp := range rawPeriods {
+		if pm, ok := rp.(map[string]any); ok {
+			periods = append(periods, pm)
+		}
+	}
+	return strings.TrimSpace(name), periods
+}
+
+// analysisPeriodsView — 저장된 축제기간(during) + ±N일에서 화면용 before/during/after
+// 구간을 파생한다(2026-07-01 재설계). 연도 내림차순 + during→before→after 정렬.
+//   - during: festival_start ~ festival_end
+//   - before: before_days>0 이면 [start-N, start-1일], 아니면 개방형(end만 start-1일,
+//     start=dataStart = 원본 데이터의 최소 게시일)
+//   - after : after_days>0 이면 [end+1일, end+N], 아니면 개방형(start만 end+1일,
+//     end=dataEnd = 원본 데이터의 최대 게시일)
+// 개방형(N 미설정) 경계는 dataStart/dataEnd(실제 데이터 시작/끝 날짜)로 채우고 open_start/
+// open_end 플래그로 "데이터 경계"임을 표시한다. dataStart/dataEnd가 빈 값(날짜 컬럼 없음)이면
+// 경계도 빈 값으로 두어 프론트가 "데이터 시작/끝"으로 표기한다. days는 before/after에만
+// 실어 준다(0=개방형). 실제 날짜 산출은 백엔드가 하고 프론트는 렌더만 한다(재계산 금지).
+func analysisPeriodsView(periods []map[string]any, dataStart, dataEnd string) []map[string]any {
+	const dayFmt = "2006-01-02"
+	type row struct {
+		year  int
+		ord   int
+		entry map[string]any
+	}
+	rows := make([]row, 0, len(periods)*3)
+	add := func(year, ord int, entry map[string]any) {
+		rows = append(rows, row{year: year, ord: ord, entry: entry})
+	}
+	for _, p := range periods {
+		year, _ := anyToInt(p["year"])
+		startStr, _ := p["festival_start"].(string)
+		endStr, _ := p["festival_end"].(string)
+		startT, errS := time.Parse(dayFmt, strings.TrimSpace(startStr))
+		endT, errE := time.Parse(dayFmt, strings.TrimSpace(endStr))
+		if errS != nil || errE != nil {
+			continue
+		}
+		beforeDays, _ := anyToInt(p["before_days"])
+		afterDays, _ := anyToInt(p["after_days"])
+
+		// during
+		add(year, 0, map[string]any{
+			"year": year, "period": festivalPeriodDuring,
+			"start_ymd": startT.Format(dayFmt), "end_ymd": endT.Format(dayFmt),
+		})
+		// before
+		beforeEnd := startT.AddDate(0, 0, -1)
+		beforeEntry := map[string]any{
+			"year": year, "period": festivalPeriodBefore,
+			"end_ymd": beforeEnd.Format(dayFmt), "days": beforeDays,
+		}
+		if beforeDays > 0 {
+			beforeEntry["start_ymd"] = startT.AddDate(0, 0, -beforeDays).Format(dayFmt)
+		} else {
+			beforeEntry["start_ymd"] = dataStart // 개방형: 데이터 시작(실제 최소 게시일, 없으면 "")
+			beforeEntry["open_start"] = true
+		}
+		add(year, 1, beforeEntry)
+		// after
+		afterStart := endT.AddDate(0, 0, 1)
+		afterEntry := map[string]any{
+			"year": year, "period": festivalPeriodAfter,
+			"start_ymd": afterStart.Format(dayFmt), "days": afterDays,
+		}
+		if afterDays > 0 {
+			afterEntry["end_ymd"] = endT.AddDate(0, 0, afterDays).Format(dayFmt)
+		} else {
+			afterEntry["end_ymd"] = dataEnd // 개방형: 데이터 끝(실제 최대 게시일, 없으면 "")
+			afterEntry["open_end"] = true
+		}
+		add(year, 2, afterEntry)
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].year != rows[j].year {
+			return rows[i].year > rows[j].year
+		}
+		return rows[i].ord < rows[j].ord
+	})
+	out := make([]map[string]any, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.entry)
+	}
+	return out
+}
+
+// datasetSubjectName — dataset.metadata.doc_genuineness.subject_name(운영자 지정 대상명).
+func datasetSubjectName(dataset domain.Dataset) string {
+	dg, ok := dataset.Metadata["doc_genuineness"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	name, _ := dg["subject_name"].(string)
+	return strings.TrimSpace(name)
+}
+
+// loadCollectionValues — clean source_json에서 후보 컬럼 중 값이 가장 많은 컬럼을 골라
+// distinct 값 목록을 돌려준다(수집 채널/키워드 공용). splitPipe면 "A | B" 파이프 구분값을
+// 분해한다. 채널/키워드 컬럼명은 데이터셋마다 달라(값 기반 자동선택, channel_breakdown과 동일).
+func loadCollectionValues(cleanRef string, candidates []string, splitPipe bool) []string {
+	if strings.TrimSpace(cleanRef) == "" {
+		return nil
+	}
+	db, cleanup, err := openTempDuckDB()
+	if err != nil {
+		return nil
+	}
+	defer cleanup()
+	cleanSrc := fmt.Sprintf("read_parquet('%s')", escapeDuckDBLiteral(cleanRef))
+	valExpr := func(field string) string {
+		return fmt.Sprintf(`json_extract_string(source_json, '$."%s"')`, field)
+	}
+	chosen, best := "", -1
+	for _, f := range candidates {
+		expr := valExpr(f)
+		var cnt int
+		q := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s IS NOT NULL AND %s <> ''", cleanSrc, expr, expr)
+		if err := db.QueryRow(q).Scan(&cnt); err != nil {
+			continue
+		}
+		if cnt > best {
+			best, chosen = cnt, f
+		}
+	}
+	if chosen == "" || best <= 0 {
+		return nil
+	}
+	expr := valExpr(chosen)
+	rows, err := db.Query(fmt.Sprintf("SELECT DISTINCT %s AS v FROM %s WHERE %s IS NOT NULL AND %s <> ''", expr, cleanSrc, expr, expr))
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	set := map[string]bool{}
+	for rows.Next() {
+		var v sql.NullString
+		if err := rows.Scan(&v); err != nil || !v.Valid {
+			continue
+		}
+		parts := []string{v.String}
+		if splitPipe {
+			parts = strings.Split(v.String, "|")
+		}
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				set[p] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// resolveReportTaxonomyID — clause_label_summary.taxonomy_id 우선 → dataset.metadata.
+// taxonomy_id → 기본(festival-gunsan). loadAspectLabels와 동일 정책에 dataset fallback 추가.
+func resolveReportTaxonomyID(version domain.DatasetVersion, dataset domain.Dataset) string {
+	if m, ok := version.Metadata["clause_label_summary"].(map[string]any); ok {
+		if id := strings.TrimSpace(metadataString(m, "taxonomy_id", "")); id != "" {
+			return id
+		}
+	}
+	if id := strings.TrimSpace(metadataString(dataset.Metadata, "taxonomy_id", "")); id != "" {
+		return id
+	}
+	return "festival-gunsan"
+}
+
+// loadTypeDefinitions — taxonomy의 aspect 정의(유형 정의)를 {key,label,description} 목록으로.
+func loadTypeDefinitions(taxonomyID string) []map[string]any {
+	path := filepath.Join(registry.ConfigDir(), "taxonomies", taxonomyID+".json")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var parsed struct {
+		Aspects []struct {
+			Key         string `json:"key"`
+			Label       string `json:"label"`
+			Description string `json:"description"`
+		} `json:"aspects"`
+	}
+	if err := json.Unmarshal(content, &parsed); err != nil {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(parsed.Aspects))
+	for _, a := range parsed.Aspects {
+		if strings.TrimSpace(a.Key) == "" {
+			continue
+		}
+		out = append(out, map[string]any{"key": a.Key, "label": a.Label, "description": a.Description})
+	}
+	return out
+}
+
+var (
+	collectionChannelCandidates = []string{"수집채널", "채널", "channel", "source", "platform", "매체", "미디어"}
+	collectionKeywordCandidates = []string{"수집키워드", "검색키워드", "키워드", "keyword", "query", "검색어"}
+)
 
 // ── 공통 헬퍼 ──────────────────────────────────────────────────────────────
 

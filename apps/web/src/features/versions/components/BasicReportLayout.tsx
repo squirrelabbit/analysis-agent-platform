@@ -6,13 +6,16 @@ import { BarTrack, DonutChart, DistributionLegend } from "@/components/common/ch
 import type { DonutDatum, LegendDatum } from "@/components/common/charts";
 import { cn } from "@/lib/utils";
 import type {
+  DefinitionListData,
   DistributionData,
+  PeriodTableData,
   RankData,
   ReportPanel,
   ReportRow,
   StackedData,
   StatGridData,
   StatItem,
+  TagListData,
   ValueFormat,
 } from "../models/basicReport";
 
@@ -117,9 +120,115 @@ function PanelView({ panel }: { panel: ReportPanel }) {
       return <StackedBarPanel data={panel.data as StackedData} />;
     case "rank":
       return <RankPanel data={panel.data as RankData} title={panel.title} />;
+    case "period_table":
+      return <PeriodTablePanel data={panel.data as PeriodTableData} />;
+    case "tag_list":
+      return <TagListPanel data={panel.data as TagListData} />;
+    case "definition_list":
+      return <DefinitionListPanel data={panel.data as DefinitionListData} />;
     default:
       return null;
   }
+}
+
+// ── 분석 개요(#31) view별 패널 ────────────────────────────────
+
+// 축제 기간 표 — 연도 / 구분(전·기간·후) / 기간(개방형은 "~"). ±N일은 뱃지.
+function PeriodTablePanel({ data }: { data: PeriodTableData }) {
+  const rows = data.rows ?? [];
+  if (rows.length === 0) {
+    return <div className="text-[12.5px] text-zinc-400">축제 기간이 설정되지 않았습니다.</div>;
+  }
+  const rangeText = (r: PeriodTableData["rows"][number]): string => {
+    // 개방형 경계는 백엔드가 실제 데이터 시작/끝 날짜를 채워 준다. 날짜가 있으면 그대로
+    // 쓰고, 비어 있을 때(데이터에 날짜 컬럼이 없음)만 "데이터 시작/끝"으로 대체한다.
+    const start = r.start_ymd || (r.open_start ? "데이터 시작" : "");
+    const end = r.end_ymd || (r.open_end ? "데이터 끝" : "");
+    return `${start} ~ ${end}`;
+  };
+  const badgeCls: Record<string, string> = {
+    during: "bg-violet-50 text-violet-600",
+    before: "bg-zinc-100 text-zinc-500",
+    after: "bg-zinc-100 text-zinc-500",
+  };
+  return (
+    <table className="w-full border-collapse text-[12.5px]">
+      <thead>
+        <tr className="border-b border-zinc-200 text-left text-zinc-400">
+          <th className="py-1.5 pr-3 font-semibold">연도</th>
+          <th className="py-1.5 pr-3 font-semibold">구분</th>
+          <th className="py-1.5 pr-3 font-semibold">기간</th>
+          <th className="py-1.5 font-semibold">±N일</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={`${r.year}-${r.period}-${i}`} className="border-b border-zinc-100">
+            <td className="py-1.5 pr-3 font-semibold tabular-nums text-zinc-700">{r.year}</td>
+            <td className="py-1.5 pr-3">
+              <span
+                className={cn(
+                  "inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold",
+                  badgeCls[r.period] ?? "bg-zinc-100 text-zinc-500",
+                )}
+              >
+                {r.period_label}
+              </span>
+            </td>
+            <td className="py-1.5 pr-3 tabular-nums text-zinc-600">{rangeText(r)}</td>
+            <td className="py-1.5 tabular-nums text-zinc-400">
+              {r.days ? `${r.days}일` : "—"}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// 수집 채널/키워드 — chip 목록.
+function TagListPanel({ data }: { data: TagListData }) {
+  const items = data.items ?? [];
+  if (items.length === 0) {
+    return <div className="text-[12.5px] text-zinc-400">—</div>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((it, i) => (
+        <span
+          key={`${it}-${i}`}
+          className="inline-flex rounded-md bg-zinc-100 px-2 py-1 text-[12px] font-medium text-zinc-600"
+        >
+          {it}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// 유형 정의 — 용어 — 설명 목록.
+function DefinitionListPanel({ data }: { data: DefinitionListData }) {
+  const items = data.items ?? [];
+  if (items.length === 0) {
+    return <div className="text-[12.5px] text-zinc-400">유형 정의가 없습니다.</div>;
+  }
+  return (
+    <dl className="flex flex-col gap-2">
+      {items.map((it, i) => (
+        <div
+          key={`${it.term}-${i}`}
+          className="flex flex-col gap-0.5 rounded-lg border border-zinc-100 bg-zinc-50/60 px-3.5 py-2.5 sm:flex-row sm:gap-3"
+        >
+          <dt className="shrink-0 text-[12.5px] font-bold text-zinc-700 sm:w-24">
+            {it.term}
+          </dt>
+          <dd className="text-[12.5px] leading-relaxed text-zinc-500">
+            {it.description || "—"}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 // ── view별 패널 ───────────────────────────────────────────────

@@ -3,7 +3,10 @@ import { useLocation } from "react-router-dom";
 import { useProjectParams } from "@/shared/hooks/useRouteParams";
 import { useDatasets } from "@/features/datasets/hooks/dataset.query";
 import { useChatThreads } from "../hooks/chat.query";
-import { useDeleteChatThread } from "../hooks/chat.mutation";
+import {
+  useDeleteChatThread,
+  useRenameChatThread,
+} from "../hooks/chat.mutation";
 import { ChatNavContext, type ChatNavValue } from "./ChatNavContext";
 
 export function ChatNavProvider({ children }: { children: ReactNode }) {
@@ -38,10 +41,14 @@ export function ChatNavProvider({ children }: { children: ReactNode }) {
     isChatRoute ? activeDatasetId : "",
   );
   const deleteMutation = useDeleteChatThread(projectId, activeDatasetId);
+  const renameMutation = useRenameChatThread(projectId, activeDatasetId);
 
   const value = useMemo<ChatNavValue>(() => {
     const deletingThreadId = deleteMutation.isPending
       ? (deleteMutation.variables ?? null)
+      : null;
+    const renamingThreadId = renameMutation.isPending
+      ? (renameMutation.variables?.threadId ?? null)
       : null;
     return {
       datasetId,
@@ -72,9 +79,22 @@ export function ChatNavProvider({ children }: { children: ReactNode }) {
           console.error("대화 삭제 실패", err);
         }
       },
+      renameThread: async (id, title) => {
+        const next = title.trim();
+        if (!next || renameMutation.isPending) return;
+        const current = (threadsQuery.data ?? []).find((t) => t.id === id);
+        if (current && current.title === next) return;
+        try {
+          await renameMutation.mutateAsync({ threadId: id, title: next });
+        } catch (err) {
+          // 수정 실패 시 목록은 유지된다(진단용 로그만 남긴다).
+          console.error("대화 제목 수정 실패", err);
+        }
+      },
       threads: threadsQuery.data ?? [],
       threadsLoading: threadsQuery.isLoading,
       deletingThreadId,
+      renamingThreadId,
       isComposing,
       setComposing,
       isChatRoute,
@@ -88,6 +108,7 @@ export function ChatNavProvider({ children }: { children: ReactNode }) {
     threadsQuery.data,
     threadsQuery.isLoading,
     deleteMutation,
+    renameMutation,
     isChatRoute,
   ]);
 

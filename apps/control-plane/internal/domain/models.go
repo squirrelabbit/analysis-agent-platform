@@ -18,11 +18,23 @@ type Project struct {
 	// 채팅 count 표시용. dataset 단위 thread API(ListAnalysisThreads)는 그대로
 	// 유지. 프론트가 dataset별로 N+1 호출 안 하도록 service에서 단일 COUNT 합산.
 	AnalysisThreadCount int `json:"analysis_thread_count"`
+	// #31 (2026-07-01) — 프로젝트 레벨 메타데이터. 축제 메타(festival)의 단일 source.
+	// dataset.metadata와 동일 패턴(물리 컬럼 = JSONB). 비어 있으면 생략.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 type ProjectCreateRequest struct {
-	Name        string  `json:"name"`
-	Description *string `json:"description,omitempty"`
+	Name        string         `json:"name"`
+	Description *string        `json:"description,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// ProjectUpdateRequest — PATCH /projects/{pid}. non-nil 필드만 반영한다.
+// Metadata는 patch 병합(기존 key 유지 + 겹치면 덮어씀). festival은 건드릴 때만 재검증.
+type ProjectUpdateRequest struct {
+	Name        *string        `json:"name,omitempty"`
+	Description *string        `json:"description,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 type ProjectListResponse struct {
@@ -462,6 +474,12 @@ type KeywordDictionaryEventListResponse struct {
 
 type AnalysisThreadCreateRequest struct {
 	Title string `json:"title,omitempty"`
+}
+
+// AnalysisThreadUpdateRequest — thread 제목(title) 수정 요청 (#28, silverone 2026-06-30).
+// title은 필수 — 공백 trim 후 비면 400.
+type AnalysisThreadUpdateRequest struct {
+	Title string `json:"title"`
 }
 
 type AnalysisThreadListResponse struct {

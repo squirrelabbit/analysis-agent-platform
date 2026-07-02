@@ -86,8 +86,12 @@ def _load_noise_patterns(payload: dict[str, Any]) -> tuple[list[re.Pattern[str]]
 
 
 def _apply_noise_scrub(text: str, patterns: list[re.Pattern[str]]) -> tuple[str, dict[str, int]]:
-    """text에 inline scrub 적용. 매치된 pattern은 공백으로 치환, 다중 공백은 단일로.
-    반환: (scrubbed text, pattern별 hit count 딕셔너리)."""
+    """text에 inline scrub 적용. 매치된 pattern은 공백으로 치환한다.
+    반환: (scrubbed text, pattern별 hit count 딕셔너리).
+
+    공백/줄바꿈 정규화는 여기서 하지 않는다 — cleaned_text 최종의 _normalize_whitespace
+    (= runtime.common.normalize_whitespace 단일 함수)가 noise 유무와 무관하게 일괄 처리한다.
+    옛 구조는 동일한 공백 합치기가 이 함수에도 박혀 있어 규칙이 3곳에 흩어져 있었다(#17 통합)."""
     hits: dict[str, int] = {}
     if not patterns or not text:
         return text, hits
@@ -97,9 +101,12 @@ def _apply_noise_scrub(text: str, patterns: list[re.Pattern[str]]) -> tuple[str,
         if matched:
             hits[pattern.pattern] = hits.get(pattern.pattern, 0) + len(matched)
             scrubbed = pattern.sub(" ", scrubbed)
-    if hits:
-        scrubbed = re.sub(r"\s+", " ", scrubbed).strip()
     return scrubbed, hits
+
+
+# 공백/줄바꿈 정규화는 runtime.common.normalize_whitespace 단일 함수로 통합(#17 후속).
+# 기존 호출부(run_dataset_clean)와 테스트(test_clean_whitespace) 호환을 위해 이름만 별칭 유지.
+_normalize_whitespace = rt.normalize_whitespace
 
 
 def _clean_output_schema(analysis_columns: list[AnalysisColumn] | None = None) -> Any:
@@ -220,7 +227,7 @@ def run_dataset_clean(payload: dict[str, Any]) -> dict[str, Any]:
             # 제거됨. 한글 SNS 후기 분석에서 영문/숫자/공백/모노음절은 모두 의미
             # 신호라 거친 제거가 해롭다. 남은 책임은 known noise phrase strip +
             # whitespace 정규화. 도메인 필터링은 regex_rule_names로 명시.
-            cleaned_text = rt._strip_known_noise_phrases(scrubbed_text)
+            cleaned_text = _normalize_whitespace(rt._strip_known_noise_phrases(scrubbed_text))
             if not cleaned_text:
                 dropped_count += 1
                 continue

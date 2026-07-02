@@ -27,9 +27,12 @@ export interface ChatNavValue {
   setThreadId: (id: string | null) => void;
   /** 대화 삭제 — 활성 스레드를 지우면 threadId도 해제. */
   deleteThread: (id: string) => Promise<void>;
+  /** 대화 제목 수정(#28). 빈 제목/같은 제목이면 무시. */
+  renameThread: (id: string, title: string) => Promise<void>;
   threads: ChatThread[];
   threadsLoading: boolean;
   deletingThreadId: string | null;
+  renamingThreadId: string | null;
   isComposing: boolean;
   setComposing: (v: boolean) => void;
   /** 현재 라우트가 채팅 화면인지 — 사이드바 이력 노출/목록 fetch 게이트. */

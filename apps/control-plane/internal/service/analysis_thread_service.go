@@ -65,6 +65,10 @@ func (s *DatasetService) GetAnalysisThread(projectID, datasetID, threadID string
 	return s.threads().GetAnalysisThread(projectID, datasetID, threadID)
 }
 
+func (s *DatasetService) UpdateAnalysisThread(projectID, datasetID, threadID string, input domain.AnalysisThreadUpdateRequest) (domain.AnalysisThread, error) {
+	return s.threads().UpdateAnalysisThread(projectID, datasetID, threadID, input)
+}
+
 func (s *DatasetService) DeleteAnalysisThread(projectID, datasetID, threadID string) error {
 	return s.threads().DeleteAnalysisThread(projectID, datasetID, threadID)
 }

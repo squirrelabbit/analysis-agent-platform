@@ -15,6 +15,8 @@ export interface GenuinenessItemDto {
   reason: string;
   source: string;
   cleaned_text: string;
+  // 원문 URL — clean source_json에서 추출(전용 URL 컬럼). 없으면 빈 문자열/생략.
+  source_url?: string;
   // silverone 2026-06-11 — 수동 보정 overlay. genuineness/reason은 effective 값,
   // 아래는 원본/보정 구분용(보정된 행에만).
   original_genuineness?: string;
@@ -71,6 +73,8 @@ export interface GenuinenessItem {
   reason: string;
   source: string;
   cleanedText: string;
+  // 원문 URL(전용 URL 컬럼). 없으면 빈 문자열.
+  sourceUrl: string;
   // silverone 2026-06-11 — 수동 보정 overlay (보정된 행에만).
   originalGenuineness?: string;
   originalReason?: string;
@@ -125,6 +129,7 @@ const mapGenuinenessItem = (dto: GenuinenessItemDto): GenuinenessItem => ({
   reason: dto.reason,
   source: dto.source,
   cleanedText: dto.cleaned_text,
+  sourceUrl: dto.source_url ?? "",
   originalGenuineness: dto.original_genuineness,
   originalReason: dto.original_reason,
   overrideGenuineness: dto.override_genuineness,

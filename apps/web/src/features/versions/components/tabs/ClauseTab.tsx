@@ -1,8 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   FileText,
   Check,
-  ChevronRight,
+  ExternalLink,
   Loader2,
   Minus,
   Pencil,
@@ -55,6 +55,7 @@ import {
   isBuildRunning,
 } from "../BuildStatusMeta";
 import ClauseDocDialog from "../ClauseDocDialog";
+import { GuideSection } from "../GuideSection";
 
 // 드릴다운 selector의 "전체" 항목 sentinel key (실제 aspect key와 충돌 방지).
 const ALL_KEY = "__all__";
@@ -170,6 +171,16 @@ export function ClauseTab() {
   // taxonomy_id를 안 남긴 옛 artifact는 undefined → default taxonomy로 fallback.
   // taxonomy 조회 실패해도 aspectLabelOf가 key로 fallback하므로 화면은 동작한다.
   const { data: taxonomy } = useTaxonomy(applied?.taxonomy_id);
+
+  // 같은 문서끼리 묶어 보기 위해 현재 페이지를 doc_id로 안정 정렬(같은 doc 내 원래
+  // 순서 보존)한다. 서버는 doc_id로 정렬해 주지 않고 빌드가 병렬이라 같은 문서 절이
+  // 흩어질 수 있어서다. DataTable이 이 정렬을 전제로 문서 그룹 헤더를 끼운다.
+  // (페이지 경계로 쪼개진 동일 문서는 페이지네이션 한계상 묶지 못한다.)
+  const orderedItems = useMemo(
+    () =>
+      items ? [...items].sort((a, b) => a.docId.localeCompare(b.docId)) : items,
+    [items],
+  );
 
   if (isLoading) return <BuildTabLoading />;
   if (!summary) {
@@ -343,23 +354,8 @@ export function ClauseTab() {
     }
   }
 
+  // 문서 ID는 개별 컬럼 대신 문서 그룹 헤더(아래 renderGroupHeader)에 한 번만 표시한다.
   const columns: Column<ClauseItem>[] = [
-    {
-      header: "문서 ID",
-      headerClassName: "w-30",
-      cell: (item) => (
-        <td className="px-4 py-3">
-          <button
-            type="button"
-            onClick={() => setDocDialogId(item.docId)}
-            title="원본 텍스트와 추출된 절 보기"
-            className="block cursor-pointer max-w-35 truncate border-b border-dashed text-xs  transition-colors hover:border-violet-500 hover:text-violet-700"
-          >
-            {item.docId}
-          </button>
-        </td>
-      ),
-    },
     {
       header: "문장",
       headerClassName: "w-80",
@@ -640,15 +636,11 @@ export function ClauseTab() {
 
       {/* 절 유형(Aspect) 안내 — 참고 정보라 기본 접힘, 펼치면 카드로 표시 */}
       {taxonomy && taxonomy.aspects.length > 0 && (
-        <details className="group rounded-2xl border border-zinc-100 bg-white px-5 py-3.5 shadow-sm">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm font-bold text-zinc-900 marker:hidden">
-            <ChevronRight className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-90" />
-            절 유형(Aspect) 안내
-            <span className="font-medium text-zinc-400">
-              · {taxonomy.aspects.length}종
-            </span>
-          </summary>
-          <div className="mt-3.5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <GuideSection
+          title="절 유형(Aspect) 안내"
+          meta={`· ${taxonomy.aspects.length}종`}
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {taxonomy.aspects.map((a) => (
               <div
                 key={a.key}
@@ -661,7 +653,7 @@ export function ClauseTab() {
               </div>
             ))}
           </div>
-        </details>
+        </GuideSection>
       )}
 
       {/* Aspect별 감성 분포 (전체 + aspect 드릴다운) */}
@@ -741,8 +733,31 @@ export function ClauseTab() {
       {/* Table */}
       <DataTable
         columns={columns}
-        items={items}
+        items={orderedItems}
         rowKey={(item) => item.clauseId}
+        groupBy={(item) => item.docId}
+        renderGroupHeader={(docId, count) => (
+          <div className="flex items-center gap-2 rounded-lg bg-zinc-100 px-3 py-2">
+            <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+            <span
+              className="truncate text-xs font-bold text-zinc-700"
+              title={docId}
+            >
+              {docId}
+            </span>
+            <span className="shrink-0 text-[11px] font-medium text-zinc-400">
+              · {count}개 절
+            </span>
+            <button
+              type="button"
+              onClick={() => setDocDialogId(docId)}
+              className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600 transition-colors hover:border-violet-300 hover:text-violet-700"
+            >
+              <ExternalLink className="h-3 w-3" />
+              원문 보기
+            </button>
+          </div>
+        )}
         title={`절 라벨링 결과 상세`}
         toolbar={
           <>
@@ -799,7 +814,7 @@ export function ClauseTab() {
       {/* 문서 ID 클릭 → 원본 텍스트 + 추출된 절 다이얼로그 */}
       <ClauseDocDialog
         docId={docDialogId}
-        items={items ?? []}
+        items={orderedItems ?? []}
         onClose={() => setDocDialogId(null)}
       />
     </div>

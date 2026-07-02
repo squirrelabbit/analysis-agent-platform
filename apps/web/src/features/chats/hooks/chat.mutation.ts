@@ -31,6 +31,20 @@ export const useAnalysisChat = (projectId: string, datasetId: string) => {
   });
 };
 
+// 제목 수정(#28). 성공 시 thread 목록(title)을 갱신. 열린 상세는 title을 안 쓰므로 목록만.
+export const useRenameChatThread = (projectId: string, datasetId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ threadId, title }: { threadId: string; title: string }) =>
+      chatApi.renameThread(projectId, datasetId, threadId, title),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: chatKeys.threadList(projectId, datasetId),
+      });
+    },
+  });
+};
+
 export const useDeleteChatThread = (projectId: string, datasetId: string) => {
   const queryClient = useQueryClient();
   return useMutation({

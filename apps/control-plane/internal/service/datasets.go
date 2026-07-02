@@ -265,6 +265,8 @@ func (s *DatasetService) UpdateDatasetMetadata(projectID, datasetID string, patc
 	for key, value := range patch {
 		merged[key] = value
 	}
+	// 축제 메타데이터(#31)는 2026-07-01부터 project.metadata.festival(프로젝트 레벨)로
+	// 이동했다. dataset.metadata에선 더 이상 검증/정규화하지 않는다(단일 source).
 	dataset.Metadata = merged
 	if err := s.store.SaveDataset(dataset); err != nil {
 		return domain.Dataset{}, err

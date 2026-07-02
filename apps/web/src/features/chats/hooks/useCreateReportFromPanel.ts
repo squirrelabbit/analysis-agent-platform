@@ -23,7 +23,11 @@ export function useCreateReportFromPanel(projectId: string) {
   const [isPending, setIsPending] = useState(false);
 
   const create = useCallback(
-    async ({ staged, reportTitle, loadedReportId }: CreateReportParams) => {
+    async (
+      { staged, reportTitle, loadedReportId }: CreateReportParams,
+      // navigate=false면 저장만 하고 보고서 에디터로 이동하지 않는다(채팅에 머무름).
+      opts?: { navigate?: boolean },
+    ) => {
       if (staged.length === 0 || isPending) return;
       setIsPending(true);
       try {
@@ -42,7 +46,9 @@ export function useCreateReportFromPanel(projectId: string) {
         queryClient.invalidateQueries({
           queryKey: reportKeys.documentList(projectId),
         });
-        navigate(`/projects/${projectId}/reports/${doc.report_id}`);
+        if (opts?.navigate ?? true) {
+          navigate(`/projects/${projectId}/reports/${doc.report_id}`);
+        }
         return doc;
       } finally {
         setIsPending(false);

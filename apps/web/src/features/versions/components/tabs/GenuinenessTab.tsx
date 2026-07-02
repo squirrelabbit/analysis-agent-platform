@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Check,
+  ExternalLink,
   FileText,
   Loader2,
   Minus,
@@ -45,6 +46,7 @@ import {
   BuildTabLoading,
   isBuildRunning,
 } from "../BuildStatusMeta";
+import { GenuinenessCriteriaGuide } from "../GenuinenessCriteriaGuide";
 
 // 필터 옵션: "전체" + 진성 3분류 (라벨은 GENUINENESS_LABELS 단일 출처).
 const FILTER_OPTIONS: { label: string; value: string }[] = [
@@ -190,6 +192,30 @@ export default function GenuinenessTab() {
     {
       header: "정제 텍스트",
       cell: (item) => <ExpandableTextCell text={item.cleanedText} />,
+    },
+    {
+      // 정제 텍스트와 판별 결과 사이 — 원본 게시글 URL을 새 탭으로 여는 버튼.
+      // source_json에 원문 URL이 있는 행에만 노출(없으면 "-").
+      header: "URL",
+      headerClassName: "w-16 text-center",
+      cell: (item) => (
+        <td className="px-3 py-3 text-center">
+          {item.sourceUrl ? (
+            <a
+              href={item.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="원문 보기"
+              aria-label="원문 보기"
+              className="inline-grid h-7 w-7 place-items-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-violet-600"
+            >
+              <ExternalLink className="h-4 w-4" />
+            </a>
+          ) : (
+            <span className="text-zinc-300">-</span>
+          )}
+        </td>
+      ),
     },
     {
       header: "판별 결과",
@@ -481,6 +507,9 @@ export default function GenuinenessTab() {
           />
         ))}
       </div>
+
+      {/* 진성 분류 기준 안내 (토글) — 결과 해석 기준 노출 */}
+      <GenuinenessCriteriaGuide />
 
       {/* 교차검증(verify) 요약 배너 (ADR-026) */}
       {summary.mode === "verify" && (

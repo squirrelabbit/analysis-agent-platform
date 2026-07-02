@@ -30,17 +30,63 @@ func (s *ProjectService) CreateProject(input domain.ProjectCreateRequest) (domai
 	if name == "" {
 		return domain.Project{}, ErrInvalidArgument{Message: "name is required"}
 	}
+	// #31 — 프로젝트 생성 시 축제 메타(metadata.festival)를 함께 받을 수 있다.
+	metadata, err := normalizeProjectMetadata(input.Metadata)
+	if err != nil {
+		return domain.Project{}, err
+	}
 
 	project := domain.Project{
 		ProjectID:   id.New(),
 		Name:        name,
 		Description: input.Description,
 		CreatedAt:   time.Now().UTC(),
+		Metadata:    metadata,
 	}
 	if err := s.store.SaveProject(project); err != nil {
 		return domain.Project{}, err
 	}
 	return project, nil
+}
+
+// UpdateProject — PATCH /projects/{pid}. non-nil 필드만 반영. metadata는 patch 병합
+// (기존 key 유지 + 겹치면 덮어씀). festival을 건드릴 때만 재검증. 축제 메타 수정 경로.
+func (s *ProjectService) UpdateProject(projectID string, req domain.ProjectUpdateRequest) (domain.Project, error) {
+	project, err := s.store.GetProject(projectID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return domain.Project{}, ErrNotFound{Resource: "project"}
+		}
+		return domain.Project{}, err
+	}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			return domain.Project{}, ErrInvalidArgument{Message: "name must not be empty"}
+		}
+		project.Name = name
+	}
+	if req.Description != nil {
+		project.Description = req.Description
+	}
+	if req.Metadata != nil {
+		merged := map[string]any{}
+		for k, v := range project.Metadata {
+			merged[k] = v
+		}
+		for k, v := range req.Metadata {
+			merged[k] = v
+		}
+		normalized, err := normalizeProjectMetadata(merged)
+		if err != nil {
+			return domain.Project{}, err
+		}
+		project.Metadata = normalized
+	}
+	if err := s.store.SaveProject(project); err != nil {
+		return domain.Project{}, err
+	}
+	return s.withProjectCounts(project)
 }
 
 func (s *ProjectService) GetProject(projectID string) (domain.Project, error) {

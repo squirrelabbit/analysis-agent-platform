@@ -386,6 +386,32 @@ paths:
                 $ref: "#/components/schemas/Project"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+    patch:
+      tags: [Projects]
+      summary: 프로젝트 수정 (이름/설명/메타)
+      description: |
+        이름/설명/메타데이터를 수정한다. non-nil 필드만 반영. `metadata`는 patch 병합이며
+        `festival`(축제 메타)을 건드릴 때만 재검증한다. 축제 메타 수정 경로(#31).
+      operationId: updateProject
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdateRequest"
+      responses:
+        "200":
+          description: 수정된 프로젝트
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
     delete:
       tags: [Projects]
       summary: 프로젝트 삭제
@@ -1657,6 +1683,36 @@ paths:
                 $ref: "#/components/schemas/AnalysisThreadDetail"
         "404":
           $ref: "#/components/responses/ErrorResponse"
+    patch:
+      tags: [Analysis]
+      summary: analysis thread 제목 수정
+      description: |
+        thread의 title을 수정한다 (#28, silverone 2026-06-30). 해당 project_id +
+        dataset_id에 속한 thread만 수정 가능 — dataset이 다르거나 thread가 없으면 404.
+        title은 필수(공백 trim 후 비면 400), 80자(rune) 초과는 잘린다. title 외 필드는
+        변경하지 않는다.
+      operationId: updateAnalysisThread
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/DatasetId"
+        - $ref: "#/components/parameters/ThreadId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalysisThreadUpdateRequest"
+      responses:
+        "200":
+          description: 수정된 analysis thread
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisThread"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
     delete:
       tags: [Analysis]
       summary: analysis thread 단건 삭제
@@ -2441,6 +2497,8 @@ components:
             (`GET /projects/{pid}/datasets/{did}/analysis_threads`)는 그대로 유지.
             프론트가 dataset별 N+1 호출 안 하도록 server-side 단일 COUNT 합산.
             thread 0건이면 0.
+        metadata:
+          $ref: "#/components/schemas/ProjectMetadata"
       required: [project_id, name, created_at, dataset_count, dataset_version_count, scenario_count, prompt_count, analysis_thread_count]
     ProjectCreateRequest:
       type: object
@@ -2451,6 +2509,72 @@ components:
           type:
             - string
             - "null"
+        metadata:
+          $ref: "#/components/schemas/ProjectMetadata"
+      required: [name]
+    ProjectUpdateRequest:
+      type: object
+      description: |
+        PATCH /projects/{project_id}. non-nil 필드만 반영한다. `metadata`는 기존 값에
+        patch 병합(겹치는 key만 덮어씀)되며 `festival`을 건드릴 때만 재검증된다.
+        축제 메타 수정 경로.
+      properties:
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        metadata:
+          $ref: "#/components/schemas/ProjectMetadata"
+    ProjectMetadata:
+      type: object
+      description: |
+        프로젝트 레벨 메타데이터. 물리 테이블 없이 JSONB 인라인 저장(#31, 2026-07-01).
+        축제 메타(`festival`)의 단일 source — 보고서 분석 개요의 분석 대상/기간이 여기서
+        나온다. 다른 key도 자유롭게 담을 수 있다.
+      properties:
+        festival:
+          $ref: "#/components/schemas/FestivalMetadata"
+      additionalProperties: true
+    FestivalMetadata:
+      type: object
+      description: |
+        축제 메타데이터(#31). 연도별로 축제기간(during) `festival_start~festival_end`만
+        입력하고, 축제 전/후는 명시 날짜가 아니라 `±N일`(before_days/after_days) 창으로
+        파생한다. N을 안 주면(또는 0) 전/후는 데이터 기준 개방형(축제기간 앞/뒤 전부)이다.
+        before/during/after 날짜 파생은 보고서 엔진이 담당한다.
+      properties:
+        name:
+          type: string
+          description: 축제명(필수). 분석 대상(analysis_subject)의 1순위 source.
+          example: 강릉야행문화축제
+        periods:
+          type: array
+          description: 연도별 축제기간. 연도당 1개(중복 금지), 점진 입력 허용(0개 이상).
+          items:
+            type: object
+            properties:
+              year:
+                type: integer
+                example: 2025
+              festival_start:
+                type: string
+                description: 축제 시작일 `YYYY-MM-DD`. `year`와 연도 일치.
+                example: "2025-08-15"
+              festival_end:
+                type: string
+                description: 축제 종료일 `YYYY-MM-DD`. `festival_start <= festival_end`.
+                example: "2025-08-17"
+              before_days:
+                type: integer
+                description: 축제 전 창 일수(선택). >=1 일 때만 저장, 0/미설정=개방형.
+                example: 3
+              after_days:
+                type: integer
+                description: 축제 후 창 일수(선택). >=1 일 때만 저장, 0/미설정=개방형.
+                example: 5
+            required: [year, festival_start, festival_end]
       required: [name]
     ProjectListResponse:
       type: object
@@ -2778,6 +2902,10 @@ components:
           description: |
             새 metadata patch. 생략하면 top-level key가 patch 본문으로 그대로
             해석된다.
+
+            축제 메타데이터(#31)는 2026-07-01부터 프로젝트 레벨
+            (`PATCH /projects/{pid}` body의 `metadata.festival`, `ProjectMetadata`)로
+            이동했다. dataset.metadata에선 더 이상 검증하지 않는다.
       additionalProperties: true
     DatasetInfoUpdateRequest:
       type: object
@@ -3452,6 +3580,14 @@ components:
       properties:
         title:
           type: string
+    AnalysisThreadUpdateRequest:
+      type: object
+      description: thread 제목 수정 (#28). title은 필수 — 공백만이면 400.
+      properties:
+        title:
+          type: string
+          description: 새 제목. 공백 trim 후 비면 400, 80자(rune) 초과는 잘림.
+      required: [title]
     AnalysisThreadListResponse:
       type: object
       properties:
@@ -4400,6 +4536,12 @@ components:
                     type:
                       - string
                       - "null"
+                  source_url:
+                    type: string
+                    description: >
+                      원문 게시글 URL. clean source_json에서 값 전체가 http(s)인 컬럼을
+                      추출(전용 URL/permalink 컬럼). clean join이 없거나 URL 컬럼이 없으면
+                      빈 문자열. 진성 결과 화면에서 정제 텍스트~판별 결과 사이 원문 버튼에 쓴다.
                   final_label:
                     type: ["string", "null"]
                     description: "verify 모드(ADR-026) 권위 라벨. genuineness에도 같은 값이 채워진다(호환). review면 null."

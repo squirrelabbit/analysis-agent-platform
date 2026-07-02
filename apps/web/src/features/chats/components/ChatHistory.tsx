@@ -39,9 +39,11 @@ export default function ChatHistory() {
               thread={t}
               active={t.id === nav.threadId}
               deleting={t.id === nav.deletingThreadId}
+              renaming={t.id === nav.renamingThreadId}
               disabled={nav.isComposing}
               onSelect={nav.selectThread}
               onDelete={nav.deleteThread}
+              onRename={nav.renameThread}
             />
           ))
         )}
