@@ -34,6 +34,7 @@ from .planner import (
     PlanValidationError,
     PlannerCallError,
 )
+from .artifact_views import run_clause_label_view, run_doc_genuineness_view
 from .prompt_options import list_prompt_options
 from .source_summary import run_source_summary
 from .taxonomies import (
@@ -115,6 +116,8 @@ def supported_capabilities() -> list[TaskCapability]:
         TaskCapability(name="taxonomy", description="Return aspect/sentiment taxonomy definition (key/label/description) for a taxonomy_id (read-only)."),
         TaskCapability(name="taxonomies", description="List available taxonomies (id/domain/aspect_count/default) for selection (read-only)."),
         TaskCapability(name="source_summary", description="Dataset source file preview (columns/row_count/samples) via DuckDB/openpyxl (read-only)."),
+        TaskCapability(name="artifact_doc_genuineness_view", description="doc_genuineness artifact view aggregation (summary/items/total, single+verify) via DuckDB (read-only)."),
+        TaskCapability(name="artifact_clause_label_view", description="clause_label artifact view aggregation (summary/items/total, single+verify) via DuckDB (read-only)."),
     ]
 
 
@@ -131,6 +134,11 @@ def task_handlers() -> dict[str, Any]:
         # Node control-plane이 version 목록/상세에서 source_summary 캐시 없는
         # legacy 버전에 대해 호출한다 (read-only, 파일 스캔).
         "source_summary": run_source_summary,
+        # artifact view 집계 — Go load*Artifact(DuckDB)의 worker 이전 (ADR-024).
+        # Node control-plane의 GET doc_genuineness/clause_label view가 호출한다.
+        # status/applied 합성과 override overlay는 control-plane 책임.
+        "artifact_doc_genuineness_view": run_doc_genuineness_view,
+        "artifact_clause_label_view": run_clause_label_view,
     }
 
 

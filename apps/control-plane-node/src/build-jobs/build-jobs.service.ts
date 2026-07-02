@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { readFileSync } from 'node:fs';
 import { notFound } from '../common/errors';
-import { goRfc3339, goTimestamptz } from '../common/go-time';
+import { goTimestamptz } from '../common/go-time';
 import { anyToInt, metadataBool, metadataString } from '../common/metadata';
+import { loadBuildProgress } from '../common/progress';
 import {
   BuildJobDiagnosticsDto,
   BuildJobProgressDto,
@@ -135,61 +135,32 @@ export class BuildJobsService {
     }
   }
 
-  /** Go loadBuildJobProgress — progress_ref 파일 읽기. 어떤 실패든 progress 생략. */
+  /** RawBuildProgress → diagnostics DTO (elapsed_seconds 포함, Go BuildJobProgress omitempty 규칙). */
   private loadProgress(
     metadata: Record<string, unknown>,
     prefix: string,
   ): BuildJobProgressDto | null {
-    const ref = metadataString(metadata, `${prefix}_progress_ref`);
-    if (!ref) {
-      return null;
-    }
-    let decoded: Record<string, unknown>;
-    try {
-      decoded = JSON.parse(readFileSync(rewriteWorkspacePath(ref), 'utf-8'));
-    } catch {
-      return null;
-    }
-    const processedRows = decoded.processed_rows ?? 0;
-    const totalRows = decoded.total_rows ?? 0;
-    // Go는 int 필드에 소수 JSON이 오면 unmarshal 실패 → progress 전체 생략.
-    if (!Number.isInteger(processedRows) || !Number.isInteger(totalRows)) {
+    const raw = loadBuildProgress(metadata, prefix);
+    if (!raw) {
       return null;
     }
     const progress: BuildJobProgressDto = {
-      percent: typeof decoded.percent === 'number' ? decoded.percent : 0,
-      processed_rows: processedRows as number,
-      total_rows: totalRows as number,
+      percent: raw.percent,
+      processed_rows: raw.processed_rows,
+      total_rows: raw.total_rows,
     };
-    if (typeof decoded.elapsed_seconds === 'number' && decoded.elapsed_seconds !== 0) {
-      progress.elapsed_seconds = decoded.elapsed_seconds;
+    if (raw.elapsed_seconds !== 0) {
+      progress.elapsed_seconds = raw.elapsed_seconds;
     }
-    if (typeof decoded.eta_seconds === 'number') {
-      progress.eta_seconds = decoded.eta_seconds;
+    if (raw.eta_seconds !== null) {
+      progress.eta_seconds = raw.eta_seconds;
     }
-    const message = typeof decoded.message === 'string' ? decoded.message.trim() : '';
-    if (message) {
-      progress.message = message;
+    if (raw.message) {
+      progress.message = raw.message;
     }
-    if (typeof decoded.updated_at === 'string') {
-      const updatedAt = goRfc3339(decoded.updated_at);
-      if (updatedAt) {
-        progress.updated_at = updatedAt;
-      }
+    if (raw.updated_at !== null) {
+      progress.updated_at = raw.updated_at;
     }
     return progress;
   }
-}
-
-/**
- * progress_ref는 컨테이너 경로(/workspace/data/...)로 저장된다. Node를 host에서
- * 띄우는 동안은 WORKSPACE_DATA_DIR(= compose의 ./data mount 대응 host 경로)로
- * prefix를 치환한다. 컨테이너 배포에선 미설정 → 경로 그대로 (Go와 동일).
- */
-function rewriteWorkspacePath(path: string): string {
-  const hostDir = process.env.WORKSPACE_DATA_DIR;
-  if (hostDir && path.startsWith('/workspace/data/')) {
-    return hostDir + path.slice('/workspace/data'.length);
-  }
-  return path;
 }

@@ -82,9 +82,25 @@ progress 파일 경로는 컨테이너 기준(`/workspace/data/...`)이라 host 
 - **parity 결과**: versions 목록 4 + 상세 5 + 404 6종 전부 일치. 기존 suite 회귀
   (projects/datasets 15, build jobs 98/98)도 재통과. Python worker 테스트 940 OK (신규 9).
 
+### ✅ 6단계 — artifact views 3종 + DuckDB 집계 worker 이동 (2026-07-02)
+화면 polling view `GET .../versions/{vid}/clean · /doc_genuineness · /clause_label` 포팅:
+- **worker task 2종 신설** `artifact_doc_genuineness_view` / `artifact_clause_label_view`
+  (DuckDB 집계 — summary/items/filtered total, 단일+verify 모드, clean parquet LEFT JOIN
+  본문/원문 URL, Go `load*Artifact` 4종 대응, 계약 잠금 테스트 9건). Node는 DuckDB 미탑재.
+- **Node가 합성**: status 매핑(resolveArtifactStatus + cancelled), latest job enrich
+  (started/completed/duration_seconds/progress 파일), applied(모델 표시명 = config/
+  lloa_models.json + env fallback, verify는 summary metadata의 applied/집계 키 merge,
+  진행 중 빌드 in-flight request 회수), **override overlay**(effective label 합성 +
+  summary 재집계 + downstream_rerun_recommended).
+- **계약 발견**: `duration_seconds`는 Go `Duration.Seconds()` 공식(정수초 + 나머지ns/1e9
+  합산)이라 µs를 한 번에 나누면 부동소수점 표현이 어긋난다 (2.3688 vs 2.3688000000000002).
+- **parity**: 5 version × 3 view × 필터/페이징 조합 62/62 + override overlay 4/4
+  (Go API로 임시 override 생성→비교→삭제 원복, tier 경계 교차 재집계 포함).
+  verify 모드는 실데이터(1447820a 둘 다 verify, 94c0ef6a/54c79010 doc verify)로 커버.
+
 ### ⬜ 다음 (포팅 단계)
-- artifact views (clean/doc_genuineness/clause_label view — 집계는 worker 이동,
-  source_summary와 같은 패턴)
+- clause_keywords view + 키워드 정제 사전(read: 목록/이력 + view overlay) — 3-B
+- doc_genuineness runs/compare, 나머지 read(prompts/taxonomy proxy/reports 등)
 - build 트리거 엔드포인트 정식 포팅 (job insert + workflow start, 3단계 검증됨)
 - Python worker HTTP 프록시 (analyze — 단순 HTTP, 저위험)
 - reverse-proxy strangler 라우팅
@@ -101,6 +117,6 @@ src/
   projects/            # controller → service → repository (Go의 http→service→store 대체)
   datasets/            # GET 목록/상세
   build-jobs/          # GET 단건 (diagnostics 합성)
-  versions/            # GET 목록/상세 (stage detail + summary normalize)
-  worker/              # Python worker HTTP client (source_summary — ADR-024 위임)
+  versions/            # GET 목록/상세 + artifact view 3종 (status/applied/override 합성)
+  worker/              # Python worker HTTP client (source_summary/artifact views — ADR-024 위임)
 ```

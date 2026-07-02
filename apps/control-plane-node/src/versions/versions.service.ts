@@ -203,7 +203,7 @@ function isActive(row: DatasetVersionRow, dataset: DatasetActiveRow): boolean {
 }
 
 /** Go cleanStatus — metadata.clean_status → 컬럼 clean_status → data_type 기본값. */
-function cleanStatus(row: DatasetVersionRow, meta: Record<string, unknown>): string {
+export function cleanStatus(row: DatasetVersionRow, meta: Record<string, unknown>): string {
   const fromMeta = metadataString(meta, 'clean_status');
   if (fromMeta) {
     return fromMeta;

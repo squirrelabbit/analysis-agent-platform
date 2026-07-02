@@ -54,6 +54,24 @@ function formatKst(m: RegExpMatchArray): string {
   );
 }
 
+/**
+ * pg timestamptz text → epoch µs. duration(초) 계산용 — Go time.Sub가 µs 정밀도
+ * 컬럼값 기준으로 초를 내므로 µs 정수로 맞춘다. 파싱 불가면 null.
+ */
+export function pgEpochMicros(pgText: string): number | null {
+  const m = pgText.match(
+    /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?([+-]\d{2}(?::?\d{2})?)$/,
+  );
+  if (!m) {
+    return null;
+  }
+  const fracMicros = Number((m[7] ?? '').padEnd(6, '0').slice(0, 6));
+  const baseMs =
+    Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6])) -
+    parseOffsetMinutes(m[8]) * 60_000;
+  return baseMs * 1000 + fracMicros;
+}
+
 /** 'Z' | '+09' | '+09:30' | '+0930' → 분. */
 function parseOffsetMinutes(offset: string): number {
   if (offset === 'Z') {
