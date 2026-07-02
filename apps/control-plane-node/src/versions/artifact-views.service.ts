@@ -1,7 +1,7 @@
 import { HttpException, Injectable } from '@nestjs/common';
 import { existsSync } from 'node:fs';
-import { notFound } from '../common/errors';
-import { goTimestamptz, pgEpochMicros } from '../common/go-time';
+import { httpError, notFound } from '../common/errors';
+import { goRfc3339, goTimestamptz, pgEpochMicros } from '../common/go-time';
 import { modelDisplayNameFor } from '../common/lloa-models';
 import {
   anyStringList,
@@ -352,6 +352,218 @@ export class ArtifactViewsService {
     }
     view.pagination.total = result.total;
     return view;
+  }
+
+  /** Go GetDocGenuinenessRuns — 모델별 결과 목록 (비교 화면 dropdown용). */
+  async docGenuinenessRuns(
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+  ): Promise<Record<string, unknown>> {
+    const { meta } = await this.loadVersion(projectId, datasetId, versionId);
+    const items = docGenuinenessRunsFromMetadata(meta).map((run) => {
+      const dto: Record<string, unknown> = { model: run.model };
+      const display = modelDisplayNameFor(run.model);
+      if (display) {
+        dto['model_display_name'] = display;
+      }
+      dto['ref'] = run.ref;
+      if (run.promptVersion) {
+        dto['prompt_version'] = run.promptVersion;
+      }
+      dto['completed_at'] = run.completedAt;
+      return dto;
+    });
+    return { dataset_version_id: versionId, items };
+  }
+
+  /** Go CompareDocGenuineness — 한 버전 안의 두 모델 결과 1:1 비교. */
+  async compareDocGenuineness(
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+    modelA: string,
+    modelB: string,
+    rawLimit: number,
+    rawOffset: number,
+  ): Promise<Record<string, unknown>> {
+    if (modelA === modelB) {
+      throw httpError(400, 'model_a and model_b must differ');
+    }
+    const { limit, offset } = normalizeArtifactPagination(rawLimit, rawOffset);
+    const { row, meta } = await this.loadVersion(projectId, datasetId, versionId);
+    const runs = docGenuinenessRunsFromMetadata(meta);
+    const runA = runs.find((run) => run.model === modelA);
+    if (!runA) {
+      throw httpError(400, `no doc_genuineness result for model_a: ${modelA}`);
+    }
+    const runB = runs.find((run) => run.model === modelB);
+    if (!runB) {
+      throw httpError(400, `no doc_genuineness result for model_b: ${modelB}`);
+    }
+    const cleanRef = resolveCleanRef(meta);
+    const rowsA = await this.loadRunLabels(runA.ref, cleanRef);
+    const rowsB = await this.loadRunLabels(runB.ref, cleanRef);
+    const overrides = await this.repo.listDocGenuinenessOverrides(projectId, row.dataset_version_id);
+    const overrideByDoc = new Map(overrides.map((o) => [o.doc_id, o.override_genuineness]));
+
+    const tiers = ['genuine_review', 'non_review', 'uncertain'];
+    const tierIndex = new Map(tiers.map((tier, index) => [tier, index]));
+    const confusion = tiers.map(() => tiers.map(() => 0));
+
+    const docIds = [...new Set([...rowsA.keys(), ...rowsB.keys()])].sort();
+    const disagreements: Record<string, unknown>[] = [];
+    let compared = 0;
+    let matched = 0;
+    let onlyInA = 0;
+    let onlyInB = 0;
+    let ovSample = 0;
+    let ovACorrect = 0;
+    let ovBCorrect = 0;
+    let unreviewed = 0;
+    for (const docId of docIds) {
+      const a = rowsA.get(docId);
+      const b = rowsB.get(docId);
+      if (a && !b) {
+        onlyInA++;
+        continue;
+      }
+      if (!a && b) {
+        onlyInB++;
+        continue;
+      }
+      if (!a || !b) {
+        continue;
+      }
+      compared++;
+      const ai = tierIndex.get(a.label);
+      const bi = tierIndex.get(b.label);
+      if (ai !== undefined && bi !== undefined) {
+        confusion[ai][bi]++;
+      }
+      const truth = overrideByDoc.get(docId) ?? '';
+      if (truth !== '') {
+        ovSample++;
+        if (a.label === truth) {
+          ovACorrect++;
+        }
+        if (b.label === truth) {
+          ovBCorrect++;
+        }
+      }
+      if (a.label === b.label) {
+        matched++;
+        continue;
+      }
+      if (truth === '') {
+        unreviewed++;
+      }
+      const item: Record<string, unknown> = { doc_id: docId, a_genuineness: a.label };
+      if (a.reason) {
+        item['a_reason'] = a.reason;
+      }
+      item['b_genuineness'] = b.label;
+      if (b.reason) {
+        item['b_reason'] = b.reason;
+      }
+      const cleaned = a.cleanedText || b.cleanedText;
+      if (cleaned) {
+        item['cleaned_text'] = cleaned;
+      }
+      if (truth) {
+        item['override_genuineness'] = truth;
+      }
+      disagreements.push(item);
+    }
+
+    const rate = compared > 0 ? matched / compared : 0;
+    const patterns: Record<string, unknown>[] = [];
+    for (let i = 0; i < tiers.length; i++) {
+      for (let j = 0; j < tiers.length; j++) {
+        if (i !== j && confusion[i][j] > 0) {
+          patterns.push({ a_genuineness: tiers[i], b_genuineness: tiers[j], count: confusion[i][j] });
+        }
+      }
+    }
+    patterns.sort((x, y) => (y['count'] as number) - (x['count'] as number));
+
+    let overrideEval: Record<string, unknown> | null = null;
+    if (ovSample > 0) {
+      overrideEval = {
+        sample_count: ovSample,
+        a_correct: ovACorrect,
+        b_correct: ovBCorrect,
+        a_accuracy: ovACorrect / ovSample,
+        b_accuracy: ovBCorrect / ovSample,
+        leader: ovACorrect > ovBCorrect ? 'a' : ovBCorrect > ovACorrect ? 'b' : 'tie',
+      };
+    }
+    const verdictLevel =
+      overrideEval !== null ? 'ground_truth' : rate >= 0.85 ? 'agreement_only' : 'review_needed';
+
+    const total = disagreements.length;
+    const start = Math.min(offset, total);
+    const end = Math.min(start + limit, total);
+
+    return {
+      version_a: {
+        dataset_version_id: versionId,
+        ...(modelA ? { model: modelA } : {}),
+        ...(modelDisplayNameFor(modelA) ? { model_display_name: modelDisplayNameFor(modelA) } : {}),
+        total: rowsA.size,
+      },
+      version_b: {
+        dataset_version_id: versionId,
+        ...(modelB ? { model: modelB } : {}),
+        ...(modelDisplayNameFor(modelB) ? { model_display_name: modelDisplayNameFor(modelB) } : {}),
+        total: rowsB.size,
+      },
+      tiers,
+      compared,
+      matched,
+      agreement_rate: rate,
+      only_in_a: onlyInA,
+      only_in_b: onlyInB,
+      confusion,
+      disagreements: disagreements.slice(start, end),
+      disagreements_total: total,
+      pagination: { limit, offset, total },
+      patterns,
+      ...(overrideEval !== null ? { override_eval: overrideEval } : {}),
+      unreviewed_disagreements: unreviewed,
+      verdict_level: verdictLevel,
+    };
+  }
+
+  /** Go loadRunLabels — run artifact 전체 doc 라벨을 map으로 (worker 단일모드 전체 로드). */
+  private async loadRunLabels(
+    ref: string,
+    cleanRef: string,
+  ): Promise<Map<string, { label: string; reason: string; cleanedText: string }>> {
+    // Go는 limit 1<<30으로 전체를 읽는다 — pagination normalize를 우회한다.
+    const result = await this.callWorker('artifact_doc_genuineness_view', {
+      ref,
+      clean_ref: cleanRef,
+      limit: 1 << 30,
+      offset: 0,
+      mode: 'single',
+      genuineness: '',
+      disagreement_only: false,
+      needs_review_only: false,
+    });
+    const rows = new Map<string, { label: string; reason: string; cleanedText: string }>();
+    for (const item of result.items) {
+      const docId = typeof item['doc_id'] === 'string' ? item['doc_id'] : '';
+      if (!docId) {
+        continue;
+      }
+      rows.set(docId, {
+        label: typeof item['genuineness'] === 'string' ? item['genuineness'] : '',
+        reason: typeof item['reason'] === 'string' ? item['reason'] : '',
+        cleanedText: typeof item['cleaned_text'] === 'string' ? item['cleaned_text'] : '',
+      });
+    }
+    return rows;
   }
 
   /** Go GetDatasetVersion의 404 정합성 (dataset → dataset version 순). */
@@ -816,6 +1028,78 @@ function recomputeAspectSentimentPercents(
       value['percent'] = percentOf(intValueOrZero(value['count']), total);
     }
   }
+}
+
+interface DocGenuinenessRun {
+  model: string;
+  ref: string;
+  promptVersion: string;
+  /** KST RFC3339 표기. 없거나 파싱 실패면 Go zero time과 동일한 표기. */
+  completedAt: string;
+}
+
+const GO_ZERO_TIME = '0001-01-01T00:00:00Z';
+
+/**
+ * Go docGenuinenessRunsFromMetadata — metadata.doc_genuineness_runs 파싱.
+ * runs 키가 없는 옛 버전은 단일 doc_genuineness_ref + summary.model로 run 1건 합성.
+ */
+function docGenuinenessRunsFromMetadata(meta: Record<string, unknown>): DocGenuinenessRun[] {
+  const raw = meta['doc_genuineness_runs'];
+  const runs: DocGenuinenessRun[] = [];
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (!isPlainObject(item)) {
+        continue;
+      }
+      const model = anyStringValue(item['model']).trim();
+      const ref = anyStringValue(item['ref']).trim();
+      if (!model || !ref) {
+        continue;
+      }
+      runs.push({
+        model,
+        ref,
+        promptVersion: anyStringValue(item['prompt_version']).trim(),
+        completedAt: metadataTimeValue(item['completed_at']),
+      });
+    }
+  }
+  if (runs.length > 0) {
+    return runs;
+  }
+  // 하위 호환 — 옛 단일 결과를 run 1건으로.
+  let ref = metadataString(meta, 'doc_genuineness_ref');
+  if (!ref) {
+    ref = metadataString(meta, 'doc_genuineness_uri');
+  }
+  if (!ref) {
+    return [];
+  }
+  const summary = meta['doc_genuineness_summary'];
+  let model = '';
+  if (isPlainObject(summary) && typeof summary['model'] === 'string') {
+    model = summary['model'].trim();
+  }
+  return [
+    {
+      model: model || 'default',
+      ref,
+      promptVersion: metadataString(meta, 'doc_genuineness_prompt_version'),
+      completedAt: metadataTimeValue(meta['doc_genuineness_completed_at']),
+    },
+  ];
+}
+
+/** Go anyTimeValue + KST marshal — RFC3339 문자열 파싱, 실패 시 zero time 표기. */
+function metadataTimeValue(value: unknown): string {
+  if (typeof value === 'string') {
+    const formatted = goRfc3339(value);
+    if (formatted) {
+      return formatted;
+    }
+  }
+  return GO_ZERO_TIME;
 }
 
 /** Go percentOf — 소수 1자리 half-away-from-zero 반올림. */

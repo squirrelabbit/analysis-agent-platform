@@ -2,20 +2,22 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 /**
- * Go lloa_model_registry.go + modelDisplayNameFor 포팅 — artifact의 raw 모델 id에
- * 대한 화면 표시명. config/lloa_models.json(LLOA_MODELS_PATH env override) allowlist
- * 라벨 우선, 없으면 env 단일쌍(LLOA_MODEL/LLOA_MODEL_DISPLAY_NAME) 매칭 fallback.
- * 어디에도 없으면 '' → 미노출(프론트가 raw model로 fallback).
+ * Go lloa_model_registry.go + modelDisplayNameFor 포팅 — 전처리 빌드 모델 allowlist
+ * (config/lloa_models.json, LLOA_MODELS_PATH env override)와 화면 표시명.
+ * 표시명은 catalog 라벨 우선, 없으면 env 단일쌍(LLOA_MODEL/LLOA_MODEL_DISPLAY_NAME)
+ * fallback. 어디에도 없으면 '' → 미노출(프론트가 raw model로 fallback).
  */
 
-interface LLOAModelOption {
+export interface LLOAModelOption {
   model_id: string;
   label: string;
+  default: boolean;
 }
 
 let cachedOptions: LLOAModelOption[] | null = null;
 
-function loadOptions(): LLOAModelOption[] {
+/** GET /lloa_model_options 응답용 — catalog.default 일치 항목(없으면 첫 항목)이 default. */
+export function lloaModelOptions(): LLOAModelOption[] {
   if (cachedOptions !== null) {
     return cachedOptions;
   }
@@ -32,7 +34,15 @@ function loadOptions(): LLOAModelOption[] {
       }
       seen.add(id);
       const label = typeof model?.label === 'string' && model.label.trim() ? model.label.trim() : id;
-      options.push({ model_id: id, label });
+      options.push({ model_id: id, label, default: false });
+    }
+    if (options.length > 0) {
+      const defaultModel = typeof catalog?.default === 'string' ? catalog.default.trim() : '';
+      const defaultIndex = Math.max(
+        options.findIndex((option) => option.model_id === defaultModel),
+        0,
+      );
+      options[defaultIndex].default = true;
     }
     cachedOptions = options;
   } catch {
@@ -46,7 +56,7 @@ export function modelDisplayNameFor(model: string): string {
   if (!trimmed) {
     return '';
   }
-  for (const option of loadOptions()) {
+  for (const option of lloaModelOptions()) {
     if (option.model_id === trimmed && option.label !== option.model_id) {
       return option.label;
     }

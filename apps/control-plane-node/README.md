@@ -111,8 +111,23 @@ progress 파일 경로는 컨테이너 기준(`/workspace/data/...`)이라 host 
 - **parity**: 49/49 (view 필터/q/group 조합 + 사전 목록/이력 + 404) — 실데이터 활성
   block 규칙(군산) overlay + 추천 제외어 포함, 재실행도 동일(결정성 확인).
 
+### ✅ 8단계 — 잔여 read: runs/compare + proxy 4종 + reports (2026-07-02)
+- `GET .../doc_genuineness/runs` (모델별 결과 목록, legacy 단일결과 fallback 합성) +
+  `GET .../datasets/{did}/doc_genuineness/compare` (confusion/patterns/override 정확도/
+  verdict — 라벨 전체 로드는 기존 worker task 재사용, 비교 연산은 Node).
+- proxy 4종: `GET /prompt_options` `/taxonomy` `/taxonomies`(worker 응답 그대로 전달,
+  4xx→400 {detail}) + `/lloa_model_options`(config catalog).
+- `GET /projects/{pid}/reports` / `/reports/{rid}` (blocks는 opaque JSON passthrough).
+- 계약 발견: Go zero time(`0001-01-01T00:00:00Z`)은 KST 변환하지 않는다(displaytime
+  IsZero 분기) + JS `Date.UTC`의 0~99년→1900+ 매핑 함정 → goRfc3339에 zero time 분기.
+- parity 47/53. 잔여 6건은 **양쪽 다 500**(깨진 legacy run ref — verify 스키마
+  artifact를 단일 로더로 읽거나 파일 삭제됨)이고 DuckDB 드라이버별 에러 문구
+  포맷만 다름 — 상태코드/원인 동일로 계약 동등 판단. (실행 중 build가 있는 버전의
+  view duration_seconds는 now 기준이라 비교 제외 대상.)
+
 ### ⬜ 다음 (포팅 단계)
-- doc_genuineness runs/compare, 나머지 read(prompts/taxonomy proxy/reports 등)
+- 잔여 read (후순위): analysis threads/runs(analyze 프록시와 함께), basic_analysis
+  (보고서 조립 엔진 — worker 이동 설계 필요), project prompts CRUD(보류 기능)
 - build 트리거 엔드포인트 정식 포팅 (job insert + workflow start, 3단계 검증됨)
 - Python worker HTTP 프록시 (analyze — 단순 HTTP, 저위험)
 - reverse-proxy strangler 라우팅

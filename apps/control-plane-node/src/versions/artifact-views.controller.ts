@@ -36,6 +36,16 @@ export class ArtifactViewsController {
     });
   }
 
+  /** GET .../doc_genuineness/runs — Go handleListDocGenuinenessRuns 계약 동일. */
+  @Get('doc_genuineness/runs')
+  async docGenuinenessRuns(
+    @Param('project_id') projectId: string,
+    @Param('dataset_id') datasetId: string,
+    @Param('version_id') versionId: string,
+  ): Promise<unknown> {
+    return this.service.docGenuinenessRuns(projectId, datasetId, versionId);
+  }
+
   /** GET .../clause_keywords — Go handleGetClauseKeywordsView 계약 동일. */
   @Get('clause_keywords')
   async clauseKeywords(

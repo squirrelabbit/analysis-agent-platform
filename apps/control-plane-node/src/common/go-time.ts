@@ -40,6 +40,11 @@ export function goRfc3339(input: string): string | null {
 /** match 그룹 [_, Y, M, D, h, m, s, frac?, offset] → KST 변환 + RFC3339Nano 표기. */
 function formatKst(m: RegExpMatchArray): string {
   const [, year, month, day, hour, minute, second, fracRaw, offsetRaw] = m;
+  // Go zero time — displaytime.InKST가 IsZero면 변환하지 않는다. JS Date.UTC는
+  // 연도 0~99를 1900+로 매핑하는 함정도 있어 KST 변환 전에 그대로 돌려준다.
+  if (year === '0001') {
+    return '0001-01-01T00:00:00Z';
+  }
   // offset은 분 단위 정수 — 초·소수부는 변환에 영향이 없어 그대로 보존한다.
   const utcMs =
     Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute)) -

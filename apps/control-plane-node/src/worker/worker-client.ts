@@ -12,6 +12,30 @@ export class PythonWorkerClient {
     process.env.PYTHON_AI_WORKER_URL ?? 'http://127.0.0.1:18090';
 
   /**
+   * POST /tasks/<task> 원형 — proxy용(prompt_options/taxonomy/taxonomies).
+   * Go GetPromptOptions/GetTaxonomy처럼 status + raw body를 그대로 돌려주고
+   * 4xx/5xx 매핑은 호출측이 한다.
+   */
+  async postTask(
+    task: string,
+    payload: Record<string, unknown>,
+  ): Promise<{ status: number; body: unknown; text: string }> {
+    const response = await fetch(`${this.baseUrl}/tasks/${task}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const text = await response.text();
+    let body: unknown = null;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = null;
+    }
+    return { status: response.status, body, text };
+  }
+
+  /**
    * POST /tasks/artifact_doc_genuineness_view · artifact_clause_label_view —
    * artifact 파일 집계(summary/items/total). Go load*Artifact(DuckDB)의 대응이라
    * 실패는 Go와 동일하게 조회 실패(500)다 — 호출측이 throw를 그대로 전파한다.
