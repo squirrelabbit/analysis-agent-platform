@@ -65,10 +65,26 @@ Go 계약 그대로 포팅 + **라이브 parity 검증**(Go :18080 vs Node :1808
 progress 파일 경로는 컨테이너 기준(`/workspace/data/...`)이라 host 실행 시
 `WORKSPACE_DATA_DIR=<repo>/data`로 prefix 치환 (컨테이너 배포에선 미설정 = Go와 동일).
 
+### ✅ 5단계 — read 경로 확대 2차: dataset versions 목록/상세 + worker 첫 위임 (2026-07-02)
+- `GET /projects/{pid}/datasets/{did}/versions` / `GET .../versions/{vid}` 포팅
+  (version numbering, clean/doc_genuineness/clause_label stage detail, summary normalize,
+  clean_summary 계약, byte_size/original_filename).
+- **source 프리뷰(row_count/columns)의 DuckDB 계산을 Python worker로 이동** (ADR-024 첫 적용):
+  worker에 read-only task `POST /tasks/source_summary` 신설 (DuckDB + openpyxl, Go
+  `loadDatasetSourceSummary` 대응). Node는 metadata `source_summary` 캐시 우선, 없으면
+  (2026-06-26 이전 legacy 버전) worker 호출. Node는 DuckDB를 들고 있지 않다.
+- **계약 발견 2건**:
+  - `clean.completed_at`은 **컬럼 우선** — Go store `normalizeDatasetVersionCleanFields`가
+    scan 직후 컬럼값을 metadata["cleaned_at"]에 덮어써서, service의 metadata-우선 로직이
+    실질적으로 컬럼값을 본다 (컬럼 NULL일 때만 metadata 파싱).
+  - metadata timestamp(doc_genuineness_completed_at 등)는 ns 정밀도 문자열 그대로 파싱되어
+    ns로 응답된다 (컬럼은 µs) — goRfc3339가 정밀도를 보존해야 함.
+- **parity 결과**: versions 목록 4 + 상세 5 + 404 6종 전부 일치. 기존 suite 회귀
+  (projects/datasets 15, build jobs 98/98)도 재통과. Python worker 테스트 940 OK (신규 9).
+
 ### ⬜ 다음 (포팅 단계)
-- read 경로 확대 2차: dataset versions 목록/상세 — build stage view(~390줄) + source summary
-  (DuckDB fallback → ADR-024대로 worker 이동 검토) + artifacts 의존이라 별도 증분
-- artifact views (clean/doc_genuineness/clause_label view — 집계는 worker 이동)
+- artifact views (clean/doc_genuineness/clause_label view — 집계는 worker 이동,
+  source_summary와 같은 패턴)
 - build 트리거 엔드포인트 정식 포팅 (job insert + workflow start, 3단계 검증됨)
 - Python worker HTTP 프록시 (analyze — 단순 HTTP, 저위험)
 - reverse-proxy strangler 라우팅
@@ -85,4 +101,6 @@ src/
   projects/            # controller → service → repository (Go의 http→service→store 대체)
   datasets/            # GET 목록/상세
   build-jobs/          # GET 단건 (diagnostics 합성)
+  versions/            # GET 목록/상세 (stage detail + summary normalize)
+  worker/              # Python worker HTTP client (source_summary — ADR-024 위임)
 ```

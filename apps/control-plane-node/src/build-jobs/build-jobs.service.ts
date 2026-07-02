@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { notFound } from '../common/errors';
 import { goRfc3339, goTimestamptz } from '../common/go-time';
+import { anyToInt, metadataBool, metadataString } from '../common/metadata';
 import {
   BuildJobDiagnosticsDto,
   BuildJobProgressDto,
@@ -178,35 +179,6 @@ export class BuildJobsService {
     }
     return progress;
   }
-}
-
-/** Go metadataString — 값을 문자열화 + trim, 비면 ''(생략 신호). */
-function metadataString(metadata: Record<string, unknown>, key: string): string {
-  const value = metadata[key];
-  if (value === undefined || value === null) {
-    return '';
-  }
-  return String(value).trim();
-}
-
-/** Go metadataBool — bool true 또는 문자열 'true'(대소문자 무관)만 true. */
-function metadataBool(metadata: Record<string, unknown>, key: string): boolean {
-  const value = metadata[key];
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  if (typeof value === 'string') {
-    return value.trim().toLowerCase() === 'true';
-  }
-  return false;
-}
-
-/** Go anyToInt — 숫자만 int로 (소수는 절삭), 그 외 undefined. */
-function anyToInt(value: unknown): number | undefined {
-  if (typeof value === 'number') {
-    return Math.trunc(value);
-  }
-  return undefined;
 }
 
 /**

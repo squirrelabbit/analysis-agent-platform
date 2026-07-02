@@ -4,9 +4,10 @@ import { DatasetsModule } from './datasets/datasets.module';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
 import { ProjectsModule } from './projects/projects.module';
+import { VersionsModule } from './versions/versions.module';
 
 @Module({
-  imports: [DbModule, ProjectsModule, DatasetsModule, BuildJobsModule],
+  imports: [DbModule, ProjectsModule, DatasetsModule, BuildJobsModule, VersionsModule],
   controllers: [HealthController],
 })
 export class AppModule {}
