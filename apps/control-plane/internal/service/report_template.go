@@ -222,17 +222,11 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 		if cleanRef == "" && version.CleanURI != nil {
 			cleanRef = strings.TrimSpace(*version.CleanURI)
 		}
-		// 원본 게시일 min/max(단일 스캔) — 분석기간 개방형 경계(데이터 시작/끝)와
-		// 개요 "분석 기간" 문자열이 공유한다. 날짜 컬럼이 없으면 둘 다 빈 값.
-		dataStart, dataEnd := "", ""
-		if reportCleanReady(version) && cleanRef != "" {
-			if lo, hi, err := loadDataPeriod(cleanRef); err == nil {
-				dataStart, dataEnd = lo, hi
-			}
-		}
 		period := metadataString(version.Metadata, "data_period", "")
-		if period == "" {
-			period = formatDataPeriodRange(dataStart, dataEnd) // 원본 데이터의 게시일 범위
+		if period == "" && reportCleanReady(version) && cleanRef != "" {
+			if lo, hi, err := loadDataPeriod(cleanRef); err == nil {
+				period = formatDataPeriodRange(lo, hi) // 원본 데이터의 게시일 범위
+			}
 		}
 		model := metadataString(version.Metadata, "clause_label_model", metadataString(version.Metadata, "doc_genuineness_model", ""))
 		if model == "" {
@@ -258,7 +252,7 @@ func (s *DatasetService) loadReportBuildRoot(version domain.DatasetVersion, buil
 			"lloa_model":    model,
 			// #31
 			"analysis_subject":    subject,
-			"analysis_periods":    analysisPeriodsView(festPeriods, dataStart, dataEnd),
+			"analysis_periods":    analysisPeriodsView(festPeriods),
 			"collection_channels": loadCollectionValues(cleanRef, collectionChannelCandidates, false),
 			"collection_keywords": loadCollectionValues(cleanRef, collectionKeywordCandidates, true),
 			"type_definitions":    loadTypeDefinitions(resolveReportTaxonomyID(version, dataset)),
@@ -800,8 +794,8 @@ func (s *DatasetService) buildReportPanel(version domain.DatasetVersion, panel r
 		out["data"] = stackedData(node, labels)
 	case "rank":
 		out["data"] = rankData(node, src, labels)
-	case "period_table": // #31 분석 기간(축제 전/기간/후)
-		out["data"] = periodTableData(node)
+	case "period_timeline": // #31 분석 기간(연도별 대상기간·축제기간·기준/비교)
+		out["data"] = periodTimelineData(node)
 	case "tag_list": // #31 수집 채널/키워드
 		out["data"] = tagListData(node)
 	case "definition_list": // #31 유형 정의
@@ -990,15 +984,10 @@ func rankData(node any, src *registry.ReportTemplateSource, labels reportLabels)
 	return map[string]any{"items": items}
 }
 
-// ── transformer: period_table (#31 분석 기간 — 축제 전/기간/후) ─────────────
-// analysisPeriodsView가 파생한 [{year,period,start_ymd,end_ymd,days}]를 화면 표 rows로.
-// period_label(축제 전/기간/후) + open_start/open_end(개방형 = "" boundary)를 실어 준다.
-func periodTableData(node any) map[string]any {
-	labelFor := map[string]string{
-		festivalPeriodDuring: "축제 기간",
-		festivalPeriodBefore: "축제 전",
-		festivalPeriodAfter:  "축제 후",
-	}
+// ── transformer: period_timeline (#31 분석 기간 — 연도별 대상기간·축제기간·기준/비교) ──
+// analysisPeriodsView가 만든 [{year,role,role_label,target_start,target_end,target_days,
+// festival_start,festival_end}]를 화면 타임라인 rows로 싣는다.
+func periodTimelineData(node any) map[string]any {
 	list, _ := asList(node)
 	rows := make([]any, 0, len(list))
 	for _, item := range list {
@@ -1007,32 +996,23 @@ func periodTableData(node any) map[string]any {
 			continue
 		}
 		year, _ := anyToInt(m["year"])
-		period, _ := m["period"].(string)
-		start, _ := m["start_ymd"].(string)
-		end, _ := m["end_ymd"].(string)
-		// 개방형 여부는 명시 플래그 우선(경계에 실제 데이터 날짜가 채워져도 유지),
-		// 없으면 빈 경계로 파생(하위호환).
-		openStart := strings.TrimSpace(start) == ""
-		if v, ok := m["open_start"].(bool); ok && v {
-			openStart = true
-		}
-		openEnd := strings.TrimSpace(end) == ""
-		if v, ok := m["open_end"].(bool); ok && v {
-			openEnd = true
-		}
-		row := map[string]any{
-			"year":         year,
-			"period":       period,
-			"period_label": labelFor[period],
-			"start_ymd":    start,
-			"end_ymd":      end,
-			"open_start":   openStart,
-			"open_end":     openEnd,
-		}
-		if days, ok := anyToInt(m["days"]); ok && days > 0 {
-			row["days"] = days
-		}
-		rows = append(rows, row)
+		role, _ := m["role"].(string)
+		roleLabel, _ := m["role_label"].(string)
+		targetDays, _ := anyToInt(m["target_days"])
+		targetStart, _ := m["target_start"].(string)
+		targetEnd, _ := m["target_end"].(string)
+		festivalStart, _ := m["festival_start"].(string)
+		festivalEnd, _ := m["festival_end"].(string)
+		rows = append(rows, map[string]any{
+			"year":           year,
+			"role":           role,
+			"role_label":     roleLabel,
+			"target_start":   targetStart,
+			"target_end":     targetEnd,
+			"target_days":    targetDays,
+			"festival_start": festivalStart,
+			"festival_end":   festivalEnd,
+		})
 	}
 	return map[string]any{"rows": rows}
 }
@@ -1264,77 +1244,58 @@ func festivalMeta(project domain.Project) (string, []map[string]any) {
 	return strings.TrimSpace(name), periods
 }
 
-// analysisPeriodsView — 저장된 축제기간(during) + ±N일에서 화면용 before/during/after
-// 구간을 파생한다(2026-07-01 재설계). 연도 내림차순 + during→before→after 정렬.
-//   - during: festival_start ~ festival_end
-//   - before: before_days>0 이면 [start-N, start-1일], 아니면 개방형(end만 start-1일,
-//     start=dataStart = 원본 데이터의 최소 게시일)
-//   - after : after_days>0 이면 [end+1일, end+N], 아니면 개방형(start만 end+1일,
-//     end=dataEnd = 원본 데이터의 최대 게시일)
-// 개방형(N 미설정) 경계는 dataStart/dataEnd(실제 데이터 시작/끝 날짜)로 채우고 open_start/
-// open_end 플래그로 "데이터 경계"임을 표시한다. dataStart/dataEnd가 빈 값(날짜 컬럼 없음)이면
-// 경계도 빈 값으로 두어 프론트가 "데이터 시작/끝"으로 표기한다. days는 before/after에만
-// 실어 준다(0=개방형). 실제 날짜 산출은 백엔드가 하고 프론트는 렌더만 한다(재계산 금지).
-func analysisPeriodsView(periods []map[string]any, dataStart, dataEnd string) []map[string]any {
+// analysisPeriodsView — 저장된 축제 메타 periods를 화면 타임라인 rows로 만든다(2026-07-02
+// 재설계). 연도별로 대상기간(target)·축제기간(festival)·역할(기준/비교)을 그대로 싣고,
+// target_days(대상기간 총 일수, 양끝 포함)를 계산한다. 정렬: 기준 연도(base) 먼저, 그다음
+// 연도 내림차순. 옛 before/during/after ±N일 파생은 폐기됐다.
+func analysisPeriodsView(periods []map[string]any) []map[string]any {
 	const dayFmt = "2006-01-02"
 	type row struct {
 		year  int
-		ord   int
+		base  bool
 		entry map[string]any
 	}
-	rows := make([]row, 0, len(periods)*3)
-	add := func(year, ord int, entry map[string]any) {
-		rows = append(rows, row{year: year, ord: ord, entry: entry})
-	}
+	rows := make([]row, 0, len(periods))
 	for _, p := range periods {
 		year, _ := anyToInt(p["year"])
-		startStr, _ := p["festival_start"].(string)
-		endStr, _ := p["festival_end"].(string)
-		startT, errS := time.Parse(dayFmt, strings.TrimSpace(startStr))
-		endT, errE := time.Parse(dayFmt, strings.TrimSpace(endStr))
-		if errS != nil || errE != nil {
-			continue
+		role, _ := p["role"].(string)
+		if role == "" {
+			role = festivalRoleCompare
 		}
-		beforeDays, _ := anyToInt(p["before_days"])
-		afterDays, _ := anyToInt(p["after_days"])
-
-		// during
-		add(year, 0, map[string]any{
-			"year": year, "period": festivalPeriodDuring,
-			"start_ymd": startT.Format(dayFmt), "end_ymd": endT.Format(dayFmt),
+		targetStart, _ := p["target_start"].(string)
+		targetEnd, _ := p["target_end"].(string)
+		festivalStart, _ := p["festival_start"].(string)
+		festivalEnd, _ := p["festival_end"].(string)
+		roleLabel := "비교 연도"
+		if role == festivalRoleBase {
+			roleLabel = "기준 연도"
+		}
+		targetDays := 0
+		if ts, err1 := time.Parse(dayFmt, strings.TrimSpace(targetStart)); err1 == nil {
+			if te, err2 := time.Parse(dayFmt, strings.TrimSpace(targetEnd)); err2 == nil && !te.Before(ts) {
+				targetDays = int(te.Sub(ts).Hours()/24) + 1 // 양끝 포함
+			}
+		}
+		rows = append(rows, row{
+			year: year,
+			base: role == festivalRoleBase,
+			entry: map[string]any{
+				"year":           year,
+				"role":           role,
+				"role_label":     roleLabel,
+				"target_start":   targetStart,
+				"target_end":     targetEnd,
+				"target_days":    targetDays,
+				"festival_start": festivalStart,
+				"festival_end":   festivalEnd,
+			},
 		})
-		// before
-		beforeEnd := startT.AddDate(0, 0, -1)
-		beforeEntry := map[string]any{
-			"year": year, "period": festivalPeriodBefore,
-			"end_ymd": beforeEnd.Format(dayFmt), "days": beforeDays,
-		}
-		if beforeDays > 0 {
-			beforeEntry["start_ymd"] = startT.AddDate(0, 0, -beforeDays).Format(dayFmt)
-		} else {
-			beforeEntry["start_ymd"] = dataStart // 개방형: 데이터 시작(실제 최소 게시일, 없으면 "")
-			beforeEntry["open_start"] = true
-		}
-		add(year, 1, beforeEntry)
-		// after
-		afterStart := endT.AddDate(0, 0, 1)
-		afterEntry := map[string]any{
-			"year": year, "period": festivalPeriodAfter,
-			"start_ymd": afterStart.Format(dayFmt), "days": afterDays,
-		}
-		if afterDays > 0 {
-			afterEntry["end_ymd"] = endT.AddDate(0, 0, afterDays).Format(dayFmt)
-		} else {
-			afterEntry["end_ymd"] = dataEnd // 개방형: 데이터 끝(실제 최대 게시일, 없으면 "")
-			afterEntry["open_end"] = true
-		}
-		add(year, 2, afterEntry)
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].year != rows[j].year {
-			return rows[i].year > rows[j].year
+		if rows[i].base != rows[j].base {
+			return rows[i].base // 기준 연도 먼저
 		}
-		return rows[i].ord < rows[j].ord
+		return rows[i].year > rows[j].year // 그다음 연도 내림차순
 	})
 	out := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {

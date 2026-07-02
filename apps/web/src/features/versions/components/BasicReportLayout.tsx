@@ -5,10 +5,18 @@
 import { BarTrack, DonutChart, DistributionLegend } from "@/components/common/charts";
 import type { DonutDatum, LegendDatum } from "@/components/common/charts";
 import { cn } from "@/lib/utils";
+import {
+  Boxes,
+  Calendar,
+  FileText,
+  Settings2,
+  User,
+  type LucideIcon,
+} from "lucide-react";
 import type {
   DefinitionListData,
   DistributionData,
-  PeriodTableData,
+  PeriodTimelineData,
   RankData,
   ReportPanel,
   ReportRow,
@@ -120,8 +128,8 @@ function PanelView({ panel }: { panel: ReportPanel }) {
       return <StackedBarPanel data={panel.data as StackedData} />;
     case "rank":
       return <RankPanel data={panel.data as RankData} title={panel.title} />;
-    case "period_table":
-      return <PeriodTablePanel data={panel.data as PeriodTableData} />;
+    case "period_timeline":
+      return <PeriodTimelinePanel data={panel.data as PeriodTimelineData} />;
     case "tag_list":
       return <TagListPanel data={panel.data as TagListData} />;
     case "definition_list":
@@ -133,56 +141,90 @@ function PanelView({ panel }: { panel: ReportPanel }) {
 
 // ── 분석 개요(#31) view별 패널 ────────────────────────────────
 
-// 축제 기간 표 — 연도 / 구분(전·기간·후) / 기간(개방형은 "~"). ±N일은 뱃지.
-function PeriodTablePanel({ data }: { data: PeriodTableData }) {
+// YYYY-MM-DD → YYYY.MM.DD. 같은 해면 끝 날짜는 MM.DD로 축약("2025.09.12 – 09.28").
+function formatPeriodRange(start: string, end: string): string {
+  const dot = (s: string) => s.split("-").join(".");
+  if (!start && !end) return "—";
+  if (!start) return dot(end);
+  if (!end) return dot(start);
+  const sameYear = start.slice(0, 4) === end.slice(0, 4);
+  return sameYear
+    ? `${dot(start)} – ${end.slice(5).split("-").join(".")}`
+    : `${dot(start)} – ${dot(end)}`;
+}
+
+// 분석 기간 타임라인(#31) — 연도별 기준/비교 연도 · 대상 기간 · 축제 기간.
+function PeriodTimelinePanel({ data }: { data: PeriodTimelineData }) {
   const rows = data.rows ?? [];
   if (rows.length === 0) {
-    return <div className="text-[12.5px] text-zinc-400">축제 기간이 설정되지 않았습니다.</div>;
+    return (
+      <div className="text-[12.5px] text-zinc-400">분석 기간이 설정되지 않았습니다.</div>
+    );
   }
-  const rangeText = (r: PeriodTableData["rows"][number]): string => {
-    // 개방형 경계는 백엔드가 실제 데이터 시작/끝 날짜를 채워 준다. 날짜가 있으면 그대로
-    // 쓰고, 비어 있을 때(데이터에 날짜 컬럼이 없음)만 "데이터 시작/끝"으로 대체한다.
-    const start = r.start_ymd || (r.open_start ? "데이터 시작" : "");
-    const end = r.end_ymd || (r.open_end ? "데이터 끝" : "");
-    return `${start} ~ ${end}`;
-  };
-  const badgeCls: Record<string, string> = {
-    during: "bg-violet-50 text-violet-600",
-    before: "bg-zinc-100 text-zinc-500",
-    after: "bg-zinc-100 text-zinc-500",
-  };
   return (
-    <table className="w-full border-collapse text-[12.5px]">
-      <thead>
-        <tr className="border-b border-zinc-200 text-left text-zinc-400">
-          <th className="py-1.5 pr-3 font-semibold">연도</th>
-          <th className="py-1.5 pr-3 font-semibold">구분</th>
-          <th className="py-1.5 pr-3 font-semibold">기간</th>
-          <th className="py-1.5 font-semibold">±N일</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={`${r.year}-${r.period}-${i}`} className="border-b border-zinc-100">
-            <td className="py-1.5 pr-3 font-semibold tabular-nums text-zinc-700">{r.year}</td>
-            <td className="py-1.5 pr-3">
-              <span
+    <div className="rounded-2xl border border-zinc-200">
+      {rows.map((r, i) => {
+        const base = r.role === "base";
+        return (
+          <div
+            key={`${r.year}-${i}`}
+            className={cn(
+              "grid grid-cols-1 items-center gap-5 px-6 py-6 sm:grid-cols-[120px_1fr_auto]",
+              i > 0 && "border-t border-zinc-100",
+            )}
+          >
+            {/* 연도 + 역할 */}
+            <div>
+              <div
                 className={cn(
-                  "inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold",
-                  badgeCls[r.period] ?? "bg-zinc-100 text-zinc-500",
+                  "text-3xl font-extrabold leading-none tracking-tight tabular-nums",
+                  base ? "text-violet-600" : "text-zinc-400",
                 )}
               >
-                {r.period_label}
+                {r.year}
+              </div>
+              <span
+                className={cn(
+                  "mt-2.5 inline-block rounded-full px-3 py-1 text-[11px] font-bold",
+                  base
+                    ? "bg-violet-50 text-violet-600"
+                    : "bg-zinc-100 text-zinc-500",
+                )}
+              >
+                {r.role_label}
               </span>
-            </td>
-            <td className="py-1.5 pr-3 tabular-nums text-zinc-600">{rangeText(r)}</td>
-            <td className="py-1.5 tabular-nums text-zinc-400">
-              {r.days ? `${r.days}일` : "—"}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+            </div>
+            {/* 대상 기간 */}
+            <div>
+              <div className="mb-1.5 text-[12px] font-semibold text-zinc-400">
+                대상 기간
+              </div>
+              <div className="flex flex-wrap items-center gap-2.5 text-lg font-extrabold tracking-tight tabular-nums text-zinc-800">
+                <Calendar className="h-[18px] w-[18px] shrink-0 text-zinc-400" />
+                {formatPeriodRange(r.target_start, r.target_end)}
+                {r.target_days > 0 && (
+                  <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-[12px] font-bold text-zinc-500">
+                    총 {r.target_days}일
+                  </span>
+                )}
+              </div>
+            </div>
+            {/* 축제 기간 */}
+            <div className="flex items-center gap-3.5 rounded-2xl bg-violet-50 px-5 py-3.5">
+              <span className="text-2xl leading-none">🎉</span>
+              <div>
+                <div className="mb-1.5 text-[12px] font-bold text-violet-600">
+                  축제 기간
+                </div>
+                <div className="inline-block rounded-lg bg-violet-600 px-4 py-1.5 text-base font-extrabold tabular-nums text-white">
+                  {formatPeriodRange(r.festival_start, r.festival_end)}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -233,6 +275,14 @@ function DefinitionListPanel({ data }: { data: DefinitionListData }) {
 
 // ── view별 패널 ───────────────────────────────────────────────
 
+// 분석 개요 stat_grid 셀 아이콘 — key별 매핑(#31 디자인 정합). 미지정 key는 아이콘 없음.
+const STAT_ICONS: Record<string, LucideIcon> = {
+  subject: User,
+  model: Boxes,
+  unit: FileText,
+  steps: Settings2,
+};
+
 function StatGridPanel({ data }: { data: StatGridData }) {
   return (
     <div
@@ -246,11 +296,17 @@ function StatGridPanel({ data }: { data: StatGridData }) {
           it.sub === null || it.sub === undefined || it.sub === ""
             ? null
             : String(it.sub);
+        const Icon = STAT_ICONS[it.key];
         return (
           <div
             key={`${it.key}-${i}`}
             className="rounded-xl border border-zinc-100 bg-zinc-50/60 px-4 py-3.5"
           >
+            {Icon && (
+              <div className="mb-3 grid h-9 w-9 place-items-center rounded-lg bg-violet-50 text-violet-600">
+                <Icon className="h-[18px] w-[18px]" />
+              </div>
+            )}
             <div className="text-[12px] font-semibold text-zinc-400">
               {it.label}
             </div>

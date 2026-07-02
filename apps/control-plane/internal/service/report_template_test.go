@@ -186,35 +186,34 @@ func TestDigPathAndToFloat(t *testing.T) {
 }
 
 // #31 분석 개요 전용 뷰 transformer 잠금.
-func TestPeriodTableData(t *testing.T) {
-	// analysisPeriodsView가 파생한 형태(년 int, 개방형 "" boundary, days).
+func TestPeriodTimelineData(t *testing.T) {
+	// analysisPeriodsView가 만든 형태(연도별 대상기간·축제기간·역할).
 	node := []map[string]any{
-		{"year": 2025, "period": "during", "start_ymd": "2025-08-15", "end_ymd": "2025-08-17"},
-		{"year": 2025, "period": "before", "start_ymd": "2025-08-12", "end_ymd": "2025-08-14", "days": 3},
-		{"year": 2025, "period": "after", "start_ymd": "2025-08-18", "end_ymd": "", "days": 0},
+		{"year": 2025, "role": "base", "role_label": "기준 연도",
+			"target_start": "2025-09-12", "target_end": "2025-09-28", "target_days": 17,
+			"festival_start": "2025-09-19", "festival_end": "2025-09-21"},
+		{"year": 2024, "role": "compare", "role_label": "비교 연도",
+			"target_start": "2024-09-13", "target_end": "2024-09-29", "target_days": 17,
+			"festival_start": "2024-09-20", "festival_end": "2024-09-22"},
 	}
-	out := periodTableData(node)
+	out := periodTimelineData(node)
 	rows, _ := out["rows"].([]any)
-	if len(rows) != 3 {
-		t.Fatalf("rows len = %d, want 3", len(rows))
+	if len(rows) != 2 {
+		t.Fatalf("rows len = %d, want 2", len(rows))
 	}
-	during := rows[0].(map[string]any)
-	if during["period_label"] != "축제 기간" || during["open_start"] != false || during["open_end"] != false {
-		t.Fatalf("during row = %v", during)
+	base := rows[0].(map[string]any)
+	if base["role"] != "base" || base["role_label"] != "기준 연도" {
+		t.Fatalf("row0 = %v, want base 기준 연도", base)
 	}
-	before := rows[1].(map[string]any)
-	if before["period_label"] != "축제 전" {
-		t.Fatalf("before label = %v", before["period_label"])
+	if d, _ := anyToInt(base["target_days"]); d != 17 {
+		t.Fatalf("target_days = %v, want 17", base["target_days"])
 	}
-	if d, _ := anyToInt(before["days"]); d != 3 {
-		t.Fatalf("before days = %v, want 3", before["days"])
+	if base["target_start"] != "2025-09-12" || base["festival_end"] != "2025-09-21" {
+		t.Fatalf("row0 dates = %v", base)
 	}
-	after := rows[2].(map[string]any)
-	if after["open_end"] != true {
-		t.Fatalf("after open_end should be true (end_ymd '')")
-	}
-	if _, ok := after["days"]; ok {
-		t.Fatalf("days=0은 생략되어야: %v", after["days"])
+	cmp := rows[1].(map[string]any)
+	if cmp["role_label"] != "비교 연도" {
+		t.Fatalf("row1 label = %v, want 비교 연도", cmp["role_label"])
 	}
 }
 

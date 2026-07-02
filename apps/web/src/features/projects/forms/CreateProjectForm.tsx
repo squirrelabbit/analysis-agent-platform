@@ -13,7 +13,7 @@ import type {
 } from "../models/dto";
 
 // 폼 값(문자열) → CreateProjectRequest. 축제명이 있을 때만 festival을 실어 보낸다.
-// before/after_days는 >0일 때만 포함(비우거나 0이면 개방형).
+// 연도별 대상기간·축제기간 + 역할(기준/비교)을 그대로 담는다.
 function buildCreateRequest(data: ProjectFormValues): CreateProjectRequest {
   const req: CreateProjectRequest = {
     name: data.name.trim(),
@@ -22,19 +22,17 @@ function buildCreateRequest(data: ProjectFormValues): CreateProjectRequest {
   const festivalName = data.festivalName?.trim();
   if (festivalName) {
     const periods = (data.periods ?? [])
-      .filter((p) => p.year || p.festival_start || p.festival_end)
-      .map((p) => {
-        const period: FestivalPeriodInput = {
+      .filter((p) => p.year || p.target_start || p.festival_start)
+      .map(
+        (p): FestivalPeriodInput => ({
           year: Number(p.year),
+          role: p.role,
+          target_start: p.target_start,
+          target_end: p.target_end,
           festival_start: p.festival_start,
           festival_end: p.festival_end,
-        };
-        const before = Number(p.before_days);
-        const after = Number(p.after_days);
-        if (before > 0) period.before_days = before;
-        if (after > 0) period.after_days = after;
-        return period;
-      });
+        }),
+      );
     req.metadata = { festival: { name: festivalName, periods } };
   }
   return req;
@@ -120,7 +118,7 @@ export default function CreateProjectForm({
               >
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-xs font-medium text-[#5b6178]">
-                    연도별 축제 기간 #{idx + 1}
+                    연도별 기간 #{idx + 1}
                   </span>
                   <Button
                     type="button"
@@ -132,7 +130,7 @@ export default function CreateProjectForm({
                     삭제
                   </Button>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <Field>
                     <FieldLabel className="text-[11px]">연도</FieldLabel>
                     <Input
@@ -147,53 +145,73 @@ export default function CreateProjectForm({
                     )}
                   </Field>
                   <Field>
-                    <FieldLabel className="text-[11px]">축제 시작일</FieldLabel>
-                    <Input
-                      type="date"
-                      {...register(`periods.${idx}.festival_start` as const)}
-                    />
-                    {errors.periods?.[idx]?.festival_start && (
-                      <p className="text-[11px] text-red-500">
-                        {errors.periods[idx]?.festival_start?.message}
-                      </p>
-                    )}
-                  </Field>
-                  <Field>
-                    <FieldLabel className="text-[11px]">축제 종료일</FieldLabel>
-                    <Input
-                      type="date"
-                      {...register(`periods.${idx}.festival_end` as const)}
-                    />
-                    {errors.periods?.[idx]?.festival_end && (
-                      <p className="text-[11px] text-red-500">
-                        {errors.periods[idx]?.festival_end?.message}
-                      </p>
-                    )}
+                    <FieldLabel className="text-[11px]">역할</FieldLabel>
+                    <select
+                      className="h-9 rounded-md border border-[#e6e8f0] bg-white px-2 text-sm"
+                      {...register(`periods.${idx}.role` as const)}
+                    >
+                      <option value="base">기준 연도</option>
+                      <option value="compare">비교 연도</option>
+                    </select>
                   </Field>
                 </div>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <Field>
-                    <FieldLabel className="text-[11px]">
-                      축제 전 N일 <span className="text-[#9399b0]">(비우면 전체)</span>
-                    </FieldLabel>
-                    <Input
-                      type="number"
-                      min={0}
-                      {...register(`periods.${idx}.before_days` as const)}
-                      placeholder="예) 3"
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel className="text-[11px]">
-                      축제 후 N일 <span className="text-[#9399b0]">(비우면 전체)</span>
-                    </FieldLabel>
-                    <Input
-                      type="number"
-                      min={0}
-                      {...register(`periods.${idx}.after_days` as const)}
-                      placeholder="예) 3"
-                    />
-                  </Field>
+                <div className="mt-2">
+                  <p className="mb-1 text-[11px] font-semibold text-[#5b6178]">대상 기간</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field>
+                      <FieldLabel className="text-[11px]">시작일</FieldLabel>
+                      <Input
+                        type="date"
+                        {...register(`periods.${idx}.target_start` as const)}
+                      />
+                      {errors.periods?.[idx]?.target_start && (
+                        <p className="text-[11px] text-red-500">
+                          {errors.periods[idx]?.target_start?.message}
+                        </p>
+                      )}
+                    </Field>
+                    <Field>
+                      <FieldLabel className="text-[11px]">종료일</FieldLabel>
+                      <Input
+                        type="date"
+                        {...register(`periods.${idx}.target_end` as const)}
+                      />
+                      {errors.periods?.[idx]?.target_end && (
+                        <p className="text-[11px] text-red-500">
+                          {errors.periods[idx]?.target_end?.message}
+                        </p>
+                      )}
+                    </Field>
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <p className="mb-1 text-[11px] font-semibold text-[#5b6178]">축제 기간</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field>
+                      <FieldLabel className="text-[11px]">시작일</FieldLabel>
+                      <Input
+                        type="date"
+                        {...register(`periods.${idx}.festival_start` as const)}
+                      />
+                      {errors.periods?.[idx]?.festival_start && (
+                        <p className="text-[11px] text-red-500">
+                          {errors.periods[idx]?.festival_start?.message}
+                        </p>
+                      )}
+                    </Field>
+                    <Field>
+                      <FieldLabel className="text-[11px]">종료일</FieldLabel>
+                      <Input
+                        type="date"
+                        {...register(`periods.${idx}.festival_end` as const)}
+                      />
+                      {errors.periods?.[idx]?.festival_end && (
+                        <p className="text-[11px] text-red-500">
+                          {errors.periods[idx]?.festival_end?.message}
+                        </p>
+                      )}
+                    </Field>
+                  </div>
                 </div>
               </div>
             ))}
@@ -207,10 +225,11 @@ export default function CreateProjectForm({
             onClick={() =>
               append({
                 year: "",
+                role: fields.length === 0 ? "base" : "compare",
+                target_start: "",
+                target_end: "",
                 festival_start: "",
                 festival_end: "",
-                before_days: "",
-                after_days: "",
               })
             }
           >
