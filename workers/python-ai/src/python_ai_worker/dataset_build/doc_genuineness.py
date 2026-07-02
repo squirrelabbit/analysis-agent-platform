@@ -64,6 +64,39 @@ _DOC_GENUINENESS_MAX_INPUT_CHARS_ENV = "LLOA_DOC_GENUINENESS_MAX_INPUT_CHARS"
 # error_body 로깅 시 truncate 길이 (PII / 로그 폭주 방지).
 _ERROR_BODY_LOG_LIMIT = 256
 
+# silverone 2026-06-30 — doc_genuineness 배칭(opt-in). default 1 = 기존 단일 호출.
+# baseline(gunsan): system prompt ~2500토큰이 doc마다(1781회) 캐시 없이 재전송돼
+# 입력 토큰 5.17M의 ~86%를 차지. N docs/call로 묶으면 prompt를 amortize(N=5면
+# 입력 ~-69% + 호출수 1/5). **배치 정확도가 단일 대비 검증되기 전까지 default 1
+# 유지** — 운영자가 payload['batch_size'] 또는 env로 명시할 때만 활성화.
+# 짧은(non-chunked) doc만 배칭한다. 긴 문서는 기존 chunk aggregate 경로 유지.
+_DEFAULT_BATCH_SIZE = 1
+_MAX_BATCH_SIZE = 20
+_DOC_GENUINENESS_BATCH_SIZE_ENV = "LLOA_DOC_GENUINENESS_BATCH_SIZE"
+# 배치 응답 max_tokens = per-doc 예산 × actual group_size (2026-07-01).
+# 단일 경로(payload.max_tokens or 4096)와 per-doc 예산을 맞춰, 배치의 정확도
+# 저하가 "토큰 예산 confound"인지 "문서 간 간섭"인지 분리 측정한다. 옛 상수
+# (base 2048 + doc당 256, cap 16384)는 doc당 예산이 단일의 1/6까지 쪼그라들어
+# N 스윕 정확도가 예산 굶김에 오염됐다. 운영/실험용 env override.
+_DEFAULT_BATCH_PER_DOC_MAX_TOKENS = 4096
+_DOC_GENUINENESS_BATCH_PER_DOC_MAX_TOKENS_ENV = "LLOA_DOC_GENUINENESS_BATCH_PER_DOC_MAX_TOKENS"
+_BATCH_MAX_TOKENS_CAP = 65_536  # LLOA_MAX_TOKENS 상한과 정렬
+
+# 단일 doc system prompt에 덧붙이는 배치 모드 지시 — 분류 기준·예시는 그대로
+# 재사용하고 입출력 계약만 단일→배열로 바꾼다(별도 프롬프트 파일 불필요).
+_BATCH_MODE_OVERRIDE = """
+
+## BATCH MODE (위 Output Format 대체)
+이번 입력은 단일 문서가 아니라 여러 문서의 JSON 배열이다:
+[{"doc_id": "...", "doc_text": "..."}, ...]
+각 문서를 위의 분류 기준·예시 그대로 **독립적으로** 판정하고, 결과를 JSON 배열로만 출력한다:
+[{"doc_id": "<입력 그대로 echo>", "genuineness": "genuine_review|non_review|uncertain", "reason": "<한국어 20~40자>"}, ...]
+규칙:
+- 입력의 모든 doc_id에 정확히 하나씩, 입력 순서대로 출력한다.
+- doc_id는 입력 값을 그대로 echo한다(임의 생성·변형 금지).
+- 배열 외 텍스트·설명·markdown 금지.
+"""
+
 
 def _coerce_positive_int(raw: Any) -> int | None:
     """positive int면 반환, 아니면 None. bool은 reject (int subclass 회피)."""
@@ -120,6 +153,36 @@ def _resolve_max_input_chars(payload: dict[str, Any]) -> int:
             fallback=_DEFAULT_MAX_INPUT_CHARS,
         )
     return _DEFAULT_MAX_INPUT_CHARS
+
+
+def _resolve_batch_size(payload: dict[str, Any]) -> int:
+    """배치 크기 우선순위: payload > env > default 1. cap = _MAX_BATCH_SIZE.
+
+    1 = 배칭 안 함(기존 단일 호출). invalid / 0 / negative는 default 1로 fallback.
+    """
+    if value := _coerce_positive_int(payload.get("batch_size")):
+        return min(_MAX_BATCH_SIZE, value)
+    if value := _coerce_positive_int(os.environ.get(_DOC_GENUINENESS_BATCH_SIZE_ENV)):
+        return min(_MAX_BATCH_SIZE, value)
+    return _DEFAULT_BATCH_SIZE
+
+
+def _resolve_batch_per_doc_max_tokens(payload: dict[str, Any]) -> int:
+    """배치 doc당 max_tokens 예산: payload > env > default 4096(=단일 경로와 동일).
+
+    실효 batch_max_tokens = 이 값 × actual group_size (cap _BATCH_MAX_TOKENS_CAP).
+    invalid / 0 / negative는 default로 fallback.
+    """
+    if value := _coerce_positive_int(payload.get("batch_per_doc_max_tokens")):
+        return value
+    if value := _coerce_positive_int(os.environ.get(_DOC_GENUINENESS_BATCH_PER_DOC_MAX_TOKENS_ENV)):
+        return value
+    return _DEFAULT_BATCH_PER_DOC_MAX_TOKENS
+
+
+def _batch_system_prompt(system_prompt: str) -> str:
+    """단일 doc system prompt + 배치 모드 입출력 override."""
+    return system_prompt + _BATCH_MODE_OVERRIDE
 
 
 def _truncate_text(text: str, limit: int) -> tuple[str, int, int, bool]:
@@ -323,6 +386,116 @@ def _classify_doc(
     }
 
 
+def _classify_batch(
+    client: LloaClient,
+    *,
+    batch_system_prompt: str,
+    items: list[tuple[int, str, str]],
+    max_input_chars: int,
+    max_tokens: int,
+) -> list[dict[str, Any]]:
+    """여러 doc를 한 LLOA 호출(JSON 배열)로 분류 (opt-in 배칭).
+
+    반환: items와 같은 순서의 per-doc outcome 리스트. 각 outcome은 단일(non-chunked)
+    ``_process`` 결과와 같은 스키마라 호출부 루프가 그대로 처리한다. 배치 전체 실패
+    (request/parse)는 batch 내 모든 doc를 같은 error_kind로 격리하고, 응답 배열에서
+    누락/invalid한 doc는 개별 parse 실패로 격리한다(한 batch가 build를 죽이지 않게).
+    배치 usage는 첫 성공 outcome에만 부착해 중복 합산을 막는다.
+    """
+    prepared: list[tuple[str, int, int, bool]] = []
+    user_array: list[dict[str, str]] = []
+    for _, doc_id, doc_text in items:
+        used_text, original_length, used_length, truncated = _truncate_text(doc_text, max_input_chars)
+        prepared.append((doc_id, original_length, used_length, truncated))
+        user_array.append({"doc_id": doc_id, "doc_text": used_text})
+
+    outcomes: list[dict[str, Any]] = [
+        {
+            "doc_id": doc_id,
+            "original_length": original_length,
+            "used_length": used_length,
+            "truncated": truncated,
+            "result": None,
+            "error": None,
+            "error_kind": None,
+            "status_code": None,
+            "error_body": "",
+            # 배치 1회 호출당 finish_reason은 첫 outcome에만 부착(호출 단위 분포 집계용).
+            "batch_finish_reason": None,
+        }
+        for (doc_id, original_length, used_length, truncated) in prepared
+    ]
+
+    def _tag_call(finish_reason: Any) -> None:
+        if outcomes:
+            outcomes[0]["batch_finish_reason"] = str(finish_reason or "")
+
+    def _fail_all(error_kind: str, exc: BaseException, *, status_code: Any = None, error_body: str = "") -> list[dict[str, Any]]:
+        for outcome in outcomes:
+            outcome["error"] = exc
+            outcome["error_kind"] = error_kind
+            outcome["status_code"] = status_code
+            outcome["error_body"] = error_body
+        _tag_call(f"error:{error_kind}")
+        return outcomes
+
+    try:
+        response = client.create_json_response(
+            system=batch_system_prompt,
+            user=json.dumps(user_array, ensure_ascii=False),
+            max_tokens=max_tokens,
+        )
+    except LloaResponseParseError as exc:
+        return _fail_all("parse", exc)
+    except OSError as exc:
+        return _fail_all(
+            "request", exc,
+            status_code=getattr(exc, "code", None),
+            error_body=_read_error_body(exc),
+        )
+
+    body = response.body
+    if not isinstance(body, list):
+        return _fail_all(
+            "parse",
+            LloaResponseParseError(
+                f"doc_genuineness batch expected JSON array, got {type(body).__name__}",
+                raw_text=str(body)[:_ERROR_BODY_LOG_LIMIT],
+                finish_reason=response.finish_reason,
+            ),
+        )
+
+    _tag_call(response.finish_reason)
+
+    by_id: dict[str, dict[str, Any]] = {}
+    for entry in body:
+        if isinstance(entry, dict) and entry.get("doc_id") is not None:
+            by_id[str(entry["doc_id"])] = entry
+
+    usage_attached = False
+    for outcome in outcomes:
+        entry = by_id.get(outcome["doc_id"])
+        tier = str((entry or {}).get("genuineness") or "").strip()
+        if entry is None or tier not in _ALLOWED_TIERS:
+            outcome["error"] = LloaResponseParseError(
+                f"doc_genuineness batch missing/invalid entry for doc_id={outcome['doc_id']} (tier={tier!r})",
+                raw_text="",
+                finish_reason=response.finish_reason,
+            )
+            outcome["error_kind"] = "parse"
+            continue
+        result: dict[str, Any] = {
+            "genuineness": tier,
+            "reason": str(entry.get("reason") or "").strip(),
+        }
+        if not usage_attached:
+            # 배치 1회 호출의 usage를 첫 성공 doc에만 부착(나머지는 0 합산).
+            result["usage"] = response.usage
+            usage_attached = True
+        outcome["result"] = result
+    return outcomes
+
+
 @skill_handler("python-ai")
 def _chunk_aggregate_classify(
     client: LloaClient, *, system_prompt: str, doc_id: str, doc_text: str,
@@ -455,6 +628,7 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         )
 
     concurrency = _resolve_concurrency(payload)
+    batch_size = _resolve_batch_size(payload)
     max_input_chars = _resolve_max_input_chars(payload)
     # ADR-029 — 긴 문서 chunk aggregate. **기본 ON**: cleaned_text > max_input_chars인
     # doc는 자동으로 chunk 경로(별도 플래그·Go 배선 불필요). 짧은 doc은 기존 단일 호출.
@@ -474,6 +648,8 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
     total_chunk_count = 0
     chunk_failure_count = 0
     genuine_span_count = 0
+    # 배치 호출당 finish_reason 분포 (truncation=length 감지용). batch_size>1일 때만 채워짐.
+    batch_finish_reasons: dict[str, int] = {}
 
     # silverone 2026-05-28 (D2) — clause_label 동일 3-패스 패턴:
     # (1) row scan으로 empty shortcut + LLOA target 분리,
@@ -585,9 +761,44 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
     # 빌드 중단(silverone 2026-06-29) — /tasks/cancel로 event set 시 남은 doc 멈추고 보존.
     cancelled = False
     cancel_event = _cancel.begin(dataset_version_id)
+    # 배칭(opt-in, 2026-06-30) — 짧은(non-chunked) doc만 한 LLOA 호출로 묶는다.
+    # 긴 문서(chunk aggregate)와 batch_size<=1은 기존 단일 _process 경로 유지.
+    # 각 task는 단일 outcome 또는 outcome 리스트를 반환하고, 아래 루프가 평탄화해 처리.
+    def _is_chunked_target(doc_text: str) -> bool:
+        return chunking_enabled and len(doc_text) > max_input_chars
+
+    batch_per_doc_max_tokens = _resolve_batch_per_doc_max_tokens(payload) if batch_size > 1 else None
+    if batch_size > 1:
+        batch_system = _batch_system_prompt(system_prompt)
+
+        def _batch_task(group: list[tuple[int, str, str]]) -> list[dict[str, Any]]:
+            # 배치 시작 시점에 이미 취소면 호출 없이 즉시 skip 반환.
+            if cancel_event.is_set():
+                return [{"doc_id": gid, "skipped_cancel": True} for _, gid, _ in group]
+            # 실효 max_tokens = per-doc 예산 × actual group_size (마지막 그룹은 < batch_size).
+            group_max_tokens = min(
+                _BATCH_MAX_TOKENS_CAP, batch_per_doc_max_tokens * len(group)
+            )
+            return _classify_batch(
+                client,
+                batch_system_prompt=batch_system,
+                items=group,
+                max_input_chars=max_input_chars,
+                max_tokens=group_max_tokens,
+            )
+
+        simple_items = [it for it in lloa_targets if not _is_chunked_target(it[2])]
+        chunked_items = [it for it in lloa_targets if _is_chunked_target(it[2])]
+        tasks = [(lambda item=it: _process(item)) for it in chunked_items]
+        for start in range(0, len(simple_items), batch_size):
+            group = simple_items[start : start + batch_size]
+            tasks.append(lambda g=group: _batch_task(g))
+    else:
+        tasks = [(lambda item=it: _process(item)) for it in lloa_targets]
+
     if lloa_targets:
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
-            futures = {executor.submit(_process, item): item for item in lloa_targets}
+            futures = [executor.submit(task) for task in tasks]
             for future in as_completed(futures):
                 # 취소 감지 시 즉시 멈춘다(남은 future 취소 + 탈출). 부분 결과 저장 안 함.
                 # break해야 진행률도 그 자리에 멈춘다(드레인하면 완료수가 치솟음).
@@ -596,114 +807,119 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
                         pending.cancel()
                     cancelled = True
                     break
-                outcome = future.result()
-                if outcome.get("skipped_cancel"):
-                    cancelled = True
-                    continue
-                doc_id = outcome["doc_id"]
-                if outcome.get("chunked"):
-                    chunked_doc_count += 1
-                    total_chunk_count += outcome["chunk_count"]
-                    chunk_failure_count += outcome["chunk_failures"]
-                    genuine_span_count += outcome["genuine_span_count"]
-                    if outcome["all_failed"]:
-                        # doc 전체 chunk 실패 → request_failure로 카운트(대량 실패 abort 안전망).
+                result = future.result()
+                # 단일 task=outcome dict, 배치 task=outcome 리스트 — 둘 다 평탄화.
+                for outcome in (result if isinstance(result, list) else [result]):
+                    if outcome.get("skipped_cancel"):
+                        cancelled = True
+                        continue
+                    # 배치 호출당 finish_reason 집계 (첫 outcome에만 부착돼 호출 단위로 셈).
+                    if (fr := outcome.get("batch_finish_reason")) is not None:
+                        batch_finish_reasons[fr] = batch_finish_reasons.get(fr, 0) + 1
+                    doc_id = outcome["doc_id"]
+                    if outcome.get("chunked"):
+                        chunked_doc_count += 1
+                        total_chunk_count += outcome["chunk_count"]
+                        chunk_failure_count += outcome["chunk_failures"]
+                        genuine_span_count += outcome["genuine_span_count"]
+                        if outcome["all_failed"]:
+                            # doc 전체 chunk 실패 → request_failure로 카운트(대량 실패 abort 안전망).
+                            request_failures += 1
+                        records_by_doc[doc_id] = outcome["record"]
+                        tier_counts[outcome["tier"]] += 1
+                        usage = outcome["usage"]
+                        total_prompt_tokens += int(usage.get("prompt_tokens") or 0)
+                        total_completion_tokens += int(usage.get("completion_tokens") or 0)
+                        completed += 1
+                        if progress_path and (completed % 10 == 0 or completed == total_rows):
+                            write_progress(
+                                progress_path, processed_rows=completed, total_rows=total_rows,
+                                started_at=started_at, message="doc_genuineness processing",
+                            )
+                        continue
+                    length_fields = {
+                        "original_length": outcome["original_length"],
+                        "used_length": outcome["used_length"],
+                        "truncated": outcome["truncated"],
+                    }
+                    if outcome["truncated"]:
+                        truncated_docs += 1
+                        LOGGER.warning(
+                            "doc_genuineness.truncated",
+                            doc_id=doc_id,
+                            original_length=outcome["original_length"],
+                            used_length=outcome["used_length"],
+                            max_input_chars=max_input_chars,
+                        )
+                    kind = outcome["error_kind"]
+                    if kind == "parse":
+                        exc = outcome["error"]
+                        LOGGER.warning(
+                            "doc_genuineness.parse_failed",
+                            doc_id=doc_id,
+                            error_category=type(exc).__name__,
+                            error_message=str(exc),
+                            finish_reason=getattr(exc, "finish_reason", ""),
+                        )
+                        parse_failures += 1
+                        records_by_doc[doc_id] = {
+                            "doc_id": doc_id,
+                            "genuineness": "non_review",
+                            "reason": f"fallback: LLOA 응답 파싱 실패 ({type(exc).__name__})",
+                            "prompt_version": prompt_version,
+                            "source": "lloa_parse_failure",
+                            **length_fields,
+                        }
+                        tier_counts["non_review"] += 1
+                    elif kind == "request":
+                        exc = outcome["error"]
+                        LOGGER.warning(
+                            "doc_genuineness.request_failed",
+                            doc_id=doc_id,
+                            error_category=type(exc).__name__,
+                            error_message=str(exc),
+                            status_code=outcome["status_code"],
+                            error_body=outcome["error_body"],
+                            original_length=outcome["original_length"],
+                            used_length=outcome["used_length"],
+                            truncated=outcome["truncated"],
+                        )
                         request_failures += 1
-                    records_by_doc[doc_id] = outcome["record"]
-                    tier_counts[outcome["tier"]] += 1
-                    usage = outcome["usage"]
-                    total_prompt_tokens += int(usage.get("prompt_tokens") or 0)
-                    total_completion_tokens += int(usage.get("completion_tokens") or 0)
+                        records_by_doc[doc_id] = {
+                            "doc_id": doc_id,
+                            "genuineness": "uncertain",
+                            "reason": (
+                                f"fallback: LLOA 요청 실패 ({type(exc).__name__}) — "
+                                "해당 doc 격리, build 계속"
+                            ),
+                            "prompt_version": prompt_version,
+                            "source": "lloa_request_failure",
+                            **length_fields,
+                        }
+                        tier_counts["uncertain"] += 1
+                    else:
+                        result_obj = outcome["result"]
+                        records_by_doc[doc_id] = {
+                            "doc_id": doc_id,
+                            "genuineness": result_obj["genuineness"],
+                            "reason": result_obj["reason"],
+                            "prompt_version": prompt_version,
+                            "source": "lloa",
+                            **length_fields,
+                        }
+                        tier_counts[result_obj["genuineness"]] += 1
+                        usage = result_obj.get("usage") or {}
+                        total_prompt_tokens += int(usage.get("prompt_tokens") or 0)
+                        total_completion_tokens += int(usage.get("completion_tokens") or 0)
                     completed += 1
                     if progress_path and (completed % 10 == 0 or completed == total_rows):
                         write_progress(
-                            progress_path, processed_rows=completed, total_rows=total_rows,
-                            started_at=started_at, message="doc_genuineness processing",
+                            progress_path,
+                            processed_rows=completed,
+                            total_rows=total_rows,
+                            started_at=started_at,
+                            message="doc_genuineness processing",
                         )
-                    continue
-                length_fields = {
-                    "original_length": outcome["original_length"],
-                    "used_length": outcome["used_length"],
-                    "truncated": outcome["truncated"],
-                }
-                if outcome["truncated"]:
-                    truncated_docs += 1
-                    LOGGER.warning(
-                        "doc_genuineness.truncated",
-                        doc_id=doc_id,
-                        original_length=outcome["original_length"],
-                        used_length=outcome["used_length"],
-                        max_input_chars=max_input_chars,
-                    )
-                kind = outcome["error_kind"]
-                if kind == "parse":
-                    exc = outcome["error"]
-                    LOGGER.warning(
-                        "doc_genuineness.parse_failed",
-                        doc_id=doc_id,
-                        error_category=type(exc).__name__,
-                        error_message=str(exc),
-                        finish_reason=getattr(exc, "finish_reason", ""),
-                    )
-                    parse_failures += 1
-                    records_by_doc[doc_id] = {
-                        "doc_id": doc_id,
-                        "genuineness": "non_review",
-                        "reason": f"fallback: LLOA 응답 파싱 실패 ({type(exc).__name__})",
-                        "prompt_version": prompt_version,
-                        "source": "lloa_parse_failure",
-                        **length_fields,
-                    }
-                    tier_counts["non_review"] += 1
-                elif kind == "request":
-                    exc = outcome["error"]
-                    LOGGER.warning(
-                        "doc_genuineness.request_failed",
-                        doc_id=doc_id,
-                        error_category=type(exc).__name__,
-                        error_message=str(exc),
-                        status_code=outcome["status_code"],
-                        error_body=outcome["error_body"],
-                        original_length=outcome["original_length"],
-                        used_length=outcome["used_length"],
-                        truncated=outcome["truncated"],
-                    )
-                    request_failures += 1
-                    records_by_doc[doc_id] = {
-                        "doc_id": doc_id,
-                        "genuineness": "uncertain",
-                        "reason": (
-                            f"fallback: LLOA 요청 실패 ({type(exc).__name__}) — "
-                            "해당 doc 격리, build 계속"
-                        ),
-                        "prompt_version": prompt_version,
-                        "source": "lloa_request_failure",
-                        **length_fields,
-                    }
-                    tier_counts["uncertain"] += 1
-                else:
-                    result = outcome["result"]
-                    records_by_doc[doc_id] = {
-                        "doc_id": doc_id,
-                        "genuineness": result["genuineness"],
-                        "reason": result["reason"],
-                        "prompt_version": prompt_version,
-                        "source": "lloa",
-                        **length_fields,
-                    }
-                    tier_counts[result["genuineness"]] += 1
-                    usage = result.get("usage") or {}
-                    total_prompt_tokens += int(usage.get("prompt_tokens") or 0)
-                    total_completion_tokens += int(usage.get("completion_tokens") or 0)
-                completed += 1
-                if progress_path and (completed % 10 == 0 or completed == total_rows):
-                    write_progress(
-                        progress_path,
-                        processed_rows=completed,
-                        total_rows=total_rows,
-                        started_at=started_at,
-                        message="doc_genuineness processing",
-                    )
 
     # silverone 2026-06-08 — fail-loud: LLOA 실패(요청+파싱)율이 임계 이상이면 build 중단.
     # per-doc 격리(uncertain fallback)는 소수 flaky doc 보호용 — LLOA 서버 다운으로
@@ -765,6 +981,10 @@ def run_dataset_doc_genuineness(payload: dict[str, Any]) -> dict[str, Any]:
         "prompt_version": prompt_version,
         "model": lloa_config.model,
         "concurrency": concurrency,
+        "batch_size": batch_size,
+        # 배치 계측 (2026-07-01) — 토큰 예산 confound / truncation 진단용.
+        "batch_per_doc_max_tokens": batch_per_doc_max_tokens,
+        "batch_finish_reasons": batch_finish_reasons,
         "reasoning_effort": lloa_config.reasoning_effort,
         "total_prompt_tokens": total_prompt_tokens,
         "total_completion_tokens": total_completion_tokens,

@@ -17,10 +17,16 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
+from python_ai_worker.clients.lloa import LloaJSONResponse, LloaResponseParseError
 from python_ai_worker.dataset_build.doc_genuineness import (
+    _DEFAULT_BATCH_SIZE,
     _DEFAULT_CONCURRENCY,
+    _DOC_GENUINENESS_BATCH_SIZE_ENV,
     _DOC_GENUINENESS_CONCURRENCY_ENV,
+    _MAX_BATCH_SIZE,
     _MAX_CONCURRENCY,
+    _classify_batch,
+    _resolve_batch_size,
     _resolve_concurrency,
 )
 
@@ -207,6 +213,221 @@ class DocGenuinenessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dataset_doc_genuineness requires"):
             doc_genuineness.run_dataset_doc_genuineness({"dataset_version_id": "x"})
 
+
+def _batch_fake_urlopen_factory(labels_by_doc: dict[str, tuple[str, str]]):
+    """배치 모드 fake urlopen — user content가 doc 배열이고 응답도 배열로 echo."""
+    calls: list[list[str]] = []
+
+    class _Resp:
+        def __init__(self, payload: dict) -> None:
+            self._payload = payload
+
+        def read(self) -> bytes:
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+    def _fake(req, timeout=None):  # type: ignore[no-untyped-def]
+        body = json.loads(req.data.decode("utf-8"))
+        user_arr = json.loads(body["messages"][1]["content"])
+        assert isinstance(user_arr, list), "batch user content must be JSON array"
+        calls.append([d["doc_id"] for d in user_arr])
+        out = [
+            {
+                "doc_id": d["doc_id"],
+                "genuineness": labels_by_doc[d["doc_id"]][0],
+                "reason": labels_by_doc[d["doc_id"]][1],
+            }
+            for d in user_arr
+        ]
+        return _Resp(_llm_completion(json.dumps(out, ensure_ascii=False)))
+
+    return _fake, calls
+
+
+class DocGenuinenessBatchRunTests(DocGenuinenessTests):
+    """배치(opt-in) end-to-end — setUp/_payload/_patch_config_and_run 재사용."""
+
+    def test_batch_size_two_groups_calls_and_labels(self) -> None:
+        labels = {
+            "row:1": ("genuine_review", "본인 방문 후기."),
+            "row:2": ("non_review", "행사 안내문."),
+            "row:3": ("uncertain", "정보 부족."),
+        }
+        fake_urlopen, calls = _batch_fake_urlopen_factory(labels)
+        result = self._patch_config_and_run(fake_urlopen, self._payload(batch_size=2))
+
+        # row:4 empty는 배칭 대상 아님(shortcut). target 3건 → batch_size 2 → 2 호출.
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(sorted(d for c in calls for d in c), ["row:1", "row:2", "row:3"])
+        # 각 호출은 배열(>=1건), 한 호출에 최대 2건.
+        self.assertTrue(all(1 <= len(c) <= 2 for c in calls))
+
+        summary = result["artifact"]["summary"]
+        self.assertEqual(summary["batch_size"], 2)
+        self.assertEqual(summary["tier_counts"]["genuine_review"], 1)
+        self.assertEqual(summary["tier_counts"]["non_review"], 2)  # row:2 + row:4 empty
+        self.assertEqual(summary["tier_counts"]["uncertain"], 1)
+        self.assertEqual(summary["parse_failures"], 0)
+        self.assertEqual(summary["processed_row_count"], 4)
+
+        records = {
+            json.loads(line)["doc_id"]: json.loads(line)
+            for line in self.output_path.read_text(encoding="utf-8").strip().splitlines()
+        }
+        self.assertEqual(records["row:1"]["genuineness"], "genuine_review")
+        self.assertEqual(records["row:1"]["source"], "lloa")
+        self.assertEqual(records["row:4"]["source"], "empty_text_shortcut")
+
+    def test_batch_size_one_keeps_single_call_path(self) -> None:
+        # batch_size=1(기본)은 단일 doc 경로 — user content가 배열이 아닌 object.
+        responses = {
+            "row:1": _llm_completion('{"doc_id":"row:1","genuineness":"genuine_review","reason":"후기."}'),
+            "row:2": _llm_completion('{"doc_id":"row:2","genuineness":"non_review","reason":"안내문."}'),
+            "row:3": _llm_completion('{"doc_id":"row:3","genuineness":"uncertain","reason":"불확실."}'),
+        }
+        fake_urlopen, log = _fake_urlopen_factory(responses)
+        result = self._patch_config_and_run(fake_urlopen, self._payload(batch_size=1))
+        self.assertEqual(len(log), 3)  # 단일 호출 3건
+        self.assertEqual(result["artifact"]["summary"]["batch_size"], 1)
+
+
+class ClassifyBatchUnitTests(unittest.TestCase):
+    """_classify_batch 매핑/격리 로직 단위 — 실제 HTTP 없이 stub client."""
+
+    class _StubClient:
+        def __init__(self, *, body=None, usage=None, exc=None, finish_reason="stop"):
+            self._body = body
+            self._usage = usage or {"prompt_tokens": 50, "completion_tokens": 12}
+            self._exc = exc
+            self._fr = finish_reason
+            self.calls: list[dict] = []
+
+        def create_json_response(self, *, system, user, max_tokens):
+            self.calls.append({"system": system, "user": user, "max_tokens": max_tokens})
+            if self._exc is not None:
+                raise self._exc
+            return LloaJSONResponse(body=self._body, usage=self._usage, finish_reason=self._fr)
+
+    def _items(self):
+        return [(0, "d1", "본문1"), (1, "d2", "본문2"), (2, "d3", "본문3")]
+
+    def _run(self, client):
+        return _classify_batch(
+            client,
+            batch_system_prompt="SYS",
+            items=self._items(),
+            max_input_chars=20000,
+            max_tokens=4096,
+        )
+
+    def test_happy_path_maps_by_doc_id_and_attaches_usage_once(self) -> None:
+        body = [
+            {"doc_id": "d1", "genuineness": "genuine_review", "reason": "r1"},
+            {"doc_id": "d2", "genuineness": "non_review", "reason": "r2"},
+            {"doc_id": "d3", "genuineness": "uncertain", "reason": "r3"},
+        ]
+        client = self._StubClient(body=body)
+        outcomes = self._run(client)
+
+        self.assertEqual([o["doc_id"] for o in outcomes], ["d1", "d2", "d3"])
+        self.assertEqual([o["result"]["genuineness"] for o in outcomes],
+                         ["genuine_review", "non_review", "uncertain"])
+        self.assertTrue(all(o["error_kind"] is None for o in outcomes))
+        # 배치 usage는 첫 성공 outcome에만 부착(중복 합산 방지).
+        self.assertIn("usage", outcomes[0]["result"])
+        self.assertNotIn("usage", outcomes[1]["result"])
+        self.assertNotIn("usage", outcomes[2]["result"])
+        # 한 호출만 발생.
+        self.assertEqual(len(client.calls), 1)
+
+    def test_missing_entry_is_isolated_as_parse(self) -> None:
+        body = [
+            {"doc_id": "d1", "genuineness": "genuine_review", "reason": "r1"},
+            {"doc_id": "d3", "genuineness": "non_review", "reason": "r3"},
+        ]  # d2 누락
+        outcomes = self._run(self._StubClient(body=body))
+        by_id = {o["doc_id"]: o for o in outcomes}
+        self.assertIsNotNone(by_id["d1"]["result"])
+        self.assertEqual(by_id["d2"]["error_kind"], "parse")
+        self.assertIsNone(by_id["d2"]["result"])
+        self.assertIsNotNone(by_id["d3"]["result"])
+
+    def test_invalid_tier_is_isolated_as_parse(self) -> None:
+        body = [
+            {"doc_id": "d1", "genuineness": "bogus", "reason": "r1"},
+            {"doc_id": "d2", "genuineness": "non_review", "reason": "r2"},
+            {"doc_id": "d3", "genuineness": "uncertain", "reason": "r3"},
+        ]
+        by_id = {o["doc_id"]: o for o in self._run(self._StubClient(body=body))}
+        self.assertEqual(by_id["d1"]["error_kind"], "parse")
+        self.assertIsNotNone(by_id["d2"]["result"])
+
+    def test_non_array_body_fails_all_as_parse(self) -> None:
+        client = self._StubClient(body={"doc_id": "d1", "genuineness": "non_review"})
+        outcomes = self._run(client)
+        self.assertTrue(all(o["error_kind"] == "parse" for o in outcomes))
+
+    def test_parse_error_fails_all_as_parse(self) -> None:
+        client = self._StubClient(exc=LloaResponseParseError("boom"))
+        outcomes = self._run(client)
+        self.assertTrue(all(o["error_kind"] == "parse" for o in outcomes))
+
+    def test_request_error_fails_all_as_request(self) -> None:
+        client = self._StubClient(exc=urllib.error.URLError("down"))
+        outcomes = self._run(client)
+        self.assertTrue(all(o["error_kind"] == "request" for o in outcomes))
+
+    def test_long_doc_is_truncated(self) -> None:
+        long_text = "가" * 50
+        body = [{"doc_id": "d1", "genuineness": "non_review", "reason": "r"}]
+        client = self._StubClient(body=body)
+        outcomes = _classify_batch(
+            client,
+            batch_system_prompt="SYS",
+            items=[(0, "d1", long_text)],
+            max_input_chars=10,
+            max_tokens=4096,
+        )
+        self.assertTrue(outcomes[0]["truncated"])
+        self.assertEqual(outcomes[0]["original_length"], 50)
+        self.assertEqual(outcomes[0]["used_length"], 10)
+        # 실제 user payload에도 truncate된 텍스트만 들어가야 함.
+        sent = json.loads(client.calls[0]["user"])
+        self.assertEqual(len(sent[0]["doc_text"]), 10)
+
+
+class ResolveBatchSizeTests(unittest.TestCase):
+    def test_default_is_one(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(_DOC_GENUINENESS_BATCH_SIZE_ENV, None)
+            self.assertEqual(_resolve_batch_size({}), _DEFAULT_BATCH_SIZE)
+            self.assertEqual(_DEFAULT_BATCH_SIZE, 1)
+
+    def test_payload_overrides_env(self) -> None:
+        with patch.dict(os.environ, {_DOC_GENUINENESS_BATCH_SIZE_ENV: "4"}):
+            self.assertEqual(_resolve_batch_size({"batch_size": 7}), 7)
+
+    def test_env_used_when_no_payload(self) -> None:
+        with patch.dict(os.environ, {_DOC_GENUINENESS_BATCH_SIZE_ENV: "5"}):
+            self.assertEqual(_resolve_batch_size({}), 5)
+
+    def test_cap_applied(self) -> None:
+        self.assertEqual(_resolve_batch_size({"batch_size": 999}), _MAX_BATCH_SIZE)
+
+    def test_invalid_falls_back_to_default(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(_DOC_GENUINENESS_BATCH_SIZE_ENV, None)
+            self.assertEqual(_resolve_batch_size({"batch_size": 0}), _DEFAULT_BATCH_SIZE)
+            self.assertEqual(_resolve_batch_size({"batch_size": -3}), _DEFAULT_BATCH_SIZE)
+            self.assertEqual(_resolve_batch_size({"batch_size": "abc"}), _DEFAULT_BATCH_SIZE)
+
+
+class DocGenuinenessAppliedSnapshotTests(DocGenuinenessTests):
     def test_applied_snapshot_in_summary(self) -> None:
         # silverone 2026-05-22 (PR-α2) — 실행 당시 적용된 subject variables가
         # summary.applied에 snapshot으로 저장된다.

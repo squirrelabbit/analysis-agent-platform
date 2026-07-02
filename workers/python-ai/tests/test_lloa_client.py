@@ -185,6 +185,31 @@ class LloaClientTests(unittest.TestCase):
         client.create_json_response(system="sys", user="hi", max_tokens=512)
         self.assertEqual(captured["body"]["max_tokens"], 512)
 
+    def test_per_call_latency_logged(self) -> None:
+        # silverone 2026-06-30 — 성능 baseline의 per-call p95 측정용 호출당 로그.
+        from unittest.mock import patch
+        from python_ai_worker.clients import lloa
+
+        def fake_urlopen(req, timeout=None):  # type: ignore[no-untyped-def]
+            return _FakeResponse(_completion(
+                '{"ok": true}',
+                usage={"prompt_tokens": 200, "completion_tokens": 50, "total_tokens": 250},
+            ))
+
+        client = LloaClient(_config(), urlopen=fake_urlopen)
+        with patch.object(lloa.LOGGER, "info") as info:
+            client.create_json_response(system="sys", user="hi")
+
+        events = [c for c in info.call_args_list if c.args and c.args[0] == "lloa.call.completed"]
+        self.assertEqual(len(events), 1)
+        kwargs = events[0].kwargs
+        self.assertIn("duration_ms", kwargs)
+        self.assertIsInstance(kwargs["duration_ms"], float)
+        self.assertEqual(kwargs["prompt_tokens"], 200)
+        self.assertEqual(kwargs["completion_tokens"], 50)
+        self.assertEqual(kwargs["total_tokens"], 250)
+        self.assertEqual(kwargs["finish_reason"], "stop")
+
 
 class HelperTests(unittest.TestCase):
     def test_strip_markdown_fence_plain(self) -> None:

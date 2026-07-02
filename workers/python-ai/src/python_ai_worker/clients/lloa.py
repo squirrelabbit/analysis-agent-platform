@@ -14,11 +14,15 @@ LLOA endpoint 전용이다.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 from urllib import request
 
+from ..obs import get
 from ..runtime.llm_guards import RetryPolicy, with_retry
+
+LOGGER = get(__name__)
 
 
 @dataclass(frozen=True)
@@ -129,6 +133,9 @@ class LloaClient:
 
         # transient HTTP/connection 오류만 backoff 재시도. JSON parse 실패 등 non-retryable은
         # with_retry가 즉시 re-raise한다(is_retryable_exception).
+        # silverone 2026-06-30 — 호출당 latency 로그(성능 baseline의 per-call p95 측정용).
+        # build당 수천 호출이라 line당 1개씩 누적되지만, p50/p95 집계 근거가 된다.
+        call_started = time.monotonic()
         body = with_retry(
             "lloa.create_json_response",
             _request,
@@ -138,6 +145,7 @@ class LloaClient:
                 max_delay_sec=self._config.retry_max_delay_sec,
             ),
         )
+        call_duration_ms = round((time.monotonic() - call_started) * 1000.0, 1)
 
         choice = (body.get("choices") or [{}])[0]
         message = choice.get("message") or {}
@@ -145,6 +153,17 @@ class LloaClient:
         reasoning = message.get("reasoning") or message.get("reasoning_content") or ""
         finish_reason = str(choice.get("finish_reason") or "")
         usage = body.get("usage") or {}
+
+        # HTTP 응답을 받은 모든 호출(이후 content parse 실패 포함)의 latency를 남긴다.
+        LOGGER.info(
+            "lloa.call.completed",
+            duration_ms=call_duration_ms,
+            model=self._config.model,
+            prompt_tokens=int(usage.get("prompt_tokens") or 0),
+            completion_tokens=int(usage.get("completion_tokens") or 0),
+            total_tokens=int(usage.get("total_tokens") or 0),
+            finish_reason=finish_reason,
+        )
 
         if not content:
             raise LloaResponseParseError(
