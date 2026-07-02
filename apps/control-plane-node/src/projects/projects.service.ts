@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { notFound } from '../common/errors';
+import { goTimestamptz } from '../common/go-time';
 import { ProjectDto, ProjectListResponse } from './project.dto';
 import { ProjectCountsRow, ProjectsRepository } from './projects.repository';
 
@@ -11,11 +13,19 @@ export class ProjectsService {
     return { items: rows.map((r) => this.toDto(r)) };
   }
 
+  async get(projectId: string): Promise<ProjectDto> {
+    const row = await this.repo.getWithCounts(projectId);
+    if (row === undefined) {
+      throw notFound('project');
+    }
+    return this.toDto(row);
+  }
+
   private toDto(row: ProjectCountsRow): ProjectDto {
     const dto: ProjectDto = {
       project_id: row.project_id,
       name: row.name,
-      created_at: row.created_at.toISOString(),
+      created_at: goTimestamptz(row.created_at),
       dataset_count: Number(row.dataset_count),
       dataset_version_count: Number(row.dataset_version_count),
       scenario_count: 0,

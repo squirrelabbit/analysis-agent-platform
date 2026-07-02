@@ -2,12 +2,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Kysely, sql } from 'kysely';
 import { DB } from '../db/db.module';
 
-/** Postgres row 원형 (count는 bigint → pg가 string으로 반환). */
+/** Postgres row 원형 (count는 bigint → pg가 string으로, timestamptz는 raw text로 반환). */
 export interface ProjectCountsRow {
   project_id: string;
   name: string;
   description: string | null;
-  created_at: Date;
+  created_at: string;
   metadata: Record<string, unknown> | null;
   dataset_count: string;
   dataset_version_count: string;
@@ -25,7 +25,20 @@ export class ProjectsRepository {
   constructor(@Inject(DB) private readonly db: Kysely<any>) {}
 
   async listWithCounts(): Promise<ProjectCountsRow[]> {
-    const result = await sql<ProjectCountsRow>`
+    const result = await this.countsQuery(sql``).execute(this.db);
+    return result.rows;
+  }
+
+  /** 단건 조회 — GET /projects/{project_id}. 미존재면 빈 배열. */
+  async getWithCounts(projectId: string): Promise<ProjectCountsRow | undefined> {
+    const result = await this.countsQuery(
+      sql`WHERE p.project_id = ${projectId}::uuid`,
+    ).execute(this.db);
+    return result.rows[0];
+  }
+
+  private countsQuery(where: ReturnType<typeof sql>) {
+    return sql<ProjectCountsRow>`
       SELECT
         p.project_id::text AS project_id,
         p.name,
@@ -39,8 +52,8 @@ export class ProjectsRepository {
         (SELECT count(*) FROM project_prompts pp WHERE pp.project_id = p.project_id) AS prompt_count,
         (SELECT count(*) FROM analysis_threads t WHERE t.project_id = p.project_id) AS analysis_thread_count
       FROM projects p
+      ${where}
       ORDER BY p.created_at ASC, p.project_id ASC
-    `.execute(this.db);
-    return result.rows;
+    `;
   }
 }
