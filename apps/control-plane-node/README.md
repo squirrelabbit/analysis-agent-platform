@@ -137,9 +137,18 @@ Temporal 쓰기 interop을 **정식 경로**로 배선한 첫 write:
   temporal-worker 실행 → completed**(workflow_run_id 기록, clean artifact 생성),
   clean view Go/Node parity OK. 400(text_columns 부재) 문구도 Go와 일치.
 
-### ⬜ 다음 (포팅 단계)
-- 쓰기 경로 2차: POST doc_genuineness/clause_label(모델·verify 검증 동반)/
-  clause_keywords + cancel 4종 — clean과 같은 패턴 + LLOA 모델 allowlist 검증
+### ✅ 10단계 — 쓰기 경로 2차: 나머지 build 트리거 3종 + cancel (2026-07-02)
+- `POST .../doc_genuineness`(subject 설정 필수 + LLOA 모델 allowlist/verify 2모델+judge
+  검증 + clean ready) / `.../clause_label`(동일 검증) / `.../clause_keywords`
+  (clause_label artifact 존재) — 공통 접수 코어(enqueue: idempotent → 상태 큐잉 →
+  job insert → Temporal start) 공유.
+- `POST .../{type}/cancel` 3종 — active job 확인 후 worker `/tasks/cancel` 협조 신호,
+  202 {status: cancelling}.
+- 검증: 400 에러경로 6종 Go/Node 본문 완전 일치(모델 allowlist/verify 검증/cancel
+  no-active — LLOA 실 트리거 없이). **clause_keywords 실전 E2E**(Kiwi 결정론·LLOA
+  무관): Node 202 → Temporal → Go worker 실행 → completed, 재빌드 후 view parity OK.
+  doc_genuineness/clause_label의 실 LLOA 트리거는 비용상 생략 — 접수 코어는 clean/
+  clause_keywords E2E로 증명, type별 precondition은 400 parity로 커버.
 - 잔여 read (후순위): analysis threads/runs(analyze 프록시와 함께), basic_analysis
   (보고서 조립 엔진 — worker 이동 설계 필요), project prompts CRUD(보류 기능)
 - build 트리거 엔드포인트 정식 포팅 (job insert + workflow start, 3단계 검증됨)
