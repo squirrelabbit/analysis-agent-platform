@@ -308,7 +308,7 @@ export function ExpandableTextCell({ text }: { text: string }) {
           ref={pRef}
           onClick={() => overflowing && setExpanded((v) => !v)}
           className={cn(
-            "min-w-0 flex-1",
+            "min-w-0 flex-1 whitespace-pre-line",
             !expanded && "line-clamp-2",
             overflowing && "cursor-pointer",
           )}
