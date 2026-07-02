@@ -15,10 +15,11 @@ export interface DatasetVersionRow {
   ready_at: string | null;
 }
 
-/** 활성 버전 판정에 필요한 dataset 최소 조각. */
+/** 활성 버전 판정 + view 합성(추천 제외어)에 필요한 dataset 조각. */
 export interface DatasetActiveRow {
   dataset_id: string;
   active_dataset_version_id: string | null;
+  metadata: Record<string, unknown> | null;
 }
 
 const VERSION_COLUMNS = sql`
@@ -33,7 +34,7 @@ export class VersionsRepository {
   /** Go GetDatasetVersion/ListDatasetVersions는 진입 전에 GetDataset로 404 dataset 판정. */
   async getDataset(projectId: string, datasetId: string): Promise<DatasetActiveRow | undefined> {
     const result = await sql<DatasetActiveRow>`
-      SELECT dataset_id::text AS dataset_id, active_dataset_version_id
+      SELECT dataset_id::text AS dataset_id, active_dataset_version_id, metadata
       FROM datasets
       WHERE project_id = ${projectId}::uuid AND dataset_id = ${datasetId}::uuid
     `.execute(this.db);

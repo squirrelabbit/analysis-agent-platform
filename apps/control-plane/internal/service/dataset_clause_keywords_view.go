@@ -187,7 +187,9 @@ func loadClauseKeywordsArtifact(ref string, limit, offset int, aspect, sentiment
 	// ── item table = 키워드 집계 행 (필터 적용 후 keyword GROUP BY) ───────────
 	// 프론트 1차 화면은 raw 절-키워드가 아니라 "키워드별: 언급수/문서수/우세감성/
 	// 대표 aspect/대표 절". 필터(aspect/sentiment/q)는 집계 *전* 행에 적용하고,
-	// 페이징은 키워드 단위. dominant_*/top_aspect는 mode(arg_max)로 산출.
+	// 페이징은 키워드 단위. dominant_*/top_aspect/대표 절은 ROW_NUMBER + 명시
+	// tie-break(동률 시 사전순)로 산출 — arg_max는 동률 승자가 비결정적이어서
+	// 호출·프로세스마다 값이 흔들렸다 (2026-07-02, Node parity 게이트에서 발견).
 	where := buildKeywordFilter(aspect, sentiment, q)
 	filteredTotal, err := scalarCount(db, fmt.Sprintf(
 		"SELECT COUNT(DISTINCT keyword) FROM %s %s%skeyword IS NOT NULL",
@@ -205,22 +207,41 @@ func loadClauseKeywordsArtifact(ref string, limit, offset int, aspect, sentiment
 		 base AS (
 		    SELECT keyword,
 		           COUNT(*) AS count,
-		           COUNT(DISTINCT doc_id) AS document_count,
-		           arg_max(clause, length(clause)) AS representative_clause
+		           COUNT(DISTINCT doc_id) AS document_count
 		    FROM filtered GROUP BY keyword
 		 ),
-		 dom_sent AS (SELECT keyword, arg_max(sentiment, c) AS dominant_sentiment, MAX(c) AS dom_c FROM ks GROUP BY keyword),
-		 dom_asp  AS (SELECT keyword, arg_max(aspect, c) AS top_aspect FROM ka GROUP BY keyword)
+		 rep AS (
+		    SELECT keyword, clause AS representative_clause FROM (
+		       SELECT keyword, clause,
+		              ROW_NUMBER() OVER (PARTITION BY keyword ORDER BY length(clause) DESC, clause) AS rn
+		       FROM filtered
+		    ) WHERE rn = 1
+		 ),
+		 dom_sent AS (
+		    SELECT keyword, sentiment AS dominant_sentiment, c AS dom_c FROM (
+		       SELECT keyword, sentiment, c,
+		              ROW_NUMBER() OVER (PARTITION BY keyword ORDER BY c DESC, sentiment) AS rn
+		       FROM ks
+		    ) WHERE rn = 1
+		 ),
+		 dom_asp AS (
+		    SELECT keyword, aspect AS top_aspect FROM (
+		       SELECT keyword, aspect, c,
+		              ROW_NUMBER() OVER (PARTITION BY keyword ORDER BY c DESC, aspect) AS rn
+		       FROM ka
+		    ) WHERE rn = 1
+		 )
 		 SELECT b.keyword,
 		        b.count,
 		        b.document_count,
 		        s.dominant_sentiment,
 		        ROUND(CAST(s.dom_c AS DOUBLE) / b.count, 4) AS dominant_sentiment_ratio,
 		        a.top_aspect,
-		        b.representative_clause
+		        r.representative_clause
 		 FROM base b
 		 JOIN dom_sent s USING (keyword)
 		 JOIN dom_asp a USING (keyword)
+		 JOIN rep r USING (keyword)
 		 ORDER BY b.count DESC, b.keyword
 		 LIMIT %d OFFSET %d`,
 		source, where, whereGlue(where), limit, offset,

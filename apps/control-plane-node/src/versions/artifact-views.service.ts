@@ -25,8 +25,9 @@ import {
   DocGenuinenessOverrideRow,
   LatestBuildJobRow,
 } from './artifact-views.repository';
+import { KeywordDictionaryRepository } from '../keyword-dictionary/keyword-dictionary.repository';
 import { cleanStatus } from './versions.service';
-import { DatasetVersionRow, VersionsRepository } from './versions.repository';
+import { DatasetActiveRow, DatasetVersionRow, VersionsRepository } from './versions.repository';
 
 export interface ArtifactViewQuery {
   limit: number;
@@ -51,6 +52,7 @@ export class ArtifactViewsService {
   constructor(
     private readonly versions: VersionsRepository,
     private readonly repo: ArtifactViewsRepository,
+    private readonly keywordDictionary: KeywordDictionaryRepository,
     private readonly worker: PythonWorkerClient,
   ) {}
 
@@ -282,12 +284,82 @@ export class ArtifactViewsService {
     return view;
   }
 
+  /** Go GetClauseKeywordsView — 사전 overlay + 대시보드 집계는 worker, 합성은 여기. */
+  async clauseKeywordsView(
+    projectId: string,
+    datasetId: string,
+    versionId: string,
+    query: ArtifactViewQuery & { q?: string; group?: string },
+  ): Promise<DatasetArtifactViewDto> {
+    const { row, meta, dataset } = await this.loadVersion(projectId, datasetId, versionId);
+    const { limit, offset } = normalizeArtifactPagination(query.limit, query.offset);
+    const job = await this.repo.latestJob(projectId, row.dataset_version_id, 'clause_keywords');
+
+    let ref = metadataString(meta, 'clause_keywords_ref');
+    if (!ref) {
+      ref = metadataString(meta, 'clause_keywords_uri');
+    }
+    const view = this.baseView('clause_keywords', job, meta);
+    view.status = resolveArtifactStatus(
+      ref,
+      job,
+      metadataString(meta, 'clause_keywords_status'),
+      metadataBool(meta, 'clause_keywords_cancelled'),
+    );
+    view.pagination = { limit, offset, total: 0 };
+
+    if (!ref || !existsSync(rewriteWorkspacePath(ref))) {
+      return view;
+    }
+    // 키워드 정제 사전 — 활성 규칙을 worker overlay로 전달(원본 artifact 불변).
+    const rules = await this.keywordDictionary.listRules(projectId, datasetId, true);
+    const result = await this.callWorker('artifact_clause_keywords_view', {
+      ref,
+      limit,
+      offset,
+      aspect: query.aspect ?? '',
+      sentiment: query.sentiment ?? '',
+      q: query.q ?? '',
+      group: query.group ?? '',
+      rules: rules.map((rule) => ({
+        rule_type: rule.rule_type,
+        source_term: rule.source_term,
+        target_term: rule.target_term,
+        active: rule.active,
+      })),
+    });
+
+    view.summary = result.summary;
+    const activeRuleCount = rules.filter((rule) => rule.active).length;
+    if (activeRuleCount > 0) {
+      view.summary['dictionary_rule_count'] = activeRuleCount;
+    }
+    // 추천 제외어 — 검색어/대상명(dataset.metadata.doc_genuineness) 유래 키워드 표시.
+    const terms = subjectDerivedTerms(dataset.metadata ?? {});
+    if (terms.size > 0) {
+      const flagged = annotateSuggestedExclude(result.items, terms);
+      if (flagged > 0) {
+        view.summary['suggested_exclude_page_count'] = flagged;
+      }
+      view.summary['suggested_exclude_terms'] = [...terms].sort();
+    }
+    const extractorVersion = summaryMetadataString(meta, 'clause_keywords_summary', 'extractor_version');
+    if (extractorVersion) {
+      view.applied = { extractor_version: extractorVersion };
+    }
+    if (result.items.length > 0) {
+      view.items = result.items;
+    }
+    view.pagination.total = result.total;
+    return view;
+  }
+
   /** Go GetDatasetVersion의 404 정합성 (dataset → dataset version 순). */
   private async loadVersion(
     projectId: string,
     datasetId: string,
     versionId: string,
-  ): Promise<{ row: DatasetVersionRow; meta: Record<string, unknown> }> {
+  ): Promise<{ row: DatasetVersionRow; meta: Record<string, unknown>; dataset: DatasetActiveRow }> {
     const dataset = await this.versions.getDataset(projectId, datasetId);
     if (dataset === undefined) {
       throw notFound('dataset');
@@ -296,7 +368,7 @@ export class ArtifactViewsService {
     if (row === undefined || row.dataset_id !== datasetId) {
       throw notFound('dataset version');
     }
-    return { row, meta: row.metadata ?? {} };
+    return { row, meta: row.metadata ?? {}, dataset };
   }
 
   /** view 공통 필드 (Go DatasetArtifactView 기본값 + enrichViewWithJob). */
@@ -345,7 +417,10 @@ export class ArtifactViewsService {
   }
 
   private async callWorker(
-    task: 'artifact_doc_genuineness_view' | 'artifact_clause_label_view',
+    task:
+      | 'artifact_doc_genuineness_view'
+      | 'artifact_clause_label_view'
+      | 'artifact_clause_keywords_view',
     payload: Record<string, unknown>,
   ): Promise<WorkerViewResult> {
     let body: Record<string, unknown>;
@@ -749,4 +824,51 @@ function percentOf(count: number, total: number): number {
     return 0;
   }
   return Math.floor((count / total) * 1000 + 0.5) / 10;
+}
+
+/**
+ * Go subjectDerivedTerms — dataset.metadata.doc_genuineness의 subject_name +
+ * subject_aliases + recruitment_keywords를 구분자(공백/&/·/구두점)로 쪼갠 토큰 집합
+ * (소문자, 2글자 미만 제거). "추천 제외어" 매칭용.
+ */
+function subjectDerivedTerms(datasetMeta: Record<string, unknown>): Set<string> {
+  const raw = datasetMeta['doc_genuineness'];
+  const terms = new Set<string>();
+  if (!isPlainObject(raw)) {
+    return terms;
+  }
+  const parts: string[] = [anyStringValue(raw['subject_name'])];
+  parts.push(...(anyStringList(raw['subject_aliases']) ?? []));
+  parts.push(...(anyStringList(raw['recruitment_keywords']) ?? []));
+  for (const part of parts) {
+    for (const token of part.split(/[\s&/,·・|+()[\]\-_~]+/u)) {
+      const term = token.trim().toLowerCase();
+      if ([...term].length >= 2) {
+        terms.add(term);
+      }
+    }
+  }
+  return terms;
+}
+
+/** Go annotateSuggestedExclude — 현재 페이지의 keyword 행에 검색어 유래 플래그. */
+function annotateSuggestedExclude(
+  items: Record<string, unknown>[],
+  terms: Set<string>,
+): number {
+  if (terms.size === 0) {
+    return 0;
+  }
+  let count = 0;
+  for (const item of items) {
+    const keyword = item['keyword'];
+    if (typeof keyword !== 'string') {
+      continue;
+    }
+    if (terms.has(keyword.trim().toLowerCase())) {
+      item['suggested_exclude'] = true;
+      count++;
+    }
+  }
+  return count;
 }

@@ -17,7 +17,10 @@ export class PythonWorkerClient {
    * 실패는 Go와 동일하게 조회 실패(500)다 — 호출측이 throw를 그대로 전파한다.
    */
   async artifactView(
-    task: 'artifact_doc_genuineness_view' | 'artifact_clause_label_view',
+    task:
+      | 'artifact_doc_genuineness_view'
+      | 'artifact_clause_label_view'
+      | 'artifact_clause_keywords_view',
     payload: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     const response = await fetch(`${this.baseUrl}/tasks/${task}`, {

@@ -35,6 +35,7 @@ from .planner import (
     PlannerCallError,
 )
 from .artifact_views import run_clause_label_view, run_doc_genuineness_view
+from .clause_keywords_view import run_clause_keywords_view
 from .prompt_options import list_prompt_options
 from .source_summary import run_source_summary
 from .taxonomies import (
@@ -118,6 +119,7 @@ def supported_capabilities() -> list[TaskCapability]:
         TaskCapability(name="source_summary", description="Dataset source file preview (columns/row_count/samples) via DuckDB/openpyxl (read-only)."),
         TaskCapability(name="artifact_doc_genuineness_view", description="doc_genuineness artifact view aggregation (summary/items/total, single+verify) via DuckDB (read-only)."),
         TaskCapability(name="artifact_clause_label_view", description="clause_label artifact view aggregation (summary/items/total, single+verify) via DuckDB (read-only)."),
+        TaskCapability(name="artifact_clause_keywords_view", description="clause_keywords dashboard/table aggregation with dictionary overlay via DuckDB (read-only)."),
     ]
 
 
@@ -139,6 +141,7 @@ def task_handlers() -> dict[str, Any]:
         # status/applied 합성과 override overlay는 control-plane 책임.
         "artifact_doc_genuineness_view": run_doc_genuineness_view,
         "artifact_clause_label_view": run_clause_label_view,
+        "artifact_clause_keywords_view": run_clause_keywords_view,
     }
 
 

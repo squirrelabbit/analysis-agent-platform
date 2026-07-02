@@ -36,6 +36,28 @@ export class ArtifactViewsController {
     });
   }
 
+  /** GET .../clause_keywords — Go handleGetClauseKeywordsView 계약 동일. */
+  @Get('clause_keywords')
+  async clauseKeywords(
+    @Param('project_id') projectId: string,
+    @Param('dataset_id') datasetId: string,
+    @Param('version_id') versionId: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('aspect') aspect?: string,
+    @Query('sentiment') sentiment?: string,
+    @Query('q') q?: string,
+    @Query('group') group?: string,
+  ): Promise<DatasetArtifactViewDto> {
+    return this.service.clauseKeywordsView(projectId, datasetId, versionId, {
+      ...parseArtifactPagination(limit, offset),
+      aspect: (aspect ?? '').trim(),
+      sentiment: (sentiment ?? '').trim(),
+      q: (q ?? '').trim(),
+      group: (group ?? '').trim(),
+    });
+  }
+
   /** GET .../clause_label — Go handleGetClauseLabelView 계약 동일. */
   @Get('clause_label')
   async clauseLabel(

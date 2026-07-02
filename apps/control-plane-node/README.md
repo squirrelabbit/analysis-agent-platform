@@ -98,8 +98,20 @@ progress 파일 경로는 컨테이너 기준(`/workspace/data/...`)이라 host 
   (Go API로 임시 override 생성→비교→삭제 원복, tier 경계 교차 재집계 포함).
   verify 모드는 실데이터(1447820a 둘 다 verify, 94c0ef6a/54c79010 doc verify)로 커버.
 
+### ✅ 7단계 (3-B) — clause_keywords view + 키워드 사전 read/overlay (2026-07-02)
+- `GET .../versions/{vid}/clause_keywords` — worker task `artifact_clause_keywords_view`
+  (대시보드 summary: 총/고유/절 count·top5·워드클라우드 top30+weight, 키워드/절 중심
+  item table, **사전 overlay**: block WHERE 제외 + synonym CASE 병합을 source 서브쿼리로).
+  Node가 dictionary_rule_count·추천 제외어(subject 유래 토큰)·extractor_version 합성.
+- `GET .../datasets/{did}/keyword_dictionary` (+`?include_inactive`) / `.../history` —
+  규칙 목록·append-only 이력 read 포팅.
+- **Go 비결정성 수정**: 키워드 집계의 dominant_sentiment/top_aspect/대표 절이 `arg_max`
+  동률 시 비결정적(worker에서는 호출마다 흔들림, Go도 프로세스마다 다를 수 있음) —
+  Go/worker 양쪽 SQL을 ROW_NUMBER + 명시 tie-break(사전순)로 결정화.
+- **parity**: 49/49 (view 필터/q/group 조합 + 사전 목록/이력 + 404) — 실데이터 활성
+  block 규칙(군산) overlay + 추천 제외어 포함, 재실행도 동일(결정성 확인).
+
 ### ⬜ 다음 (포팅 단계)
-- clause_keywords view + 키워드 정제 사전(read: 목록/이력 + view overlay) — 3-B
 - doc_genuineness runs/compare, 나머지 read(prompts/taxonomy proxy/reports 등)
 - build 트리거 엔드포인트 정식 포팅 (job insert + workflow start, 3단계 검증됨)
 - Python worker HTTP 프록시 (analyze — 단순 HTTP, 저위험)
@@ -117,6 +129,7 @@ src/
   projects/            # controller → service → repository (Go의 http→service→store 대체)
   datasets/            # GET 목록/상세
   build-jobs/          # GET 단건 (diagnostics 합성)
-  versions/            # GET 목록/상세 + artifact view 3종 (status/applied/override 합성)
+  versions/            # GET 목록/상세 + artifact view 4종 (status/applied/override/사전 합성)
+  keyword-dictionary/  # 키워드 정제 사전 read (목록/이력)
   worker/              # Python worker HTTP client (source_summary/artifact views — ADR-024 위임)
 ```
