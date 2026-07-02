@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { BuildJobsModule } from './build-jobs/build-jobs.module';
+import { BuildTriggerModule } from './build-trigger/build-trigger.module';
 import { DatasetsModule } from './datasets/datasets.module';
 import { DbModule } from './db/db.module';
 import { HealthController } from './health/health.controller';
@@ -15,6 +16,7 @@ import { VersionsModule } from './versions/versions.module';
     ProjectsModule,
     DatasetsModule,
     BuildJobsModule,
+    BuildTriggerModule,
     VersionsModule,
     KeywordDictionaryModule,
     ProxyModule,

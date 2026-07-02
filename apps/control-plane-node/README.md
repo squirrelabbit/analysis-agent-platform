@@ -125,7 +125,21 @@ progress 파일 경로는 컨테이너 기준(`/workspace/data/...`)이라 host 
   포맷만 다름 — 상태코드/원인 동일로 계약 동등 판단. (실행 중 build가 있는 버전의
   view duration_seconds는 now 기준이라 비교 제외 대상.)
 
+### ✅ 9단계 — 쓰기 경로 1차: POST clean (Temporal 정식 배선) (2026-07-02)
+`POST .../versions/{vid}/clean` — Go handleCreateCleanJob 대응. PoC 3단계(fake job)의
+Temporal 쓰기 interop을 **정식 경로**로 배선한 첫 write:
+- precondition(data_type/text_columns 해석: 입력→raw_text_columns→text_columns),
+  queued/running 동일타입 job idempotent 반환, job row insert + version 상태 큐잉
+  (Go는 전체 row 재저장, Node는 targeted UPDATE — 시맨틱 동일), Temporal
+  `dataset.build.v1` start(@temporalio/client, workflow_id=`dataset-build-<job>`),
+  start 실패 시 failed 마킹(workflow_start_failed) 후 500.
+- **E2E 검증**(일회용 프로젝트 생성→검증→삭제): Node 202 → Temporal → **Go
+  temporal-worker 실행 → completed**(workflow_run_id 기록, clean artifact 생성),
+  clean view Go/Node parity OK. 400(text_columns 부재) 문구도 Go와 일치.
+
 ### ⬜ 다음 (포팅 단계)
+- 쓰기 경로 2차: POST doc_genuineness/clause_label(모델·verify 검증 동반)/
+  clause_keywords + cancel 4종 — clean과 같은 패턴 + LLOA 모델 allowlist 검증
 - 잔여 read (후순위): analysis threads/runs(analyze 프록시와 함께), basic_analysis
   (보고서 조립 엔진 — worker 이동 설계 필요), project prompts CRUD(보류 기능)
 - build 트리거 엔드포인트 정식 포팅 (job insert + workflow start, 3단계 검증됨)
@@ -144,7 +158,10 @@ src/
   projects/            # controller → service → repository (Go의 http→service→store 대체)
   datasets/            # GET 목록/상세
   build-jobs/          # GET 단건 (diagnostics 합성)
-  versions/            # GET 목록/상세 + artifact view 4종 (status/applied/override/사전 합성)
+  versions/            # GET 목록/상세 + artifact view 4종 + runs/compare
   keyword-dictionary/  # 키워드 정제 사전 read (목록/이력)
+  proxy/               # prompt_options/taxonomy/taxonomies proxy + lloa_model_options
+  reports/             # 보고서 read (목록/상세)
+  build-trigger/       # POST clean (Temporal dataset.build.v1 start — 쓰기 1차)
   worker/              # Python worker HTTP client (source_summary/artifact views — ADR-024 위임)
 ```
