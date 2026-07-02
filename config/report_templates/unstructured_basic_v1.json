@@ -22,7 +22,7 @@
           }
         ] },
         { "panels": [
-          { "view": "period_table", "width": "full", "title": "분석 기간", "source": { "build": "version", "path": "analysis_periods" } }
+          { "view": "period_timeline", "width": "full", "title": "분석 기간", "source": { "build": "version", "path": "analysis_periods" } }
         ] },
         { "panels": [
           { "view": "tag_list", "width": "1/2", "title": "수집 채널",  "source": { "build": "version", "path": "collection_channels" } },

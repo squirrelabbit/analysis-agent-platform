@@ -2540,10 +2540,11 @@ components:
     FestivalMetadata:
       type: object
       description: |
-        축제 메타데이터(#31). 연도별로 축제기간(during) `festival_start~festival_end`만
-        입력하고, 축제 전/후는 명시 날짜가 아니라 `±N일`(before_days/after_days) 창으로
-        파생한다. N을 안 주면(또는 0) 전/후는 데이터 기준 개방형(축제기간 앞/뒤 전부)이다.
-        before/during/after 날짜 파생은 보고서 엔진이 담당한다.
+        축제 메타데이터(#31, 2026-07-02 재설계). 연도별로 대상기간(target_start~target_end,
+        분석 대상 구간)과 축제기간(festival_start~festival_end)을 각각 직접 입력한다. 축제기간은
+        대상기간 안에 포함되어야 한다. `role`로 기준 연도(base) 1개 + 비교 연도(compare) N개를
+        구분한다(role 미지정=compare, base 0개면 최신 연도 자동 승격, 2개 이상이면 오류).
+        옛 before/during/after ±N일 개방형 파생 모델은 폐기됐다.
       properties:
         name:
           type: string
@@ -2551,30 +2552,35 @@ components:
           example: 강릉야행문화축제
         periods:
           type: array
-          description: 연도별 축제기간. 연도당 1개(중복 금지), 점진 입력 허용(0개 이상).
+          description: 연도별 기간. 연도당 1개(중복 금지), 점진 입력 허용(0개 이상).
           items:
             type: object
             properties:
               year:
                 type: integer
                 example: 2025
+              role:
+                type: string
+                enum: [base, compare]
+                description: 연도 역할. base=기준 연도(정확히 1개), compare=비교 연도. 미지정=compare.
+                example: base
+              target_start:
+                type: string
+                description: 대상기간 시작일 `YYYY-MM-DD`. `target_start <= target_end`.
+                example: "2025-09-12"
+              target_end:
+                type: string
+                description: 대상기간 종료일 `YYYY-MM-DD`.
+                example: "2025-09-28"
               festival_start:
                 type: string
-                description: 축제 시작일 `YYYY-MM-DD`. `year`와 연도 일치.
-                example: "2025-08-15"
+                description: 축제 시작일 `YYYY-MM-DD`. `year`와 연도 일치, 대상기간 내.
+                example: "2025-09-19"
               festival_end:
                 type: string
-                description: 축제 종료일 `YYYY-MM-DD`. `festival_start <= festival_end`.
-                example: "2025-08-17"
-              before_days:
-                type: integer
-                description: 축제 전 창 일수(선택). >=1 일 때만 저장, 0/미설정=개방형.
-                example: 3
-              after_days:
-                type: integer
-                description: 축제 후 창 일수(선택). >=1 일 때만 저장, 0/미설정=개방형.
-                example: 5
-            required: [year, festival_start, festival_end]
+                description: 축제 종료일 `YYYY-MM-DD`. `festival_start <= festival_end`, 대상기간 내.
+                example: "2025-09-21"
+            required: [year, target_start, target_end, festival_start, festival_end]
       required: [name]
     ProjectListResponse:
       type: object

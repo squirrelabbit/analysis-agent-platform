@@ -10,7 +10,7 @@ export type PanelView =
   | "table"
   | "stacked_bar"
   | "rank"
-  | "period_table"
+  | "period_timeline"
   | "tag_list"
   | "definition_list";
 
@@ -68,19 +68,19 @@ export interface StatGridData {
   items: StatItem[];
 }
 
-// period_table (#31 분석 기간 — 축제 전/기간/후)
-export interface PeriodRow {
+// period_timeline (#31 분석 기간 — 연도별 대상기간·축제기간·기준/비교)
+export interface PeriodTimelineRow {
   year: number;
-  period: string; // before | during | after
-  period_label: string; // 축제 전/기간/후
-  start_ymd: string; // 개방형이면 실제 데이터 시작일(날짜 컬럼 없으면 "")
-  end_ymd: string; // 개방형이면 실제 데이터 끝일(날짜 컬럼 없으면 "")
-  open_start: boolean; // true = 데이터 시작 경계(고정 축제 전 N일이 아님)
-  open_end: boolean; // true = 데이터 끝 경계
-  days?: number; // 전/후 ±N일(설정 시)
+  role: "base" | "compare"; // 기준 / 비교 연도
+  role_label: string; // "기준 연도" / "비교 연도"
+  target_start: string; // 대상기간 시작 YYYY-MM-DD
+  target_end: string; // 대상기간 종료 YYYY-MM-DD
+  target_days: number; // 대상기간 총 일수(양끝 포함)
+  festival_start: string; // 축제기간 시작 YYYY-MM-DD
+  festival_end: string; // 축제기간 종료 YYYY-MM-DD
 }
-export interface PeriodTableData {
-  rows: PeriodRow[];
+export interface PeriodTimelineData {
+  rows: PeriodTimelineRow[];
 }
 
 // tag_list (#31 수집 채널/키워드)
@@ -107,7 +107,7 @@ export interface ReportPanel {
     | StackedData
     | RankData
     | StatGridData
-    | PeriodTableData
+    | PeriodTimelineData
     | TagListData
     | DefinitionListData;
   source?: Record<string, unknown>;

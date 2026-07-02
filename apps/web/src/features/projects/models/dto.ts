@@ -16,13 +16,14 @@ export interface ProjectListResponse {
   items: ProjectResponse[]
 }
 
-// 축제 메타(#31) — 프로젝트 레벨. 연도별 축제기간(during) + ±N일(선택, 비우면 개방형).
+// 축제 메타(#31, 2026-07-02 재설계) — 프로젝트 레벨. 연도별 대상기간·축제기간 + 역할(기준/비교).
 export interface FestivalPeriodInput {
   year: number,
-  festival_start: string,   // YYYY-MM-DD
-  festival_end: string,     // YYYY-MM-DD
-  before_days?: number,
-  after_days?: number,
+  role: "base" | "compare",  // 기준 / 비교 연도
+  target_start: string,      // 대상기간 시작 YYYY-MM-DD
+  target_end: string,        // 대상기간 종료 YYYY-MM-DD
+  festival_start: string,    // 축제기간 시작 YYYY-MM-DD
+  festival_end: string,      // 축제기간 종료 YYYY-MM-DD
 }
 
 export interface FestivalMetadataInput {
